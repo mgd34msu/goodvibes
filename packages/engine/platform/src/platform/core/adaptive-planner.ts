@@ -65,7 +65,6 @@ export type StrategyReasonCode =
   | 'AUTO_FALLBACK_SINGLE'         // auto mode fell back to single (default)
   // Override reasons
   | 'USER_OVERRIDE'                // explicit user /plan override command
-  | 'FLAG_DISABLED'                // adaptive planner feature is turned off in settings
   // Error reasons
   | 'INVALID_STRATEGY';            // unrecognised strategy name
 
@@ -169,8 +168,6 @@ const REASON_EXPLANATIONS: Record<StrategyReasonCode, string> = {
     'Auto mode found no strong signal for parallelism; defaulting to single.',
   USER_OVERRIDE:
     'The strategy was set explicitly by the user via /plan override.',
-  FLAG_DISABLED:
-    'The adaptive execution planner is off, so no strategy is chosen and nothing set with /plan is read. Turn it on with the planner.adaptive setting.',
   INVALID_STRATEGY:
     'The supplied strategy name is not recognised. No change was made.',
 };
@@ -427,7 +424,7 @@ export class AdaptivePlanner {
       return REASON_EXPLANATIONS[reasonCode] ?? `Unknown reason code: ${reasonCode}`;
     }
     const last = this.history[this.history.length - 1];
-    if (!last) return 'No decisions have been made yet.';
+    if (!last) return 'No strategy decisions yet: the planner is consulted when /workstream drafts a plan.';
     return this._formatDecisionExplanation(last);
   }
 

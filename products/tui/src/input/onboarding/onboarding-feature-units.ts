@@ -298,7 +298,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'adaptive-execution-planner',
         label: 'Adaptive execution planner',
-        hint: 'Score single/cohort/background/remote strategies each turn and pick the best. Exposes /plan commands.',
+        hint: 'Reserved for a per-turn execution strategy; no turn reads one yet, so this changes nothing today. /project-plan mode and override already steer /workstream drafting without it.',
       },
       {
         flagId: 'daemon-auto-update',

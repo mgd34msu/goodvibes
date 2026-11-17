@@ -1,13 +1,14 @@
 /**
- * /plan command handler.
+ * The execution-strategy subcommands of /project-plan:
+ *   /project-plan mode auto|single|cohort|background|remote
+ *   /project-plan explain
+ *   /project-plan override <strategy>
+ *   /project-plan status
+ *   /project-plan clear
  *
- * Handles the subcommands of the /plan slash command:
- *   /plan mode auto|single|cohort|background|remote
- *   /plan explain
- *   /plan override <strategy>
- *   /plan clear
- *
- * Returns a human-readable result string to display in the conversation.
+ * The strategy they set is read when /workstream drafts a plan (whether the
+ * goal is split into parts); no conversation turn reads it, and every answer
+ * that sets it says so. Returns a human-readable result string.
  */
 
 import { AdaptivePlanner, VALID_STRATEGIES } from './adaptive-planner.js';
@@ -31,6 +32,9 @@ export interface PlanCommandDeps {
   >;
   runtimeBus?: RuntimeEventBus | null | undefined;
 }
+
+/** Where a strategy set here takes effect, said with every answer that sets one. */
+const STRATEGY_READER = 'It is read when /workstream drafts a plan (whether to split the goal into parts); no conversation turn reads it.';
 
 function emitStrategyOverride(
   runtimeBus: RuntimeEventBus | null | undefined,
@@ -62,7 +66,7 @@ export function handlePlanCommand(
         const current = deps.adaptivePlanner.getMode();
         return {
           ok: true,
-          output: `Current mode: **${current}**\n\nAvailable modes: auto | single | cohort | background | remote`,
+          output: `Current mode: **${current}**\n\nAvailable modes: auto | single | cohort | background | remote\n${STRATEGY_READER}`,
         };
       }
       if (!VALID_STRATEGIES.includes(value as ExecutionStrategy)) {
@@ -75,7 +79,7 @@ export function handlePlanCommand(
       logger.info('[PlanCommandHandler] mode changed', { mode: value });
       return {
         ok: true,
-        output: `Execution mode set to **${value}**.`,
+        output: `Execution mode set to **${value}**. ${STRATEGY_READER}`,
       };
     }
 
@@ -89,9 +93,9 @@ export function handlePlanCommand(
       if (!strategy) {
         return {
           ok: false,
-          output: 'Usage: /plan override <strategy>\n'
+          output: 'Usage: /project-plan override <strategy>\n'
             + 'Strategies: auto | single | cohort | background | remote\n'
-            + 'Use /plan override auto to clear the override.',
+            + 'Use /project-plan override auto to clear the override.',
         };
       }
       const result = deps.adaptivePlanner.override(strategy);
@@ -109,7 +113,7 @@ export function handlePlanCommand(
         emitStrategyOverride(deps.runtimeBus, { strategy: 'auto', clearedBy: 'override(auto)' });
         return {
           ok: true,
-          output: 'Execution strategy override cleared. Planner will run in auto mode.',
+          output: `Execution strategy override cleared; the planner chooses again. ${STRATEGY_READER}`,
         };
       }
       logger.info('[PlanCommandHandler] override applied', { strategy: result.strategy });
@@ -117,7 +121,7 @@ export function handlePlanCommand(
       return {
         ok: true,
         output: `Execution strategy overridden to **${result.strategy.toUpperCase()}**.\n`
-          + AdaptivePlanner.explainReasonCode('OVERRIDE_IN_EFFECT'),
+          + AdaptivePlanner.explainReasonCode('OVERRIDE_IN_EFFECT') + `\n${STRATEGY_READER}`,
       };
     }
 
@@ -128,7 +132,7 @@ export function handlePlanCommand(
       emitStrategyOverride(deps.runtimeBus, { strategy: 'auto', clearedBy: 'clear' });
       return {
         ok: true,
-        output: 'Planner mode and override reset to **auto**.',
+        output: `Planner mode and override reset to **auto**. ${STRATEGY_READER}`,
       };
     }
 
@@ -154,14 +158,16 @@ export function handlePlanCommand(
       return {
         ok: false,
         output: [
-          `Unknown /plan subcommand: '${subcommand}'.`,
+          `Unknown /project-plan strategy subcommand: '${subcommand}'.`,
           '',
           'Available commands:',
-          '  /plan mode [auto|single|cohort|background|remote]  - get or set mode',
-          '  /plan override <strategy>                          - force a strategy',
-          '  /plan explain                                      - explain last decision',
-          '  /plan status                                       - show current state',
-          '  /plan clear                                        - reset to auto',
+          '  /project-plan mode [auto|single|cohort|background|remote]  - get or set mode',
+          '  /project-plan override <strategy>                          - force a strategy',
+          '  /project-plan explain                                      - explain last decision',
+          '  /project-plan status                                       - show current state',
+          '  /project-plan clear                                        - reset to auto',
+          '',
+          STRATEGY_READER,
         ].join('\n'),
       };
     }

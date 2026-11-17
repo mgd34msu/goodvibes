@@ -160,7 +160,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   const planRuntime = createShellPlanRuntime({
     adaptivePlanner: services.adaptivePlanner,
     runtimeBus,
-    isEnabled: () => configManager.get('planner.adaptive') === true,
   });
 
   // initial cost-budget alert threshold (USD; 0/unset = disabled).

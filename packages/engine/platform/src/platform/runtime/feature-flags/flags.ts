@@ -458,11 +458,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'adaptive-execution-planner',
     name: 'Adaptive Execution Planner',
     description:
-      'Enables the Adaptive Execution Planner, which scores strategy candidates '
-      + '(single/cohort/background/remote) using risk, latency, and capability '
-      + 'inputs and selects the best execution strategy each turn. '
-      + 'Exposes /plan mode, /plan explain, and /plan override commands. '
-      + 'Disable to revert to implicit single-call execution.',
+      'Reserved for choosing an execution strategy (single/cohort/background/remote) '
+      + 'on every conversation turn. No turn reads a strategy yet, so turning this on '
+      + 'changes nothing today. /project-plan mode, override, explain and status work '
+      + 'without it: they configure the planner /workstream drafting consults.',
     defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,

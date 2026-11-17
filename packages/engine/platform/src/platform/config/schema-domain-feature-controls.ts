@@ -61,7 +61,7 @@ export const featureControlSettings: ConfigSetting[] = [
     type: 'boolean',
     default: false,
     description:
-      'Score execution-strategy candidates (single/cohort/background/remote) on risk, latency, and capability inputs each turn and select the best one, with /plan mode, explain, and override commands. Default off until the routing-visibility UX lands; off means implicit single-call execution.',
+      'Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /project-plan mode, override, explain and status work with is consulted when /workstream drafts a plan, whatever this setting says.',
   },
   {
     key: 'tools.contractVerification',

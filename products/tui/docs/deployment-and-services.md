@@ -139,7 +139,8 @@ The control-plane daemon and the webhook listener each carry the same shape of T
 | Key (per prefix) | What it does |
 | --- | --- |
 | `controlPlane.hostMode` / `controlPlane.host` / `controlPlane.port`, `httpListener.host` / `httpListener.port` | The bind address and port; `hostMode` takes `local`, `network`, or `custom` |
-| `controlPlane.enabled` | Whether the control plane serves at all |
+| `controlPlane.enabled` | Whether the control plane is served to other machines. Off (the default), the daemon answers only requests from this machine, whatever `hostMode` binds, and refuses others with `CONTROL_PLANE_LOCAL_ONLY`; turn it on to serve paired devices, the web UI from another device, or a reverse proxy |
+| `controlPlane.streamMode` | Which live update stream is served: `sse` (`GET /api/control-plane/events`), `websocket` (`/api/control-plane/ws`) or `both` (the default). The terminal apps and the web UI read the SSE stream |
 | `<prefix>.tls.mode` | `off` (plain HTTP), `proxy` (a reverse proxy terminates HTTPS), or `direct` (GoodVibes terminates HTTPS itself) |
 | `<prefix>.trustProxy` | Trust proxy forwarding headers such as `X-Forwarded-For` |
 | `<prefix>.tls.certFile` / `<prefix>.tls.keyFile` | Certificate chain and private key PEM paths for `direct` mode; empty falls back to the default cert directory below |

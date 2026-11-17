@@ -5,6 +5,7 @@ import { createTelegramSourceAccountOwner } from '../channels/telegram/source-ac
 import { composeDelegatedTelegramIntake } from './facade-delegated-telegram.js';
 import { AgentManager } from '../tools/agent/index.js';
 import { resolveHostBinding } from './host-resolver.js';
+import { readControlPlaneStreamingMode } from './http/listener-admission.js';
 import { composeHostedSessionsForFacade } from './hosted-sessions-composition.js';
 import { createFacadeWorkProposalStore } from './facade-work-proposal-store.js';
 import { readConversationGateConfig, type ConversationGateConfigReader } from '../agents/conversation-gate.js';
@@ -341,7 +342,7 @@ export function resolveDaemonFacadeRuntime(
         Number(resolvedConfigManager.get('controlPlane.port') ?? 3421),
         'controlPlane',
       ),
-      streamingMode: (resolvedConfigManager.get('controlPlane.streamMode') as import('../control-plane/index.js').ControlPlaneStreamingMode | undefined) ?? 'sse',
+      streamingMode: readControlPlaneStreamingMode(resolvedConfigManager.get('controlPlane.streamMode')),
     },
   });
 

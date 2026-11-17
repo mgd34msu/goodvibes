@@ -60,7 +60,8 @@ export async function buildControlPlaneStatusResult(runtime: CliCommandRuntime):
   // probe asserts a binding that does not exist. Not-probed is its own state
   // (undefined), NEVER coerced to a definite false: a daemon launched with
   // flag overrides can be serving healthily regardless of the stored mode.
-  const reachable = enabled === true ? (binding.recognized ? await probeTcp(binding.host, binding.port) : undefined) : false;
+  // Probed whether or not other machines are served: the daemon listens for this machine either way.
+  const reachable = binding.recognized ? await probeTcp(binding.host, binding.port) : undefined;
   const auth = readAuthPaths(runtime);
   const service = {
     enabled: runtime.configManager.get('service.enabled'),
@@ -97,7 +98,7 @@ export function formatControlPlaneStatus(runtime: CliCommandRuntime, value: Cont
     value,
     [
       'GoodVibes control-plane status',
-      `  enabled: ${yesNo(value.enabled)}`,
+      `  serves other machines: ${yesNo(value.enabled)} (controlPlane.enabled)`,
       `  bind: ${formatRuntimeEndpointBinding(value)}`,
       `  bind posture: ${value.recognized ? value.posture.label : 'unknown (unrecognized host mode)'}`,
       `  reachable: ${value.reachable === undefined ? 'not probed (unrecognized host mode)' : yesNo(value.reachable)}`,

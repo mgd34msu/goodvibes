@@ -82,6 +82,7 @@ import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
 import { bindClientAddress, resolveClientAddress } from './client-address.js';
+import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './http/listener-admission.js';
 import type { ServiceCommandRunner } from './service-handover.js';
 import { inFlightWorkIds } from '../runtime/fleet/registry.js';
 
@@ -789,7 +790,17 @@ export class DaemonServer {
         async fetch(req: Request, server: UpgradeCapableServer): Promise<Response | undefined> {
           configureJudgmentRequestLifetime(req, server);
           // Resolved once here; every security event, the sign-in limiter and the audit read this one value.
-          bindClientAddress(req, resolveClientAddress(req, server.requestIP?.(req)?.address, { trustProxy: self.trustProxyEnabled() }));
+          const peerAddress = server.requestIP?.(req)?.address;
+          const clientAddress = resolveClientAddress(req, peerAddress, { trustProxy: self.trustProxyEnabled() });
+          bindClientAddress(req, clientAddress);
+          // Who is served (controlPlane.enabled) and which live stream (controlPlane.streamMode), before any route.
+          const unserved = refuseUnservedListenerRequest(req, {
+            servesOtherMachines: self.configManager.get('controlPlane.enabled') === true,
+            streamMode: readControlPlaneStreamingMode(self.configManager.get('controlPlane.streamMode')),
+            peerAddress,
+            clientAddress,
+          });
+          if (unserved) return unserved;
           const upgrade = self.tryUpgradeControlPlaneWebSocket(req, server);
           if (upgrade === 'upgraded') return;
           if (upgrade) return upgrade;
@@ -1181,7 +1192,11 @@ export class DaemonServer {
       onRestart: () => this.restartCycle.request(),
       getIsRunning: () => this.restartCycle.active,
     });
-    this._configWatchUnsub = () => watcher.unsubscribe();
+    // The stream mode needs no rebind: the listener reads it per request; clients read it from the gateway state.
+    const unsubscribeStreamMode = this.configManager.subscribe('controlPlane.streamMode', (mode) => {
+      this.controlPlaneGateway.setServerState({ streamingMode: readControlPlaneStreamingMode(mode) });
+    });
+    this._configWatchUnsub = () => { watcher.unsubscribe(); unsubscribeStreamMode(); };
   }
 
   /**

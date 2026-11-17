@@ -10,7 +10,7 @@ export const DEFAULT_SERVER_CONFIG: ControlPlaneServerConfig = {
   enabled: false,
   host: '127.0.0.1',
   port: 3421,
-  streamingMode: 'sse',
+  streamingMode: 'both',
   // The sign-in store's own value, so the published lifetime is the one that holds.
   sessionTtlMs: OPERATOR_SESSION_TTL_MS,
 };

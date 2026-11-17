@@ -140,7 +140,7 @@ export function evaluateNetworkScopeRule(
     // A deny that names this tool, or a tool that declares where its hosts sit,
     // cannot be checked when no host can be read: the call is refused rather
     // than decided as if the rule did not exist.
-    const unreadable = rule.effect === 'deny' && (declaredHosts !== undefined
+    const unreadable = rule.effect !== 'allow' && (declaredHosts !== undefined
       || (Array.isArray(rule.toolPattern) ? rule.toolPattern.includes(toolName) : rule.toolPattern === toolName));
     return {
       matched: unreadable,
@@ -149,7 +149,7 @@ export function evaluateNetworkScopeRule(
         check: `network-scope-rule:${rule.id}`,
         matched: unreadable,
         detail: unreadable
-          ? 'no host could be read from this call, so the deny rule cannot be checked; the call is refused'
+          ? `no host could be read from this call, so the ${rule.effect} rule cannot be checked and applies`
           : 'no network host/URL argument found in args',
       },
     };
@@ -170,7 +170,7 @@ export function evaluateNetworkScopeRule(
   });
   // Same batch semantics as command rules: a deny matches when ANY named host does,
   // an allow only when EVERY named host does.
-  const decisive = rule.effect === 'deny'
+  const decisive = rule.effect !== 'allow'
     ? (outcomes.find((o) => o.matched) ?? outcomes[0]!)
     : (outcomes.find((o) => !o.matched) ?? outcomes[0]!);
   return { matched: decisive.matched, step: { layer: 'policy', check, matched: decisive.matched, detail: decisive.detail } };

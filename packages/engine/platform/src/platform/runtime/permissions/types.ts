@@ -325,8 +325,13 @@ interface BaseRule {
   description?: string | undefined;
   /** Who authored this rule. */
   origin: RuleOrigin;
-  /** Whether the rule grants (allow) or blocks (deny) matching calls. */
-  effect: 'allow' | 'deny';
+  /**
+   * Whether the rule grants (allow) or blocks (deny) matching calls, or has the
+   * owner asked about them in every mode that asks anyone (ask: "always ask me").
+   * The layered evaluator reads allow and deny only; an ask rule is the gate's
+   * (gate/classify.ts, the owner-only `standing-ask`).
+   */
+  effect: 'allow' | 'deny' | 'ask';
   /**
    * Set when the rule records the owner's answer to an item only he decides
    * (gate/classify.ts OwnerOnlyKind). Only such an allow settles that item

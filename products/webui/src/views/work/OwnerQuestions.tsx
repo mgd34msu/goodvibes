@@ -5,6 +5,12 @@
  * An answer goes back to the agent or session that asked: the toast says
  * whether it was delivered, waits for that session to be opened again, or
  * cannot reach it and why, and recent answers are listed with that state.
+ *
+ * Calls Jev decided for the owner at the permission gate (kind `decision`)
+ * are listed too, with a button per choice still open: undo restores the
+ * files the call changed, never, always and ask set a standing rule for calls
+ * like it, keep leaves it. The app whose gate decided carries the choice out;
+ * the toast says what was done, or why it could not be.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -19,6 +25,7 @@ import type { StatusTone } from '../../components/ui/StatusDot';
 
 const QUESTIONS_QUERY_KEY = ['owner-inbox', 'questions', 'open'] as const;
 const ANSWERS_QUERY_KEY = ['owner-inbox', 'questions', 'closed'] as const;
+const DECISIONS_QUERY_KEY = ['owner-inbox', 'decisions'] as const;
 /** Recent answers shown with where they are; older ones are in /decisions. */
 const ANSWERS_SHOWN = 20;
 
@@ -91,6 +98,69 @@ function AnsweredRow({ question }: { question: AnsweredQuestion }) {
     </li>
   );
 }
+
+interface JevDecision {
+  readonly id: string;
+  readonly title: string;
+  readonly detail?: string;
+  readonly options: readonly string[];
+  readonly open: boolean;
+  /** What was done, or why it was closed, once it is no longer open. */
+  readonly outcome?: string;
+  readonly createdAt: number;
+}
+
+/** Jev's decisions, newest first: open ones take a choice, closed ones say what became of them. */
+function readDecisions(value: unknown): JevDecision[] {
+  const items = (value as { items?: unknown } | null)?.items;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((raw): JevDecision[] => {
+    const item = raw as Record<string, unknown>;
+    if (typeof item.id !== 'string' || typeof item.title !== 'string' || item.kind !== 'decision') return [];
+    const answer = item.answer as { option?: unknown; text?: unknown } | undefined;
+    const outcome = typeof answer?.text === 'string' && answer.text ? answer.text
+      : typeof answer?.option === 'string' ? answer.option
+        : typeof item.withdrawnReason === 'string' && item.withdrawnReason ? item.withdrawnReason
+          : item.status === 'expired' ? 'Expired; set a standing rule in settings instead.' : undefined;
+    return [{
+      id: item.id,
+      title: item.title,
+      ...(typeof item.detail === 'string' && item.detail ? { detail: item.detail } : {}),
+      options: Array.isArray(item.options) ? item.options.filter((option): option is string => typeof option === 'string') : [],
+      open: item.status === 'open',
+      ...(outcome !== undefined ? { outcome } : {}),
+      createdAt: typeof item.createdAt === 'number' ? item.createdAt : 0,
+    }];
+  });
+}
+
+function DecisionRow({ decision, onChoose, busy }: {
+  decision: JevDecision;
+  onChoose: (option: string) => void;
+  busy: boolean;
+}) {
+  const decided = decision.createdAt ? new Date(decision.createdAt).toLocaleString() : '';
+  return (
+    <li className="gv-row work-question">
+      <div className="gv-row__text work-question__body">
+        <div className="gv-row__title">{decision.title}</div>
+        <div className="gv-row__meta">{decided}</div>
+        {decision.detail && <p className="work-question__detail">{decision.detail}</p>}
+        {decision.open ? (
+          <div className="work-question__answer">
+            {decision.options.map((option) => (
+              <Button key={option} size="sm" disabled={busy} onClick={() => onChoose(option)}>{option}</Button>
+            ))}
+          </div>
+        ) : decision.outcome && <Chip size="sm" tone="info">{decision.outcome}</Chip>}
+      </div>
+    </li>
+  );
+}
+
+type DecisionOutcome =
+  | { readonly applied: true; readonly item?: { readonly answer?: { readonly text?: string } } }
+  | { readonly applied: false; readonly refusal: { readonly reason: string; readonly next?: readonly string[] } };
 
 type AnswerOutcome =
   | { readonly applied: true; readonly delivery?: unknown }
@@ -171,6 +241,26 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
     refetchInterval: 30_000,
     retry: false,
   });
+  const decisions = useQuery({
+    queryKey: DECISIONS_QUERY_KEY,
+    queryFn: async () => readDecisions(await platformClient.operator.invoke('inbox.list', { status: 'all', kinds: ['decision'], limit: ANSWERS_SHOWN })),
+    enabled,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const choose = useMutation({
+    mutationFn: async (input: { itemId: string; option: string }) =>
+      (await platformClient.operator.invoke('inbox.answer', input)) as DecisionOutcome,
+    onSuccess: (outcome) => {
+      if (!outcome.applied) {
+        toast({ title: 'Not done', description: [outcome.refusal.reason, outcome.refusal.next?.[0]].filter(Boolean).join(' '), tone: 'warning' });
+      } else {
+        toast({ title: 'Done', description: outcome.item?.answer?.text ?? 'Your choice was carried out.', tone: 'success' });
+      }
+    },
+    onError: (error) => toast({ title: 'The choice was not sent', description: formatError(error), tone: 'danger' }),
+    onSettled: () => { void queryClient.invalidateQueries({ queryKey: DECISIONS_QUERY_KEY }); },
+  });
   const answer = useMutation({
     mutationFn: async (input: { itemId: string; option?: string; text?: string }) =>
       (await platformClient.operator.invoke('inbox.answer', input)) as AnswerOutcome,
@@ -194,7 +284,8 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
   });
   const open = enabled ? questions.data ?? [] : [];
   const answered = enabled ? answers.data ?? [] : [];
-  if (open.length === 0 && answered.length === 0) return null;
+  const decided = enabled ? decisions.data ?? [] : [];
+  if (open.length === 0 && answered.length === 0 && decided.length === 0) return null;
   return (
     <>
       {open.length > 0 && (
@@ -212,6 +303,18 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
       {answered.length > 0 && (
         <RowGroup label="Your answers" count={answered.length}>
           {answered.map((question) => <AnsweredRow key={question.id} question={question} />)}
+        </RowGroup>
+      )}
+      {decided.length > 0 && (
+        <RowGroup label="Decided for you by Jev" count={decided.length}>
+          {decided.map((decision) => (
+            <DecisionRow
+              key={decision.id}
+              decision={decision}
+              busy={choose.isPending}
+              onChoose={(option) => choose.mutate({ itemId: decision.id, option })}
+            />
+          ))}
         </RowGroup>
       )}
     </>

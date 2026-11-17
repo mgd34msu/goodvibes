@@ -3,9 +3,11 @@
  *
  * `/questions` lists what waits on the owner (permission asks, questions agents
  * left, channel claims, purchase windows, queued actions) and answers one.
- * `/decisions` lists what was decided, by whom and from where, and for an
- * answered question whether the answer reached the agent or session that
- * asked, waits for that session to be opened again, or cannot reach it.
+ * `/decisions` lists what was decided for the owner: the calls Jev decided at
+ * the permission gate, which he can still undo (the files the call changed),
+ * turn into a standing rule (never, always, always ask me) or keep; and every
+ * answered item, by whom and from where, with whether an answer reached the
+ * agent or session that asked, waits for that session, or cannot reach it.
  *
  * The products supply where the inbox is (the home's one store, through the
  * daemon's inbox.* verbs while a daemon is reachable and directly otherwise)
@@ -16,6 +18,7 @@ import { formatRefusal } from '@goodvibes-jev/engine/errors';
 import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { TerminalSlashCommand } from './command-registry.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
+import { JEV_DECISION_CHOICES } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 export interface OwnerInboxCommandContext {
   readonly print: (text: string) => void;
@@ -32,6 +35,8 @@ export interface OwnerInboxCommandPolicy<Context> {
 const SHORT_ID_CHARS = 14;
 const LIST_LIMIT = 50;
 const DECISIONS_LIMIT = 30;
+/** What the owner can do about a call Jev decided (permissions/jev-decisions.ts). */
+const DECISION_CHOICES: ReadonlySet<string> = new Set(Object.values(JEV_DECISION_CHOICES));
 
 /** Display-only: strip terminal control sequences from text an agent or a channel wrote. */
 function text(value: string): string {
@@ -224,21 +229,73 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
 
   const decisions: TerminalSlashCommand<Context> = {
     name: 'decisions',
-    description: 'What was decided on your inbox: the answer, who gave it and from where',
-    usage: '[<count>]',
-    effect: 'read-only',
+    description: 'What was decided for you: calls Jev decided (undo, never, always, ask, keep) and every answered inbox item',
+    usage: '[list] [<count>] | <keep|undo|never|always|ask> <id>',
+    argsHint: '[list|keep|undo|never|always|ask]',
+    // Listing reads; a choice on a decision changes files or standing rules and is the owner's (the handler checks).
+    effect: 'mixed',
+    readVerbs: ['', 'list'],
     async handler(args, context) {
+      // Read before the first await: a model running this command must not choose for the owner.
+      const owner = policy.isOwner(context, 'decisions');
       const inbox = port(context);
       if (!inbox) return;
-      const count = Number(args[0]);
+      const sub = (args[0] ?? '').toLowerCase();
+
+      if (DECISION_CHOICES.has(sub)) {
+        if (!owner) {
+          say(context, '[decisions] Only the owner changes what Jev decided. Type /decisions <choice> <id> at the terminal.');
+          return;
+        }
+        const raw = args[1];
+        if (!raw) { say(context, `Usage: /decisions ${sub} <id>   (/decisions lists the ids)`); return; }
+        try {
+          const open = await inbox.list({ status: 'open', kinds: ['decision'], limit: 500 });
+          const resolved = resolveId(raw, open);
+          if ('error' in resolved) {
+            const closed = await inbox.find(raw);
+            say(context, closed?.kind === 'decision'
+              ? `[decisions] ${shortId(closed.id)} is ${closed.status}${closed.answer ? `: ${answerText(closed)}` : closed.withdrawnReason ? `: ${text(closed.withdrawnReason)}` : ''}. Set a standing rule with /permissions instead.`
+              : `[decisions] No open decision starts with "${raw}". /decisions lists them.`);
+            return;
+          }
+          const outcome = await inbox.answer(resolved.id, { option: sub });
+          if (outcome.applied) {
+            say(context, `[decisions] ${shortId(outcome.item.id)}: ${outcome.item.answer?.text ? text(outcome.item.answer.text) : `${sub}.`}`);
+            return;
+          }
+          say(context, `[decisions] ${formatRefusal(outcome.refusal)}`);
+        } catch (error) {
+          failed(context, 'apply the choice', error);
+        }
+        return;
+      }
+
+      if (sub !== '' && sub !== 'list' && !/^\d+$/.test(sub)) {
+        say(context, 'Usage: /decisions [list] [<count>] | <keep|undo|never|always|ask> <id>');
+        return;
+      }
+      const count = Number(sub === 'list' ? args[1] : args[0]);
       const limit = Number.isInteger(count) && count > 0 ? Math.min(count, 500) : DECISIONS_LIMIT;
       try {
-        const items = await inbox.list({ status: 'closed', limit });
-        if (items.length === 0) { say(context, '[inbox] Nothing has been decided yet.'); return; }
+        const [open, closed] = await Promise.all([
+          inbox.list({ status: 'open', kinds: ['decision'], limit }),
+          inbox.list({ status: 'closed', limit }),
+        ]);
+        if (open.length === 0 && closed.length === 0) { say(context, '[inbox] Nothing has been decided yet.'); return; }
         say(context, [
-          `Decided (${items.length}, newest first):`,
-          ...items.map((item) => `  ${item.closedAt !== undefined ? `${when(item.closedAt)}  ` : ''}${formatOwnerItemLine(item)}`),
-          '',
+          ...(open.length > 0 ? [
+            `Jev decided, and you can still change (${open.length}, newest first):`,
+            ...open.map((item) => `  ${when(item.createdAt)}  ${formatOwnerItemLine(item)}`),
+            '',
+            'Change one: /decisions <keep|undo|never|always|ask> <id>   (undo restores the files the call changed; never, always and ask set a standing rule for calls like it)',
+            '',
+          ] : []),
+          ...(closed.length > 0 ? [
+            `Decided (${closed.length}, newest first):`,
+            ...closed.map((item) => `  ${item.closedAt !== undefined ? `${when(item.closedAt)}  ` : ''}${formatOwnerItemLine(item)}`),
+            '',
+          ] : []),
           'Details: /questions show <id>',
         ].join('\n'));
       } catch (error) {

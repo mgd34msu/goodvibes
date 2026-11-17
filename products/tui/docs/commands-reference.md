@@ -380,7 +380,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/decisions` | None | `[<count>]` | What was decided on your inbox: the answer, who gave it and from where |
+| `/decisions` | None | `[list] [<count>] \| <keep\|undo\|never\|always\|ask> <id>` | What was decided for you: calls Jev decided (undo, never, always, ask, keep) and every answered inbox item |
 | `/held` | None | `[list] \| approve <id...\|all> \| dismiss <id...\|all>` | Calls just-vibes held for you instead of asking: list, approve or set aside |
 | `/permissions` | `/perms` | `[rules \| revoke <rule-id>]` | Show permission settings and provenance, and list or revoke remembered approval rules |
 | `/questions` | `/inbox` | `[all] \| show <id> \| answer <id> <choice\|text> [note]` | What waits on you: permission asks, questions agents left, claims, purchase windows; answer one |

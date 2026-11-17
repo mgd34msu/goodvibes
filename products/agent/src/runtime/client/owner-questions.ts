@@ -22,7 +22,8 @@ import {
   type AnswerDeliveringInbox,
   type OwnerInboxClient,
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { OWNER_ASKER_SESSION_FILE_METADATA } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { bridgeJevDecisionsToInbox, processJevDecisions, type JevDecisionUndo } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes-jev/engine/platform/platform/agents';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
@@ -45,6 +46,8 @@ export interface OwnerQuestionServices {
   readonly sessionManager: Pick<SessionManager, 'onDeleted'>;
   /** Where this app keeps its sessions: a session's identity is its saved file there. */
   readonly surface: Pick<SessionSurface, 'sessionsDir'>;
+  /** Restores the files of a call Jev let run, when the owner chooses undo in /decisions. */
+  readonly fileUndoManager?: JevDecisionUndo | undefined;
 }
 
 function connectedHost(options: ConnectedHostInboxOptions): ConnectedHost {
@@ -134,7 +137,11 @@ export function wireOwnerQuestionSessions(
   const inbox = (): AnswerDeliveringInbox => agentOwnerQuestions(services, options, sessionId);
   const stopOpened = whenSessionOpens(conversation, (id) => inbox().openSession(id));
   const stopDeleted = services.sessionManager.onDeleted((id) => { void inbox().deleteSession(id); });
+  // What Jev decides in this Agent's turns is listed in /decisions here, in the TUI and in the web UI; a choice on it is carried out here.
+  const stopDecisions = bridgeJevDecisionsToInbox(processJevDecisions(), homeOwnerInbox(services.shellPaths),
+    { surface: 'agent', handle: handleOwnerDecisions, undo: services.fileUndoManager });
   return () => {
+    stopDecisions();
     stopOpened();
     stopDeleted();
     stopFollowing();

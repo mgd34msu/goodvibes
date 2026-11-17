@@ -12,7 +12,7 @@ import {
 } from './method-catalog-shared.js';
 import { METADATA_SCHEMA, enumSchema } from './operator-contract-schemas-shared.js';
 
-export const OWNER_ITEM_KIND_SCHEMA = enumSchema(['approval', 'question', 'claim', 'purchase', 'queued-action']);
+export const OWNER_ITEM_KIND_SCHEMA = enumSchema(['approval', 'question', 'claim', 'purchase', 'queued-action', 'decision']);
 const POSTABLE_OWNER_ITEM_KIND_SCHEMA = enumSchema(['question', 'queued-action']);
 const OWNER_ITEM_STATUS_SCHEMA = enumSchema(['open', 'answered', 'withdrawn', 'expired']);
 

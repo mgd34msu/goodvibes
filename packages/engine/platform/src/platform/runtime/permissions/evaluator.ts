@@ -168,7 +168,7 @@ function evaluateModeLayer(
 
 interface PolicyRuleCheckResult {
   matched: boolean;
-  effect: 'allow' | 'deny';
+  effect: PolicyRule['effect'];
   reason: DecisionReason;
   step: EvaluationStep;
 }
@@ -335,8 +335,9 @@ export class LayeredPolicyEvaluator {
 // ── Layer 4: Policy rules (managed denies, then user before managed, first match wins) ─────
     // An administrator's deny is a ceiling: no user or remembered allow may sit ahead of it.
     const managedDenies = this.rules.filter((r) => r.origin === 'managed' && r.effect === 'deny');
-    const userRules = this.rules.filter((r) => r.origin === 'user');
-    const managedRules = this.rules.filter((r) => r.origin === 'managed' && r.effect !== 'deny');
+    // An ask rule is not an allow or a deny: the gate asks the owner for it (gate/classify.ts).
+    const userRules = this.rules.filter((r) => r.origin === 'user' && r.effect !== 'ask');
+    const managedRules = this.rules.filter((r) => r.origin === 'managed' && r.effect === 'allow');
     const orderedRules = [...managedDenies, ...userRules, ...managedRules];
 
     for (const rule of orderedRules) {

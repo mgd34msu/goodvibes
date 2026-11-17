@@ -33,10 +33,11 @@ import { effectPermittedForProvenance } from '../gate/surface-authority.js';
 import { isStateMutation } from '../gate/policy/state-policy.js';
 import { resolve } from 'node:path';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
-import { buildDurableRuleForDecision, buildRememberOptions, matchDurableRulesAsync, sessionApprovalKey } from './approval-rules.js';
+import { buildDurableRuleForDecision, buildRememberOptions, matchDurableRulesAsync, sessionApprovalKey, type RememberTier } from './approval-rules.js';
 import { changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { toolDecisionOf } from './denial.js';
 import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
+import { processJevDecisions, type JevDecisionLedger, type JevDecisionRuleEffect } from './jev-decisions.js';
 import { readModeCategory, toolCategoryOf, type ToolDefinition } from '../types/tools.js';
 import { projectIdentity, type UserPermissionRuleStore } from './user-rule-store.js';
 import type { PolicyRuntimeState } from '../runtime/permissions/policy-runtime.js';
@@ -148,6 +149,8 @@ interface CallFactInput {
 /** A session answer or saved rule that matched a call. */
 interface RememberedDecision {
   readonly approved: boolean;
+  /** `ask`: the owner's standing "always ask me" rule; neither an allow nor a denial. */
+  readonly effect: PolicyRule['effect'];
   readonly source: PermissionDecisionSource;
   readonly reason: PermissionDecisionReasonCode;
   /** What the answer or rule covers, as the agent is told it. */
@@ -352,6 +355,8 @@ export interface GateOptions {
   readonly ledger?: UntrustedContentLedger | undefined;
   /** Where just-vibes holds calls for the owner; the process's ledger when absent. */
   readonly heldForOwner?: HeldForOwnerLedger | undefined;
+  /** Where the calls Jev decides are kept for the owner's `/decisions`; the process's ledger when absent. */
+  readonly jevDecisions?: JevDecisionLedger | undefined;
 }
 
 /** A host-bound decision for the selected execution mode and exact current action. */
@@ -881,7 +886,7 @@ export class PermissionManager {
       ? this.mapEvaluatorDecision(await this.evaluateRuntimePolicy(toolName, args, mode, this.policyClassification(category), { signal, assertCurrent }, owner, subjects), analysis)
       : null;
     // A link inside an allowed folder can lead to a path the owner denied: that denial applies too.
-    const landed = mode !== 'yolo' && durable?.approved !== false
+    const landed = mode !== 'yolo' && durable?.effect !== 'deny'
       ? await this.deniedWhereLinksLead(toolName, args, { signal, assertCurrent }, owner, options.hookOwner?.sessionId)
       : null;
     const exposure = (rawAuthority as Readonly<Record<string, unknown>>)['exposure'];
@@ -902,6 +907,7 @@ export class PermissionManager {
     // The owner answered a channel's request himself: his approval is the authority the channel lacked.
     const ownerDirected = decided.kind === 'owner-only' && decided.item === 'channel-request' && result.approved && result.sourceLayer === 'user_prompt';
     this.policyRuntimeState.recordPermissionDecision({ callId: sourceId, tool: toolName, category, result });
+    this.noteJevDecision(toolName, args, result, definition);
     assertCurrent();
     const admission: AutonomousPermissionAdmission = Object.freeze({
       result, revisionIds: Object.freeze(safety.revision ? [safety.revision.ref.id] : []),
@@ -1240,7 +1246,7 @@ export class PermissionManager {
     }
     if (i.policy?.approved === false) return { effect: 'deny', source: 'managed-policy', description: 'managed permission policy' };
     const remembered = (answer: RememberedDecision, source: CallRuleFact['source'], where = ''): CallRuleFact => ({
-      effect: answer.approved ? 'allow' : 'deny', source, description: `${answer.description}${where}`,
+      effect: answer.effect, source, description: `${answer.description}${where}`,
       ...(answer.ownerOnly ? { ownerOnly: answer.ownerOnly } : {}),
     });
     const sourceOf = (answer: RememberedDecision): CallRuleFact['source'] => answer.source === 'session_override' ? 'session' : 'user-rule';
@@ -1385,7 +1391,7 @@ export class PermissionManager {
       }
       remembered = await this.rememberedDecision(this.getApprovalKey(toolName, args), toolName, args, { signal, assertCurrent }, undefined, ownerOnly, subjects);
       // A link inside an allowed folder can lead to a path the owner denied: that denial applies too.
-      if (!(remembered && !remembered.approved)) landed = await this.deniedWhereLinksLead(toolName, args, { signal, assertCurrent });
+      if (remembered?.effect !== 'deny') landed = await this.deniedWhereLinksLead(toolName, args, { signal, assertCurrent });
     }
     const decided = classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface, definition, ownerOnly,
@@ -1399,6 +1405,7 @@ export class PermissionManager {
       actionRevision: callId, attribution,
     });
     assertCurrent();
+    this.noteJevDecision(toolName, args, safety.result, definition);
     return this.emitAndReturn(callId, toolName, category, safety.result, hookOwner);
   }
 
@@ -1431,7 +1438,7 @@ export class PermissionManager {
     const options = signal ? { signal } : {};
     const remembered = mode === 'yolo' ? null
       : await this.rememberedDecision(this.getApprovalKey(toolName, captured), toolName, captured, options, undefined, ownerOnly, subjects);
-    const landed = mode === 'yolo' || (remembered && !remembered.approved) ? null : await this.deniedWhereLinksLead(toolName, captured, options);
+    const landed = mode === 'yolo' || remembered?.effect === 'deny' ? null : await this.deniedWhereLinksLead(toolName, captured, options);
     const decided = classifyCall(mode, this.callFacts({
       toolName, args: captured, category, mode, surface: this.gate.surfaceOf?.(), definition, ownerOnly,
       directory: this.configReader.getWorkingDirectory(), tools: config.permissions?.tools, remembered, landed, policy: null,
@@ -1463,7 +1470,7 @@ export class PermissionManager {
     const ownerAnswer = ownerOnly === undefined ? undefined : this.sessionApprovals.get(ownerOnlySessionKey(ownerOnly, key));
     const session = ownerAnswer ?? this.sessionApprovals.get(key);
     if (session !== undefined) {
-      return { approved: session, source: 'session_override', reason: session ? 'session_cached_allow' : 'session_cached_deny',
+      return { approved: session, effect: session ? 'allow' : 'deny', source: 'session_override', reason: session ? 'session_cached_allow' : 'session_cached_deny',
         description: 'your answer earlier in this session', ...(ownerAnswer !== undefined ? { ownerOnly } : {}), assertCurrent: current };
     }
     // Rules remembered from an answer this process are matched live, after the
@@ -1477,7 +1484,7 @@ export class PermissionManager {
     if (!durable) return null;
     const approved = durable.effect === 'allow';
     const rule = rules?.find((candidate) => candidate.id === durable.ruleId);
-    return { approved, source: 'user_rule', reason: approved ? 'user_rule_allow' : 'user_rule_deny',
+    return { approved, effect: durable.effect, source: 'user_rule', reason: approved ? 'user_rule_allow' : 'user_rule_deny',
       description: `the saved rule "${rule?.description ?? durable.ruleId}"`,
       ...(rule?.ownerOnly ? { ownerOnly: rule.ownerOnly } : {}), assertCurrent: current };
   }
@@ -1492,7 +1499,7 @@ export class PermissionManager {
       const landedArgs = { path: real };
       const remembered = await this.rememberedDecision(this.getApprovalKey(toolName, landedArgs, sessionId), toolName, landedArgs, options, owner);
       remembered?.assertCurrent();
-      if (remembered && !remembered.approved) return remembered;
+      if (remembered?.effect === 'deny') return remembered;
     }
     return null;
   }
@@ -1550,7 +1557,7 @@ export class PermissionManager {
     if (this.sessionDeniesRead(sessionApprovalKey('read', { path: this.absoluteReadPath(rawPath) }), sessionId)) return 'restricted';
     const remembered = await this.rememberedDecision(readKey, 'read', args);
     remembered?.assertCurrent(); assertWorkspace();
-    return remembered?.approved === false ? 'restricted' : 'allow';
+    return remembered?.effect === 'deny' ? 'restricted' : 'allow';
   }
 
   /**
@@ -1716,6 +1723,54 @@ export class PermissionManager {
         next: ['carry on with the work that does not need this call',
           `the owner is shown it at the end of the run and can approve it with /held approve ${held.id}; after that the same call runs`] },
     }) };
+  }
+
+  /**
+   * Keep a decision Jev made for the owner (`/decisions`), with what he can do
+   * about it: the standing rules a choice would save, at the narrowest tier
+   * this call allows (built now, so the call's arguments are not kept), and,
+   * when the tool records every change for undo, the files undo restores.
+   * Nothing when another layer decided.
+   */
+  private noteJevDecision(toolName: string, args: Record<string, unknown>, result: PermissionCheckResult, definition: ToolDefinition | undefined): void {
+    const receipt = result.autonomousDecision;
+    if (result.sourceLayer !== 'jev_decision' || !receipt) return;
+    const directory = this.configReader.getWorkingDirectory();
+    const option = buildRememberOptions(toolName, args).find((candidate) => candidate.tier !== 'session');
+    let scope: string | undefined;
+    let remember: ((effect: JevDecisionRuleEffect) => Promise<string>) | undefined;
+    if (option !== undefined && option.tier !== 'session' && directory) {
+      const tier = option.tier;
+      const allow = buildDurableRuleForDecision({ toolName, args, tier, effect: 'allow' });
+      const deny = buildDurableRuleForDecision({ toolName, args, tier, effect: 'deny' });
+      const ask = buildDurableRuleForDecision({ toolName, args, tier, effect: 'ask' });
+      if (allow && deny && ask) {
+        const chosen: Readonly<Record<JevDecisionRuleEffect, PolicyRule>> = { allow, deny, ask };
+        scope = `${option.label} (${option.detail})`;
+        remember = (effect) => this.saveStandingRule(chosen[effect], tier, toolName, directory);
+      }
+    }
+    const paths = extractPathArgs(args);
+    const undoPaths = result.approved && paths.length > 0 && declaredRecoverable(definition, args)
+      ? paths.map((path) => resolve(directory ?? '', path)) : undefined;
+    this.jevDecisions().record({
+      toolName, summary: result.analysis.summary, approved: result.approved, reason: receipt.summary, decisionId: receipt.decisionId,
+      ...(undoPaths ? { undoPaths } : {}),
+      ...(scope !== undefined ? { scope } : {}),
+    }, remember);
+  }
+
+  /** Save a standing rule the owner chose from a decision, scoped to the project it was made in; resolves with what it covers. */
+  private async saveStandingRule(rule: PolicyRule, tier: Exclude<RememberTier, 'session'>, toolName: string, project: string): Promise<string> {
+    const store = this.userRuleStore;
+    if (!store?.remember) throw new Error('This app has no permission rule store, so no standing rule can be saved here.');
+    await store.remember({ rule, tier, tool: toolName, createdAt: Date.now(), project: projectIdentity(project) });
+    return rule.description ?? `${rule.effect} ${toolName} calls like this`;
+  }
+
+  /** The ledger Jev's decisions are kept in: the process's, unless the embedder gave one. */
+  private jevDecisions(): JevDecisionLedger {
+    return this.gate.jevDecisions ?? processJevDecisions();
   }
 
   /** The ledger this gate holds just-vibes calls in: the process's, unless the embedder gave one. */

@@ -53,7 +53,13 @@ import { askerLivenessPath, sessionAskerKey, settleAskerLock, type OwnerAskerKin
 
 export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA, OWNER_ASKER_SESSION_FILE_METADATA };
 
-export type OwnerItemKind = 'approval' | 'question' | 'claim' | 'purchase' | 'queued-action';
+/**
+ * `decision` is a call Jev decided for the owner at the permission gate: it is
+ * open while the owner can still act on it (undo, never, always, ask, keep),
+ * and only a list that names the kind shows it, so it never reads as something
+ * waiting on him.
+ */
+export type OwnerItemKind = 'approval' | 'question' | 'claim' | 'purchase' | 'queued-action' | 'decision';
 export type OwnerItemStatus = 'open' | 'answered' | 'withdrawn' | 'expired';
 
 /** An answer: one of the item's options, or free text when it has none. Text may accompany an option. */
@@ -285,7 +291,7 @@ export interface OwnerInboxPort {
   answer(id: string, answer: OwnerAnswer): Promise<OwnerAnswerOutcome>;
 }
 
-export const OWNER_ITEM_KINDS: readonly OwnerItemKind[] = ['approval', 'question', 'claim', 'purchase', 'queued-action'];
+export const OWNER_ITEM_KINDS: readonly OwnerItemKind[] = ['approval', 'question', 'claim', 'purchase', 'queued-action', 'decision'];
 export const OWNER_ITEM_LIMITS = Object.freeze({
   titleChars: 200,
   detailChars: 4000,
@@ -296,7 +302,34 @@ export const OWNER_ITEM_LIMITS = Object.freeze({
   metadataEntries: 16,
 });
 
-const POSTABLE_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action']);
+const POSTABLE_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action', 'decision']);
+
+/**
+ * Applies the owner's choice on a `decision` item in the process whose gate
+ * made the decision; resolves with what was done, in words, or throws to say
+ * why it could not be done (the item then stays open).
+ */
+export type OwnerDecisionHandler = (item: OwnerItem, option: string) => Promise<string>;
+
+/** Decision handlers of this process, by the key prefix their items are posted under. */
+const decisionHandlers = new Map<string, OwnerDecisionHandler>();
+
+/** Handle the owner's choices on decision items posted under `keyPrefix`; returns the unregister. */
+export function handleOwnerDecisions(keyPrefix: string, handler: OwnerDecisionHandler): () => void {
+  decisionHandlers.set(keyPrefix, handler);
+  return () => { if (decisionHandlers.get(keyPrefix) === handler) decisionHandlers.delete(keyPrefix); };
+}
+
+function decisionHandlerFor(key: string | undefined): OwnerDecisionHandler | undefined {
+  if (key === undefined) return undefined;
+  for (const [prefix, handler] of decisionHandlers) if (key.startsWith(prefix)) return handler;
+  return undefined;
+}
+
+/** True when this process made the decision posted under `key`, so the owner's choice on it is applied here. */
+export function isOwnerDecisionHandledHere(key: string | undefined): boolean {
+  return decisionHandlerFor(key) !== undefined;
+}
 const APPROVE = 'approve';
 const DENY = 'deny';
 const DEFAULT_LIST_LIMIT = 100;
@@ -329,7 +362,7 @@ function optionalText(value: unknown, field: string, max: number): string | unde
 /** Validate a producer's item; the store trusts what it is given. */
 export function validateNewOwnerItem(input: NewOwnerItem): Omit<StoredOwnerItem, 'id' | 'createdAt'> {
   if (!POSTABLE_KINDS.has(input.kind)) {
-    throw new OwnerInboxInputError('kind must be question, claim, purchase or queued-action; permission asks are raised through approvals.', 'kind');
+    throw new OwnerInboxInputError('kind must be question, claim, purchase, queued-action or decision; permission asks are raised through approvals.', 'kind');
   }
   const options = input.options ?? [];
   if (!Array.isArray(options) || options.length > OWNER_ITEM_LIMITS.options) {
@@ -538,6 +571,8 @@ function matchesFilter(item: OwnerItem, filter: OwnerInboxListFilter, kinds: Rea
   if (status === 'open' && item.status !== 'open') return false;
   if (status === 'closed' && item.status === 'open') return false;
   if (kinds && !kinds.has(item.kind)) return false;
+  // An open decision waits on no one: it is listed only where it is asked for by kind (/decisions).
+  if (!kinds && status === 'open' && item.kind === 'decision') return false;
   if (filter.sessionId !== undefined && item.sessionId !== filter.sessionId) return false;
   return true;
 }
@@ -561,6 +596,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   readonly #approvals: OwnerInboxApprovalSource | undefined;
   readonly #now: () => number;
   readonly #listeners = new Set<OwnerInboxListener>();
+  /** Decision items whose choice is being carried out; a second choice meanwhile is refused. */
+  readonly #applying = new Set<string>();
   readonly #unsubscribeApprovals: (() => void) | undefined;
   #probes: OwnerAskerPresenceProbe[];
   #approvalRevision = 0;
@@ -732,7 +769,13 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       if (item.status !== 'open') return { applied: false, item, refusal: closedRefusal(item) };
       const checked = this.#checkAnswer(item, answer);
       if ('refusal' in checked) return { applied: false, item, refusal: checked.refusal };
-      const result = this.#questions.answer(id, checked.answer, by, now);
+      let recorded = checked.answer;
+      if (item.kind === 'decision') {
+        const applied = await this.#applyDecision(item, checked.answer);
+        if ('refusal' in applied) return { applied: false, item, refusal: applied.refusal };
+        recorded = applied.answer;
+      }
+      const result = this.#questions.answer(id, recorded, by, this.#now());
       if (!result) return { applied: false, refusal: unknownRefusal(id) };
       const answered = this.#project(result.entry, now);
       if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
@@ -933,6 +976,51 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   #emitStored(entry: StoredOwnerEntry, item: OwnerItem): void {
     if (this.#stopStoreChanges !== null) this.#announced.set(entry.item.id, storedEntryVersion(entry));
     this.#emit(item);
+  }
+
+  /**
+   * A decision item's choice is carried out before it is recorded, by the
+   * process whose gate decided, so the answer on the item says what was done.
+   */
+  async #applyDecision(item: OwnerItem, answer: OwnerAnswer): Promise<{ answer: OwnerAnswer } | { refusal: Refusal }> {
+    const handler = decisionHandlerFor(item.key);
+    if (!handler) {
+      return {
+        refusal: refusal({
+          code: 'DECIDED_ELSEWHERE',
+          state: 'still open',
+          reason: `Jev made this decision in ${typeof item.metadata?.['surface'] === 'string' ? item.metadata['surface'] : 'another app'}, and only that app can apply a choice on it.`,
+          next: ['Choose it with /decisions in the app that made it while that session is running.', 'Or set a standing rule with /permissions.'],
+          status: 409,
+        }),
+      };
+    }
+    if (this.#applying.has(item.id)) {
+      return {
+        refusal: refusal({
+          code: 'DECISION_IN_PROGRESS', state: 'still open', status: 409,
+          reason: 'Another choice on this decision is being applied right now.',
+          next: ['Show it again in a moment; the first choice decides it.'],
+        }),
+      };
+    }
+    this.#applying.add(item.id);
+    try {
+      const done = await handler(item, answer.option ?? '');
+      return { answer: { option: answer.option, text: clip(done, OWNER_ITEM_LIMITS.answerTextChars) } };
+    } catch (error) {
+      return {
+        refusal: refusal({
+          code: 'DECISION_NOT_APPLIED',
+          state: 'still open',
+          reason: error instanceof Error ? error.message : String(error),
+          next: ['Choose another action, or keep the decision as it is.'],
+          status: 409,
+        }),
+      };
+    } finally {
+      this.#applying.delete(item.id);
+    }
   }
 
   #checkAnswer(item: OwnerItem, answer: OwnerAnswer): { answer: OwnerAnswer } | { refusal: Refusal } {

@@ -125,7 +125,7 @@ export function ownerInboxStorePath(shellPaths: { resolveUserPath(...segments: s
 
 /** Closed items kept for the history view; open items and answers still waiting for their asker are never dropped. */
 const MAX_CLOSED_ENTRIES = 500;
-const STORED_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action']);
+const STORED_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action', 'decision']);
 
 const MIGRATIONS: readonly SqliteMigration[] = [{
   toVersion: 1,

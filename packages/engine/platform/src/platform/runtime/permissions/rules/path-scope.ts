@@ -162,7 +162,7 @@ export function evaluatePathScopeRule(
   // Effect-aware batch semantics: an allow rule only matches when EVERY path
   // in the call is inside scope (one out-of-scope edit must not ride in on a
   // partial grant); a deny rule matches when ANY path does.
-  const matched = rule.effect === 'deny'
+  const matched = rule.effect !== 'allow'
     ? absolutePaths.some(pathMatches)
     : absolutePaths.every(pathMatches);
 

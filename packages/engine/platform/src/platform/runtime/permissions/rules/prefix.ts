@@ -190,7 +190,8 @@ export function evaluatePrefixRule(
   const classRule = rule.exactCommandMatch === 'command-class';
   const exactLiteral = (command: string): boolean => rule.exactCommands?.some((exact) => command === exact) ?? false;
   // An exact allow holds only for the environment, directory and detachment it was approved with.
-  const contextHolds = rule.effect === 'deny' || classRule || execContextOf(args) === (rule.exactContext ?? execContextOf({}));
+  // A deny or ask rule protects: it holds in any context, and any matching command or segment triggers it.
+  const contextHolds = rule.effect !== 'allow' || classRule || execContextOf(args) === (rule.exactContext ?? execContextOf({}));
 
   const segmentMatches = (command: string, whole = false): boolean => {
     if (whole && exactLiteral(command)) return contextHolds;
@@ -210,14 +211,14 @@ export function evaluatePrefixRule(
     if (exactLiteral(command) && contextHolds) return true;
     const split = splitShellCommand(command);
     if (!split.opaque && split.segments.length <= 1) return segmentMatches(command, true);
-    if (rule.effect === 'deny') return segmentMatches(command, true) || split.segments.some((segment) => segmentMatches(segment));
+    if (rule.effect !== 'allow') return segmentMatches(command, true) || split.segments.some((segment) => segmentMatches(segment));
     return !split.opaque && split.segments.every((segment) => segmentMatches(segment));
   };
 
   // Effect-aware batch semantics: an allow rule only matches when EVERY
   // command in the call matches (a mixed batch must not ride in on a partial
   // grant); a deny rule matches when ANY command does.
-  const matched = rule.effect === 'deny'
+  const matched = rule.effect !== 'allow'
     ? commandArgs.some(commandMatches)
     : commandArgs.every(commandMatches);
 

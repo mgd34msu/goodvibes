@@ -209,7 +209,7 @@ export function buildDurableRuleForDecision(input: {
   readonly toolName: string;
   readonly args: Record<string, unknown>;
   readonly tier: RememberTier;
-  readonly effect: 'allow' | 'deny';
+  readonly effect: PolicyRule['effect'];
   readonly now?: number | undefined;
   /** The owner-only kind the owner answered; the rule then settles that kind too. */
   readonly ownerOnly?: OwnerOnlyKind | undefined;
@@ -287,7 +287,7 @@ function durableRuleFor(input: Parameters<typeof buildDurableRuleForDecision>[0]
 }
 
 export interface DurableRuleMatch {
-  readonly effect: 'allow' | 'deny';
+  readonly effect: PolicyRule['effect'];
   readonly ruleId: string;
 }
 
@@ -295,9 +295,10 @@ export interface DurableRuleMatch {
  * Evaluation of durable user rules against a call, the lightweight matcher
  * alongside explicit session decisions (it must work with the policy engine
  * flag on OR off, so it does not go through the full layered evaluator).
- * A matching deny wins over any matching allow, whatever their order, so a
- * later "deny always" is enforced even under an older, broader allow; among
- * rules of one effect the first match is reported.
+ * A matching deny wins over any matching ask or allow, and an ask over an
+ * allow, whatever their order, so a later "deny always" or "always ask me" is
+ * enforced even under an older, broader allow; among rules of one effect the
+ * first match is reported.
  */
 /** @deprecated Synchronous compatibility; production callers use matchDurableRulesAsync. */
 export function matchDurableRules(
@@ -307,6 +308,7 @@ export function matchDurableRules(
   options: { readonly projectRoot?: string | undefined } = {},
 ): DurableRuleMatch | null {
   let firstAllow: DurableRuleMatch | null = null;
+  let firstAsk: DurableRuleMatch | null = null;
   for (const rule of rules) {
     let matched = false;
     switch (rule.type) {
@@ -331,10 +333,11 @@ export function matchDurableRules(
     }
     if (matched) {
       if (rule.effect === 'deny') return { effect: 'deny', ruleId: rule.id };
-      firstAllow ??= { effect: 'allow', ruleId: rule.id };
+      if (rule.effect === 'ask') firstAsk ??= { effect: 'ask', ruleId: rule.id };
+      else firstAllow ??= { effect: 'allow', ruleId: rule.id };
     }
   }
-  return firstAllow;
+  return firstAsk ?? firstAllow;
 }
 
 /**
@@ -352,6 +355,7 @@ export async function matchDurableRulesAsync(
   current();
   const subjects = options.subjects;
   let firstAllow: DurableRuleMatch | null = null;
+  let firstAsk: DurableRuleMatch | null = null;
   for (const rule of rules) {
     let matched = false;
     switch (rule.type) {
@@ -377,8 +381,9 @@ export async function matchDurableRulesAsync(
     }
     if (matched) {
       if (rule.effect === 'deny') return { effect: 'deny', ruleId: rule.id };
-      firstAllow ??= { effect: 'allow', ruleId: rule.id };
+      if (rule.effect === 'ask') firstAsk ??= { effect: 'ask', ruleId: rule.id };
+      else firstAllow ??= { effect: 'allow', ruleId: rule.id };
     }
   }
-  return firstAllow;
+  return firstAsk ?? firstAllow;
 }

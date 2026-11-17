@@ -107,7 +107,7 @@ export const PERMISSION_PROMPT_DECISION_SCHEMA = objectSchema({
 // One durable user-origin permission rule as the settings surface lists it.
 export const PERMISSION_USER_RULE_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
-  effect: enumSchema(['allow', 'deny']),
+  effect: enumSchema(['allow', 'deny', 'ask']),
   tier: enumSchema(['exact', 'command-class', 'path', 'tool']),
   tool: STRING_SCHEMA,
   description: STRING_SCHEMA,

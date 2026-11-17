@@ -13,6 +13,7 @@
  */
 import {
   createOwnerInbox,
+  isOwnerDecisionHandledHere,
   type OwnerAnswer,
   type OwnerAnswerDeliveryReport,
   type OwnerAnswerOutcome,
@@ -106,7 +107,12 @@ export function routeOwnerInbox(options: {
       if (!options.daemonReachable()) return await home.find(id);
       return (await daemon.find(id).catch(() => undefined)) ?? await home.find(id);
     },
-    answer: (id: string, answer: OwnerAnswer) => either(id, (inbox) => inbox.answer(id, answer)),
+    async answer(id: string, answer: OwnerAnswer) {
+      // A decision this process's gate made is carried out here, where its session and rules are.
+      const local = await home.find(id);
+      if (local?.kind === 'decision' && isOwnerDecisionHandledHere(local.key)) return await home.answer(id, answer);
+      return await either(id, (inbox) => inbox.answer(id, answer));
+    },
     async post(item) {
       return await (options.daemonReachable() ? daemon : home).post(item);
     },

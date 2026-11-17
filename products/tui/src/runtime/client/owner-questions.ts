@@ -21,7 +21,8 @@ import {
   type AnswerDeliveringInbox,
   type OwnerInboxClient,
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { OWNER_ASKER_SESSION_FILE_METADATA } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { bridgeJevDecisionsToInbox, processJevDecisions } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes-jev/engine/platform/platform/agents';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { whenSessionOpens } from '@goodvibes-jev/engine/terminal-shell/session-resume';
@@ -99,7 +100,11 @@ export function wireOwnerQuestionSessions(
   const inbox = (): AnswerDeliveringInbox => terminalOwnerQuestions(services, sessionId);
   const stopOpened = whenSessionOpens(conversation, (id) => inbox().openSession(id));
   const stopDeleted = services.sessionManager.onDeleted((id) => { void inbox().deleteSession(id); });
+  // What Jev decides in this terminal's turns is listed in /decisions here, in the Agent and in the web UI; a choice on it is carried out here.
+  const stopDecisions = bridgeJevDecisionsToInbox(processJevDecisions(), homeOwnerInbox(services.shellPaths),
+    { surface: 'tui', handle: handleOwnerDecisions, undo: services.fileUndoManager });
   return () => {
+    stopDecisions();
     stopOpened();
     stopDeleted();
     stopFollowing();

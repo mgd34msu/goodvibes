@@ -266,7 +266,10 @@ export interface WorkspaceSwapManagerLike {
  * shape the credential-read wire method (`credentials.get`) ever returns, the
  * plaintext secret value never crosses the wire. `usable` reflects a real
  * in-process resolution attempt, so a configured-but-unresolvable reference
- * (e.g. a broken `op://` ref) reports `configured: true, usable: false`.
+ * (e.g. a broken `op://` ref) reports `configured: true, usable: false`. A
+ * listing does not run password-manager or `exec` commands: such a reference
+ * is reported `usable: false, reference: 'not-checked'`; a named probe
+ * (`?key=`) resolves it.
  */
 export interface CredentialStatusRecord {
   readonly key: string;
@@ -276,6 +279,8 @@ export interface CredentialStatusRecord {
   readonly configured: boolean;
   /** The value/reference resolved to non-empty plaintext in-process. */
   readonly usable: boolean;
+  /** `not-checked`: a command-backed reference this listing did not resolve; `usable` then says nothing about it. */
+  readonly reference?: 'not-checked' | undefined;
   /** Where the value was found: 'env' | 'daemon-secure' | 'user-secure' | … */
   readonly source: string;
   /** 'daemon' | 'user' | 'project' | 'env'. */

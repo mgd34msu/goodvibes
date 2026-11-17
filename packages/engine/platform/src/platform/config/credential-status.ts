@@ -5,11 +5,14 @@
  * daemon's `credentials.get` wire method (config sharing, see CHANGELOG 1.0.0).
  *
  * The returned provider reports whether each credential in the shared store is
- * configured and usable, it NEVER exposes the plaintext value. For a stored
- * value `usable` is an in-process read (env → store), reported only as a
- * boolean. For a stored reference it means the reference parses: a listing
- * starts no password-manager process, and `/secrets test <secret-ref>` is the
- * live check. A project-store key not yet confirmed is `usable: false`.
+ * configured and usable, it NEVER exposes the plaintext value. `usable` is an
+ * in-process resolution (env → store, a pointer followed, an `env:` or `file:`
+ * reference read), reported only as a boolean. A reference that runs a command
+ * to resolve (a password manager, `exec`) is resolved by a named probe
+ * (`get(key)`), never by a listing: the listing reports it `usable: false`
+ * with `reference: 'not-checked'`, so it starts no password-manager process and
+ * never claims a credential works that it did not resolve. A project-store key
+ * not yet confirmed is `usable: false`.
  *
  * Enumeration is never a `process.env` dump. It covers STORED keys, plus the
  * env-backed keys whose names are KNOWN credential names, the provider env
@@ -31,7 +34,7 @@ import type {
   CredentialStatusRecord,
 } from '@goodvibes-jev/engine/daemon-api';
 import { BUILTIN_PROVIDER_ENV_KEYS } from './provider-credential-catalog.js';
-import type { SecretRecord, SecretsManager } from './secrets.js';
+import { isCommandBackedSecretSource, type SecretRecord, type SecretsManager } from './secrets.js';
 
 function declaredProviders(key: string): readonly string[] {
   return Object.entries(BUILTIN_PROVIDER_ENV_KEYS).filter(([, names]) => names.includes(key)).map(([id]) => id);
@@ -55,14 +58,19 @@ function knownCredentialEnvNames(): ReadonlySet<string> {
 /** The SecretsManager surface this adapter needs (keeps callers free to inject a stub). */
 type SecretsMetadataSource = Pick<SecretsManager, 'get' | 'list' | 'listDetailed'>;
 
-async function resolveUsable(secrets: SecretsMetadataSource, key: string, record?: SecretRecord): Promise<boolean> {
-  if (record?.unconfirmed) return false;
-  if (record?.refSource && !record.overriddenByEnv) return true;
+/** Whether a credential resolves, or that a listing did not run the command that would tell. */
+type Usability = Pick<CredentialStatusRecord, 'usable' | 'reference'>;
+
+async function resolveUsable(secrets: SecretsMetadataSource, key: string, record: SecretRecord | undefined, runCommands: boolean): Promise<Usability> {
+  if (record?.unconfirmed) return { usable: false };
+  if (!runCommands && record?.refSource && !record.overriddenByEnv && isCommandBackedSecretSource(record.refSource)) {
+    return { usable: false, reference: 'not-checked' };
+  }
   try {
     const value = await secrets.get(key);
-    return value !== null && value.length > 0;
+    return { usable: value !== null && value.length > 0 };
   } catch {
-    return false;
+    return { usable: false };
   }
 }
 
@@ -97,7 +105,7 @@ export function createCredentialStatusProvider(
           key: record.key,
           providerIds: declaredProviders(record.key),
           configured: true,
-          usable: await resolveUsable(secrets, record.key, record),
+          ...await resolveUsable(secrets, record.key, record, false),
           source: record.source,
           scope: record.scope,
           secure: record.secure,
@@ -125,7 +133,8 @@ export function createCredentialStatusProvider(
         key: match.key,
         providerIds: declaredProviders(match.key),
         configured: true,
-        usable: await resolveUsable(secrets, key, match),
+        // One caller-named key: resolved whatever its source.
+        ...await resolveUsable(secrets, key, match, true),
         source: match.source,
         scope: match.scope,
         secure: match.secure,

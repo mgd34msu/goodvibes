@@ -349,6 +349,11 @@ export function captureSecretsReadSource(owner: SecretsManager): () => void {
 /** Reference sources that run a password-manager or other command to resolve. */
 const COMMAND_BACKED_SOURCES: ReadonlySet<string> = new Set(['exec', '1password', 'onepassword', 'bitwarden', 'vaultwarden', 'bitwarden-secrets-manager', 'bws']);
 
+/** Whether resolving a reference of this source runs a command (a password manager or `exec`). */
+export function isCommandBackedSecretSource(source: string | null | undefined): boolean {
+  return typeof source === 'string' && COMMAND_BACKED_SOURCES.has(source);
+}
+
 /** An environment value only when `key` is really a variable, so names such as `__proto__` never read an inherited property. */
 function ownEnvValue(key: string): string | undefined {
   return Object.hasOwn(process.env, key) ? process.env[key] : undefined;

@@ -128,6 +128,7 @@ export const CREDENTIAL_STATUS_RECORD_SCHEMA = objectSchema({
   secure: BOOLEAN_SCHEMA,
   overriddenByEnv: BOOLEAN_SCHEMA,
   refSource: STRING_SCHEMA,
+  reference: enumSchema(['not-checked']),
 }, ['key', 'configured', 'usable', 'source', 'scope', 'secure', 'overriddenByEnv'], { additionalProperties: false });
 
 /** Output of `credentials.get`, a secret-free credential-status snapshot. */

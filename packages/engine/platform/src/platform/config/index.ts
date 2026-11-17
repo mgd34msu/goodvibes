@@ -340,6 +340,7 @@ export {
   secretWriteScopeWasOverridden,
 } from './secrets.js';
 export type {
+  ConfirmedProjectSecret,
   PreparedSecretImport,
   PreparedSecretImportTransition,
   PreparedSecretImportFacts,

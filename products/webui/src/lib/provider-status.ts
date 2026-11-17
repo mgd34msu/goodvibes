@@ -179,6 +179,8 @@ export interface CredentialStatusEntry {
   readonly providerIds?: readonly string[];
   readonly configured: boolean;
   readonly usable: boolean;
+  /** True for a password-manager reference the listing did not resolve: `usable` says nothing about it. */
+  readonly notChecked?: boolean;
   readonly source?: string;
   readonly secure?: boolean;
 }
@@ -219,6 +221,7 @@ export function deriveCredentialAvailability(outcome: { ok: true; value: unknown
       providerIds: Array.isArray(rec.providerIds) ? rec.providerIds.filter((id): id is string => typeof id === 'string') : [],
       configured: rec.configured === true,
       usable: rec.usable === true,
+      ...(rec.reference === 'not-checked' ? { notChecked: true } : {}),
       source: firstString(rec, ['source']) || undefined,
       secure: rec.secure === true ? true : rec.secure === false ? false : undefined,
     });

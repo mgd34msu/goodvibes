@@ -25,6 +25,8 @@ export interface CredentialStatusEntry {
   readonly key: string;
   readonly configured: boolean;
   readonly usable: boolean;
+  /** True for a command-backed reference the listing did not resolve: `usable` says nothing about it. */
+  readonly notChecked?: boolean | undefined;
   readonly source?: string | undefined;
   readonly secure?: boolean | undefined;
 }
@@ -93,6 +95,7 @@ export function deriveCredentialAvailability(outcome: CredentialStatusOutcome): 
       key,
       configured: rec.configured === true,
       usable: rec.usable === true,
+      ...(rec.reference === 'not-checked' ? { notChecked: true } : {}),
       source: readString(rec, 'source') || undefined,
       secure: rec.secure === true ? true : rec.secure === false ? false : undefined,
     });

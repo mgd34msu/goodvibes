@@ -157,10 +157,12 @@ function connectedHostCredentialLines(credentials: CredentialAvailability | null
   if (credentials === null) return ['  not shown: the connected host was not reachable.'];
   if (!credentials.available) return [`  not shown: ${credentials.reason}`];
   const configured = credentials.credentials.filter((entry) => entry.configured);
-  const unusable = configured.filter((entry) => !entry.usable).map((entry) => entry.key);
+  const unusable = configured.filter((entry) => !entry.usable && !entry.notChecked).map((entry) => entry.key);
+  const notChecked = configured.filter((entry) => entry.notChecked).map((entry) => entry.key);
   return [
     `  stored: ${configured.length} of ${credentials.credentials.length}`,
     ...(unusable.length > 0 ? [`  stored but not usable: ${unusable.join(', ')}`] : []),
+    ...(notChecked.length > 0 ? [`  held by a password manager, not checked here: ${notChecked.join(', ')}`] : []),
   ];
 }
 

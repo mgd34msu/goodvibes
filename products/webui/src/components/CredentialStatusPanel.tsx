@@ -44,12 +44,14 @@ function isForbidden(error: unknown): boolean {
 }
 
 function credentialTone(entry: CredentialStatusEntry): StatusTone {
-  if (!entry.configured) return 'idle';
+  if (!entry.configured || entry.notChecked) return 'idle';
   return entry.usable ? 'ok' : 'warn';
 }
 
 function credentialLabel(entry: CredentialStatusEntry): string {
   if (!entry.configured) return 'not configured';
+  // A password-manager reference is not run by a listing; it is resolved when used.
+  if (entry.notChecked) return 'configured, in a password manager (not checked)';
   return entry.usable ? 'usable' : 'configured, not usable';
 }
 

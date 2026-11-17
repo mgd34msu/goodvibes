@@ -275,7 +275,7 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
         if (cohort !== undefined && typeof cohort !== 'function') { drainOwned(cohort); throw new NativeDataCompatibilityError('unconfirmed-reader'); }
         const assertCohort = () => {
           if (typeof cohort !== 'function') return;
-          assertSynchronousJudgmentGuard(cohort, () => new NativeDataCompatibilityError('unconfirmed-reader'));
+          assertSynchronousJudgmentGuard((): unknown => cohort(), () => new NativeDataCompatibilityError('unconfirmed-reader'));
         };
         assertCohort();
         atomicWriteFileSync(path, contents, { mode: 0o600, assertCurrent: () => {

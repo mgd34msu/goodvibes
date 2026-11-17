@@ -531,11 +531,13 @@ function transact(
     phase = 'cleanup';
     for (const path of paths) removeBackup(path.saved);
     for (const path of staged) removeCreated(path);
-    if (restrictions.retainPublication) {
-      if (!nativeGuard) throw new Error('Native publication observation is unavailable');
-      nativeGuard.assertCurrent();
-      assertSynchronousJudgmentGuard(() => restrictions.retainPublication(nativeGuard.assertCurrent.bind(nativeGuard)), () => new Error('Publication observation must complete synchronously'));
-      nativeGuard.assertCurrent();
+    const retainPublication = restrictions.retainPublication;
+    if (retainPublication) {
+      const guard = nativeGuard;
+      if (!guard) throw new Error('Native publication observation is unavailable');
+      guard.assertCurrent();
+      assertSynchronousJudgmentGuard(() => retainPublication(guard.assertCurrent.bind(guard)), () => new Error('Publication observation must complete synchronously'));
+      guard.assertCurrent();
     }
     for (const claim of claims) removeCreated(claim);
     readerLease?.(); readerLease = undefined;

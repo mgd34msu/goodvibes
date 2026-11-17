@@ -107,10 +107,10 @@ for it to read when it starts.
 
 | Value | Behavior |
 | --- | --- |
-| `ask-me` | Reads, edits inside the workspace and calls a saved rule or `permissions.tools.*` allows run without asking. Jev reads each other call's risk: low-stakes calls run, and high-stakes, irreversible or security-weakening calls and owner-only decisions wait for your reply, bound to the exact action. With no decision model in use, every such call your tool settings do not allow asks you |
+| `ask-me` | Reads, edits inside the workspace and calls a saved rule or `permissions.tools.*` allows run without asking. Jev reads each other call's risk: calls it reads as critical, irreversible or security-weakening, and owner-only decisions, wait for your reply, bound to the exact action, and the rest run. With no decision model in use, every such call your tool settings do not allow asks you |
 | `jev-decides` (default) | Jev, the decision model, decides judgment calls: it permits ordinary work and justified risk and refuses genuinely harmful actions; owner-only decisions (spending over a limit, unrecoverable deletion, a new recipient, granting access, loosening security, changing a contract) still ask you. With no working decision model (none set, or `judgment.policy` is `No Decision Model`) it behaves as `ask-me`. While `jev-decides` is only the default (you have not chosen a mode), it also behaves as `ask-me` unless the shipped calibration record measured Jev's gate decisions on the model requests use (`judgment.model`, then `TYPESAFE_DEFAULT_MODEL`, then `jev-latest`; the record covers `jev-latest`); choosing `jev-decides` yourself applies it on any working decision model |
 | `just-vibes` | Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works; an owner-only decision, or a judgment with no decision model, is not run and is held, and the end of each run lists what was held (a headless run reports it as `heldForOwner`); `/held approve <id>` approves one for the session and the work carries on with it when you ask; a call held in a daemon-hosted session (web UI) is also posted to the owner inbox, answerable with `approve` or `dismiss` in `/questions` or the web UI |
-| `yolo` | Runs authorized actions without general safety decisions or prompts; host containment, secret storage and payment rules still apply |
+| `yolo` | Runs actions without safety decisions or prompts, except that a change asked for from a channel still goes to you and an act only you perform (answering an approval, granting access) is refused to the model; host containment, secret storage and payment limits still apply |
 | `plan` | Allows read-only tools and refuses every mutating or exec tool with a structured plan-mode denial |
 
 Older settings files keep working: `safe-owner`, `prompt`, `normal`,
@@ -134,8 +134,8 @@ mode is not on); `plan` is outside the cycle, and cycling from it, or leaving a 
 
 Background and subagent tool calls follow the mode of the session that
 started them, and their asks reach the owner through the same approval prompt
-with the subagent named. A saved `permissions.backgroundAgents` is removed from
-the settings file at load with a receipt.
+with the subagent named. A saved `permissions.backgroundAgents` is reported as
+an unknown key and has no effect.
 
 Changing `service.autostart` or `service.enabled` from `/config` reconciles
 the OS service where supported. On Linux this installs/enables, disables, or

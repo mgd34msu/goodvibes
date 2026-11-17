@@ -253,4 +253,4 @@ required for custom composition. The production constructor includes explicit
 unconfigured membership and explicit account-bound Slack, Discord and email
 sources.
 
-Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.0](../../docs/releases/3.3.0.md). Historical upstream implementation notes are kept outside the published user documentation.
+Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.0](../../docs/releases/3.3.0.md).

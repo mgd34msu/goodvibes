@@ -6,8 +6,7 @@
 The engine is the typed TypeScript platform layer behind the GoodVibes Jev products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes-jev/engine` carries the platform through explicit subpaths such as `@goodvibes-jev/engine/platform`, `@goodvibes-jev/engine/contracts` and `@goodvibes-jev/engine/errors`.
 
 Use the [monorepo installation guide](../../docs/installation.md) to install the
-application suite. Engine integration and product acceptance remain in progress;
-earlier release history does not certify this checkout. Current behavior for
+application suite. Current behavior for
 [completion verification](docs/runtime-orchestration.md#completion-verification),
 [project review inventory](docs/contract-criteria.md#project-review-inventory) and
 [owner-configured tool access](docs/tool-safety.md#owner-configured-access) lives
@@ -19,8 +18,7 @@ Public contract, config keys, route paths, event shapes, and file layouts follow
 Its settlement boundary covers the turn's owned provider, tool, hook, and hook-Agent
 work. Independent workflow-trigger automations may continue; `TURN_CANCEL` is not a
 global “all side effects stopped” receipt. Uncooperative owned work must stay pending
-rather than be reported drained. See the [cancellation contract and platform limits](docs/hosted-turn-cancellation.md)
-and the retained review evidence.
+rather than be reported drained. See the [cancellation contract and platform limits](docs/hosted-turn-cancellation.md).
 
 ```mermaid
 flowchart LR

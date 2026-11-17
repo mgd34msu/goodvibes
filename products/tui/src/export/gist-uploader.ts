@@ -41,11 +41,6 @@ export interface GistUploaderOptions {
   description?: string;
 }
 
-/** Copy the service registry's header map so a later comparison sees what was used. */
-export function captureGithubAuthHeaders(headers: Record<string, string> | null | undefined): Record<string, string> {
-  return { ...(headers ?? {}) };
-}
-
 const GITHUB_AUTHORIZATION = /^(?:bearer|token)\s+(\S+)\s*$/i;
 
 /** The token in a header map's `Authorization: Bearer <token>` or `Authorization: token <token>`. */

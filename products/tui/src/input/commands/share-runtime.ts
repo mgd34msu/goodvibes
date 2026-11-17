@@ -17,7 +17,6 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/na
 import { calcSessionCost, isModelPriced } from '@goodvibes-jev/engine/platform/platform/providers';
 import {
   GistUploadTarget,
-  captureGithubAuthHeaders,
   NO_TOKEN_GUIDANCE,
   resolveGithubToken,
 } from '../../export/gist-uploader.ts';
@@ -185,10 +184,7 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
         sessionId: ctx.session.runtime.sessionId,
         title: ctx.session.conversationManager.title || undefined,
       };
-      const options = { redact, cost: costIsUnpriced ? undefined : sessionCostUsd, signal: sourceSignal, assertCurrent() {
-        history.assertCurrent();
-        if (!current()) throw new Error('Export is no longer current');
-      } };
+      const options = { redact, cost: costIsUnpriced ? undefined : sessionCostUsd, signal: sourceSignal };
 
       let outputContent: string;
       try {
@@ -228,35 +224,26 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
       let shareLink: string | undefined;
       let uploadReceipt: string | undefined;
       if (upload) {
+        // The github service entry's bearer, else GITHUB_TOKEN; resolved once, right before the request.
         const serviceRegistry = ctx.platform.serviceRegistry;
-        const envToken = process.env['GITHUB_TOKEN'];
         let authHeaders: Record<string, string> | null = null;
-        try {
-          const svcRegistry = serviceRegistry;
-          if (svcRegistry) {
-            authHeaders = await svcRegistry.resolveAuth('github').catch(() => null);
+        let lookupFailure: string | undefined;
+        if (serviceRegistry) {
+          try {
+            authHeaders = await serviceRegistry.resolveAuth('github');
+          } catch (error) {
+            lookupFailure = summarizeError(error);
           }
-        } catch {
-          // serviceRegistry absent or resolveAuth threw, fall through to env var
         }
-
-        try {
-          if (!current()) return;
-          const captured = captureGithubAuthHeaders(authHeaders);
-          const token = await resolveGithubToken(captured, { signal: sourceSignal, beforeAttempt: () => { if (!current()) { reading?.assertCurrent(); throw new Error('Share is no longer current'); } } });
-          if (!current()) return;
-          // Re-resolve the same configured authority after the async reading.
-          // A changed/revoked credential must never be sent from a stale snapshot.
-          const refreshed = captureGithubAuthHeaders(serviceRegistry ? await serviceRegistry.resolveAuth('github') : null);
-          if (!current()) return;
-          if (ctx.platform.serviceRegistry !== serviceRegistry || process.env['GITHUB_TOKEN'] !== envToken
-            || JSON.stringify(Object.entries(captured).sort()) !== JSON.stringify(Object.entries(refreshed).sort())) {
-            ctx.print('Upload canceled: GitHub credentials changed. Run /share again.');
-            return;
-          }
-          if (!token) {
-            ctx.print(NO_TOKEN_GUIDANCE);
-          } else {
+        if (!current()) return;
+        const token = await resolveGithubToken(authHeaders, { signal: sourceSignal });
+        if (!current()) return;
+        if (!token) {
+          ctx.print(lookupFailure
+            ? `Upload not attempted: the github service entry could not be read (${lookupFailure}) and GITHUB_TOKEN is not set. Local export saved at ${outputPath}.`
+            : NO_TOKEN_GUIDANCE);
+        } else {
+          try {
             const gistFilename = basename(outputPath);
             const description = metadata.title
               ? `GoodVibes session: ${metadata.title}`
@@ -289,12 +276,11 @@ export function registerShareRuntimeCommands(registry: CommandRegistry): void {
             } else {
               ctx.print(`Upload unconfirmed: ${result.error}. GitHub may have received it; check before retrying.`);
             }
+          } catch (error) {
+            if (!current()) return;
+            // The local export is already written; the failure is the upload's alone.
+            ctx.print(`Upload failed: the Gist upload did not complete (${summarizeError(error)}). Local export saved at ${outputPath}.`);
           }
-        } catch {
-          if (!current()) return;
-          // Reading failures are operational, never a guessed token or a reason
-          // to discard the already-written local export. Do not echo auth data.
-          ctx.print('Upload failed: credential-header reading unavailable. Local export saved.');
         }
       }
 

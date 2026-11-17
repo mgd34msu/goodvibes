@@ -1,14 +1,11 @@
 import { classicPersonalOpsReceiptStatus } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { isDeepStrictEqual } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
 import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
 import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
-import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import { capturePersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { researchCheckpointRoute, researchRouteString } from './agent-harness-research-catalog-source.ts';
 import type { UiAutomationSnapshot, UiTasksSnapshot, UiControlPlaneSnapshot } from '../runtime/ui-read-models.ts';
@@ -43,44 +40,6 @@ export interface AutonomyLiveNativeFacts {
   readonly watcherReceipts: readonly AutonomyLiveNativeFact[];
   readonly schedules: readonly AutonomyLiveNativeFact[];
   readonly researchRuns: readonly AutonomyLiveNativeFact[];
-}
-
-const liveObservations = new WeakMap<object, { readonly assertCurrent: () => void; readonly captureEpoch: () => () => void }>();
-const observationUnchanged = (): void => {};
-const releaseLiveObservation = new FinalizationRegistry<() => void>(release => release());
-
-/** Native notifications retain ABA evidence and one latest private snapshot. */
-export function captureNativeReadModelObservation(model: object): () => void {
-  let observation = liveObservations.get(model);
-  if (!observation) {
-    const read = modelReadingServicePath(model, ['getSnapshot']), subscribe = modelReadingServicePath(model, ['subscribe']);
-    if (typeof read !== 'function' || typeof subscribe !== 'function') throw new ToolInputProjectionError('unavailable');
-    const reference = new WeakRef(model), state = { epoch: 0, valid: true };
-    let previous: unknown;
-    const changed = () => {
-      const current = reference.deref(); if (!current) return;
-      try {
-        if (modelReadingServicePath(current, ['getSnapshot']) !== read) throw new ToolInputProjectionError('held');
-        const next = capturePersonalOpsData(read.call(current));
-        if (next === undefined) throw new ToolInputProjectionError('invalid');
-        if (!isDeepStrictEqual(next, previous) || !state.valid) state.epoch++;
-        previous = next; state.valid = true;
-      } catch { state.epoch++; state.valid = false; }
-    };
-    const unsubscribe: unknown = subscribe.call(model, changed);
-    if (typeof unsubscribe !== 'function') throw new ToolInputProjectionError('unavailable');
-    try { changed(); if (!state.valid) throw new ToolInputProjectionError('held'); }
-    catch (error) { try { unsubscribe(); } finally { throw error; } }
-    releaseLiveObservation.register(model, () => { unsubscribe(); });
-    observation = { assertCurrent: observationUnchanged, captureEpoch() {
-      changed();
-      if (!state.valid) throw new ToolInputProjectionError('held');
-      const epoch = state.epoch;
-      return () => { if (!state.valid || state.epoch !== epoch) throw new ToolInputProjectionError('held'); };
-    } };
-    liveObservations.set(model, observation);
-  }
-  observation.assertCurrent(); return observation.captureEpoch();
 }
 
 /** How many of the newest artifacts are looked through for watcher receipts. */

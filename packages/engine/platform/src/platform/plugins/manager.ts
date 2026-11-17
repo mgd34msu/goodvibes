@@ -2,6 +2,7 @@ import { createPublicKey } from 'node:crypto';
 import { fileIdentity } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
+import { withProcessLockSync } from '../utils/process-lock.js';
 import { resolve, sep } from 'node:path';
 import {
   discoverAllPlugins,
@@ -36,6 +37,14 @@ import {
   emitPluginLoading,
   emitPluginUnloading,
 } from '../runtime/emitters/plugins.js';
+
+/** Longest a trust save waits for another app holding the shared trust file's lock. */
+const TRUST_LOCK_WAIT_MS = 2_000;
+
+/** The lock serialising read-merge-write of the shared trust file across apps. */
+function trustLockPath(trustFile: string): string {
+  return `${trustFile}.writer.sqlite`;
+}
 
 /**
  * PluginState, Persisted state for all plugins.
@@ -974,11 +983,18 @@ export class PluginManager {
     }
     this.refreshSharedTrust();
     if (Object.keys(own).length === 0) return;
-    const carried = Object.fromEntries(Object.entries(own)
-      .filter(([name, record]) => (this.trustStore.getRecord(name)?.updatedAt ?? Number.NEGATIVE_INFINITY) < record.updatedAt));
+    const newer = (store: PluginTrustStore) => Object.fromEntries(Object.entries(own)
+      .filter(([name, record]) => (store.getRecord(name)?.updatedAt ?? Number.NEGATIVE_INFINITY) < record.updatedAt));
+    let carried = newer(this.trustStore);
     if (Object.keys(carried).length > 0) {
       try {
-        writeJsonFileAtomic(path, { ...this.trustStore.exportRecords(), ...carried }, { trailingNewline: false });
+        // Read, merge and write under the trust file's lock, so another app's
+        // save in between is kept, not overwritten.
+        withProcessLockSync(trustLockPath(path), () => {
+          this.refreshSharedTrust();
+          carried = newer(this.trustStore);
+          writeJsonFileAtomic(path, { ...this.trustStore.exportRecords(), ...carried }, { trailingNewline: false });
+        }, { waitMs: TRUST_LOCK_WAIT_MS });
       } catch (err) {
         // The shared file could not take them: use them in this app for now and keep them in its file.
         logger.warn(`[plugins] Could not move trust tiers into ${path}: ${summarizeError(err)}`);
@@ -1022,13 +1038,18 @@ export class PluginManager {
   private saveTrustRecord(name: string, record: PluginTrustRecord): string | undefined {
     const path = this.trustFilePath;
     if (!path) return this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
-    this.refreshSharedTrust();
     try {
-      writeJsonFileAtomic(path, { ...this.trustStore.exportRecords(), [name]: record }, { trailingNewline: false });
+      // The file is shared by every app: read, merge and write under its lock,
+      // so two apps saving different plugins at once both keep their record.
+      withProcessLockSync(trustLockPath(path), () => {
+        this.refreshSharedTrust();
+        writeJsonFileAtomic(path, { ...this.trustStore.exportRecords(), [name]: record }, { trailingNewline: false });
+        this.trustFileIdentity = undefined;
+        this.refreshSharedTrust();
+      }, { waitMs: TRUST_LOCK_WAIT_MS });
     } catch (err) {
       return summarizeError(err);
     }
-    this.trustFileIdentity = fileIdentity(path);
     return undefined;
   }
 

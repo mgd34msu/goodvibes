@@ -5,8 +5,8 @@ import { captureCatalogPath } from './agent-harness-research-catalog-source.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 
-import { previewHarnessText } from './agent-harness-text.ts';
-import { certificationRecords, firstAcross, publishedModelRoute, safeNullablePreview, safePreview, stringList } from './agent-harness-read-helpers.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { certificationRecords, firstAcross, publishedModelRoute, safeNullablePreview, safePreview, stringList } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface ResearchLiveRecordCertification {
   readonly schemaStatus: 'certified' | 'legacy';

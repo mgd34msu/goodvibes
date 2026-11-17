@@ -4,7 +4,7 @@ import { readRecord } from './agent-harness-model-routing-utils.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { LANE_IDS } from './agent-harness-personal-ops-types.ts';
 import type { PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsLane, PersonalOpsLaneId, PersonalOpsLiveRecord, PersonalOpsRecordFreshness, PersonalOpsStatus, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
 import { PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE, PERSONAL_OPS_REVIEW_PURPOSE } from './agent-personal-ops-native-fields.ts';

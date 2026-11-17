@@ -1,5 +1,5 @@
 import { agentAccountsWriteGuard, createAgentAccountsInputProjector } from './agent-accounts-admission.ts';
-import { toolErrorText } from './tool-error-text.ts';
+import { toolErrorText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 /**
  * The `accounts` tool: the durable record of every account the agent created.
  *

@@ -12,7 +12,7 @@ import { isOperatorAutomationTargetMethod } from '../agent/operator-automation-t
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
 import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './agent-operator-input-projector.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type JsonRecord = Record<string, unknown>;
 

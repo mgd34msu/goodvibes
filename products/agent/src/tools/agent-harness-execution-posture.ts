@@ -6,8 +6,8 @@ import { captureBrowserControlPosture, type BrowserControlPosture } from './agen
 import { delegationDecisionCards } from './agent-harness-delegation-posture.ts';
 import { fileRecoveryCatalogStatus } from './agent-harness-file-recovery.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHarnessExecutionArgs {
   readonly executionRouteId?: unknown;

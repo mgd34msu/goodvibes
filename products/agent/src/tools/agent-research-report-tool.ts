@@ -8,7 +8,7 @@ import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platfo
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentResearchReportToolArgs {
   readonly runId?: unknown;

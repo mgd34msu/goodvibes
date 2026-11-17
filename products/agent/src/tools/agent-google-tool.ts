@@ -84,7 +84,7 @@ import { describeDaemonExpectationState, getSessionExpectationBook, type DaemonE
 import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes-jev/engine/platform/platform/google';
 import { readVerificationArtifact } from '@goodvibes-jev/engine/platform/platform/google';
 import { isHostFailure, type ConnectedHost } from '../agent/connected-host-client.ts';
-import { confirmParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 const GOOGLE_ACTIONS = [
   'status',

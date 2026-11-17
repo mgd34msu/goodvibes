@@ -15,7 +15,7 @@ import type { LearningCandidate } from './agent-harness-learning-curator.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { createHarnessCatalogInputProjector, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 function arrayField(snapshot: Record<string, unknown>, key: string): string[] {
   const value = snapshot[key];
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];

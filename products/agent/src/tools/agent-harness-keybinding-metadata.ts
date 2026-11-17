@@ -10,7 +10,7 @@ import {
   type KeyCombo,
   type KeybindingsManager,
 } from '../input/keybindings.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * Keys the shell handles itself before configurable bindings are consulted, and

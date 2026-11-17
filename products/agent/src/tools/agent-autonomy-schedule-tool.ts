@@ -7,7 +7,7 @@ import {
   parseAutonomyScheduleArgs,
 } from '../agent/autonomy-schedule.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type AutonomyScheduleKind = 'at' | 'every' | 'cron';
 

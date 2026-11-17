@@ -16,7 +16,7 @@ import {
   postOperatorAction,
   renderOperatorActionPath,
 } from '../agent/operator-actions.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export function createAgentOperatorActionTool(
   shellPaths: ShellPathService,

@@ -16,7 +16,7 @@ import { operatorContractMethods, type OperatorContractMethodEntry } from '@good
 import type { BackgroundProcess, ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { acquireInteractiveRuntimeSnapshot, type InteractiveRuntimeParity } from './agent-harness-interactive-runtime-records.ts';
 import { DEFAULT_BACKGROUND_TIMEOUT_MS, clampTimeout, clampWaitTimeout, processAgeMs, processStatus } from './agent-harness-process-timeout-policy.ts';
 import type {
@@ -25,7 +25,7 @@ import type {
   BackgroundProcessResolution,
   ProcessCapabilityStatus,
 } from './agent-harness-background-processes-types.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 export type {
   AgentHarnessBackgroundProcessArgs,
   BackgroundProcessResolution,

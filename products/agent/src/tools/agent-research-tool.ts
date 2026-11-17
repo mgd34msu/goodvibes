@@ -10,7 +10,7 @@ import { createAgentResearchReportTool } from './agent-research-report-tool.ts';
 import { createAgentResearchRunsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { runAdmittedResearchRunner, runPublicSearch } from './agent-research-runner.ts';
 import { createAgentResearchSourcesTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type AgentResearchAction =
   | 'briefing'

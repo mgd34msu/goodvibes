@@ -17,7 +17,7 @@ import {
 } from './agent-harness-learning-curator.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readString } from './tool-args.ts';
 
 export type AgentLearningConsolidationMode = 'preview' | 'stale' | 'delete' | 'rollback' | 'recreate' | 'receipts';

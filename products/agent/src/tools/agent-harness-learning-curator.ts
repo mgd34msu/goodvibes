@@ -1,12 +1,12 @@
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { buildLearningCandidates, candidateSearchText } from './agent-harness-learning-curator-proposals.ts';
 import { localRegistryRoute, MIN_PROMPT_MEMORY_CONFIDENCE, missingRequirementCount, routeValue } from './agent-harness-learning-curator-common.ts';
 import type { LearningCandidateCollection } from './agent-harness-learning-curator-source.ts';
 import type { AgentHarnessLearningCuratorArgs, LearningCandidate, LearningCandidateResolution, LearningConsolidationBatchPlan, LearningPromptPlan } from './agent-harness-learning-curator-types.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 export type { LearningCandidate, LearningCandidateResolution, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan } from './agent-harness-learning-curator-types.ts';
 
 function readString(value: unknown): string {

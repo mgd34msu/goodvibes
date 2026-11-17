@@ -5,8 +5,8 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { buildMcpAttackPathReview } from '@/runtime/index.ts';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHarnessSecurityArgs {
   readonly query?: unknown;

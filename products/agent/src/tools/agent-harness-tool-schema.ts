@@ -1,4 +1,4 @@
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export const AGENT_HARNESS_MODES = [
   'summary', 'modes', 'mode', 'route_decision', 'cli_commands', 'cli_command',

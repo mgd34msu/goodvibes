@@ -13,10 +13,10 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertActorMayMarkReviewed } from '../agent/review-authority.ts';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type AgentVibeAction = 'status' | 'show' | 'init' | 'import_persona';
 

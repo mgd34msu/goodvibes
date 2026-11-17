@@ -7,8 +7,8 @@ import type { CommandContext } from '../input/command-registry.ts';
 import type { ProjectWorkPlanTask as WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { AGENT_TEMPLATES, AGENT_TOOL_MODES, agentOrchestrationDecisionCards } from './agent-harness-agent-orchestration-policy.ts';
 import { remoteReadModelSnapshot, type RemoteCaptureOutcomeRecord, type RemoteWorkspaceEvidenceRecord } from './agent-harness-remote-read-models.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface AgentHarnessAgentOrchestrationArgs {
   readonly agentId?: unknown;

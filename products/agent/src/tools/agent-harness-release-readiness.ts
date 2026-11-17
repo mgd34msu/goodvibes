@@ -4,7 +4,7 @@ import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export const RELEASE_PACKAGE_ROOT = join(import.meta.dir, '..', '..');
 /** Why audit evidence is absent from an installed Agent, and where it comes from. */

@@ -4,9 +4,9 @@ import type { AgentWorkspaceChannelStatus } from '../input/agent-workspace-chann
 import { readAgentChannelDeliveryReceipts } from '../agent/channel-delivery-receipts.ts';
 import { buildAgentWorkspaceChannelTriage, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
-import { withInventoryDisclosure } from './inventory-disclosure.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { withInventoryDisclosure } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHarnessChannelArgs {
   readonly channelId?: unknown;

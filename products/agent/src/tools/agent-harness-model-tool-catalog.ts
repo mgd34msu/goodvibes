@@ -3,8 +3,8 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { fullToolDefinition } from './tool-definition-compaction.ts';
-import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHarnessModelToolCatalogArgs {
   readonly query?: unknown;

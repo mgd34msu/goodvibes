@@ -1,4 +1,4 @@
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * One redaction table for every harness read model that shows published text to

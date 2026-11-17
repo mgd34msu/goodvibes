@@ -21,9 +21,9 @@ import { browserControlPosture, type BrowserControlPosture } from './agent-harne
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { isCertifiedResearchLiveRecord, researchLiveReadModelSnapshot } from './agent-harness-research-live-read-models.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
-import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface AgentHarnessResearchBriefingArgs {
   readonly query?: unknown;

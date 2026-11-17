@@ -15,7 +15,7 @@ import {
 import { AGENT_KNOWLEDGE_METHODS } from '../cli/agent-knowledge-methods.ts';
 import { formatBatchIngest, formatFailure, formatIngest } from '../cli/agent-knowledge-format.ts';
 import { readString } from './tool-args.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export type AgentKnowledgeIngestSourceKind =
   | 'url'

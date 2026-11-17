@@ -3,7 +3,7 @@ import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runti
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { planMemoryRecord } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { ShellPathService } from '@/runtime/index.ts';

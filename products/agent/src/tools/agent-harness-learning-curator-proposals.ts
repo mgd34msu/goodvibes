@@ -2,7 +2,7 @@ import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
 import { type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { acquireLearningCuratorSource, type LearningRecord, type LearningCuratorSource, type LearningCandidateCollection, type LearningCuratorNativeContext, type LearningSessionRecord, type LearningWorkItem as WorkPlanItem } from './agent-harness-learning-curator-source.ts';
 import { readLearningDuplicatePair, readLearningGrade, readLearningProposalTarget, readLearningMemoryClass, readLearningSurvivor } from './agent-harness-learning-curator-readings.ts';
 import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';

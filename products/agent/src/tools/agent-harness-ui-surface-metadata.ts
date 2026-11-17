@@ -12,7 +12,7 @@ import { connectedBrowserCockpitRoute } from './agent-harness-browser-cockpit-ro
 import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
 import { isKnownAgentWorkspaceCategory } from '../input/agent-workspace-navigation.ts';
 import type { AgentHarnessUiSurfaceArgs, UiSurfaceDefinition, UiSurfaceLookup, UiSurfaceResolution } from './agent-harness-ui-surface-types.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 export type { AgentHarnessUiSurfaceArgs } from './agent-harness-ui-surface-types.ts';
 
 function agentHarnessModes(...modes: readonly string[]): string { return `agent_harness ${modes.map((mode) => `mode:"${mode}"`).join(', ')}`; }

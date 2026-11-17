@@ -9,7 +9,7 @@ import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { createAgentSettingsImportTool } from './agent-settings-import-tool.ts';
 import { executeAdmittedAgentSettingsImport } from './agent-settings-import-admission.ts';
 import { readSettingsAction, SETTINGS_ACTION_WORDS } from './agent-settings-action.ts';
-import { confirmParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface AgentSettingsToolArgs {
   readonly action?: unknown;

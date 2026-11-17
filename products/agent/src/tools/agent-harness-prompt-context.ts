@@ -12,7 +12,7 @@ import { buildCapabilitySummaryPrompt } from '@goodvibes-jev/engine/terminal-she
 import type { PromptContextReceipt } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { capabilitySnapshot } from '../capabilities/capability-snapshot.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface PromptContextArgs {
   readonly includeParameters?: unknown;

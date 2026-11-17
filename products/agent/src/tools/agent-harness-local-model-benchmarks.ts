@@ -2,7 +2,7 @@ import { declaredClassicModelStack } from '@goodvibes-jev/engine/platform/platfo
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { hasPurpose, PURPOSE_MODEL_COMPARE_JUDGMENT } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { localStackForProvider } from './agent-harness-local-model-url.ts';
 import type { LocalModelBenchmarkEvidence, LocalModelBenchmarkPlan, LocalModelBenchmarkRouteLatency, LocalModelBenchmarkWinner, LocalModelRecipe, ArtifactListLike } from './agent-harness-model-routing-types.ts';
 import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';

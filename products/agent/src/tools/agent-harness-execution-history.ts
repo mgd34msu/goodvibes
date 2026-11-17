@@ -4,8 +4,8 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { AgentExecutionRecord, AgentExecutionRouteKind, AgentExecutionStatus } from '../runtime/execution-ledger.ts';
 import { fileRecoveryCatalogStatus } from './agent-harness-file-recovery.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHarnessExecutionHistoryArgs {
   readonly executionRecordId?: unknown;

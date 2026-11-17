@@ -9,7 +9,7 @@ import {
 import { describeCliCommandPolicy } from './agent-harness-metadata.ts';
 import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHarnessCliArgs {
   readonly query?: unknown;

@@ -10,7 +10,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceMemorySnapshot, type buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
 import { buildAgentWorkspaceSessionMemoryCount } from '../input/agent-workspace-snapshot-builders.ts';
 import { readConfigString } from '../input/agent-workspace-snapshot-config.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { capturePersonalOpsSnapshot, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
@@ -19,7 +19,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { EXTERNAL_MEMORY_SETUP_STEP, externalMemoryProviders } from './agent-harness-memory-external-providers.ts';
 import type { ExternalMemoryProviderRecord, MemoryPostureProvider, MemoryProviderResolution } from './agent-harness-memory-external-providers.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type MemoryPostureStatus = 'ready' | 'needs-review' | 'empty' | 'unavailable';
 type MemoryVectorPostureStatus = 'ready' | 'attention' | 'disabled' | 'unavailable';

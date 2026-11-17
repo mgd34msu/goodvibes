@@ -3,7 +3,7 @@ import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-
 import { buildAgentWorkspaceDocumentOpsPart } from '../input/agent-workspace-snapshot.ts';
 import { AGENT_WORKSPACE_ARTIFACT_LIST_LIMIT } from '../input/agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep } from '../input/agent-workspace-types.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { buildReviewerReadinessChecklist, readDocumentOpsSources } from './agent-harness-document-ops-reviewer-readiness.ts';
 import type {
   AgentHarnessDocumentOpsArgs,

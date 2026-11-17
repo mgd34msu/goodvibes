@@ -2,11 +2,11 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { findOperatorContractMethod, operatorContractMethods as contractMethodIndex } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from '../input/command-registry.ts';
 import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
 import { mcpSchemaRoute } from './agent-harness-personal-ops-routes.ts';
 import type { McpSchemaSummary, McpToolRecord, McpToolSchema, OperatorContractMethod, PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsWorkflow, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

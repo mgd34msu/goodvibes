@@ -54,7 +54,7 @@ import {
   resolveDaemonOperatorConnection,
   type DaemonOperatorInvoke,
 } from '../agent/daemon-operator-client.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * The connected-host caller for the comms modes, or null when this shell has

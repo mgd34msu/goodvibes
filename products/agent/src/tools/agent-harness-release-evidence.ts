@@ -4,7 +4,7 @@ import { withNativeCatalog, rankResearchRecords } from './agent-harness-research
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { RELEASE_EVIDENCE_ORIGIN, RELEASE_PACKAGE_ROOT } from './agent-harness-release-readiness.ts';
 
 const RELEASE_EVIDENCE_ARTIFACTS = [

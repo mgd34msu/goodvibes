@@ -5,7 +5,7 @@ import {
   type KnowledgeSemanticSelfImproveResult,
 } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { CommandContext } from '../input/command-registry.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface AgentHarnessMemoryRefinementArgs {
   readonly query?: unknown;

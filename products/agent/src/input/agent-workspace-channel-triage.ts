@@ -11,7 +11,7 @@ import type { AgentWorkspaceChannelStatus } from './agent-workspace-channels.ts'
 import { buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { createChannelPrincipalAttributionResolver, type ChannelPrincipalAttributionResolver, UNKNOWN_PRINCIPAL_LABEL } from '../agent/principal-attribution.ts';
 import { renderForModel, untrustedFrom } from '../agent/untrusted-content.ts';
-import { clampReadLimit } from '../tools/agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type JsonRecord = Record<string, unknown>;
 

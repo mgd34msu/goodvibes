@@ -2,7 +2,7 @@ import { arch, cpus, freemem, platform, totalmem } from 'node:os';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireProviderApi } from '../input/commands/runtime-services.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readLocalModelCookbook } from './agent-harness-local-model-cookbook.ts';
 import { localBenchmarkRouteLatencyMap, localBenchmarkRouteLatencyMapFor, readLocalModelBenchmarkSnapshot } from './agent-harness-local-model-benchmarks.ts';
 import { localModelDetection, localModelServerEndpoints, localModelServerFacts } from './agent-harness-local-model-endpoints.ts';

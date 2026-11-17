@@ -24,7 +24,7 @@ import { describeLearningCandidate, learningCuratorSummary } from './agent-harne
 import { runLearningCurationPass } from './agent-harness-learning-curator-proposals.ts';
 import { runAutoPromoter, assertAutoPromoteResultCurrent, completedPromotionWrites } from './agent-harness-learning-auto-promote.ts';
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent } from '../agent/skill-draft-runner.ts';
-import { AgentSkillRegistry } from '../agent/skill-registry.ts';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { delegationPostureSummary, describeHarnessDelegationRoute } from './agent-harness-delegation-posture.ts';
 import { describeHarnessKeybinding, listHarnessKeybindings, listHarnessShortcuts, resetHarnessKeybinding, runHarnessKeybinding, setHarnessKeybinding, totalHarnessKeybindings, totalHarnessShortcuts } from './agent-harness-keybinding-metadata.ts';
 import { describeHarnessMediaProvider, mediaPostureSummary } from './agent-harness-media-posture.ts';

@@ -4,7 +4,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
 import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { createAgentComputerTool } from './agent-computer-tool.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type AgentDeviceAction =
   | 'status'

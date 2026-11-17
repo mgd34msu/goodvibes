@@ -3,7 +3,7 @@ import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/e
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { randomUUID } from 'node:crypto';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type ScheduleAction =
   | 'list'

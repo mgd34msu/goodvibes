@@ -13,13 +13,13 @@ import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
 import { operatorBriefingRoutes } from './agent-operator-briefing-tool.ts';
 import { OPERATOR_ACTION_IDS } from '../agent/operator-actions.ts';
 import { SOURCE_KINDS } from './agent-knowledge-ingest-tool.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
-import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * The one statement of who manages connected-host lifecycle and listeners,

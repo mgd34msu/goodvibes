@@ -6,7 +6,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import { CONNECTED_HOST_LIFECYCLE_STATEMENT, CONNECTED_HOST_OWNERSHIP, gatedConnectedHostCapabilities } from './agent-harness-connected-host-capabilities.ts';
-import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
+import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   blockedConnectedHostCapabilities,
   connectedHostCapabilityMap,

@@ -5,7 +5,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { facadeHarness } from './agent-harness-facade.ts';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type AgentPersonalOpsAction = 'briefing' | 'status' | 'queue' | 'intake' | 'lane' | 'read';
 

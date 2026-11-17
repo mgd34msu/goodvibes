@@ -21,7 +21,7 @@ import {
   type ResearchBrowserRunnerRecord,
   type ResearchVisualReportRecord,
 } from './agent-harness-research-live-read-models.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface AgentHarnessResearchWorkflowArgs {
   readonly query?: unknown;

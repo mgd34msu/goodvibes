@@ -8,8 +8,8 @@ import {
   researchSourceReportLine,
   type AgentResearchSourceRecord,
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { previewHarnessText } from './agent-harness-text.ts';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface AgentHarnessResearchQueueArgs {
   readonly sourceId?: unknown;

@@ -7,7 +7,7 @@ import {
   parseReminderScheduleArgs,
 } from '../agent/reminder-schedule.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './agent-personal-ops-effect-receipt.ts';
 

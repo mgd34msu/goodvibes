@@ -3,13 +3,13 @@ import { captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions 
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
-import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type McpCatalogContext = {
   readonly clients?: { readonly mcpApi?: Pick<McpApi, 'listServerSecurity' | 'listAllTools' | 'captureToolCatalog'> };
   readonly extensions?: { readonly mcpRegistry?: Pick<McpApi, 'listServerSecurity' | 'listAllTools' | 'captureToolCatalog'> };
 };
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 // Server-supplied strings are shortened before they reach the model.

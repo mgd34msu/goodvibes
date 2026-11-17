@@ -8,7 +8,7 @@
 import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
+import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AutonomyQueueLiveRecord, AutonomyQueueRecordControl } from './agent-harness-autonomy-queue-types.ts';
 import type { UiAutomationSnapshot, UiWatchersSnapshot } from '../runtime/ui-read-models.ts';
 

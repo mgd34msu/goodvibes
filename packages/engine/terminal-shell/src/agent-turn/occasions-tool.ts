@@ -78,6 +78,7 @@ import {
   OCCASIONS_ANSWER_WORDS,
   OCCASIONS_KIND_WORDS,
   OCCASIONS_METHOD_IDS,
+  OCCASIONS_PROFILE_WRITE_ACTIONS,
   OCCASIONS_RECORDING_SURFACE,
   OCCASIONS_RECURRENCE_WORDS,
   OCCASIONS_RESPONSE_UNREADABLE,
@@ -93,7 +94,9 @@ import {
   fail,
   isOutcome,
   ok,
+  readDetails,
   readNumber,
+  readSelf,
   readString,
   type AgentOccasionsToolDeps,
   type ToolOutcome,
@@ -151,6 +154,16 @@ function readRecurrence(
   return { recurrence: raw };
 }
 
+/** A proposal field in the form it is stored in, so a repeated value compares equal to the proposal. */
+function proposalFieldValue(field: string, value: unknown): unknown {
+  if (field === 'self') return value === true ? true : undefined;
+  if (field === 'details') {
+    const read = readDetails(value);
+    return isOutcome(read) || read.details.length === 0 ? undefined : JSON.stringify(read.details);
+  }
+  return typeof value === 'string' ? readString(value) : value;
+}
+
 // ── Proposals ──────────────────────────────────────────────────────────────
 
 /**
@@ -202,7 +215,7 @@ function takeProposal(
   }
   const values = proposal.values as Record<string, unknown>;
   const changed = fields.filter(field => args[field] !== undefined && args[field] !== ''
-    && (typeof args[field] === 'string' ? readString(args[field]) : args[field]) !== values[field]);
+    && proposalFieldValue(field, args[field]) !== proposalFieldValue(field, values[field]));
   if (changed.length > 0) {
     return fail([
       `Proposal ${token} was for: ${proposal.line}. This call changes ${changed.join(', ')}, so nothing was recorded.`,
@@ -321,24 +334,48 @@ async function handleInterviewRecord(
   ]);
 }
 
+/**
+ * Applies his answer to "which date is right?". With `keep` the other lines for
+ * that title are removed from his profile (a profile write, so it carries the
+ * authority); without it nothing changes and the recorded dates come back to
+ * put to him.
+ */
 async function handleResolveConflict(
   deps: AgentOccasionsToolDeps,
   occasionId: string,
+  keep: string,
+  authority: OccasionsAuthority | 'autonomous' | undefined,
 ): Promise<ToolOutcome> {
-  if (!occasionId) return fail(['`occasionId` is required: which conflict he has dealt with.']);
-  const result = await deps.invoke(OCCASIONS_METHOD_IDS.conflictResolve, { occasionId });
+  if (!occasionId) return fail(['`occasionId` is required: which occasion has two dates recorded.']);
+  const body = keep && authority !== undefined ? { occasionId, keep, authority } : { occasionId };
+  const result = await deps.invoke(OCCASIONS_METHOD_IDS.conflictResolve, body);
   if (!result.ok) return fail([`Could not settle the conflict on ${occasionId}.`, `  ${result.error ?? 'no reason given'}`]);
   const response = narrowOccasionsConflictResolve(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
+  const dates = response.dates ?? [];
+  const removed = response.removed ?? [];
   if (!response.resolved) {
+    const lines = [`The conflict on ${response.occasionId} is not settled.`, `  ${response.reason ?? 'no reason given'}`];
+    if (removed.length > 0) lines.push(`  Already removed: the line${removed.length === 1 ? '' : 's'} dated ${removed.join(', ')}.`);
+    if (!keep && dates.length > 1) {
+      lines.push(
+        `  Ask him which date is right: ${dates.join(' or ')}. Then call action:"resolve_conflict" with keep set to the date he names.`,
+        '  Do not pick one for him.',
+      );
+    } else {
+      lines.push('  Say that rather than reporting it fixed.');
+    }
+    return ok(lines);
+  }
+  if (removed.length === 0) {
     return ok([
-      `There was no open conflict on ${response.occasionId} to settle.`,
-      'Say that rather than reporting it fixed.',
+      `Settled: ${response.occasionId} now has one date recorded, so it stops being raised.`,
+      'Nothing was removed from his profile by this call.',
     ]);
   }
   return ok([
-    `Settled, the conflict on ${response.occasionId} stops being raised.`,
-    'The profile still holds whatever lines he wrote. Nothing was changed for him.',
+    `Say this in your reply: ${response.disclosure || `Kept ${keep} for ${response.occasionId}.`}`,
+    `  Removed the line${removed.length === 1 ? '' : 's'} dated ${removed.join(', ')}; his answers and gift history stay, and the conflict is not raised again.`,
   ]);
 }
 
@@ -362,6 +399,8 @@ async function handlePropose(
   const person = readString(args.person);
   const leadDays = readNumber(args.leadDays);
   if (args.leadDays !== undefined && leadDays === undefined) return fail(['`leadDays` must be a number of days. Nothing was recorded.']);
+  const self = readSelf(args.self);
+  if (isOutcome(self)) return self;
 
   // Every optional field is spread only when present, so the body carries no
   // key the verb did not declare.
@@ -372,6 +411,7 @@ async function handlePropose(
     ...(person ? { person } : {}),
     ...(recurrence.recurrence === undefined ? {} : { recurrence: recurrence.recurrence }),
     ...(leadDays === undefined ? {} : { leadDays }),
+    ...(self.self ? { self: true } : {}),
   };
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.propose, values);
   if (!result.ok) return fail([`Could not work out what to record for ${title}.`, `  ${result.error ?? 'no reason given'}`]);
@@ -402,7 +442,7 @@ async function handlePropose(
   return ok(lines);
 }
 
-const OCCASION_PROPOSAL_FIELDS = ['title', 'date', 'person', 'recurrence', 'leadDays'] as const;
+const OCCASION_PROPOSAL_FIELDS = ['title', 'date', 'person', 'recurrence', 'leadDays', 'self'] as const;
 
 async function handleConfirm(
   deps: AgentOccasionsToolDeps,
@@ -487,6 +527,8 @@ async function handlePlanPropose(
   const destination = readString(args.destination);
   if (args.away !== undefined && typeof args.away !== 'boolean') return fail(['`away` must be true or false. Nothing was recorded.']);
   const away = args.away === true;
+  const details = readDetails(args.details);
+  if (isOutcome(details)) return details;
 
   const values: OccasionsPlansProposeInput = {
     title,
@@ -494,6 +536,7 @@ async function handlePlanPropose(
     to,
     away,
     ...(destination ? { destination } : {}),
+    ...(details.details.length > 0 ? { details: [...details.details] } : {}),
   };
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.plansPropose, values);
   if (!result.ok) return fail([`Could not work out what to record for ${title}.`, `  ${result.error ?? 'no reason given'}`]);
@@ -510,7 +553,7 @@ async function handlePlanPropose(
   ]);
 }
 
-const PLAN_PROPOSAL_FIELDS = ['title', 'from', 'to', 'away', 'destination'] as const;
+const PLAN_PROPOSAL_FIELDS = ['title', 'from', 'to', 'away', 'destination', 'details'] as const;
 
 async function handlePlanConfirm(
   deps: AgentOccasionsToolDeps,
@@ -641,10 +684,17 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
             description: 'Omit to let the date decide: MM-DD is annual, YYYY-MM-DD is a one-off.',
           },
           leadDays: { type: 'number', description: 'Override the default runway for this one occasion only.' },
+          self: { type: 'boolean', description: 'propose: true when the date is his own (his birthday). Recorded as "for me"; a remember-only date of his own is never pushed at him.' },
           from: { type: 'string', description: 'A plan\'s first day, YYYY-MM-DD.' },
           to: { type: 'string', description: 'A plan\'s last day, YYYY-MM-DD.' },
           away: { type: 'boolean', description: 'True when the plan takes him away from home. Feeds reminder timing.' },
           destination: { type: 'string', description: 'Where, when he said. Omit when he did not.' },
+          details: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'plan_propose: everything else he gave about the plan, one detail per entry (a confirmation number, a flight and its times, who is travelling), exactly as given.',
+          },
+          keep: { type: 'string', description: 'resolve_conflict: the date he says is right, as recorded (MM-DD or YYYY-MM-DD). The other lines for that title are removed. Omit to get the recorded dates to ask him about.' },
           confirmed: { type: 'boolean', description: 'action:"remove" only: true after you asked him once to confirm the removal. Never grants write authority.' },
           authority: {
             type: 'string',
@@ -709,8 +759,6 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
           return await handleInterviewAnswer(currentDeps, interviewId, readString(args.stepId), readString(args.text));
         case 'interview_record':
           return await handleInterviewRecord(currentDeps, interviewId, readString(args.landedOn));
-        case 'resolve_conflict':
-          return await handleResolveConflict(currentDeps, occasionId);
         case 'propose':
           return await handlePropose(currentDeps, args);
         case 'plan_propose':
@@ -731,6 +779,10 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
       if (action === 'plan_confirm') {
         return await handlePlanConfirm(currentDeps, args, authority.authority, authority.authority === 'autonomous' ? '' : readString(args.said));
       }
+      if (action === 'resolve_conflict') {
+        const keep = readString(args.keep);
+        return await handleResolveConflict(currentDeps, occasionId, keep, keep ? authority.authority : undefined);
+      }
       return await handleRemove(currentDeps, occasionId, args.confirmed === true || args.confirmed === 'true', authority.authority);
       } catch (error) { return failedOperation(error, requestSent, options?.signal?.aborted === true); }
     },
@@ -750,7 +802,9 @@ export function registerAgentOccasionsTool(
       const action = normalizeOccasionsAction(args.action) ?? normalizeOccasionsAction(args.mode);
       const method = action ? ACTION_METHODS[action] : undefined;
       const gateway = captureOccasionsGatewayCurrent(options.invoke, method);
-      const local = method && captureOccasionsGatewayLocalState(options.invoke, method, action !== null && OCCASIONS_WRITE_ACTIONS.has(action));
+      const profileWrite = action !== null && OCCASIONS_PROFILE_WRITE_ACTIONS.has(action)
+        && (action !== 'resolve_conflict' || readString(args.keep) !== '');
+      const local = method && captureOccasionsGatewayLocalState(options.invoke, method, action !== null && OCCASIONS_WRITE_ACTIONS.has(action), profileWrite);
       return { targets: local?.targets ?? [], onWriteIntent: local?.onWriteIntent, mutationPath: local?.mutationPath,
         assertDescriptors() { gateway(); local?.assertCurrent(); } };
     }, args => { const action = normalizeOccasionsAction(args.action) ?? normalizeOccasionsAction(args.mode); return action !== null && !OCCASIONS_WRITE_ACTIONS.has(action); }),

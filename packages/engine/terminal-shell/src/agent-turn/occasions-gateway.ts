@@ -58,9 +58,9 @@ export interface OccasionsGatewayResult {
  * Generic over the verb, so each call's body is checked against THAT verb's
  * declared input rather than against `Record<string, unknown>`.
  *
- * Same guard `ProfileGatewayInvoke` carries, and for the same reason: the three
- * write verbs here (`occasions.confirm`, `occasions.plans.confirm`,
- * `occasions.remove`) take a required `authority`, and an operator client with a
+ * Same guard `ProfileGatewayInvoke` carries, and for the same reason: the
+ * profile write verbs here (`occasions.confirm`, `occasions.plans.confirm`,
+ * `occasions.remove`, and `occasions.conflict.resolve` with `keep`) take an `authority`, and an operator client with a
  * loose overload beneath its typed one would accept a body that omitted it. See
  * src/test/agent/operator-payload-conformance.test.ts for the measured table.
  */
@@ -101,12 +101,17 @@ export function captureOccasionsGatewayCurrent(invoke: OccasionsGatewayInvoke, m
   return captureFamilyGatewayRoute(gatewayOwners.get(invoke), methodId, 'occasions');
 }
 
-/** The registrar owns native file selection; caller arguments never supply these paths. */
-export function captureOccasionsGatewayLocalState(invoke: OccasionsGatewayInvoke, method: OccasionsMethodId, writing: boolean) {
+/**
+ * The registrar owns native file selection; caller arguments never supply these paths.
+ * `profileWrite` says the call writes the owner's profile file; by default the
+ * verbs that always do, and the caller passes it for one that does only with
+ * some arguments (`occasions.conflict.resolve` with a date to keep).
+ */
+export function captureOccasionsGatewayLocalState(invoke: OccasionsGatewayInvoke, method: OccasionsMethodId, writing: boolean,
+  profileWrite = [OCCASIONS_METHOD_IDS.confirm, OCCASIONS_METHOD_IDS.plansConfirm, OCCASIONS_METHOD_IDS.remove].some(id => id === method)) {
   const owner = gatewayOwners.get(invoke), catalog = owner?.gatewayMethods;
   const target = catalog && captureOccasionsGatewayTarget(catalog, method);
   if (!target) return undefined;
-  const profileWrite = [OCCASIONS_METHOD_IDS.confirm, OCCASIONS_METHOD_IDS.plansConfirm, OCCASIONS_METHOD_IDS.remove].some(id => id === method);
   const profileRead = target.captureProfileRead(), stateRead = target.captureStateRead?.();
   let profileWriting = false, stateWriting = false;
   return {

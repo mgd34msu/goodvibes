@@ -89,19 +89,20 @@ export const OCCASIONS_ACTIONS: readonly OccasionsAction[] = [
 /**
  * The actions that change durable state. Everything else only looks.
  *
- * `answer`, `interview_answer`, `interview_record` and `resolve_conflict` write
- * to the machine-owned acknowledgement store; `confirm`, `plan_confirm` and
- * `remove` write to the owner's own profile file and additionally require an
- * authority. `sweep` is here because a pass reaps, mirrors and delivers.
+ * `answer`, `interview_answer` and `interview_record` write to the
+ * machine-owned acknowledgement store; `confirm`, `plan_confirm`, `remove` and
+ * `resolve_conflict` (which removes the lines for the dates not kept) write to
+ * the owner's own profile file and additionally take an authority. `sweep` is
+ * here because a pass reaps, mirrors and delivers.
  */
 export const OCCASIONS_WRITE_ACTIONS: ReadonlySet<OccasionsAction> = new Set<OccasionsAction>([
   'answer', 'interview_answer', 'interview_record', 'resolve_conflict',
   'confirm', 'remove', 'plan_confirm', 'sweep',
 ]);
 
-/** The three that touch the owner's file, and therefore require an authority. */
+/** The four that touch the owner's file, and therefore take an authority. */
 export const OCCASIONS_PROFILE_WRITE_ACTIONS: ReadonlySet<OccasionsAction> = new Set<OccasionsAction>([
-  'confirm', 'remove', 'plan_confirm',
+  'confirm', 'remove', 'plan_confirm', 'resolve_conflict',
 ]);
 
 /**
@@ -377,6 +378,9 @@ export function narrowOccasionsConflictResolve(
 ): OccasionsConflictResolveResponse | null {
   if (!isRecord(value)) return null;
   if (typeof value.occasionId !== 'string' || typeof value.resolved !== 'boolean') return null;
+  if (!optionalString(value.reason) || !optionalString(value.disclosure)) return null;
+  const stringList = (list: unknown): boolean => list === undefined || (Array.isArray(list) && list.every(entry => typeof entry === 'string'));
+  if (!stringList(value.dates) || !stringList(value.removed)) return null;
   return value as unknown as OccasionsConflictResolveResponse;
 }
 

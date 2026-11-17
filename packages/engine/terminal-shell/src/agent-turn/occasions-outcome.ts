@@ -29,6 +29,25 @@ export function readNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+/** `self: true` marks the owner's own date; anything but a boolean is refused rather than dropped. */
+export function readSelf(value: unknown): { readonly self: boolean } | ToolOutcome {
+  if (value === undefined || value === null || value === '') return { self: false };
+  if (typeof value !== 'boolean') return fail(['`self` must be true or false. Nothing was recorded.']);
+  return { self: value };
+}
+
+/**
+ * A plan's details, one per entry, trimmed, empty entries left out: the same
+ * list the daemon-hosted admission reads from the call, so both sides agree.
+ */
+export function readDetails(value: unknown): { readonly details: readonly string[] } | ToolOutcome {
+  if (value === undefined || value === null) return { details: [] };
+  if (!Array.isArray(value) || value.some(entry => typeof entry !== 'string')) {
+    return fail(['`details` must be a list of strings, one detail each. Nothing was recorded.']);
+  }
+  return { details: value.flatMap(entry => typeof entry === 'string' && entry.trim() ? [entry.trim()] : []) };
+}
+
 export function fail(lines: readonly string[]): ToolOutcome {
   return { success: false, output: lines.filter(Boolean).join('\n') };
 }

@@ -162,7 +162,7 @@ export async function handlePending(deps: AgentOccasionsToolDeps): Promise<ToolO
   }
   for (const conflict of response.conflicts) {
     lines.push(`Conflict, say it as written: ${conflict.message}`);
-    lines.push(`  When he settles it, call action:"resolve_conflict" with occasionId:"${conflict.occasionId}".`);
+    lines.push(`  When he says which date is right, call action:"resolve_conflict" with occasionId:"${conflict.occasionId}" and keep set to that date.`);
   }
   for (const interview of response.interviews) {
     lines.push(renderInterviewLines(interview.interviewId, interview.nextStep, interview.complete, interview.landedOn).join('\n'));

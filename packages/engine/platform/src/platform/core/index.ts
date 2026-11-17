@@ -9,7 +9,6 @@ export * from './conversation-follow-ups.js';
 export * from './conversation-utils.js';
 export * from './conversation.js';
 export * from './deterministic-replay.js';
-export * from './event-replay.js';
 export * from './execution-plan.js';
 export * from './host-instructions.js';
 export * from './orchestrator-context-runtime.js';

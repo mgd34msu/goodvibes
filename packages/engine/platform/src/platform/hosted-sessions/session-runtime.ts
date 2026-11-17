@@ -30,6 +30,7 @@ import { HostedSessionUnavailableError } from './errors.js';
 import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
+import { registerSessionFollowUps } from '../runtime/bootstrap-runtime-events.js';
 import type { HostedDaemonRequestPath, HostedSurfaceTools, HostedSurfaceTurn } from './surface-turn.js';
 import { askingQuestions, type QuestionAsker } from '../agents/agent-owner-questions.js';
 import type { AgentWorkerSurface } from '../agents/orchestrator.js';
@@ -404,6 +405,16 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     runtimeBus: services.runtimeBus,
   });
 
+  // The agents and contracts this session started, and only those, come back to
+  // its next turn when they end, as they do in the terminal apps.
+  const stopFollowUps = registerSessionFollowUps({
+    runtimeBus: services.runtimeBus,
+    agentManager: services.agentManager,
+    contractRunner: options.floor.contractRunner,
+    sessionId,
+    queueConversationFollowUp: (item) => orchestrator.enqueueConversationFollowUp(item),
+  });
+
   // The contracts this session starts talk back to it: their questions for the
   // owner and their outcomes are the session's replies.
   const contracts = options.contracts;
@@ -526,6 +537,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       answers?.dispose();
       if (answers && hostedSessionWatches.get(sessionId) === answers) hostedSessionWatches.delete(sessionId);
       promptLifetime.abort();
+      stopFollowUps();
       stopContracts();
       unbindContextAccounting();
       try {

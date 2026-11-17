@@ -1125,7 +1125,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       proposed: record.proposedUnits?.map(unit => ({ ...unit })) };
     const input = captureStartInput({
       ask: source?.goal ?? original.task,
-      sessionId: AGENT_MANAGER_SESSION_ID,
+      // The contract belongs to the session that started its owner agent.
+      sessionId: record.sessionId ?? AGENT_MANAGER_SESSION_ID,
       origin: 'agent-tool',
       projectRoot: record.workingDirectory ?? deps.projectRoot,
       ...(record.parentAgentId === undefined ? {} : { parentAgentId: record.parentAgentId }),
@@ -1179,6 +1180,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         task: input.ask,
         template: 'orchestrator',
         outsideContract: true,
+        sessionId: input.sessionId,
         ...(input.selectedModel === undefined ? {} : { model: input.selectedModel.registryKey, provider: input.selectedModel.provider }),
         ...(input.parentAgentId === undefined ? {} : { parentAgentId: input.parentAgentId }),
       },

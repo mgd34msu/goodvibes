@@ -1475,9 +1475,11 @@ export class DaemonServer {
       const session = sessionId === undefined ? null : this.sessionBroker.getSession(sessionId);
       const triggerSurface = session?.surfaceKinds.find(isChannelSurfaceKind);
       // The channel's bound model fills the gap when the caller chose none.
-      const spawnInput = triggerSurface && session
+      const profiled = triggerSurface && session
         ? applyChannelProfileToSpawn(copied, channelProfileForSession(this.sessionBroker, session))
         : copied;
+      // An agent started for a session belongs to it: that session's listings and reports carry it.
+      const spawnInput = sessionId !== undefined && profiled.sessionId === undefined ? { ...profiled, sessionId } : profiled;
       const record = withTurnSurfaceId(triggerSurface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)));
       this.syncSpawnedAgentTask(record, sessionId);
       // Register the agent with AgentTaskAdapter so bus events can transition its task.

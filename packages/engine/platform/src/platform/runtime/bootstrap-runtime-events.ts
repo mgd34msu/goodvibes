@@ -227,16 +227,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   onContract('CONTRACT_PASSED', (payload) => {
     contractLine(`\u2713 ${payload.contractId} PASSED: ${payload.criteriaMet} of ${payload.criteriaJudged} criteria met, ${payload.nudges} corrections`, payload);
     const contract = contractRunner.get(payload.contractId);
-    const answer = contract?.answer?.trim();
-    // A conversation follow-up is read by the person, not the operator, so it
-    // is named in plain words, from the record so it still names the request
-    // after a restart. The `key` keeps the id: it is a dedupe key nobody
-    // reads. See channels/workstream-labels.ts.
-    queueConversationFollowUp?.({
-      key: `contract:${payload.contractId}:passed`,
-      summary: `${workstreamLabel(payload.contractId, contract?.ask)} passed all its checks.`,
-      ...(answer ? { result: answer } : {}),
-    });
+    queueConversationFollowUp?.(contractEndFollowUp(payload, contract));
     finishWorkstreamLabel(payload.contractId);
     checkContractCohorts(contract);
   });
@@ -244,10 +235,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   onContract('CONTRACT_FAILED', (payload) => {
     contractLine(`\u2717 ${payload.contractId} FAILED: ${payload.reason}`, payload);
     const contract = contractRunner.get(payload.contractId);
-    queueConversationFollowUp?.({
-      key: `contract:${payload.contractId}:failed`,
-      summary: `${workstreamLabel(payload.contractId, contract?.ask)} could not be finished: ${payload.reason.slice(0, 120)}`,
-    });
+    queueConversationFollowUp?.(contractEndFollowUp(payload, contract));
     finishWorkstreamLabel(payload.contractId);
     checkContractCohorts(contract);
   });
@@ -255,10 +243,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   onContract('CONTRACT_CANCELLED', (payload) => {
     contractLine(`${payload.contractId} cancelled: ${payload.reason} (${payload.filesModified} files modified)`, payload);
     const contract = contractRunner.get(payload.contractId);
-    queueConversationFollowUp?.({
-      key: `contract:${payload.contractId}:cancelled`,
-      summary: `${workstreamLabel(payload.contractId, contract?.ask)} was cancelled: ${payload.reason.slice(0, 120)}`,
-    });
+    queueConversationFollowUp?.(contractEndFollowUp(payload, contract));
     finishWorkstreamLabel(payload.contractId);
     checkContractCohorts(contract);
   });
@@ -341,13 +326,8 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
       withRouter(getSystemMessageRouter, (router) => {
         router.low(voice.completedLine(facts), payload);
       });
-      // A contract delivers its checked answer when the owner finishes.
-      // Planner/unit milestones are not separate replies to the user.
-      if (!record.contractId) queueConversationFollowUp?.({
-        key: `agent:${payload.agentId}:completed`,
-        summary: voice.completedSummary(facts),
-        ...(record.fullOutput?.trim() ? { result: record.fullOutput.trim() } : {}),
-      });
+      const followUp = agentEndFollowUp(record, payload.agentId, undefined, voice);
+      if (followUp) queueConversationFollowUp?.(followUp);
     }
     checkCohort(record);
     requestRender();
@@ -365,10 +345,6 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
         withRouter(getSystemMessageRouter, (router) => {
           router.low(voice.budgetLine(facts, budget), payload);
         });
-        if (!record.contractId) queueConversationFollowUp?.({
-          key: `agent:${payload.agentId}:failed`,
-          summary: voice.budgetSummary(facts, budget),
-        });
       } else {
         const postLine = (envelope: string | null): void => {
           withRouter(getSystemMessageRouter, (router) => {
@@ -384,11 +360,9 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
         } else {
           postLine(null);
         }
-        if (!record.contractId) queueConversationFollowUp?.({
-          key: `agent:${payload.agentId}:failed`,
-          summary: voice.failedSummary(facts, payload.error),
-        });
       }
+      const followUp = agentEndFollowUp(record, payload.agentId, payload.error, voice);
+      if (followUp) queueConversationFollowUp?.(followUp);
     }
     checkCohort(record);
     requestRender();
@@ -425,6 +399,82 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
       for (const unsub of unsubs.splice(0)) unsub();
     },
   };
+}
+
+/**
+ * The conversation follow-up for an agent that ended (`error` undefined: it
+ * completed), or null when its end is no reply of its own: a contract's agents
+ * report through the contract, and a cancelled run was stopped on purpose.
+ */
+function agentEndFollowUp(record: NonNullable<ReturnType<AgentManager['getStatus']>>, agentId: string, error: string | undefined,
+  voice: AgentLineWording): ConversationFollowUpItem | null {
+  if (record.contractId) return null;
+  const facts = agentLineFacts(record, agentId, voice);
+  if (error === undefined) {
+    const output = record.fullOutput?.trim();
+    return { key: `agent:${agentId}:completed`, summary: voice.completedSummary(facts), ...(output ? { result: output } : {}) };
+  }
+  if (record.status === 'cancelled') return null;
+  if (record.failureReason === 'max_turns' && record.turnBudget) {
+    return { key: `agent:${agentId}:failed`, summary: voice.budgetSummary(facts, { limit: record.turnBudget.limit, source: turnBudgetSourceLabel(record.turnBudget.source) }) };
+  }
+  return { key: `agent:${agentId}:failed`, summary: voice.failedSummary(facts, error) };
+}
+
+type ContractEndEvent = Extract<ContractEvent, { type: 'CONTRACT_PASSED' | 'CONTRACT_FAILED' | 'CONTRACT_CANCELLED' }>;
+
+/**
+ * The conversation follow-up for a contract that ended. It is read by the
+ * person, not the operator, so it is named in plain words, from the record so
+ * it still names the request after a restart. The `key` keeps the id: it is a
+ * dedupe key nobody reads. See channels/workstream-labels.ts.
+ */
+function contractEndFollowUp(event: ContractEndEvent, contract: ReturnType<ContractRunner['get']>): ConversationFollowUpItem {
+  const label = workstreamLabel(event.contractId, contract?.ask);
+  if (event.type === 'CONTRACT_PASSED') {
+    const answer = contract?.answer?.trim();
+    return { key: `contract:${event.contractId}:passed`, summary: `${label} passed all its checks.`, ...(answer ? { result: answer } : {}) };
+  }
+  if (event.type === 'CONTRACT_FAILED') {
+    return { key: `contract:${event.contractId}:failed`, summary: `${label} could not be finished: ${event.reason.slice(0, 120)}` };
+  }
+  return { key: `contract:${event.contractId}:cancelled`, summary: `${label} was cancelled: ${event.reason.slice(0, 120)}` };
+}
+
+/**
+ * Follow-ups for one conversation session on a bus several sessions share (a
+ * hosted session on a daemon floor): only the agents and contracts that session
+ * started, so its next turn hears its own background work and never another
+ * session's. Returns the call that stops it.
+ */
+export function registerSessionFollowUps(options: {
+  readonly runtimeBus: RuntimeEventBus;
+  readonly agentManager: Pick<AgentManager, 'getStatus'>;
+  readonly contractRunner: Pick<ContractRunner, 'get'>;
+  readonly sessionId: string;
+  readonly queueConversationFollowUp: (item: ConversationFollowUpItem) => void;
+}): () => void {
+  const { runtimeBus, agentManager, contractRunner, sessionId, queueConversationFollowUp } = options;
+  const voice = agentLineWording('agents');
+  const onAgentEnd = (agentId: string, error: string | undefined): void => {
+    const record = agentManager.getStatus(agentId);
+    if (!record || record.sessionId !== sessionId) return;
+    const followUp = agentEndFollowUp(record, agentId, error, voice);
+    if (followUp) queueConversationFollowUp(followUp);
+  };
+  const onContractEnd = (event: ContractEndEvent): void => {
+    const contract = contractRunner.get(event.contractId);
+    if (contract?.sessionId !== sessionId) return;
+    queueConversationFollowUp(contractEndFollowUp(event, contract));
+  };
+  const unsubs = [
+    runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', ({ payload }) => onAgentEnd(payload.agentId, undefined)),
+    runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_FAILED' }>>('AGENT_FAILED', ({ payload }) => onAgentEnd(payload.agentId, payload.error)),
+    runtimeBus.on<Extract<ContractEvent, { type: 'CONTRACT_PASSED' }>>('CONTRACT_PASSED', ({ payload }) => onContractEnd(payload)),
+    runtimeBus.on<Extract<ContractEvent, { type: 'CONTRACT_FAILED' }>>('CONTRACT_FAILED', ({ payload }) => onContractEnd(payload)),
+    runtimeBus.on<Extract<ContractEvent, { type: 'CONTRACT_CANCELLED' }>>('CONTRACT_CANCELLED', ({ payload }) => onContractEnd(payload)),
+  ];
+  return () => { for (const unsub of unsubs.splice(0)) unsub(); };
 }
 
 interface AgentLineFacts {

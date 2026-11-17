@@ -64,6 +64,12 @@ export interface AgentRecord extends ProgressBearingRecord {
   failureReason?: string | undefined;
   fullOutput?: string | undefined;
   streamingContent?: string | undefined;
+  /**
+   * The conversation session that started this agent (AgentInput.sessionId), or
+   * that started its contract or its parent. Absent for work no session started
+   * (automation, hooks); such an agent is listed to no session's model.
+   */
+  sessionId?: string | undefined;
   /** The contract this agent belongs to (its owner record, a unit's sub-agent, or the planner). */
   contractId?: string | undefined;
   /** The part this agent plays in its contract. */

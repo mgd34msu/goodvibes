@@ -952,24 +952,6 @@ export function waitForTaskRecovery(milliseconds: number, signal?: AbortSignal):
  * conversation. Their completion events carry nothing new, so the replay
  * queue drops them instead of announcing the same fact a second time.
  */
-const deliveredDelegates = new WeakMap<ConversationManager, Set<string>>();
-const MAX_DELIVERED_DELEGATES = 256;
-
-function recordDeliveredDelegates(conversation: ConversationManager, agentIds: readonly string[]): void {
-  let delivered = deliveredDelegates.get(conversation);
-  if (!delivered) { delivered = new Set(); deliveredDelegates.set(conversation, delivered); }
-  for (const id of agentIds) { delivered.delete(id); delivered.add(id); }
-  // A Set keeps insertion order: the first ids are the oldest.
-  while (delivered.size > MAX_DELIVERED_DELEGATES) delivered.delete(delivered.values().next().value!);
-}
-
-/** Whether a queued agent event is about a delegate whose final result this conversation already holds. */
-export function isDeliveredDelegateEvent(conversation: ConversationManager, event: { readonly eventName: string; readonly payload: unknown }): boolean {
-  if (event.eventName !== 'AGENT_COMPLETED' && event.eventName !== 'AGENT_FAILED') return false;
-  const id = (event.payload as { id?: unknown } | null)?.id;
-  return typeof id === 'string' && deliveredDelegates.get(conversation)?.has(id) === true;
-}
-
 /**
  * Delegation is a step inside a turn. The turn waits for its delegates to end
  * (or to stop on a question for the owner), woken by the agents' own completion
@@ -1010,6 +992,5 @@ export async function waitForResponseDelegates(conversation: ConversationManager
   conversation.addNotice(`[Delegated work] ${delegates.map(agent => `${agent.id} ${agent.status}`).join(', ')}. The results were given to the model.`, { level: 'info', kind: 'operational' });
   appendVerificationObservation(conversation, evidence);
   // A delegate stopped on a question is still running; its later end is news.
-  recordDeliveredDelegates(conversation, delegates.filter(agent => agent.status !== 'pending' && agent.status !== 'running').map(agent => agent.id));
   return true;
 }

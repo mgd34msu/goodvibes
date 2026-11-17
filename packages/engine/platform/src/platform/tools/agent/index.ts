@@ -150,6 +150,7 @@ function batchTaskToSpawnInput(input: AgentInput, taskDef: NonNullable<AgentInpu
     parentNodeId: taskDef.parentNodeId ?? input.parentNodeId,
     outsideContract: taskDef.outsideContract ?? input.outsideContract,
     cohort: input.cohort,
+    sessionId: input.sessionId,
   };
 }
 
@@ -283,7 +284,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     const contractInput = {
       ask,
       ...(config.getSelectedModel === undefined ? {} : { selectedModel: config.getSelectedModel() }),
-      sessionId: config.resolveSessionId(),
+      sessionId: input.sessionId ?? config.resolveSessionId(),
       origin: 'agent-tool' as const,
       projectRoot: config.projectRoot,
       proposedUnits,
@@ -378,7 +379,9 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     if (!('mode' in args) || typeof (args as Record<string, unknown>).mode !== 'string') {
       return { success: false, error: 'Missing required parameter: mode' };
     }
-    const input = classicAgentInput(modelAgentInput(args as unknown as AgentInput));
+    // The session is the host's, never the model's: every agent started here belongs to it, and every agent read here must.
+    const session = config.resolveSessionId();
+    const input = classicAgentInput({ ...modelAgentInput(args as unknown as AgentInput), sessionId: session });
     const completionRepair = readCompletionRepairContext();
     if (isNativeConversationTurn() && decisionModelPolicyState().operation !== 'classic' && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
       return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };
@@ -394,7 +397,12 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     }
 
     const manager = config.manager;
-    const delegationSession = config.resolveSessionId();
+    const delegationSession = session;
+    // Another session's agent is not this session's to read, steer or cancel: it is unknown here.
+    if (typeof input.agentId === 'string' && input.agentId.trim() !== '') {
+      const named = manager.getStatus(input.agentId);
+      if (named && named.sessionId !== session) return { success: false, error: `Unknown agent: '${input.agentId}'` };
+    }
     const delegationKey = delegationPlanKey(delegationSession, input.authoritativeTask ?? '');
     const heldPlan = heldPlans.get(delegationKey);
     if (heldPlan && decisionModelPolicyState().policy === 'Preferred' && decisionModelPolicyState().operation === 'classic')
@@ -544,7 +552,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
       }
 
       case 'list': {
-        const allRecords = manager.list();
+        const allRecords = manager.list({ sessionId: session });
         const records = input.cohort
           ? allRecords.filter(r => r.cohort === input.cohort)
           : allRecords;
@@ -988,7 +996,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         if (!input.cohort) {
           return { success: false, error: 'cohort-status requires a cohort name.' };
         }
-        const cohortAgents = manager.listByCohort(input.cohort);
+        const cohortAgents = manager.listByCohort(input.cohort).filter((agent) => agent.sessionId === session);
         if (cohortAgents.length === 0) {
           return { success: true, output: JSON.stringify({ cohort: input.cohort, count: 0, agents: [], note: `No agents found in cohort '${input.cohort}'. Check the cohort name with mode=list.` }) };
         }
@@ -1012,7 +1020,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         if (!input.cohort) {
           return { success: false, error: 'cohort-report requires a cohort name.' };
         }
-        const reportAgents = manager.listByCohort(input.cohort);
+        const reportAgents = manager.listByCohort(input.cohort).filter((agent) => agent.sessionId === session);
         if (reportAgents.length === 0) {
           return { success: true, output: `No agents found in cohort '${input.cohort}'.` };
         }
@@ -1039,7 +1047,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           const detail = input.detail ?? 'summary';
           // The summary reads no captured repository manifest, so it is built only for the full view.
           const contracts = config.contractRunner.list({
-            sessionId: config.resolveSessionId(),
+            sessionId: session,
             includeTerminal: input.includeTerminal ?? true,
             includeInputSnapshot: detail === 'full',
           });
@@ -1063,7 +1071,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         }
         try {
           const contract = config.contractRunner.get(input.contractId);
-          if (!contract) {
+          if (!contract || contract.sessionId !== session) {
             return { success: false, error: `Unknown contract: '${input.contractId}'` };
           }
           const detail = input.detail ?? 'summary';

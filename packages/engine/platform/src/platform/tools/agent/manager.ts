@@ -556,6 +556,8 @@ export class AgentManager {
       ?? (input.cohort ? `cohort:${input.cohort}` : undefined);
     const orchestrationNodeId = orchestrationGraphId ? (input.orchestrationNodeId ?? id) : undefined;
     const parentNodeId = input.parentNodeId ?? parentRecord?.orchestrationNodeId;
+    // The session that started this agent: the spawner's, else its parent's, else (a contract unit) its contract owner's.
+    const sessionId = input.sessionId ?? parentRecord?.sessionId ?? (binding ? this.contractSessionId(binding.contractId) : undefined);
     const record: AgentRecord = {
       ...(decisionModelPolicyState().operation === 'classic' ? { decisionPolicy: decisionModelPolicyState() } : {}),
       id,
@@ -603,6 +605,7 @@ export class AgentManager {
       } : {}),
       ...(input.parentAgentId ? { parentAgentId: input.parentAgentId } : {}),
       ...(parentNodeId ? { parentNodeId } : {}),
+      ...(sessionId ? { sessionId } : {}),
       ...(binding ? { contractId: binding.contractId, contractRole: 'unit' as const, contractUnitId: binding.contractUnitId } : {}),
       ...(ownerBinding ? { contractId: ownerBinding.contractId, contractRole: 'owner' as const } : {}),
       ...(binding?.routeReason ? { routeReason: binding.routeReason } : {}),
@@ -1118,8 +1121,19 @@ export class AgentManager {
     return cancelled;
   }
 
-  list(): AgentRecord[] {
-    return Array.from(this.agents.values());
+  /** Every record, or with `sessionId` only the agents that session started (AgentRecord.sessionId). */
+  list(filter?: { readonly sessionId?: string | undefined }): AgentRecord[] {
+    const records = Array.from(this.agents.values());
+    const sessionId = filter?.sessionId;
+    return sessionId === undefined ? records : records.filter((agent) => agent.sessionId === sessionId);
+  }
+
+  /** The session that started a contract, read from its owner record. */
+  private contractSessionId(contractId: string): string | undefined {
+    for (const agent of this.agents.values()) {
+      if (agent.contractId === contractId && agent.contractRole === 'owner') return agent.sessionId;
+    }
+    return undefined;
   }
 
   listByCohort(cohort: string): AgentRecord[] {

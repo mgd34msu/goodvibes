@@ -40,6 +40,8 @@ export function buildContinuationSpawnInput(
   return {
     mode: 'spawn',
     task,
+    // The agent answers this shared session; its reports and listings belong to it.
+    sessionId: input.sessionId,
     ...buildSharedSessionAgentSpawnRoutingInput(input.routing, { modelCandidates: deps.modelCandidates }),
     // Conversation first: a follow-up gets an answer, not a write-review-fix
     // chain. Both `conversationGate.mode` and `gatedSurfaces` read the live config.

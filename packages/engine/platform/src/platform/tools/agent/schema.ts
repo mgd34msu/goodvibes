@@ -273,7 +273,7 @@ export type AgentInputFieldRule = 'host-stamped' | 'host-only' | 'contract-fence
 export const AGENT_INPUT_FIELD_RULES = {
   authoritativeTask: 'host-stamped',
   captureAuthority: 'host-only', systemPromptAddendum: 'host-only', proposedUnits: 'host-only',
-  replyStyle: 'host-only', workingDirectory: 'host-only', routing: 'host-only',
+  replyStyle: 'host-only', workingDirectory: 'host-only', routing: 'host-only', sessionId: 'host-only',
   tools: 'contract-fence', restrictTools: 'contract-fence', writeScope: 'contract-fence', executionIntent: 'contract-fence',
   model: 'standalone-only', provider: 'standalone-only', fallbackModels: 'standalone-only', reasoningEffort: 'standalone-only',
   successCriteria: 'standalone-only', requiredEvidence: 'standalone-only', executionProtocol: 'standalone-only',
@@ -361,6 +361,12 @@ export interface AgentInput {
   systemPromptAddendum?: string | undefined;
   /** Internal: units proposed for the contract this spawn starts, carried to its owner and weighed by the planner. */
   proposedUnits?: readonly ProposedUnit[] | undefined;
+  /**
+   * Internal: the conversation session that started this agent, stamped by the
+   * host (the agent tool from its own session, a contract from its session).
+   * What a session's model and transcript are told about agents is scoped to it.
+   */
+  sessionId?: string | undefined;
   successCriteria?: string[] | undefined;
   requiredEvidence?: string[] | undefined;
   writeScope?: string[] | undefined;

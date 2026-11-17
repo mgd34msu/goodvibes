@@ -14,7 +14,7 @@ import { classifyFailure, JudgmentPortMissingError } from '@goodvibes-jev/engine
 import { inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
-import { isDeliveredDelegateEvent, ResponseCompletionError } from './response-completion.js';
+import { ResponseCompletionError } from './response-completion.js';
 import { completedContractEvidence } from './response-completion-contracts.js';
 import type { ConversationManager } from './conversation.js';
 import { resolveCompactionStrategy } from './conversation-compaction.js';
@@ -41,7 +41,6 @@ import type { AcpManager } from '../acp/manager.js';
 import type { SubagentTask } from '../acp/protocol.js';
 import { estimateConversationTokens } from './context-compaction.js';
 import { SessionLineageTracker } from './session-lineage.js';
-import { EventReplayQueue, sessionReplayFilter } from './event-replay.js';
 import type { ConversationFollowUpItem } from './conversation-follow-ups.js';
 import { OrchestratorFollowUpRuntime } from './orchestrator-follow-up-runtime.js';
 import { ToolCallAbortRegistry, listQueuedMessages, editQueuedMessage, deleteQueuedMessage } from './orchestrator-live-turn.js';
@@ -330,11 +329,6 @@ export class Orchestrator {
   /** True when the turn failed (set in catch; read in finally for markComplete vs markFailed). */
   private _turnFailed = false;
 
-  /** Event replay queue, ensures model acknowledges significant events */
-  private readonly replayQueue: EventReplayQueue;
-
-  /** Cleanup function returned by the active replay queue attachment. */
-  private detachReplay: (() => void) | null = null;
   private readonly runtimeBus: RuntimeEventBus | null;
   private readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'join'>>;
   private readonly contractRunner: Pick<ContractRunner, 'list'>;
@@ -422,11 +416,6 @@ export class Orchestrator {
       return mode === undefined ? prompt : `${prompt.trimEnd()}\n\n${permissionModeLine(mode)}`;
     };
     this.hookDispatcher = hookDispatcher;
-    this.replayQueue = new EventReplayQueue(3, 1, sessionReplayFilter({ agents: () => this.agentManager.list(), messages: () => this.conversation.getMessagesForLLM(),
-      contractIds: () => new Set(this.contractRunner.list({ sessionId: this.currentSessionId }).map(contract => contract.id)) }));
-    this.detachReplay = runtimeBus
-      ? EventReplayQueue.attachToRuntimeBus(runtimeBus, this.replayQueue)
-      : null;
     this.flagManager = flagManager; this.requestRender = requestRender ?? (() => {});
     this.runtimeBus = runtimeBus;
     this.compactionSessionId = this.currentSessionId;
@@ -541,6 +530,8 @@ export class Orchestrator {
           workingDirectory,
           model: args.model ? String(args.model) : undefined,
           provider: args.provider ? String(args.provider) : undefined,
+          // The subagent's progress events carry the session that delegated it.
+          sessionId: session,
         };
 
         assertCurrent();
@@ -732,10 +723,6 @@ export class Orchestrator {
     this.phase = phaseWithStreaming(this.phase, false);
     this.streamingInputTokens = 0;
     this.streamingOutputTokens = 0;
-    if (this.detachReplay) {
-      this.detachReplay();
-      this.detachReplay = null;
-    }
     this.followUpRuntime.dispose();
     this.compactionManager?.dispose();
   }
@@ -1394,29 +1381,6 @@ export class Orchestrator {
       notifyCompletion('GoodVibes', `Response ${outcome === 'complete' ? 'complete' : 'failed'} (${Math.round(durationMs / 1000)}s)`, durationMs);
     }
 
-    // ── Event replay queue ────────────────────────────────────────────────
-    // Inject unacknowledged events as system messages, then acknowledge them:
-    // injection IS delivery, so each event reaches the conversation exactly
-    // once (previously nothing ever acknowledged, so every event re-injected
-    // maxReplays times with escalating [URGENT] tags, noise turns after the
-    // agent had already finished).
-    const eventsToReplay = this.replayQueue.onTurnComplete((event) => isDeliveredDelegateEvent(this.conversation, event));
-    if (eventsToReplay.length > 0) {
-      const messages = this.replayQueue.formatReplays(eventsToReplay);
-      for (const msg of messages) {
-        // The model hears each replayed event on its next request; the person sees it in the feed.
-        this.conversation.hostInstructions.set('replay', msg, { once: true, append: true });
-        if (this.systemMessageRouter) {
-          this.systemMessageRouter.low(msg);
-        } else {
-          this.conversation.addNotice(msg, { level: 'info', priority: 'low' });
-        }
-      }
-      for (const event of eventsToReplay) {
-        this.replayQueue.acknowledge(event.id);
-      }
-      this.requestRender();
-    }
     this.followUpRuntime.scheduleFlush();
   }
 

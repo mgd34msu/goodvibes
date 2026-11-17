@@ -1,5 +1,4 @@
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
-import { mentionsAgent } from './event-replay.js';
 import type { ConversationManager } from './conversation.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ModelDefinition, ProviderRegistry } from '../providers/registry.js';
@@ -137,20 +136,6 @@ function snapshotAgents(agents: ReturnType<AgentManager['list']>): ReturnType<Ag
   return JSON.parse(JSON.stringify(agents)) as ReturnType<AgentManager['list']>;
 }
 
-/**
- * The agents this conversation started: the ids its own `agent` tool results
- * name, and the agents of this session's contracts. The agent manager is
- * shared by every session of a process, so a summary built from its whole
- * list would tell this session's model about another session's work.
- */
-export function agentsOfConversation(
-  agents: ReturnType<AgentManager['list']>,
-  messages: readonly unknown[],
-  contractIds: ReadonlySet<string>,
-): ReturnType<AgentManager['list']> {
-  return agents.filter(agent => (agent.contractId !== undefined && contractIds.has(agent.contractId)) || mentionsAgent(messages, agent.id));
-}
-
 /** The conversation's work revision at which a pre-request compaction failed; it is not tried again until the work changes. */
 const failedPreflightCompaction = new WeakMap<object, number>();
 
@@ -176,7 +161,9 @@ async function buildAutoCompactionContext(
     messages: params.messages,
     sessionMemories: deps.sessionMemoryStore?.list() ?? [],
     lineageEntries: deps.sessionLineageTracker.getEntries(),
-    agents: snapshotAgents(agentsOfConversation(deps.agentManager.list(), params.messages, new Set(contracts.map(contract => contract.id)))),
+    // Only the agents this session started (their own records say so, contract agents included): the agent
+    // manager is shared by every session of a process, and a summary of its whole list would leak another session's work.
+    agents: snapshotAgents(deps.agentManager.list({ sessionId: deps.sessionId })),
     contracts,
     activePlan: deps.planManager?.getActive(deps.sessionId) ?? null,
     compactionCount: deps.sessionLineageTracker.getCompactionCount(),

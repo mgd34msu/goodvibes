@@ -213,13 +213,19 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     const messages = new Map<string, SharedSessionMessage[]>();
     const inputs = new Map<string, SharedSessionInputRecord[]>();
     const deferred = new Set<string>();
-    const unreadable: unknown[] = [...carried];
-    for (const raw of carried) {
-      this.#setAside.push({ kind: 'session', id: isRecord(raw) && typeof raw['id'] === 'string' ? raw['id'] : 'unknown', reason: 'set aside by an earlier start' });
-    }
-    for (const [index, raw] of records.entries()) {
+    const unreadable: unknown[] = [];
+    // Records an earlier start set aside are read again: a build that knows them
+    // gets those sessions back, in place of a stand-in an older build listed from
+    // the session's log, and the index lists them again.
+    for (const [index, raw] of [...records, ...carried].entries()) {
       const record = readStoredSessionRecord(raw, index, [], [], this.#setAside);
       if (!record) { unreadable.push(raw); continue; }
+      if (index >= records.length) {
+        this.#indexDirty = true;
+        deferred.delete(record.id);
+        messages.delete(record.id);
+        inputs.delete(record.id);
+      }
       this.#indexed.set(record.id, indexedFields(record));
       // Active sessions and any with work still owed load now; the rest wait until asked for.
       if (record.status !== 'active' && record.pendingInputCount === 0) {
@@ -430,6 +436,10 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     let names: string[];
     try { names = readdirSync(this.#logDir); } catch { return; }
     const listed = new Set([...sessions.keys()].map(logFileName));
+    // A set-aside session still owns its log: it is kept for a build that can read the record, not listed again as a new one.
+    for (const raw of this.#unreadableRecords) {
+      if (isRecord(raw) && typeof raw['id'] === 'string') listed.add(logFileName(raw['id']));
+    }
     for (const name of names) {
       if (!name.endsWith('.jsonl') || listed.has(name)) continue;
       const probeId = name.slice(0, -'.jsonl'.length);

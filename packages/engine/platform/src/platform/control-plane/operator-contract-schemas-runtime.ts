@@ -275,6 +275,12 @@ export const SESSION_BROKER_SNAPSHOT_SCHEMA = objectSchema({
     closed: NUMBER_SCHEMA,
   }, ['sessions', 'active', 'closed']),
   sessions: arraySchema(SHARED_SESSION_RECORD_SCHEMA),
+  /** Stored sessions, messages and inputs this build could not read at start; kept on disk untouched for a build that can. */
+  unreadable: arraySchema(objectSchema({
+    kind: enumSchema(['session', 'message', 'input']),
+    id: STRING_SCHEMA,
+    reason: STRING_SCHEMA,
+  }, ['kind', 'id', 'reason'])),
 }, ['totals', 'sessions']);
 
 export const SHARED_SESSION_WITH_MESSAGES_SCHEMA = objectSchema({

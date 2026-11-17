@@ -313,6 +313,7 @@ export class IntegrationHelperService {
 
   getSessionBrokerSnapshot(): Record<string, unknown> {
     const sessions = this.context.sessionBroker.listSessions(50);
+    const unreadable = this.context.sessionBroker.unreadableEntries();
     return {
       totals: {
         sessions: sessions.length,
@@ -320,6 +321,8 @@ export class IntegrationHelperService {
         closed: sessions.filter((session) => session.status === 'closed').length,
       },
       sessions,
+      // Named here, not only in the log, so an operator or agent reading the list learns which entries to repair.
+      ...(unreadable.length > 0 ? { unreadable } : {}),
     };
   }
 

@@ -365,7 +365,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.list',
     title: 'List Shared Sessions',
-    description: 'Return shared-session integration state.',
+    description: 'Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.',
     category: 'sessions',
     scopes: ['read:sessions'],
     http: { method: 'GET', path: '/api/sessions' },

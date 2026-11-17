@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ConfigManager } from '../../config/manager.js';
 import { CONFIG_SCHEMA } from '../../config/index.js';
 import type { ConfigKey } from '../../config/index.js';
-import { configKeyFacts } from '../../config/config-key-facts.js';
+import { configKeyFacts, listProjectUnsettableConfigKeys } from '../../config/config-key-facts.js';
 import { credentialValueRefusal } from '../../config/write-admission.js';
 import { isSecretBearingConfigKey, isSecretReferenceValue } from '../../config/secret-bearing-config-keys.js';
 import { ConfigError } from '../../types/errors.js';
@@ -257,21 +257,26 @@ export function sourcePriority(source: SettingsSource): number {
   }
 }
 
+/** Settings that point work, data or a stored credential at a destination (config-key-facts.ts). */
+let destinationKeys: ReadonlySet<string> | undefined;
+
 /**
  * The risk shown for a staged managed bundle, decided from what the schema
  * declares about each changed setting; no value leaves the process. High: a
  * credential or card setting, or a change its key declares as loosening
  * security (the sandbox, permissions, a policy source). Medium: a setting the
- * program does not know, or one a project file may not set. Low otherwise, and
- * for a bundle that changes nothing.
+ * program does not know, or one that points work, data or a stored credential
+ * at a destination (a webhook, the judgment endpoint, a bridge URL). Low
+ * otherwise, and for a bundle that changes nothing.
  */
 export function readBundleRisk(changes: readonly ManagedBundleChange[]): Exclude<StagedManagedBundle['risk'], 'unassessed'> {
+  destinationKeys ??= new Set(listProjectUnsettableConfigKeys());
   let risk: 'low' | 'medium' = 'low';
   for (const change of changes) {
     if (!change.changed) continue;
     const facts = configKeyFacts(change.key);
     if (facts.secret || facts.cardMaterial || facts.loosens?.(change.previousValue, change.nextValue)) return 'high';
-    if (!facts.inSchema || !facts.projectSettable) risk = 'medium';
+    if (!facts.inSchema || destinationKeys.has(change.key)) risk = 'medium';
   }
   return risk;
 }

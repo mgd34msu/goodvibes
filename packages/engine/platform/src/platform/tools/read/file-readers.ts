@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { inflateSync } from 'node:zlib';
 import { extname, isAbsolute, relative } from 'node:path';
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
@@ -97,15 +98,17 @@ export interface ReadOutput {
 }
 
 /**
- * Every reader loads the whole file synchronously, so a file past this size is
- * refused up front rather than freezing or exhausting the process.
+ * Every reader loads the whole file into memory, so a file past this size is
+ * refused up front rather than exhausting the process. The loads are
+ * asynchronous: reads of one call, and of calls running side by side, overlap
+ * their waits on the disk instead of queueing behind each other.
  */
 export const MAX_READ_FILE_BYTES = 128 * 1024 * 1024;
 
-function oversizeReadError(target: ReadTarget): FileReadResult | undefined {
+async function oversizeReadError(target: ReadTarget): Promise<FileReadResult | undefined> {
   let size: number;
   try {
-    size = statSync(target.resolvedPath).size;
+    size = (await stat(target.resolvedPath)).size;
   } catch {
     return undefined; // The reader reports the real failure (missing file, directory, permissions).
   }
@@ -265,7 +268,7 @@ async function readImageFile(
   let imgBuffer: Buffer;
   try {
     context.assertCurrent?.();
-    imgBuffer = readFileSync(target.resolvedPath);
+    imgBuffer = await readFile(target.resolvedPath);
   } catch (err) {
     const message = summarizeError(err);
     return createReadErrorResult(target, `Cannot read image: ${message}`);
@@ -370,11 +373,11 @@ async function readImageFile(
   };
 }
 
-function readArchiveFile(target: ReadTarget, context: ReadExecutionContext): FileReadResult {
+async function readArchiveFile(target: ReadTarget, context: ReadExecutionContext): Promise<FileReadResult> {
   let archiveBuffer: Buffer;
   try {
     context.assertCurrent?.();
-    archiveBuffer = readFileSync(target.resolvedPath);
+    archiveBuffer = await readFile(target.resolvedPath);
   } catch (err) {
     const message = summarizeError(err);
     return createReadErrorResult(target, `Cannot read archive: ${message}`);
@@ -391,12 +394,12 @@ function readArchiveFile(target: ReadTarget, context: ReadExecutionContext): Fil
   return { ...createReadBaseResult(target, archiveBuffer.length, tokenEst), content: listing, lineCount: listing.split('\n').length, archive: true };
 }
 
-function readPdfFile(target: ReadTarget, context: ReadExecutionContext, fileInput: ReadFileInput): FileReadResult {
+async function readPdfFile(target: ReadTarget, context: ReadExecutionContext, fileInput: ReadFileInput): Promise<FileReadResult> {
   let pdfRaw: string;
   let pdfByteSize = 0;
   try {
     context.assertCurrent?.();
-    const buf = readFileSync(target.resolvedPath);
+    const buf = await readFile(target.resolvedPath);
     pdfByteSize = buf.length;
     pdfRaw = buf.toString('binary');
   } catch (err) {
@@ -411,12 +414,12 @@ function readPdfFile(target: ReadTarget, context: ReadExecutionContext, fileInpu
   return { ...createReadBaseResult(target, pdfByteSize, tokenEst), content: shouldIncludeContent(context.format) ? pdfText : undefined, lineCount: pdfLines.length };
 }
 
-function readNotebookFile(target: ReadTarget, context: ReadExecutionContext): FileReadResult {
+async function readNotebookFile(target: ReadTarget, context: ReadExecutionContext): Promise<FileReadResult> {
   let nbRaw: string;
   let nbByteSize = 0;
   try {
     context.assertCurrent?.();
-    nbRaw = readFileSync(target.resolvedPath, 'utf-8');
+    nbRaw = await readFile(target.resolvedPath, 'utf-8');
     nbByteSize = Buffer.byteLength(nbRaw, 'utf-8');
   } catch (err) {
     const message = summarizeError(err);
@@ -434,7 +437,7 @@ async function readTextFile(target: ReadTarget, context: ReadExecutionContext, f
   let fullBuf: Buffer;
   try {
     context.assertCurrent?.();
-    fullBuf = readFileSync(target.resolvedPath);
+    fullBuf = await readFile(target.resolvedPath);
   } catch (err) {
     const message = summarizeError(err);
     logger.warn('read tool: file read failed', { path: target.resolvedPath, error: message });
@@ -557,7 +560,7 @@ export async function readOneFile(
   }
 
   const target: ReadTarget = { fileInput, resolvedPath, extract };
-  const oversize = oversizeReadError(target);
+  const oversize = await oversizeReadError(target);
   if (oversize) return oversize;
   const context: ReadExecutionContext = {
     format,

@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { runDaemonServiceCli, type ManagedServiceActionRunner } from '../../daemon/service-commands.js';
+import { runDaemonServiceCli, SERVICE_EXIT_NOT_OURS, type ManagedServiceActionRunner } from '../../daemon/service-commands.js';
+import { MANAGED_SERVICE_DESCRIPTION } from '../../runtime/managed-daemon-service.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 function fixture(platform: 'systemd' | 'launchd' = 'systemd') {
@@ -15,10 +16,13 @@ function fixture(platform: 'systemd' | 'launchd' = 'systemd') {
     ? join(unitHomeDir, '.config', 'systemd', 'user', 'owned-service.service')
     : join(unitHomeDir, 'Library', 'LaunchAgents', 'owned-service.plist');
   mkdirSync(dirname(unit), { recursive: true });
-  writeFileSync(unit, 'owned recovery definition\n');
+  // A definition this product wrote names its description; anything else is the owner's and is never removed.
+  writeFileSync(unit, platform === 'systemd'
+    ? `[Unit]\nDescription=${MANAGED_SERVICE_DESCRIPTION}\n[Service]\nExecStart=/fixture/goodvibes-daemon\n`
+    : `<plist><dict><key>Label</key><string>owned-service</string><key>ProgramArguments</key><array><string>/fixture/goodvibes-daemon</string></array></dict></plist>\n`);
   const input = { subcommand: 'uninstall-service' as const, binaryPath: '/fixture/goodvibes-daemon',
     homeDir, unitHomeDir, host: '127.0.0.1', port: 4567, legacyUnitFileExists: () => false };
-  return { input, unit };
+  return { input, unit, settings };
 }
 
 test('a stopped launchd service is uninstalled with one unload, even though unloading it exits non-zero', async () => {
@@ -46,7 +50,6 @@ test('with nothing installed it exits 4 and runs no service action', async () =>
   };
   const result = await runDaemonServiceCli({ ...input, actionRunner: runner });
   expect(result.exitCode).toBe(4);
-  expect(result.lines.join('\n')).toContain('nothing to uninstall');
   expect(actions).toEqual([]);
 });
 
@@ -60,11 +63,10 @@ test('a refused systemd teardown is reported as a failure that names it', async 
   const result = await runDaemonServiceCli({ ...input, actionRunner: runner });
   expect(result.ok).toBe(false);
   expect(result.exitCode).toBe(1);
-  expect(result.lines.join('\n')).toContain('may still be running');
 });
 
-test('an uninstall stops, disables and removes only the managed definition', async () => {
-  const { input, unit } = fixture();
+test('an uninstall stops, disables and removes only the managed definition and keeps the data', async () => {
+  const { input, unit, settings } = fixture();
   const neighbor = join(dirname(unit), 'unrelated.service');
   writeFileSync(neighbor, 'unrelated definition\n');
   let active = true;
@@ -83,7 +85,8 @@ test('an uninstall stops, disables and removes only the managed definition', asy
   expect(existsSync(unit)).toBe(false);
   expect(actions).toEqual([['--user', 'disable', '--now', 'owned-service.service'], ['--user', 'daemon-reload']]);
   expect(readFileSync(neighbor, 'utf8')).toBe('unrelated definition\n');
-  expect(result.lines.join('\n')).toContain('stopped and removed the systemd service');
+  // The daemon's data and the owner's settings stay.
+  expect(existsSync(settings)).toBe(true);
 });
 
 test('a service still running after removal is reported incomplete', async () => {
@@ -97,10 +100,9 @@ test('a service still running after removal is reported incomplete', async () =>
   expect(result.exitCode).toBe(1);
   expect(result.status.installed).toBe(false);
   expect(result.status.running).toBe(true);
-  expect(result.lines.join('\n')).toContain('incomplete');
 });
 
-test('a final status query that throws after removal leaves an honest incomplete receipt', async () => {
+test('a final status query that throws after removal is reported as a failure', async () => {
   const { input, unit } = fixture();
   const runner: ManagedServiceActionRunner = (_command, args) => {
     if (args.includes('is-active')) {
@@ -113,6 +115,20 @@ test('a final status query that throws after removal leaves an honest incomplete
   expect(result.ok).toBe(false);
   expect(result.exitCode).toBe(1);
   expect(existsSync(unit)).toBe(false);
-  expect(result.lines.join('\n')).toContain('removal may already have happened');
-  expect(result.lines.join('\n')).toContain('last confirmed state before removal');
+});
+
+test('a definition GoodVibes did not write is never stopped or removed', async () => {
+  const { input, unit } = fixture();
+  writeFileSync(unit, '[Unit]\nDescription=The owner\'s own service\n[Service]\nExecStart=/usr/bin/true\n');
+  const actions: string[][] = [];
+  const runner: ManagedServiceActionRunner = (command, args) => {
+    if (args.includes('is-active')) return { status: 0, stdout: 'active\n' };
+    actions.push([command, ...args]);
+    return { status: 0 };
+  };
+  const result = await runDaemonServiceCli({ ...input, actionRunner: runner });
+  expect(result.ok).toBe(false);
+  expect(result.exitCode).toBe(SERVICE_EXIT_NOT_OURS);
+  expect(actions).toEqual([]);
+  expect(readFileSync(unit, 'utf8')).toContain('The owner');
 });

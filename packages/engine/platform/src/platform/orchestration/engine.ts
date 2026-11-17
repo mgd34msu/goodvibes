@@ -11,7 +11,8 @@ import { checkBudget } from './budget.js';
 import { AgentCapacityError } from '../tools/agent/capacity-error.js';
 import { createCancellationRegistry, type CancellationRegistry } from './cancellation.js';
 import type { ContractUnitSettlement, PhaseRunnerAgentManagerLike, WorktreeOps } from './phase-runner.js';
-import { runPhase } from './phase-runner.js';
+import { commitPhaseWork, runPhase } from './phase-runner.js';
+import { AgentWorktree } from '../agents/worktree.js';
 import { snapshotDirtyTree, type DirtyLaunchSnapshot } from './dirty-guard.js';
 import { createWorktreeIsolationManager, type WorktreeIsolationManager } from './worktree-isolation.js';
 import { createAttemptsCoordinator, type AttemptsCoordinator } from './attempts.js';
@@ -39,6 +40,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationEventListener,
   type Phase,
+  type PhaseCommitOutcome,
   type PhaseResult,
   type PhaseSpec,
   type PriceProvenanceFn,
@@ -155,6 +157,12 @@ export interface OrchestrationEngine {
   stampConflictSession(itemId: string, sessionId: string): boolean;
   /** Re-attempt a conflicted item's merge through the same lane. */
   retryItemIntegration(itemId: string): Promise<'merged' | 'conflict' | 'not-conflicted'>;
+  /**
+   * Run the scoped commit of a passed item's last failed commit again (the
+   * changes stayed in the working tree). Null when the item has no failed
+   * commit to retry; a success clears the item's commit warning.
+   */
+  retryItemCommit(itemId: string): Promise<PhaseCommitOutcome | null>;
   /** Add a dependency edge LIVE (a discovered missed dependency / manual serialization). Cycles are refused with a structured graph-cycle outcome. */
   addDependency(itemId: string, dependsOnId: string, reason: string): EdgeAddResult | null;
   /**
@@ -181,6 +189,8 @@ export interface OrchestrationEngine {
 }
 
 const CAPACITY_RETRY_BASE_MS = 500;
+/** Starts the warning a passed item carries when its commit failed; a successful retryItemCommit removes it. */
+const COMMIT_WARNING_PREFIX = 'scoped commit did not complete (non-fatal): ';
 const CAPACITY_RETRY_MAX_MS = 5_000;
 
 function generateId(prefix: string): string {
@@ -537,10 +547,6 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       createWorktree: deps.createWorktree,
       cancellation: cancellationFor(workstream),
       cancellationSignal: signal,
-      assertBookkeepingCurrent: () => {
-        if (disposed || signal.aborted || workstreams.get(workstream.id) !== workstream
-          || !workstream.items.includes(item)) throw new Error('Repository failure request retired.');
-      },
       priceUsage: deps.priceUsage,
       priceProvenance: deps.priceProvenance,
       skipClaimVerification: deps.skipClaimVerification,
@@ -550,22 +556,11 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       itemWorktree,
     });
 
-    let phaseResult = outcome.result;
-    let bookkeepingHeld = outcome.result.commit?.classification === 'held';
-    const fenceBookkeeping = () => {
-      try { outcome.bookkeeping?.assertCurrent(); } catch { bookkeepingHeld = true; }
-      if (bookkeepingHeld && phaseResult.commit) {
-        // Retain the action failure, withdraw any retired semantic conclusion.
-        phaseResult = { ...phaseResult, commit: { status: 'failed', reason: phaseResult.commit.reason, classification: 'held',
-          ...(phaseResult.commit.provenance === undefined ? {} : { provenance: phaseResult.commit.provenance }) } };
-      }
-    };
-    fenceBookkeeping();
+    const phaseResult = outcome.result;
 
     // ── Bookkeeping region (AFTER the phase outcome) ────────────────────────
     // Everything below layers on a verdict already reached; a bookkeeping
-    // fault becomes a warning on a passed item (or, for the narrow negating
-    // set, an explicit fail), never a silent contradiction of the gate.
+    // fault becomes a warning on a passed item, never a contradiction of the gate.
     item.lastActivityAt = now();
     try {
       item.usage = mergeWorkItemUsage(item.usage, outcome.result.usage);
@@ -577,10 +572,8 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     // bookkeeping, or a retried item would read the superseded run's report and
     // a removed workstream would regain a result list. Its usage above still
     // counts: the work was paid for. A killed run's own report is real history
-    // and is kept; only commit bookkeeping is withheld from it.
-    if (requeuedInFlight.has(item) || workstreams.get(workstream.id) !== workstream
-      || ((disposed || signal.aborted) && outcome.bookkeeping)) { requeuedInFlight.delete(item); return; }
-    fenceBookkeeping();
+    // and is kept.
+    if (requeuedInFlight.has(item) || workstreams.get(workstream.id) !== workstream) { requeuedInFlight.delete(item); return; }
     const results = completedResults.get(workstream.id) ?? [];
     results.push(phaseResult);
     completedResults.set(workstream.id, results);
@@ -590,8 +583,6 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     // in flight, read via currentState() to defeat stale narrowing and never
     // clobber that terminal state.
     if (signal.aborted || currentState(item) === 'failed') return;
-    fenceBookkeeping();
-    results[results.length - 1] = phaseResult;
 
     if (outcome.agentStatus === 'cancelled') {
       // A deliberate requeue already reset this item, never clobber it.
@@ -606,30 +597,12 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     }
 
     if (outcome.result.gate.passed) {
-      // The gate passed; repository-condition reading still owns whether the
-      // failed commit permits advance, negates the work, or must hold it.
+      // The gate passed, so the work stands. A commit that still failed after
+      // its lock retries leaves the changes in the working tree: a warning
+      // that names retryItemCommit, never a failure or a hold.
       const commit = phaseResult.commit;
-      if (commit?.status === 'failed' && (bookkeepingHeld || commit.classification === 'held')) {
-        item.state = 'blocked-bookkeeping';
-        item.blockedReason = 'Phase gate passed, but the failed commit or merge needs a current repository-condition reading.';
-        emit({ type: 'workstream-persisted', workstreamId: workstream.id });
-        return;
-      }
-      if (commit?.status === 'failed' && commit.negating) {
-        // Negating set: the commit/merge left the workspace corrupted, so the
-        // recorded pass can no longer be trusted, this is the one post-gate
-        // condition that genuinely fails the item.
-        failItem(
-          workstream,
-          item,
-          `phase gate passed but the workspace was left unrecorded/corrupted: ${commit.reason ?? 'commit failed'}`,
-        );
-        return;
-      }
       if (commit?.status === 'failed') {
-        // Non-negating: the gate passed and the workspace is coherent, so the
-        // work stands. Surface the miss as a warning, never a failure.
-        warnItem(item, `scoped commit did not complete (non-fatal): ${commit.reason ?? 'commit failed'}`);
+        warnItem(item, `${COMMIT_WARNING_PREFIX}${commit.reason ?? 'commit failed'}; the changes are still in the working tree, and retrying the commit records them`);
       }
 
       const forwardTarget = nextPhaseAfter(workstream, phase.ordinal) ?? null;
@@ -829,6 +802,34 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     return true;
   }
 
+  async function retryItemCommit(itemId: string): Promise<PhaseCommitOutcome | null> {
+    const found = findItemAndWorkstream(itemId);
+    if (!found) return null;
+    const { workstream, item } = found;
+    if (item.state !== 'passed' && item.state !== 'held-merge') return null;
+    // A merged branch already left its worktree; its missed commit is not on the branch to retry.
+    if (workstream.isolation === 'worktree' && (item.mergeState === 'merged' || item.worktreePath === undefined)) return null;
+    const results = completedResults.get(workstream.id) ?? [];
+    let index = -1;
+    for (let at = results.length - 1; at >= 0; at--) {
+      if (results[at]!.itemId === item.id) { index = results[at]!.commit?.status === 'failed' ? at : -1; break; }
+    }
+    if (index < 0) return null;
+    const phase = workstream.phases.find((candidate) => candidate.id === results[index]!.phaseId);
+    if (!phase) return null;
+    const itemWorktree = workstream.isolation === 'worktree' ? await worktreeIsolation.ensureWorktree(workstream, item) : undefined;
+    const worktree = (deps.createWorktree ?? (() => new AgentWorktree(deps.projectRoot)))();
+    const { commit } = await commitPhaseWork(item, phase, worktree, { projectRoot: deps.projectRoot, itemWorktree, launchDirtySnapshot });
+    if (completedResults.get(workstream.id) !== results || results[index]?.phaseId !== phase.id) return commit;
+    results[index] = { ...results[index]!, commit };
+    if (commit.status !== 'failed' && item.warnings) {
+      item.warnings = item.warnings.filter((warning) => !warning.startsWith(COMMIT_WARNING_PREFIX));
+      if (item.warnings.length === 0) item.warnings = undefined;
+    }
+    emit({ type: 'workstream-persisted', workstreamId: workstream.id });
+    return commit;
+  }
+
   function addDependency(itemId: string, dependsOnId: string, reason: string): EdgeAddResult | null {
     const found = findItemAndWorkstream(itemId);
     if (!found) return null;
@@ -1000,6 +1001,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       const resulting: string | undefined = found.item.mergeState; // mutated by the lane
       return resulting === 'merged' ? 'merged' : 'conflict';
     }),
+    retryItemCommit: (itemId) => ownedWork.run(() => retryItemCommit(itemId)),
     addDependency,
     requeueItem,
     getGraphSnapshot,

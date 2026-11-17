@@ -35,9 +35,9 @@ import { runContractGates } from '../contract/gates.js';
 import { getContractTransportRetryDelayMs, getContractTransportRetryLimit } from '../contract/config.js';
 import { readFailure } from '@goodvibes-jev/engine/errors';
 import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import type { CancellationRegistry } from './cancellation.js';
 import { excludeUntouchedLaunchResidue, readDirtyTreePaths, type DirtyLaunchSnapshot } from './dirty-guard.js';
-import { classifyBookkeepingFailure, type BookkeepingFailureReading } from './bookkeeping.js';
 import { mergeWorkItemUsage } from './types.js';
 import type { UnitRoute } from '../contract/types.js';
 import type { CommitExclusion, GateOutcome, Phase, PhaseCommitOutcome, PhaseResult, PriceProvenanceFn, WorkItem, WorkItemUsage, Workstream } from './types.js';
@@ -111,8 +111,6 @@ export interface PhaseRunnerDeps {
   readonly cancellation: CancellationRegistry;
   /** Engine-owned phase signal, registered before worktree setup or any spawn callback. */
   readonly cancellationSignal?: AbortSignal | undefined;
-  /** Engine lifetime and request ownership, retained through final publication. */
-  readonly assertBookkeepingCurrent?: (() => void) | undefined;
   readonly priceUsage?: ((model: string | undefined, usage: WorkItemUsage) => number | null) | undefined;
   /** Provenance for the same resolution priceUsage prices with, stamped onto the committed usage record at pricing time. */
   readonly priceProvenance?: PriceProvenanceFn | undefined;
@@ -139,7 +137,6 @@ export interface PhaseRunnerDeps {
 
 export interface PhaseRunOutcome {
   readonly result: PhaseResult;
-  readonly bookkeeping?: BookkeepingFailureReading | undefined;
   readonly agentStatus: 'completed' | 'failed' | 'cancelled';
 }
 
@@ -336,23 +333,57 @@ async function evaluateGate(
 interface CommitPhaseWorkResult {
   readonly exclusion?: CommitExclusion | undefined;
   readonly commit: PhaseCommitOutcome;
-  readonly bookkeeping?: BookkeepingFailureReading | undefined;
+}
+
+/** Git's own words when another git process holds the index or a ref: `Unable to create '<path>.lock': File exists.` */
+const GIT_LOCK_HELD = /Unable to create '[^'\n]*\.lock': File exists/;
+/** Waits before each retry of a commit refused by a held git lock; a lock is held for the length of one git command. */
+const LOCK_RETRY_DELAYS_MS = [250, 1_000, 3_000] as const;
+
+/**
+ * Runs a commit, trying again a bounded number of times when git reports that
+ * another process holds its lock (decided from git's message, no model). Any
+ * other error, or the lock still held after the last wait, is thrown.
+ */
+async function commitWithLockRetry<T>(run: () => Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await run(); }
+    catch (error) {
+      const delay = LOCK_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || signal?.aborted || !GIT_LOCK_HELD.test(summarizeError(error))) throw error;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, delay);
+        function done(): void { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); }
+        signal?.addEventListener('abort', done, { once: true });
+      });
+      if (signal?.aborted) throw error;
+    }
+  }
+}
+
+/** A commit that still failed: the item keeps its pass and carries this as a warning. */
+function failedCommit(error: unknown): PhaseCommitOutcome {
+  const message = summarizeError(error);
+  const lock = GIT_LOCK_HELD.test(message);
+  return { status: 'failed', reason: lock
+    ? `another git process held the repository lock through ${LOCK_RETRY_DELAYS_MS.length} retries (${message})`
+    : message };
 }
 
 /**
  * Runs the POST-gate scoped commit for a passed phase and reports its
  * outcome HONESTLY rather than swallowing failures. The gate has already
- * decided the phase passed; this step only records the changes, so its result
- * is bookkeeping: a failure surfaces to the engine as a warning on a passed
- * item only after a settled negative reading. A positive reading fails the
- * item; an unresolved reading holds it. Never a silent no-op that lets the
+ * decided the phase passed; this step only records the changes. A held git
+ * lock is retried a bounded number of times; a commit that still fails leaves
+ * the item passed with a warning (the changes stay in the working tree, and
+ * `retryItemCommit` runs the commit again). Never a silent no-op that lets the
  * fleet imply a commit happened when it did not.
  */
-async function commitPhaseWork(
+export async function commitPhaseWork(
   item: WorkItem,
   phase: Phase,
   worktree: WorktreeOps,
-  deps: PhaseRunnerDeps,
+  deps: Pick<PhaseRunnerDeps, 'projectRoot' | 'itemWorktree' | 'launchDirtySnapshot' | 'cancellationSignal'>,
 ): Promise<CommitPhaseWorkResult> {
   if (phase.gate.scope === 'off') {
     return { commit: { status: 'skipped', reason: 'commit disabled for this phase (gate scope: off)' } };
@@ -370,7 +401,8 @@ async function commitPhaseWork(
   // base (the sequential integration lane owns that at item termination).
   if (deps.itemWorktree) {
     try {
-      const result = await deps.itemWorktree.commit(`orchestration: ${item.title}, ${phase.kind} phase`, paths);
+      const itemWorktree = deps.itemWorktree;
+      const result = await commitWithLockRetry(() => itemWorktree.commit(`orchestration: ${item.title}, ${phase.kind} phase`, paths), deps.cancellationSignal);
       const ignoredNote = result.skippedIgnored.length > 0
         ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
         : undefined;
@@ -379,8 +411,7 @@ async function commitPhaseWork(
       }
       return { commit: { status: 'committed', hash: result.hash, ...(ignoredNote ? { reason: ignoredNote } : {}) } };
     } catch (error) {
-      const bookkeeping = await readCommitFailure(error, item, phase, deps);
-      return { commit: failureOutcome(bookkeeping), bookkeeping };
+      return { commit: failedCommit(error) };
     }
   }
 
@@ -413,7 +444,7 @@ async function commitPhaseWork(
   }
 
   try {
-    const result = await worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths);
+    const result = await commitWithLockRetry(() => worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths), deps.cancellationSignal);
     const ignoredNote = result.skippedIgnored.length > 0
       ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
       : undefined;
@@ -426,53 +457,7 @@ async function commitPhaseWork(
       commit: { status: 'committed', hash: result.hash, ...(ignoredNote ? { reason: ignoredNote } : {}) },
     };
   } catch (error) {
-    const bookkeeping = await readCommitFailure(error, item, phase, deps);
-    return { exclusion, commit: failureOutcome(bookkeeping), bookkeeping };
-  }
-}
-
-function failureOutcome(reading: BookkeepingFailureReading): PhaseCommitOutcome {
-  return { status: 'failed', reason: reading.reason, classification: reading.classification,
-    ...(reading.provenance === undefined ? {} : { provenance: reading.provenance }),
-    ...(reading.classification === 'held' ? {} : { negating: reading.classification === 'negating' }) };
-}
-
-function currentFailureOutcome(commit: PhaseCommitOutcome | undefined, reading: BookkeepingFailureReading | undefined): PhaseCommitOutcome | undefined {
-  if (!reading || !commit) return commit;
-  try { reading.assertCurrent(); return commit; }
-  catch { return { status: 'failed', reason: commit.reason, classification: 'held',
-    ...(commit.provenance === undefined ? {} : { provenance: commit.provenance }) }; }
-}
-
-async function readCommitFailure(error: unknown, item: WorkItem, phase: Phase, deps: PhaseRunnerDeps): Promise<BookkeepingFailureReading> {
-  let release: (() => void) | undefined;
-  try {
-    const config = deps.configManager;
-    const readIncarnation = config.getConfigurationIncarnation;
-    const watchIncarnation = config.onDidChangeIncarnation;
-    const get = config.get, getCategory = config.getCategory;
-    const incarnation = readIncarnation?.call(config);
-    const controller = new AbortController();
-    release = watchIncarnation?.call(config, () => controller.abort());
-    const itemWorktree = deps.itemWorktree;
-    const task = item.task, phaseId = item.currentPhaseId;
-    return await classifyBookkeepingFailure(error, {
-      signal: AbortSignal.any([controller.signal, ...(deps.cancellationSignal ? [deps.cancellationSignal] : [])]),
-      assertCurrent: () => {
-        deps.assertBookkeepingCurrent?.();
-        if (deps.configManager !== config || config.getConfigurationIncarnation !== readIncarnation
-          || config.onDidChangeIncarnation !== watchIncarnation || config.get !== get || config.getCategory !== getCategory
-          || readIncarnation?.call(config) !== incarnation
-          || deps.itemWorktree !== itemWorktree || item.task !== task || item.currentPhaseId !== phaseId
-          || phase.id !== phaseId) throw new Error('Repository failure request retired.');
-      },
-    });
-  } catch {
-    return { classification: 'held', reason: 'Commit or merge failed; repository reading ownership is unavailable.',
-      assertCurrent: () => { throw new Error('Repository failure request retired.'); } };
-  } finally {
-    // A broken lifetime release must not replace the original action failure.
-    try { release?.(); } catch { /* Reading remains subject to its captured owner. */ }
+    return { exclusion, commit: failedCommit(error) };
   }
 }
 
@@ -496,10 +481,9 @@ async function settleWithoutAgent(
     return { agentStatus: outcome, result: { ...base, report: genericReport(summary), gate: { passed: false, results: [] }, completedAt: Date.now() } };
   }
   const committed = await commitPhaseWork(item, phase, worktree, deps);
-  const settledCommit = currentFailureOutcome(committed.commit, committed.bookkeeping);
+  const settledCommit = committed.commit;
   return {
     agentStatus: deps.cancellationSignal?.aborted ? 'cancelled' : 'completed',
-    bookkeeping: committed.bookkeeping,
     result: {
       ...base,
       report: genericReport('checked and passed by the contract runner after a restart; no agent ran this phase'),
@@ -681,17 +665,13 @@ async function runPhaseWithSignal(
 
   let commitExclusion: CommitExclusion | undefined;
   let commit: PhaseCommitOutcome | undefined;
-  let bookkeeping: BookkeepingFailureReading | undefined;
   if (gate.passed) {
     const committed = await commitPhaseWork(item, phase, worktree, deps);
     commitExclusion = committed.exclusion;
     commit = committed.commit;
-    bookkeeping = committed.bookkeeping;
   }
-  commit = currentFailureOutcome(commit, bookkeeping);
   return {
     agentStatus: signal.aborted ? 'cancelled' : 'completed',
-    bookkeeping,
     result: {
       itemId: item.id,
       phaseId: phase.id,

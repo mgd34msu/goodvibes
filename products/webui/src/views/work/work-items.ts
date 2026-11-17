@@ -242,7 +242,7 @@ function attemptGroupItem(group: FleetAttemptGroup): WorkItem {
     type: 'attempt-group',
     id: group.groupId,
     kind: 'processes',
-    group: progress.ready || progress.held ? 'needs' : 'running',
+    group: progress.ready ? 'needs' : 'running',
     title: progress.ready
       ? `Pick a winner: ${count} attempt${count === 1 ? '' : 's'}${group.sourceTitle ? ` for ${group.sourceTitle}` : ''}`
       : `Best of ${count}: ${group.sourceTitle || group.groupId}`,

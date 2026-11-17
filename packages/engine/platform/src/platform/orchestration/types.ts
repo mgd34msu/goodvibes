@@ -103,8 +103,6 @@ export type WorkItemState =
    * terminal), so a mid-pipeline item is never re-gated.
    */
   | 'blocked-dependency'
-  /** Repository failure reading is unresolved; no pass, advance, merge or automatic retry. */
-  | 'blocked-bookkeeping'
   /**
    * A best-of-N attempt sibling that has PASSED every phase but is parked
    * pending the winner pick (see attempts.ts). Its worktree is KEPT (not merged,
@@ -122,24 +120,22 @@ export type WorkItemState =
  *
  * - pending -> in-phase: claimed; awaiting-capacity/blocked-budget reach in-phase the same way.
  * - in-phase -> awaiting-capacity | passed (routeItem), pending (bounded auto-retry, or restart
- *   reconciliation), blocked-bookkeeping, failed.
+ *   reconciliation), failed. A failed post-gate commit does not change the state: the item
+ *   passes with a warning, and engine.retryItemCommit records the changes later.
  * - -> blocked-dependency and back to pending: the per-tick dependency gate.
  * - failed -> pending: retryItem only. A failed item is never auto-retried again.
  * - passed -> held-merge: a best-of-N attempt parks after routeItem passed it; held-merge -> passed
  *   when picked or not selected. held-merge -> pending is requeueItem (a contract unit sent back for a fix).
- * - blocked-bookkeeping is an unresolved repository reading, deliberately not finished; it leaves
- *   only by requeueItem or kill.
  * - kill/failItem fails any item that is not already passed or failed.
  */
 export const workItemLifecycle = defineLifecycle<WorkItemState>('work item', {
   pending: ['awaiting-capacity', 'in-phase', 'blocked-budget', 'blocked-dependency', 'pending', 'failed'],
   'awaiting-capacity': ['awaiting-capacity', 'in-phase', 'blocked-budget', 'blocked-dependency', 'pending', 'failed'],
-  'in-phase': ['awaiting-capacity', 'passed', 'pending', 'blocked-bookkeeping', 'failed'],
+  'in-phase': ['awaiting-capacity', 'passed', 'pending', 'failed'],
   passed: ['held-merge'],
   failed: ['pending'],
   'blocked-budget': ['awaiting-capacity', 'in-phase', 'blocked-budget', 'pending', 'failed'],
   'blocked-dependency': ['blocked-dependency', 'pending', 'failed'],
-  'blocked-bookkeeping': ['pending', 'failed'],
   'held-merge': ['passed', 'pending', 'failed'],
 });
 
@@ -285,13 +281,13 @@ export interface WorkItem extends WorkItemContractFields {
   readonly createdAt: number;
   completedAt?: number | undefined;
   failureReason?: string | undefined;
-  /** Why budget, dependency or repository bookkeeping is blocking this item. */
+  /** Why budget, capacity or a dependency is blocking this item. */
   blockedReason?: string | undefined;
   /**
    * Non-fatal bookkeeping notes accrued while the item PASSED its phases, e.g.
    * a scoped commit that could not complete. Warnings NEVER
-   * change the item's terminal status (that derives only from phase outcomes
-   * plus the explicit negating set, see bookkeeping.ts); they make a
+   * change the item's terminal status (that derives only from phase outcomes);
+   * they make a
    * passed-with-caveats outcome legible instead of hiding it, or, worse,
    * misreporting a genuinely-passed item as failed.
    */
@@ -578,17 +574,11 @@ export interface CommitExclusion {
  * and a commit was therefore attempted or deliberately skipped.
  */
 export interface PhaseCommitOutcome {
-  /** Classic failure reporting is not a semantic repository diagnosis. */
-  readonly provenance?: 'classic';
   readonly status: 'committed' | 'skipped' | 'failed';
   /** The landed commit hash, present only for status 'committed'. */
   readonly hash?: string | undefined;
   /** Human-readable detail for 'skipped'/'failed', plus any gitignored-path note on 'committed'. */
   readonly reason?: string | undefined;
-  /** A settled semantic yes/no only. Missing for an unresolved held reading. */
-  readonly negating?: boolean | undefined;
-  /** Unresolved reading is held, never equivalent to non-negating. */
-  readonly classification?: import('./bookkeeping.js').BookkeepingFailureClass | undefined;
 }
 
 /**

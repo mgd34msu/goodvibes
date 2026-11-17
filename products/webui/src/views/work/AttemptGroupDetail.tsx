@@ -50,9 +50,9 @@ export function AttemptGroupDetail({ group, onClose }: { group: FleetAttemptGrou
       <DetailSection title="Attempts">
         <RowList aria-label="Attempts">
           {progress.unresolved.map(item => (
-            <Row key={item.itemId} leading={<StatusDot tone={item.state === 'blocked-bookkeeping' ? 'warn' : 'live'} />}
+            <Row key={item.itemId} leading={<StatusDot tone="live" />}
               title={item.title || `Attempt ${item.attemptIndex + 1}`}
-              meta={[item.state === 'blocked-bookkeeping' ? 'Held: repository condition unresolved' : item.state, item.reason].filter(Boolean).join(' · ')} />
+              meta={[item.state, item.reason].filter(Boolean).join(' · ')} />
           ))}
           {group.candidates.map((candidate) => {
             const state = candidateState(candidate.state);

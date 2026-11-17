@@ -2,6 +2,8 @@ import type { WebSearchProvider, WebSearchProviderCall, WebSearchProviderRespons
 import {
   buildDescriptor,
   executeJsonRequest,
+  ignoredFilterMetadata,
+  regionCountry,
   resolveDomain,
   resolveBaseUrl,
   resultFromRecord,
@@ -21,6 +23,22 @@ function mapSafeSearch(value: WebSearchRequest['safeSearch']): string | undefine
       return 'off';
     case 'moderate':
       return 'moderate';
+    default:
+      return undefined;
+  }
+}
+
+/** Brave's `freshness`: past day, week, month or year. */
+function mapFreshness(value: WebSearchRequest['timeRange']): string | undefined {
+  switch (value) {
+    case 'day':
+      return 'pd';
+    case 'week':
+      return 'pw';
+    case 'month':
+      return 'pm';
+    case 'year':
+      return 'py';
     default:
       return undefined;
   }
@@ -46,12 +64,17 @@ export function createBraveSearchProvider(context: SearchProviderContext): WebSe
     async search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse> {
       const maxResults = Math.max(1, Math.min(20, request.maxResults ?? 10));
       const baseUrl = resolveBaseUrl(serviceRegistry, env, undefined, BRAVE_SERVICE_NAME, BRAVE_DEFAULT_BASE_URL)!;
+      const safesearch = mapSafeSearch(request.safeSearch);
+      const freshness = mapFreshness(request.timeRange);
+      const country = regionCountry(request.region);
       const { payload } = await executeJsonRequest<Record<string, unknown>>({
         url: `${baseUrl}/res/v1/web/search`,
         params: {
           q: request.query,
           count: String(maxResults),
-          ...(mapSafeSearch(request.safeSearch) ? { safesearch: mapSafeSearch(request.safeSearch)! } : {}),
+          ...(safesearch ? { safesearch } : {}),
+          ...(freshness ? { freshness } : {}),
+          ...(country ? { country } : {}),
         },
         headers: { Accept: 'application/json' },
         service: serviceRegistry.get(BRAVE_SERVICE_NAME) ? BRAVE_SERVICE_NAME : undefined,
@@ -94,6 +117,11 @@ export function createBraveSearchProvider(context: SearchProviderContext): WebSe
           moreResultsAvailable: Boolean(
             query && typeof query === 'object' && (query as Record<string, unknown>).more_results_available,
           ),
+          ...ignoredFilterMetadata(request, [
+            ...(safesearch ? ['safeSearch' as const] : []),
+            ...(freshness ? ['timeRange' as const] : []),
+            ...(country ? ['region' as const] : []),
+          ]),
         },
       };
     },

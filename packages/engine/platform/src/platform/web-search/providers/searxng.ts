@@ -3,6 +3,7 @@ import {
   buildDescriptor,
   executeJsonRequest,
   firstString,
+  ignoredFilterMetadata,
   resolveBaseUrl,
   resultFromRecord,
   type SearchProviderContext,
@@ -11,6 +12,7 @@ import {
 const SEARXNG_ENV_KEYS = ['SEARXNG_BASE_URL'] as const;
 const SEARXNG_SERVICE_NAME = 'searxng';
 
+/** SearXNG's `time_range` has day, month and year; a week filter is reported as ignored. */
 function mapTimeRange(value: WebSearchRequest['timeRange']): string | undefined {
   switch (value) {
     case 'day':
@@ -19,6 +21,20 @@ function mapTimeRange(value: WebSearchRequest['timeRange']): string | undefined 
       return 'month';
     case 'year':
       return 'year';
+    default:
+      return undefined;
+  }
+}
+
+/** SearXNG's `safesearch`: 0 off, 1 moderate, 2 strict. */
+function mapSafeSearch(value: WebSearchRequest['safeSearch']): string | undefined {
+  switch (value) {
+    case 'off':
+      return '0';
+    case 'moderate':
+      return '1';
+    case 'strict':
+      return '2';
     default:
       return undefined;
   }
@@ -47,14 +63,18 @@ export function createSearxngSearchProvider(context: SearchProviderContext): Web
       if (!baseUrl) {
         throw new Error('SearXNG requires SEARXNG_BASE_URL or a searxng service entry with baseUrl.');
       }
+      const region = request.region?.trim();
+      const timeRange = mapTimeRange(request.timeRange);
+      const safesearch = mapSafeSearch(request.safeSearch);
       const { payload } = await executeJsonRequest<Record<string, unknown>>({
         url: `${baseUrl}/search`,
         params: {
           q: request.query,
           format: 'json',
           pageno: '1',
-          ...(request.region ? { language: request.region } : {}),
-          ...(mapTimeRange(request.timeRange) ? { time_range: mapTimeRange(request.timeRange)! } : {}),
+          ...(region ? { language: region } : {}),
+          ...(timeRange ? { time_range: timeRange } : {}),
+          ...(safesearch ? { safesearch } : {}),
         },
         headers: { Accept: 'application/json' },
         service: serviceRegistry.get(SEARXNG_SERVICE_NAME) ? SEARXNG_SERVICE_NAME : undefined,
@@ -82,6 +102,11 @@ export function createSearxngSearchProvider(context: SearchProviderContext): Web
         results,
         metadata: {
           numberOfResults: typeof payload.number_of_results === 'number' ? payload.number_of_results : undefined,
+          ...ignoredFilterMetadata(request, [
+            ...(region ? ['region' as const] : []),
+            ...(timeRange ? ['timeRange' as const] : []),
+            ...(safesearch ? ['safeSearch' as const] : []),
+          ]),
         },
       };
     },

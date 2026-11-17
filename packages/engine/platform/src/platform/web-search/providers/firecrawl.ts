@@ -3,6 +3,8 @@ import {
   buildDescriptor,
   executeJsonRequest,
   firstString,
+  ignoredFilterMetadata,
+  jsonAnswerBytes,
   resolveBaseUrl,
   resultFromRecord,
   withInlineBearer,
@@ -49,6 +51,7 @@ export function createFirecrawlSearchProvider(context: SearchProviderContext): W
       const maxResults = Math.max(1, Math.min(20, request.maxResults ?? 10));
       const evidenceRequested = request.includeEvidence || request.verbosity === 'evidence' || request.verbosity === 'full';
       const baseUrl = resolveBaseUrl(serviceRegistry, env, undefined, FIRECRAWL_SERVICE_NAME, FIRECRAWL_DEFAULT_BASE_URL)!;
+      const tbs = mapTimeRange(request.timeRange);
       const { payload } = await executeJsonRequest<Record<string, unknown>>({
         url: `${baseUrl}/v1/search`,
         method: 'POST',
@@ -56,12 +59,13 @@ export function createFirecrawlSearchProvider(context: SearchProviderContext): W
         body: {
           query: request.query,
           limit: maxResults,
-          ...(mapTimeRange(request.timeRange) ? { tbs: mapTimeRange(request.timeRange)! } : {}),
+          ...(tbs ? { tbs } : {}),
           ...(evidenceRequested ? { scrapeOptions: { formats: ['markdown'] } } : {}),
         },
         service: serviceRegistry.get(FIRECRAWL_SERVICE_NAME) ? FIRECRAWL_SERVICE_NAME : undefined,
         auth: serviceRegistry.get(FIRECRAWL_SERVICE_NAME) ? undefined : withInlineBearer(env, FIRECRAWL_ENV_KEYS),
         fetcher: context.fetcher ?? call?.fetcher,
+        maxContentLength: jsonAnswerBytes(maxResults, evidenceRequested === true),
       });
       const data = Array.isArray(payload.data)
         ? payload.data
@@ -84,6 +88,7 @@ export function createFirecrawlSearchProvider(context: SearchProviderContext): W
         results,
         metadata: {
           requestId: firstString(payload, ['id', 'requestId']),
+          ...ignoredFilterMetadata(request, tbs ? ['timeRange'] : []),
         },
       };
     },

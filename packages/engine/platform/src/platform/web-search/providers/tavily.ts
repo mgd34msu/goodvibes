@@ -3,6 +3,7 @@ import {
   buildDescriptor,
   executeJsonRequest,
   firstString,
+  ignoredFilterMetadata,
   resolveBaseUrl,
   resultFromRecord,
   withInlineBearer,
@@ -25,6 +26,11 @@ function buildInstantAnswer(payload: Record<string, unknown>): WebSearchInstantA
   };
 }
 
+/** Tavily's `time_range`: it takes day, week, month and year as they are. */
+function mapTimeRange(value: WebSearchRequest['timeRange']): string | undefined {
+  return value === 'day' || value === 'week' || value === 'month' || value === 'year' ? value : undefined;
+}
+
 export function createTavilySearchProvider(context: SearchProviderContext): WebSearchProvider {
   const env = context.env;
   const serviceRegistry = context.serviceRegistry;
@@ -45,6 +51,7 @@ export function createTavilySearchProvider(context: SearchProviderContext): WebS
     async search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse> {
       const maxResults = Math.max(1, Math.min(20, request.maxResults ?? 10));
       const baseUrl = resolveBaseUrl(serviceRegistry, env, undefined, TAVILY_SERVICE_NAME, TAVILY_DEFAULT_BASE_URL)!;
+      const timeRange = mapTimeRange(request.timeRange);
       const { payload } = await executeJsonRequest<Record<string, unknown>>({
         url: `${baseUrl}/search`,
         method: 'POST',
@@ -56,6 +63,7 @@ export function createTavilySearchProvider(context: SearchProviderContext): WebS
           search_depth: request.includeEvidence || request.verbosity === 'evidence' || request.verbosity === 'full'
             ? 'advanced'
             : 'basic',
+          ...(timeRange ? { time_range: timeRange } : {}),
         },
         service: serviceRegistry.get(TAVILY_SERVICE_NAME) ? TAVILY_SERVICE_NAME : undefined,
         auth: serviceRegistry.get(TAVILY_SERVICE_NAME) ? undefined : withInlineBearer(env, TAVILY_ENV_KEYS),
@@ -84,6 +92,7 @@ export function createTavilySearchProvider(context: SearchProviderContext): WebS
         metadata: {
           requestId: firstString(payload, ['request_id']),
           responseTime: firstString(payload, ['response_time']),
+          ...ignoredFilterMetadata(request, timeRange ? ['timeRange'] : []),
         },
       };
     },

@@ -12,7 +12,8 @@ export function createWebSearchTool(service: WebSearchService): Tool {
       core: true,
       description:
         'Search the web through a provider-backed search layer.'
-        + ' Returns normalized ranked results, optional instant-answer data, and optional fetched evidence.',
+        + ' Returns normalized ranked results, optional instant-answer data, and optional fetched evidence.'
+        + ' metadata.ignoredFilters names any region, safeSearch or timeRange filter the answering provider could not apply.',
       parameters: toRecord(WEB_SEARCH_TOOL_SCHEMA),
       sideEffects: ['network'],
       concurrency: 'parallel',
@@ -33,21 +34,26 @@ export function createWebSearchTool(service: WebSearchService): Tool {
         ...(typeof args.timeRange === 'string' ? { timeRange: args.timeRange as import('../../web-search/types.js').WebSearchTimeRange } : {}),
         ...(typeof args.includeInstantAnswer === 'boolean' ? { includeInstantAnswer: args.includeInstantAnswer } : {}),
         ...(typeof args.includeEvidence === 'boolean' ? { includeEvidence: args.includeEvidence } : {}),
-        ...(typeof args.evidenceTopN === 'number' ? { evidenceTopN: args.evidenceTopN } : {}),
+        ...(typeof args.evidenceTopN === 'number' && Number.isFinite(args.evidenceTopN) ? { evidenceTopN: Math.min(10, Math.max(1, Math.floor(args.evidenceTopN))) } : {}),
         ...(typeof args.evidenceExtract === 'string' ? { evidenceExtract: args.evidenceExtract as import('../fetch/schema.js').FetchExtractMode } : {}),
-      });
+      }, { signal });
+      // The signal stops the provider request and the evidence fetches; the
+      // turn also stops waiting at once instead of when they notice.
+      let onAbort: (() => void) | undefined;
       try {
-        // The providers take no cancellation signal, so the turn stops waiting for the answer when it is cancelled.
         const output = signal
           ? await Promise.race([search, new Promise<never>((_, reject) => {
-            signal.addEventListener('abort', () => reject(signal.reason ?? new Error('Web search was cancelled.')), { once: true });
+            onAbort = () => reject(signal.reason ?? new Error('Web search was cancelled.'));
+            signal.addEventListener('abort', onAbort, { once: true });
           })])
           : await search;
         return { success: true, output: JSON.stringify(output) };
       } catch (error) {
         search.catch(() => undefined);
-        if (signal?.aborted) return { success: false, error: 'Web search was cancelled. Any answer that arrives later is discarded.', cancelled: true };
+        if (signal?.aborted) return { success: false, error: 'Web search was cancelled; its provider request and page fetches were stopped.', cancelled: true };
         return { success: false, error: `Web search failed: ${summarizeError(error)}` };
+      } finally {
+        if (onAbort) signal?.removeEventListener('abort', onAbort);
       }
     },
   };

@@ -17,6 +17,8 @@ type FetchExecutor = (input: FetchInput) => Promise<FetchOutput>;
 const DEFAULT_LITE_ENDPOINT = 'https://lite.duckduckgo.com/lite/';
 const DEFAULT_INSTANT_ENDPOINT = 'https://api.duckduckgo.com/';
 const DEFAULT_SOURCE = 'goodvibes-platform';
+/** The notice DuckDuckGo's lite page shows when a query has no hits. */
+const NO_RESULTS_MARKER = /No\s+(?:more\s+)?results/i;
 
 function decodeHtmlEntities(input: string): string {
   return input
@@ -249,6 +251,10 @@ export function createDuckDuckGoProvider(options: DuckDuckGoProviderOptions = {}
         throw new Error(lite?.error ?? 'DuckDuckGo lite search failed');
       }
       const results = parseOrganicResults(lite.content).slice(0, maxResults);
+      // A rate-limit or challenge page also parses to zero results; only a page that says so is "no results".
+      if (results.length === 0 && !NO_RESULTS_MARKER.test(lite.content)) {
+        throw new Error(`DuckDuckGo answered with status ${lite.status ?? 'unknown'} but the page has no results and no "No results" notice, which is how its rate-limit and challenge pages look. Wait a minute before searching again, or pass providerId as another configured provider.`);
+      }
       const instantRaw = output.results?.[1]?.content;
       let instantAnswer: WebSearchInstantAnswer | undefined;
       if (typeof instantRaw === 'string') {

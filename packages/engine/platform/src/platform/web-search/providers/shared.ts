@@ -1,7 +1,7 @@
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import { executeFetchInput, type FetchOutput, type FetchUrlResult } from '../../tools/fetch/index.js';
 import type { FetchAuthInput, FetchInput, FetchUrlInput } from '../../tools/fetch/schema.js';
-import type { WebSearchEvidence, WebSearchProviderDescriptor, WebSearchResult } from '../types.js';
+import type { WebSearchEvidence, WebSearchProviderDescriptor, WebSearchRequest, WebSearchResult } from '../types.js';
 import { summarizeError } from '../../utils/error-display.js';
 
 type EnvMap = Record<string, string | undefined>;
@@ -39,6 +39,44 @@ export interface JsonRequestConfig {
 export interface JsonRequestResult<T = unknown> {
   readonly payload: T;
   readonly response: FetchUrlResult;
+}
+
+/** A request filter a provider may or may not be able to apply. */
+export type WebSearchFilter = 'region' | 'safeSearch' | 'timeRange';
+
+/** The filters this request actually sets (`timeRange: 'any'` and a blank region set nothing). */
+export function requestedFilters(request: WebSearchRequest): WebSearchFilter[] {
+  const filters: WebSearchFilter[] = [];
+  if (request.region?.trim()) filters.push('region');
+  if (request.safeSearch) filters.push('safeSearch');
+  if (request.timeRange && request.timeRange !== 'any') filters.push('timeRange');
+  return filters;
+}
+
+/**
+ * `metadata.ignoredFilters` for a provider response: the filters the request
+ * set that this provider did not send, so the caller can tell a filtered result
+ * set from an unfiltered one. Empty when every requested filter was applied.
+ */
+export function ignoredFilterMetadata(request: WebSearchRequest, applied: readonly WebSearchFilter[]): { ignoredFilters?: WebSearchFilter[] } {
+  const ignored = requestedFilters(request).filter((filter) => !applied.includes(filter));
+  return ignored.length > 0 ? { ignoredFilters: ignored } : {};
+}
+
+/**
+ * The two-letter country of a region: `us`, `US` or DuckDuckGo's
+ * country-language form `us-en` all give `US`; DuckDuckGo's no-region `wt-wt`
+ * and anything else give undefined (the region is then reported ignored).
+ */
+export function regionCountry(region: string | undefined): string | undefined {
+  const match = /^([a-z]{2})(?:-[a-z]{2})?$/i.exec(region?.trim() ?? '');
+  if (!match || match[1]!.toLowerCase() === 'wt') return undefined;
+  return match[1]!.toUpperCase();
+}
+
+/** Response bytes a JSON search answer may take: room for page text when the provider sends it. */
+export function jsonAnswerBytes(maxResults: number, pageTextRequested: boolean): number | undefined {
+  return pageTextRequested ? Math.max(512_000, maxResults * 200_000) : undefined;
 }
 
 export function resolveDomain(url: string): string | undefined {
@@ -181,6 +219,10 @@ export async function executeJsonRequest<T = unknown>(config: JsonRequestConfig)
   const response = output.results?.[0];
   if (!response || response.error || typeof response.content !== 'string') {
     throw new Error(response?.error ?? `Search provider request failed for ${config.url}`);
+  }
+  if (response.truncated) {
+    const limit = config.maxContentLength ?? 512_000;
+    throw new Error(`Search provider answer from ${config.url} was larger than ${limit} bytes and was cut, so it could not be read. Ask for fewer results, or leave out evidence.`);
   }
   let payload: T;
   try {

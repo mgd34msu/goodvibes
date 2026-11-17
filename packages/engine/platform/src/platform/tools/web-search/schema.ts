@@ -24,17 +24,17 @@ export const WEB_SEARCH_TOOL_SCHEMA = {
     },
     region: {
       type: 'string',
-      description: 'Provider-specific region code such as us-en for DuckDuckGo.',
+      description: 'Region: a country code such as us, or DuckDuckGo\'s country-language form such as us-en. A provider that cannot filter by region names it in metadata.ignoredFilters.',
     },
     safeSearch: {
       type: 'string',
       enum: ['strict', 'moderate', 'off'],
-      description: 'Safe-search posture. Default provider behavior is moderate.',
+      description: 'Safe-search posture. Default provider behavior is moderate. A provider without the filter names it in metadata.ignoredFilters.',
     },
     timeRange: {
       type: 'string',
       enum: ['any', 'day', 'week', 'month', 'year'],
-      description: 'Optional recency filter.',
+      description: 'Optional recency filter. A provider that cannot apply it (or this range) names it in metadata.ignoredFilters, so the results are not date-filtered.',
     },
     includeInstantAnswer: {
       type: 'boolean',

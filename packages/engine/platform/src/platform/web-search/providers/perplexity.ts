@@ -2,6 +2,8 @@ import type { WebSearchProvider, WebSearchProviderCall, WebSearchProviderRespons
 import {
   buildDescriptor,
   executeJsonRequest,
+  ignoredFilterMetadata,
+  regionCountry,
   resolveBaseUrl,
   resultFromRecord,
   withInlineBearer,
@@ -47,6 +49,8 @@ export function createPerplexitySearchProvider(context: SearchProviderContext): 
     async search(request: WebSearchRequest, call?: WebSearchProviderCall): Promise<WebSearchProviderResponse> {
       const maxResults = Math.max(1, Math.min(10, request.maxResults ?? 10));
       const baseUrl = resolveBaseUrl(serviceRegistry, env, undefined, PERPLEXITY_SERVICE_NAME, PERPLEXITY_BASE_URL)!;
+      const country = regionCountry(request.region);
+      const recency = mapTimeRange(request.timeRange);
       const { payload } = await executeJsonRequest<Record<string, unknown>>({
         url: `${baseUrl}/search`,
         method: 'POST',
@@ -56,8 +60,8 @@ export function createPerplexitySearchProvider(context: SearchProviderContext): 
         body: {
           query: request.query,
           max_results: maxResults,
-          ...(request.region?.trim() ? { country: request.region.trim() } : {}),
-          ...(mapTimeRange(request.timeRange) ? { search_recency_filter: mapTimeRange(request.timeRange) } : {}),
+          ...(country ? { country } : {}),
+          ...(recency ? { search_recency_filter: recency } : {}),
         },
         fetcher: context.fetcher ?? call?.fetcher,
       });
@@ -80,6 +84,10 @@ export function createPerplexitySearchProvider(context: SearchProviderContext): 
         results,
         metadata: {
           provider: 'perplexity',
+          ...ignoredFilterMetadata(request, [
+            ...(country ? ['region' as const] : []),
+            ...(recency ? ['timeRange' as const] : []),
+          ]),
         },
       };
     },

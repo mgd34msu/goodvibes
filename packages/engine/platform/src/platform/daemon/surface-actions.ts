@@ -626,7 +626,8 @@ export class DaemonSurfaceActionHelper {
           headers: req.headers,
         }),
         // The approval's audit names who pressed the button, not the daemon token the callback rode in on.
-        userId ? { surface, userId } : undefined,
+        // A press whose sender could not be read is still a chat press: the owner check refuses it.
+        { surface, userId: userId?.trim() ?? '' },
       );
       const body = await result.json().catch(() => ({} as Record<string, unknown>));
       return result.ok

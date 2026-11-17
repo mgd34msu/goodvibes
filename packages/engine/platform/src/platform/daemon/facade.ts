@@ -1444,6 +1444,14 @@ export class DaemonServer {
   ): Promise<Response> {
     if (interaction) {
       // A button pressed in a chat answers only from a command surface or as that channel's recorded owner.
+      if (!interaction.userId) {
+        return this.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({
+          error: `The ${interaction.surface} button press did not say who pressed it, so it cannot answer an approval.`,
+          code: 'APPROVAL_ANSWER_REFUSED', state: 'pending',
+          reason: `The ${interaction.surface} payload carried no sender id, so the owner check cannot run.`,
+          next: ['Answer the approval in the web app or a terminal app, or with an approval reply from the channel owner\'s account'],
+        }, { status: 403 }));
+      }
       let fromChannelOwner = false;
       try { fromChannelOwner = isChannelOwner({ policy: this.channelPolicy.getPolicy(interaction.surface as ChannelSurface) }, interaction.userId); }
       catch { fromChannelOwner = false; }

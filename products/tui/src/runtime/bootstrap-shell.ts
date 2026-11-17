@@ -315,11 +315,12 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     });
   // Turn and tool events refresh the header after the agent's own work; this
   // poll covers changes made outside the app (another terminal's checkout,
-  // commit or edit) while the user is idle.
+  // commit or fetch, or an edit seen when the terminal regains focus) while the
+  // user is idle, running git only when git's own files moved.
   gitStatusProvider.startPolling(5_000, (info) => {
     lastGitInfoRef.value = info;
     requestRender();
-  });
+  }, () => services.focusTracker.isFocused());
 
   const saveHistory = configManager.get('behavior.saveHistory') as boolean;
   const inputHistory = new InputHistory({

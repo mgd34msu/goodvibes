@@ -1,7 +1,15 @@
 import type { ApprovalBroker } from '../control-plane/approval-broker.js';
+import type { ChannelPolicyManager } from '../channels/policy-manager.js';
+import { isChannelOwner } from '../channels/policy-manager.js';
+import type { ChannelSurface } from '../channels/types.js';
+import { assertCanConfirm } from '../gate/surface-authority.js';
 
 interface InteractiveApprovalContext {
   readonly broker: Pick<ApprovalBroker, 'claimApproval' | 'resolveApproval' | 'cancelApproval'>;
+  /** The channel policies that say who owns a chat surface. */
+  readonly channelPolicy: Pick<ChannelPolicyManager, 'getPolicy'>;
+  /** Who pressed the button, when it came from a chat surface whose signature the daemon already verified; absent for the web API. */
+  readonly interaction?: { readonly surface: string; readonly userId: string } | undefined;
   parseBody(request: Request): Promise<Record<string, unknown> | Response | null>;
   actor(request: Request): string;
   /** The surface the answer came from; absent means the web API. */
@@ -16,6 +24,28 @@ export async function handleInteractiveApprovalAction(
   action: 'claim' | 'approve' | 'deny' | 'cancel',
   req: Request,
 ): Promise<Response> {
+  const interaction = context.interaction;
+  if (interaction) {
+    // A button pressed in a chat answers only from a command surface or as that channel's recorded owner.
+    if (!interaction.userId) {
+      return context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({
+        error: `The ${interaction.surface} button press did not say who pressed it, so it cannot answer an approval.`,
+        code: 'APPROVAL_ANSWER_REFUSED', state: 'pending',
+        reason: `The ${interaction.surface} payload carried no sender id, so the owner check cannot run.`,
+        next: ['Answer the approval in the web app or a terminal app, or with an approval reply from the channel owner\'s account'],
+      }, { status: 403 }));
+    }
+    let fromChannelOwner = false;
+    try { fromChannelOwner = isChannelOwner({ policy: context.channelPolicy.getPolicy(interaction.surface as ChannelSurface) }, interaction.userId); }
+    catch { fromChannelOwner = false; }
+    const verdict = assertCanConfirm(interaction.surface, { fromChannelOwner });
+    if (!verdict.allowed) {
+      return context.record(req, `/api/approvals/${approvalId}/${action}`, Response.json({
+        error: `${verdict.problem} ${verdict.fix}`, code: 'APPROVAL_ANSWER_REFUSED', state: 'pending',
+        reason: verdict.problem, next: [verdict.fix],
+      }, { status: 403 }));
+    }
+  }
   const body = await context.parseBody(req);
   // A body that could not be read must not become an approve/deny without its note or remember choice.
   if (body instanceof Response) return body;

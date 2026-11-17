@@ -32,7 +32,6 @@ import type {
   ChannelPolicyManager,
   RouteBindingManager,
   SurfaceRegistry,
-  ChannelSurface,
 } from '../channels/index.js';
 import { buildDaemonClusterCoordinator, type ClusterCoordinator } from './facade-cluster.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -53,8 +52,6 @@ import type { HostedSessionManager } from '../hosted-sessions/index.js';
 import { reportHostedSessionRestore } from './hosted-sessions-composition.js';
 import { isSurfaceDeliveryEnabled } from './surface-policy.js';
 import { handleInteractiveApprovalAction } from './facade-approval-action.js';
-import { isChannelOwner } from '../channels/policy-manager.js';
-import { assertCanConfirm } from '../gate/surface-authority.js';
 import { AgentTaskAdapter } from '../runtime/tasks/adapters/agent-adapter.js';
 import { ProcessTaskAdapter } from '../runtime/tasks/adapters/process-adapter.js';
 import {
@@ -1474,29 +1471,10 @@ export class DaemonServer {
     /** Who pressed the button, when it came from a chat surface whose signature the daemon already verified. */
     interaction?: { readonly surface: string; readonly userId: string } | undefined,
   ): Promise<Response> {
-    if (interaction) {
-      // A button pressed in a chat answers only from a command surface or as that channel's recorded owner.
-      if (!interaction.userId) {
-        return this.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({
-          error: `The ${interaction.surface} button press did not say who pressed it, so it cannot answer an approval.`,
-          code: 'APPROVAL_ANSWER_REFUSED', state: 'pending',
-          reason: `The ${interaction.surface} payload carried no sender id, so the owner check cannot run.`,
-          next: ['Answer the approval in the web app or a terminal app, or with an approval reply from the channel owner\'s account'],
-        }, { status: 403 }));
-      }
-      let fromChannelOwner = false;
-      try { fromChannelOwner = isChannelOwner({ policy: this.channelPolicy.getPolicy(interaction.surface as ChannelSurface) }, interaction.userId); }
-      catch { fromChannelOwner = false; }
-      const verdict = assertCanConfirm(interaction.surface, { fromChannelOwner });
-      if (!verdict.allowed) {
-        return this.recordApiResponse(req, `/api/approvals/${approvalId}/${action}`, Response.json({
-          error: `${verdict.problem} ${verdict.fix}`, code: 'APPROVAL_ANSWER_REFUSED', state: 'pending',
-          reason: verdict.problem, next: [verdict.fix],
-        }, { status: 403 }));
-      }
-    }
     return handleInteractiveApprovalAction({
       broker: this.approvalBroker,
+      channelPolicy: this.channelPolicy,
+      interaction,
       parseBody: (request) => this.parseOptionalJsonBody(request),
       actor: (request) => interaction
         ? `${interaction.surface}:${interaction.userId}`

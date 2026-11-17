@@ -4,6 +4,8 @@
 // Red when: The first unknown sender is admitted or made owner without the owner accepting the claim, or a non-owner's "approve" resolves a pending approval.
 // Proves: A card number typed into a chat channel is kept in the session, the policy audit and a model request.
 // Red when: `authorizeSurfaceIngress` reads, records or passes on a message with a card number instead of refusing it first and telling the owner on that channel.
+// Proves: A guest on the owner's channel settles something of the owner's: answers a purchase window, presses Approve on a permission ask, or cancels a run; or the owner's command from one conversation acts on work another started.
+// Red when: The purchase-window reply, the approve button or a channel control command stops requiring the channel's owner, or a control command stops requiring that its conversation started the work it names.
 /**
  * Who reaches the assistant over a chat channel, and who may answer for the
  * owner. On a surface with no owner the first unknown sender is held as a
@@ -24,6 +26,12 @@ import { ChannelPolicyManager } from '../platform/src/platform/channels/policy-m
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
 import { createOwnerInbox } from '../platform/src/platform/control-plane/owner-inbox.ts';
 import { DaemonSurfaceActionHelper } from '../platform/src/platform/daemon/surface-actions.ts';
+import { handleInteractiveApprovalAction } from '../platform/src/platform/daemon/facade-approval-action.ts';
+import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
+import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
+import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
+import { PaymentReplyInbox } from '../platform/src/platform/payments/reply-inbox.ts';
+import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 import { useApprovalReadings } from './helpers/approval-readings.ts';
 
@@ -170,4 +178,76 @@ test('with a user and a group listed, only that user in that group is taken', as
     expect(await admitted(policy, { userId: 'U-OWNER', conversationKind: 'group', groupId: 'G-OTHER' })).toBe(false);
     expect(await admitted(policy, { userId: 'U-OWNER', conversationKind: 'direct', groupId: 'U-OWNER' })).toBe(true);
   } finally { await policy.stop(); }
+});
+
+test('a guest on the owner\'s channel answers no purchase window, presses no approval, cancels no run; the owner does, from the conversation that started it', async () => {
+  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+  const root = scratch();
+  const policy = await ownedSlack();
+  await policy.upsertPolicy('telegram', { allowlistUserIds: ['U-OWNER', 'U-FRIEND'], ownerId: 'U-OWNER' });
+  const broker = new ApprovalBroker({ storePath: join(root, 'approvals.json') });
+  await broker.start();
+  const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
+  const sessionBroker = new SharedSessionBroker({ storePath: join(root, 'sessions.json'), routeBindings,
+    agentStatusProvider: { getStatus: () => null }, messageSender: { send: () => false } });
+  await sessionBroker.start();
+  const paymentReplies = new PaymentReplyInbox();
+  // The agent runtime is the stand-in: one running agent, and a record of what was cancelled.
+  const cancelled: string[] = [];
+  const running = { id: 'agent-a', status: 'running', task: 'the owner\'s job', tools: [] };
+  const agentManager = { getStatus: (id: string) => id === 'agent-a' ? running : null,
+    cancel: (id: string) => { cancelled.push(id); return true; } };
+  const helper = new DaemonSurfaceActionHelper({
+    channelPolicy: policy, approvalBroker: broker, routeBindings, sessionBroker, agentManager, paymentReplies,
+    automationManager: { getRun: () => undefined, cancelRun: async () => undefined },
+    // As the daemon wires it: the button's press goes to the approval action with who pressed it.
+    handleApprovalAction: (approvalId: string, action: 'claim' | 'approve' | 'deny' | 'cancel', req: Request, interaction?: { readonly surface: string; readonly userId: string }) =>
+      handleInteractiveApprovalAction({ broker, channelPolicy: policy, interaction, parseBody: async () => null,
+        actor: () => `${interaction?.surface ?? 'web'}:${interaction?.userId ?? ''}`, surface: () => interaction?.surface ?? 'web',
+        record: (_request, _path, response) => response }, approvalId, action, req),
+  } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
+  try {
+    // The purchase window: the guest's yes is not taken; the owner's settles it.
+    const window = paymentReplies.waitForAnswer({ purchaseId: 'p-1', kind: 'approval', deadlineMs: Date.now() + 600_000, channels: ['telegram'], notice: 'Buy the kettle for 20.00?' });
+    const reply = (userId: string) => helper.authorizeSurfaceIngress({ surface: 'telegram', userId, conversationKind: 'direct', text: 'approve' });
+    await reply('U-FRIEND');
+    expect(paymentReplies.pending).toBe(1);
+    await reply('U-OWNER');
+    expect(await window).toEqual({ answer: 'approve', channel: 'telegram' });
+
+    // The approve button on a permission ask: the guest's press, and one with no sender, leave it pending; the owner's approves it.
+    const ask = broker.requestApproval({ request: { callId: 'call-button', tool: 'run_command', args: { command: 'deploy' }, category: 'execute',
+      analysis: { classification: 'execute', riskLevel: 'medium', summary: 'run a command', reasons: [] } }, routeId: 'route-1' });
+    void ask.catch(() => undefined);
+    await until(() => broker.listApprovals(10).some((entry) => entry.status === 'pending'), 'the ask to be pending');
+    const approvalId = broker.listApprovals(10).find((entry) => entry.status === 'pending')!.id;
+    const press = (userId?: string) => helper.performInteractiveSurfaceAction(`gv:approval:approve:${approvalId}`, 'slack', new Request('http://127.0.0.1/slack/actions', { method: 'POST' }), userId);
+    await press('U-FRIEND');
+    await press(undefined);
+    expect(broker.listApprovals(10).find((entry) => entry.id === approvalId)!.status).toBe('pending');
+    await press('U-OWNER');
+    expect(broker.listApprovals(10).find((entry) => entry.id === approvalId)!.status).toBe('approved');
+
+    // A control command: the agent was started from conversation A.
+    const routeA = await routeBindings.upsertBinding({ kind: 'channel', surfaceKind: 'slack', surfaceId: 'slack', externalId: 'C-A', channelId: 'C-A' });
+    const routeB = await routeBindings.upsertBinding({ kind: 'channel', surfaceKind: 'slack', surfaceId: 'slack', externalId: 'C-B', channelId: 'C-B' });
+    const submitted = await sessionBroker.submitMessage({ routeId: routeA.id, surfaceKind: 'slack', surfaceId: 'slack', externalId: 'C-A', body: 'start the job', providerMessageId: 'm-1' });
+    await sessionBroker.bindAgent(submitted.session.id, 'agent-a', submitted.input!.id);
+    const scope = helper.buildSurfaceAdapterContext();
+    const command = async (userId: string, routeId: string) => {
+      expect((await scope.authorizeSurfaceIngress({ surface: 'slack', userId, conversationKind: 'direct', text: '/cancel agent-a' })).allowed).toBe(true);
+      const parsed = await scope.parseSurfaceControlCommand('/cancel agent-a');
+      return scope.performSurfaceControlCommand(parsed!, { surface: 'slack', routeId, userId });
+    };
+    expect(await command('U-FRIEND', routeA.id)).toStartWith('Not done');
+    expect(await command('U-OWNER', routeB.id)).toStartWith('Not done');
+    expect(cancelled).toEqual([]);
+    expect(await command('U-OWNER', routeA.id)).toBe('Cancelled agent agent-a');
+    expect(cancelled).toEqual(['agent-a']);
+  } finally {
+    retire();
+    await paymentReplies.close();
+    await sessionBroker.stop();
+    await policy.stop();
+  }
 });

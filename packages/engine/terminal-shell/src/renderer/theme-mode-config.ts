@@ -2,7 +2,7 @@ import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/pl
 import { normalizeThemeName, setActiveThemeMode, setActiveThemeName } from './theme.js';
 import type { ThemeMode, ThemeModeSetting } from './theme.js';
 import { getTerminalPalette } from '../terminal-palette-store.js';
-import { classifyBackgroundLuminance, parseColorSpec } from './terminal-bg-probe.js';
+import { classifyBackgroundLuminance, parseColorSpec } from './terminal-bg-color.js';
 export const THEME_MODE_CONFIG_KEY: ConfigKey = 'display.themeMode';
 export function coerceThemeModeSetting(raw: unknown): ThemeModeSetting {
     return raw === 'auto' || raw === 'dark' || raw === 'light' ? raw : 'auto';

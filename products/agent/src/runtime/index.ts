@@ -225,8 +225,8 @@ export {
   isPluginReloadable, isPluginTerminal, resolveCapabilityManifest, validateManifestV2, validatePluginSignature, LOW_QUALITY_THRESHOLD,
   computeQualityScore, createCompactionManager, describeScore, escalateStrategy, isTerminalCompactionState, reachableFromCompactionState,
   compactionFailurePlaybook, exportRecoveryPlaybook, permissionDeadlockPlaybook, pluginDegradationPlaybook, reconnectFailurePlaybook, sessionUnrecoverablePlaybook,
-  stuckTurnPlaybook, createSessionUnrecoverablePlaybook, createStuckTurnPlaybook, evaluateOrchestrationSpawn, TRANSPORT_COMPATIBILITY_MATRIX, applyTransition,
-  canTransition, isOperational, isReloadable, isTerminal, reachableFrom, evaluateSessionMaintenance,
+  stuckTurnPlaybook, createSessionUnrecoverablePlaybook, createStuckTurnPlaybook, evaluateOrchestrationSpawn, TRANSPORT_COMPATIBILITY_MATRIX,
+  evaluateSessionMaintenance,
   formatSessionMaintenanceLines, getGuidanceMode, DEFAULT_RETENTION_CONFIG, RetentionPolicy, SnapshotPruner, buildPersistedSessionContext,
   buildLocalReturnContextSummary, formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary, persistConversation, generateUserSessionId,
   loadLastConversation, loadRecoveryConversation, writeRecoveryFile, deleteRecoveryFile, checkRecoveryFile, getRecoveryFilePath,
@@ -308,7 +308,6 @@ export type DistributedRuntimeSnapshotStore = Operations.DistributedRuntimeSnaps
 // re-export above (`export { X } from '<subpath>'` carries both the value
 // and its implicit instance type), so redeclaring their types here would
 // conflict (TS2484).
-export type RuntimeTransitionResult = Operations.RuntimeTransitionResult;
 export type RetentionClass = Operations.RetentionClass;
 export type RetentionClassConfig = Operations.RetentionClassConfig;
 export type RetentionConfig = Operations.RetentionConfig;
@@ -478,4 +477,4 @@ export type DivergenceReport = Security.DivergenceReport;
 export type EnforceGateResult = Security.EnforceGateResult;
 export type SignedPolicyBundle<T = unknown> = Security.SignedPolicyBundle<T>;
 
-export { inspectInboundTls, extractForwardedClientIp, type InspectableDomain, type InboundTlsMode, type InboundServerSurface, type InboundTlsSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/inspection';
+export { inspectInboundTls, extractForwardedClientIp, type InboundTlsMode, type InboundServerSurface, type InboundTlsSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/inspection';

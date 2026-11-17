@@ -114,15 +114,6 @@ export type {
 export {
   TRANSPORT_PROTOCOL_SUPPORT_MATRIX as TRANSPORT_COMPATIBILITY_MATRIX,
 } from './remote/index.js';
-export {
-  applyTransition,
-  canTransition,
-  isOperational,
-  isReloadable,
-  isTerminal,
-  reachableFrom,
-} from './lifecycle-facade.js';
-export type { RuntimeTransitionResult } from './lifecycle-facade.js';
 export * from './crash-capture.js';
 export * from './session-maintenance.js';
 export * from './session-persistence.js';

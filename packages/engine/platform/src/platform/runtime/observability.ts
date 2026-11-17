@@ -27,7 +27,6 @@ export {
   appendBounded,
 } from './diagnostics/index.js';
 export {
-  StateInspectorPanel,
   DivergencePanel,
   SecurityPanel,
 } from './diagnostics/index.js';
@@ -155,26 +154,6 @@ export type {
   EvaluateResult,
   CascadeAppliedEvent,
 } from './health/types.js';
-export {
-  BoundedTransitionLog,
-  TimelineBuffer,
-  SelectorHotspotSampler,
-  StateInspectorProvider,
-  createStateInspector,
-} from './inspection/state-inspector/index.js';
-export type {
-  CreateStateInspectorOptions,
-  DomainSnapshot,
-  HotspotReport,
-  HotspotSamplerConfig,
-  SelectorHotspot,
-  StateInspectorConfig,
-  StateSnapshot,
-  SubscriptionInfo,
-  TimeTravelCursor,
-  TimelineEvent,
-  TransitionEntry,
-} from './inspection/state-inspector/index.js';
 export {
   TelemetryApiService,
   attachComposedInstrumentation,

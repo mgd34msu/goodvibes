@@ -30,8 +30,6 @@ export type {
 export { DEFAULT_BUFFER_LIMIT, DEFAULT_COMPONENT_CONFIG, applyFilter, appendBounded } from './types.js';
 
 // ── Panel data providers ─────────────────────────────────────────────────────
-export { StateInspectorPanel } from './panels/state-inspector.js';
-export type { InspectableDomain } from './panels/state-inspector.js';
 export { DivergencePanel } from './panels/divergence.js';
 export { PolicyPanel } from './panels/policy.js';
 export type { PolicyPanelSnapshot } from './panels/policy.js';

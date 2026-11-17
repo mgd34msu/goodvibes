@@ -498,11 +498,10 @@ Each health domain's status comes from its own entities, as their owners announc
 | Policy | `PolicyPanel` | the policy runtime (`runtime/permissions/policy-runtime.ts`) |
 | Divergence | `DivergencePanel` | the policy runtime |
 | Security | `SecurityPanel` | its snapshot type is the security read model's shape |
-| State inspector | `StateInspectorPanel` | its `InspectableDomain` type is the state inspector's |
 
 A panel follows one pattern: construct it with its data sources, read `getSnapshot()`, subscribe for changes, and call `dispose()` to release.
 
-The terminal products' runtime floor builds one state inspector over the runtime store (`stateInspector` on the client runtime services, `createRuntimeStoreInspector`): every store domain is registered, and a snapshot, the transition history and the timeline are read on demand. Constructing it reads nothing. A snapshot renders a `Date` as ISO text, an `Error` as `{ name, message }`, a `bigint` as decimal text and binary data as `"<N bytes>"`, masks credential-shaped spans, and stops at a fixed depth and value count with `"[Truncated]"`.
+Runtime state is read from the runtime store itself: `getState()` returns every domain with its `revision` and `lastUpdatedAt`, the UI read models (`createUiReadModels`) present it to the terminal apps and the web UI, and the runtime event stream carries each transition as it happens.
 
 ### Provider health
 

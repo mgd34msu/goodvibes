@@ -931,6 +931,12 @@ export class BrowserEngine {
         if (isDeadlineError(error)) {
           throw deadlineError({ action: 'click', deadlineMs, next: 'The element never became clickable. Call action:"snapshot" to check it is present, visible, enabled and not covered.' });
         }
+        // A driver failure of the trial (the control detached, was replaced or
+        // would not take input) is the same fact: nothing reached the page.
+        // This module's own refusals and cancellations keep their own class.
+        if (error instanceof Error && error.name === 'Error') {
+          throw new BrowserSessionError('The element would not accept a click, so nothing was sent to the page.', 'Call action:"snapshot" for current refs and check the control is present, visible and enabled.');
+        }
         throw error;
       }
       current();

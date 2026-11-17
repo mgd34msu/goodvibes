@@ -300,7 +300,10 @@ export function createAgentReviewPacketShareTool(
           ...target, message, title,
           ...(attached ? { attachments: [{ artifactId: summary.artifactId, label: summary.filename }] } : {}),
         };
-        const delivery = await deliverAgentChannelMessage(channelDeliveryRouter, input, { signal: executionOptions?.signal, assertCurrent });
+        const delivery = await deliverAgentChannelMessage(channelDeliveryRouter, input, {
+          ...(executionOptions?.signal ? { signal: executionOptions.signal } : {}),
+          assertCurrent,
+        });
         // Once the delivery has returned, the result is the delivery.
         return output(formatShareResult({ summary, delivery, attached }));
       } catch (error) {

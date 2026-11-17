@@ -93,9 +93,11 @@ export interface LearningCuratorNativeContext {
 type SessionListEntry = ReturnType<NonNullable<NonNullable<LearningCuratorNativeContext['session']>['sessionManager']>['list']>[number];
 type SessionMeta = Omit<SessionListEntry, 'timestamp'> & { readonly timestamp?: string | undefined };
 type LoadedSession = NonNullable<ReturnType<NonNullable<NonNullable<LearningCuratorNativeContext['session']>['sessionManager']>['load']>>;
+/** The saved file's own meta line (title, model, provider), with its clock as ISO text like the listing's. */
+type LoadedSessionMeta = Omit<LoadedSession['meta'], 'timestamp'> & { readonly timestamp?: string | undefined };
 export interface LearningSessionRecord {
   readonly session: SessionMeta;
-  readonly loaded: (Omit<LoadedSession, 'meta'> & { readonly meta: SessionMeta }) | undefined;
+  readonly loaded: (Omit<LoadedSession, 'meta'> & { readonly meta: LoadedSessionMeta }) | undefined;
 }
 
 function projectSessionMeta<T extends { readonly timestamp?: number }>(record: T): Omit<T, 'timestamp'> & { readonly timestamp?: string | undefined } {

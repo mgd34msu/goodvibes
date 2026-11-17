@@ -49,7 +49,9 @@ const OPERATOR_CREDENTIAL = 'the daemon\'s operator credential, presented in pro
 export function createAgentInProcessHost(options: AgentInProcessHostOptions): AgentInProcessHost {
   // One transport for the host's life: the operator client built on it (and its
   // schema table) is cached per transport, so every call reuses it.
-  const serve = ((input: string | URL | Request, init?: RequestInit) => options.requests.serve(new Request(input, init))) as typeof fetch;
+  const serve = ((input: string | URL | Request, init?: RequestInit) => options.requests.serve(
+    input instanceof Request ? new Request(input, init) : new Request(input instanceof URL ? input.href : input, init),
+  )) as typeof fetch;
   const operator = { baseUrl: options.baseUrl, source: 'in-process' as const, credential: OPERATOR_CREDENTIAL, fetch: serve };
   const paired = { baseUrl: options.baseUrl, source: 'pairing' as const, credential: PAIRING_CREDENTIAL, fetch: serve };
   const connection = (): ConnectedHostConnection => {

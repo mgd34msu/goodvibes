@@ -240,7 +240,7 @@ async function loadArtifactForInsert(
   if (descriptor) return { descriptor };
   if (artifactStore.readContent) {
     const { record, buffer } = await artifactStore.readContent(artifactId);
-    return { descriptor: record, buffer: includeContent ? buffer : undefined };
+    return includeContent ? { descriptor: record, buffer } : { descriptor: record };
   }
   throw new Error(`Unknown artifact ${artifactId}. Use agent_artifacts mode:"list" to inspect available artifacts.`);
 }

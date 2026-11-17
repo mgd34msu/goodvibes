@@ -464,7 +464,7 @@ export function createAgentOperatorMethodTool(
         stage = 'sending';
         // The connection's own transport: the network, or the daemon's request path in a turn it hosts.
         const response = await (connection.fetch ?? fetch)(`${connection.baseUrl}${requestPath}`, {
-          signal: options?.signal,
+          ...(options?.signal ? { signal: options.signal } : {}),
           redirect: 'error',
           method: route.httpMethod,
           headers: {

@@ -34,7 +34,7 @@ export interface OperatorContractMethodEntry {
   readonly http?: {
     readonly method?: string | undefined;
     readonly path?: string | undefined;
-  };
+  } | undefined;
   readonly inputSchema?: Record<string, unknown> | undefined;
   readonly invokable?: boolean | undefined;
 }

@@ -106,23 +106,8 @@ export interface PersonalOpsLiveRecord {
   readonly reviewRecordCount?: number;
   readonly reviewLabels?: readonly string[];
   readonly sourceTool?: string;
-  readonly certification?: PersonalOpsRecordCertification;
   readonly followUpRoutes?: readonly PersonalOpsFollowUpRoute[];
   readonly freshness?: PersonalOpsRecordFreshness;
-}
-
-export interface PersonalOpsRecordCertification {
-  readonly schemaStatus: 'legacy';
-  readonly schemaVersion?: string;
-  readonly publicationGuarantee?: string;
-  readonly publisher?: string;
-  readonly provenance?: readonly string[];
-  readonly receiptId?: string;
-  readonly receiptStatus?: string;
-  readonly receiptRoute?: string;
-  readonly receiptIds?: readonly string[];
-  readonly missingSignals: readonly string[];
-  readonly policy: string;
 }
 
 export interface PersonalOpsFollowUpRoute {
@@ -150,7 +135,7 @@ export interface PersonalOpsRecordFreshness {
     | 'connector-attention'
     | 'provider-contract-missing'
     | 'source-tool-missing';
-  readonly source: 'connector-read' | 'saved-review-artifact' | 'daemon-read-model' | 'platform-read-model';
+  readonly source: 'connector-read' | 'saved-review-artifact';
   readonly sourceTool?: string;
   readonly lastReviewedAt?: string;
   readonly refreshRoute?: string;
@@ -248,8 +233,6 @@ export const PERSONAL_OPS_READ_CONTROL_FIELDS = new Set(['saveReviewCards', 'sav
 export const QUEUE_CAPABILITIES = new Set([
   'inbox-read',
   'calendar-read',
-  'inbox-provider-thread',
-  'calendar-provider-event',
   'inbox-thread-review',
   'calendar-event-review',
   'inbox-review-artifact',

@@ -18,6 +18,7 @@ import { registerAgentGoogleTool } from '../tools/agent-google-tool.ts';
 import { startLoopbackListener } from '@goodvibes-jev/engine/platform/platform/google/node';
 import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '../trust/outward-approvals.ts';
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { retainGoogleConnectionOwners } from '../tools/agent-google-admission.ts';
 import { createConnectedHost, resolveConnectedHost, type ConnectedHost } from '../agent/connected-host-client.ts';
 
@@ -26,6 +27,8 @@ export interface GoogleToolWiringDeps {
   readonly configManager: ConfigManager;
   readonly secretsManager: SecretsManager;
   readonly homeDirectory: string;
+  /** Where a sent mail or created event leaves its Personal Ops receipt. */
+  readonly artifactStore?: ArtifactStore;
 }
 
 function readGoogleConfiguration(config: ConfigManager, key: string): unknown {
@@ -60,6 +63,7 @@ export function wireAgentGoogleTool(registry: ToolRegistry, deps: GoogleToolWiri
     configGet: (key: string) => readGoogleConfiguration(deps.configManager, key),
     secretGet: (key: string) => deps.secretsManager.get(key),
     captureConnectionCurrent: () => captureGoogleConnectionCurrent(deps),
+    artifactStore: deps.artifactStore,
 
     // Exact config and credential plans publish into their native owning stores.
 

@@ -2,18 +2,14 @@ import type { StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/
 import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { LANE_IDS } from './agent-harness-personal-ops-types.ts';
 
-export const PERSONAL_OPS_EFFECT_RECEIPT_PURPOSES = new Set([
-  'personal-ops-provider-effect-receipt', 'personal-ops-effect-receipt', 'personal-ops-connector-effect-receipt',
-  'agent-personal-ops-effect-receipt', 'connected-host-personal-ops-effect-receipt',
-]);
+/** Written by `writePersonalOpsEffectReceipt` after a provider effect the Agent performed. */
+export const PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE = 'personal-ops-effect-receipt';
 export const PERSONAL_OPS_REVIEW_PURPOSE = 'personal-ops-review-cards';
 const NATIVE_METADATA_PURPOSES = new Set([
-  ...PERSONAL_OPS_EFFECT_RECEIPT_PURPOSES, PERSONAL_OPS_REVIEW_PURPOSE, 'watcher-run-receipt',
+  PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE, PERSONAL_OPS_REVIEW_PURPOSE, 'watcher-run-receipt',
   'watcher-receipt', 'automation-watcher-receipt',
   'agent-watcher-receipt', 'agent-watcher-run-receipt', 'connected-host-watcher-receipt', 'connected-host-watcher-run-receipt',
   'automation-run-history-receipt', 'durable-run-history-receipt', 'connected-host-automation-run-history-receipt', 'provider-source-record-receipt',
-  'agent-memory-provider-receipt', 'connected-host-memory-provider-receipt', 'external-memory-provider-receipt',
-  'goodvibes-memory-provider-receipt', 'memory-provider-receipt', 'external-memory-receipt',
   'remote-runner-artifact-receipt', 'remote-runner-closeout-receipt', 'remote-runner-export-receipt',
   'agent-remote-runner-artifact-receipt', 'agent-remote-runner-closeout-receipt', 'connected-host-remote-runner-artifact-receipt',
   'connected-host-remote-runner-closeout-receipt',
@@ -79,7 +75,7 @@ const NATIVE_FIELDS = new Set([
   'lastUpdatedAt', 'transport', 'connectedAt', 'runnerContract', 'knowledgeInjections',
   'linked', 'notes', 'activePlan', 'workPlan', 'updatedBy',
   'researchFile',
-  'sourceRecordId', 'reviewRecordCount', 'reviewLabels', 'reviewKinds', 'reviewRecordIds', 'fullRawConnectorOutputStored', 'payloadRedacted', 'recordedAt',
+  'sourceRecordId', 'subjectId', 'reviewRecordCount', 'reviewLabels', 'reviewKinds', 'reviewRecordIds', 'fullRawConnectorOutputStored', 'payloadRedacted', 'recordedAt',
   'threads', 'messages', 'events', 'items', 'results', 'effectReceiptIds', 'threadId', 'messageId', 'eventId',
   'calendarId', 'taskId', 'reminderId', 'subject', 'from', 'labels', 'receivedAt', 'snippet', 'preview',
   'start', 'end', 'startsAt', 'endsAt', 'conflicts', 'attendees', 'organizer', 'location',

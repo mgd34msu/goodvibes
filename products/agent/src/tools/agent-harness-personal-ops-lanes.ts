@@ -5,7 +5,7 @@ import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-sna
 import { googleConnectionState, type AgentGoogleConnectionState } from './agent-google-tool.ts';
 import { calendarWorkflows, connectorSignals, contractLaneMethods, inboxWorkflows, NO_CONNECTORS, readConnectorInventory, reminderWorkflows, taskWorkflows, type ConnectorInventory, type GoogleLaneRoute } from './agent-harness-personal-ops-discovery.ts';
 import { NOTE_CAPTURE_ROUTE } from './agent-harness-personal-ops-routes.ts';
-import { cappedCount, channelRecords, connectorRecords, localRecord, refreshableSavedRecordCount, reminderOperationRecords, routineReceiptRecord, savedArtifactScanWindowFull, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedProviderEffectReceiptRecords, savedReviewArtifactRecords, savedReviewQueueRecords, taskOperationRecords } from './agent-harness-personal-ops-records.ts';
+import { cappedCount, channelRecords, connectorRecords, localRecord, NO_SAVED_ARTIFACTS, readPersonalOpsSavedArtifacts, refreshableSavedRecordCount, reminderOperationRecords, routineReceiptRecord, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedProviderEffectReceiptRecords, savedReviewArtifactRecords, savedReviewQueueRecords, taskOperationRecords, type PersonalOpsSavedArtifacts } from './agent-harness-personal-ops-records.ts';
 import type { PersonalOpsLane, PersonalOpsLiveRecord } from './agent-harness-personal-ops-types.ts';
 import { personalOpsStyleDraftRecord, personalOpsStyleDraftWorkflow } from './agent-harness-personal-ops-style-draft.ts';
 
@@ -181,23 +181,23 @@ async function ownedBuildLanes(
   const wants = (lane: 'inbox' | 'calendar' | 'tasks' | 'reminders') => exactLane === undefined || exactLane === lane;
   const none: readonly PersonalOpsLiveRecord[] = [];
   const readsConnectors = wants('inbox') || wants('calendar');
-  const [connectors, google]: readonly [ConnectorInventory, GoogleLanes] = readsConnectors
-    ? await Promise.all([options.connectors ?? readConnectorInventory(context, options), readGoogleLanes(context)])
-    : [NO_CONNECTORS, NO_GOOGLE_LANES];
-  const emailConnectors = wants('inbox') ? connectorSignals(connectors, 'inbox') : [];
-  const calendarConnectors = wants('calendar') ? connectorSignals(connectors, 'calendar') : [];
-  const [inboxArtifactRecords, calendarArtifactRecords, inboxReviewQueueRecords, calendarReviewQueueRecords,
-    inboxEffectReceiptRecords, calendarEffectReceiptRecords, taskEffectReceiptRecords, reminderEffectReceiptRecords] = await Promise.all([
-    wants('inbox') ? savedReviewArtifactRecords(context, 'inbox', emailConnectors, options) : none,
-    wants('calendar') ? savedReviewArtifactRecords(context, 'calendar', calendarConnectors, options) : none,
-    wants('inbox') ? savedReviewQueueRecords(context, 'inbox', emailConnectors, options) : none,
-    wants('calendar') ? savedReviewQueueRecords(context, 'calendar', calendarConnectors, options) : none,
-    wants('inbox') ? savedProviderEffectReceiptRecords(context, 'inbox', options) : none,
-    wants('calendar') ? savedProviderEffectReceiptRecords(context, 'calendar', options) : none,
-    wants('tasks') ? savedProviderEffectReceiptRecords(context, 'tasks', options) : none,
-    wants('reminders') ? savedProviderEffectReceiptRecords(context, 'reminders', options) : none,
+  // One artifact listing serves every lane's saved reviews and effect receipts.
+  const readsSaved = readsConnectors || wants('reminders');
+  const [connectors, google, saved]: readonly [ConnectorInventory, GoogleLanes, PersonalOpsSavedArtifacts] = await Promise.all([
+    readsConnectors ? options.connectors ?? readConnectorInventory(context, options) : NO_CONNECTORS,
+    readsConnectors ? readGoogleLanes(context) : NO_GOOGLE_LANES,
+    readsSaved ? readPersonalOpsSavedArtifacts(context, options) : NO_SAVED_ARTIFACTS,
   ]);
   options.signal?.throwIfAborted();
+  const emailConnectors = wants('inbox') ? connectorSignals(connectors, 'inbox') : [];
+  const calendarConnectors = wants('calendar') ? connectorSignals(connectors, 'calendar') : [];
+  const inboxArtifactRecords = wants('inbox') ? savedReviewArtifactRecords(saved, 'inbox', emailConnectors) : none;
+  const calendarArtifactRecords = wants('calendar') ? savedReviewArtifactRecords(saved, 'calendar', calendarConnectors) : none;
+  const inboxReviewQueueRecords = wants('inbox') ? savedReviewQueueRecords(saved, 'inbox', emailConnectors) : none;
+  const calendarReviewQueueRecords = wants('calendar') ? savedReviewQueueRecords(saved, 'calendar', calendarConnectors) : none;
+  const inboxEffectReceiptRecords = wants('inbox') ? savedProviderEffectReceiptRecords(saved, 'inbox') : none;
+  const calendarEffectReceiptRecords = wants('calendar') ? savedProviderEffectReceiptRecords(saved, 'calendar') : none;
+  const reminderEffectReceiptRecords = wants('reminders') ? savedProviderEffectReceiptRecords(saved, 'reminders') : none;
   const refreshableInboxQueueRecords = refreshableSavedRecordCount(inboxReviewQueueRecords);
   const refreshableCalendarQueueRecords = refreshableSavedRecordCount(calendarReviewQueueRecords);
   const readyChannels = snapshot.channels.filter((channel) => channel.ready).length;
@@ -215,8 +215,8 @@ async function ownedBuildLanes(
   const inbox = () => inboxLane({ snapshot, google, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords,
     inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels });
   const withScanWindow = (lanes: readonly PersonalOpsLane[]): readonly PersonalOpsLane[] => {
-    if (!savedArtifactScanWindowFull(context)) return lanes;
-    const readsSavedArtifacts = new Set(['inbox', 'calendar', 'tasks', 'reminders']);
+    if (!saved.windowFull) return lanes;
+    const readsSavedArtifacts = new Set(['inbox', 'calendar', 'reminders']);
     return lanes.map(lane => readsSavedArtifacts.has(lane.id) ? { ...lane, signals: [...lane.signals, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL] } : lane);
   };
   if (exactLane === 'reminders') return withScanWindow([remindersLane(scheduleMethods, reminderEffectReceiptRecords, configuredTargets, readyChannels)]);
@@ -278,27 +278,19 @@ async function ownedBuildLanes(
     {
       id: 'tasks',
       label: 'Tasks',
-      status: taskMethods.length > 0 || taskEffectReceiptRecords.length > 0 ? 'ready' : 'partial',
+      status: taskMethods.length > 0 ? 'ready' : 'partial',
       outcome: 'Track user-visible work items, inspect host task state, and update work plan status without hidden jobs.',
-      current: taskEffectReceiptRecords.length > 0
-        ? 'Saved task provider-effect receipts are available for audit and follow-up; no fresh task provider record is currently ready.'
-        : `Agent has work-plan actions and ${taskMethods.length} task/work-plan daemon method(s) in the platform contract.`,
-      next: taskEffectReceiptRecords.length > 0
-        ? 'Review saved task provider-effect receipts, then repair or refresh the task provider before another provider update.'
-        : 'Use work plans for user-visible task tracking; inspect runtime host tasks separately before mutating anything.',
+      current: `Agent has work-plan actions and ${taskMethods.length} task/work-plan daemon method(s) in the platform contract.`,
+      next: 'Use work plans for user-visible task tracking; inspect runtime host tasks separately before mutating anything.',
       userRoute: 'Agent Workspace -> Work & Approvals -> Autonomy queue',
       modelRoute: 'agent_work_plan action:"list"',
       signals: [
-        `${cappedCount(taskEffectReceiptRecords.length, 'record')} saved task provider-effect receipt(s)`,
         `${taskMethods.length} task/work-plan daemon method(s)`,
         'Work plan list/get/create/update/set_status/remove/clear_completed actions are available',
       ],
       methodIds: taskMethods,
       workflows: taskWorkflows(taskMethods),
-      liveRecords: [
-        ...taskEffectReceiptRecords,
-        ...taskOperationRecords(),
-      ],
+      liveRecords: taskOperationRecords(),
     },
     remindersLane(scheduleMethods, reminderEffectReceiptRecords, configuredTargets, readyChannels),
     {

@@ -173,6 +173,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     configManager: configManager as GoogleToolWiringDeps['configManager'],
     secretsManager: services.secretsManager,
     homeDirectory: services.shellPaths.homeDirectory,
+    artifactStore: services.artifactStore,
   });
   // Accounts the agent creates are recorded here at creation time. Autonomous
   // signup is authorized; doing it invisibly is not, and this is what makes it
@@ -229,7 +230,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   registerAgentOperatorBriefingTool(toolRegistry, services.shellPaths, configManager);
   registerAgentOperatorMethodTool(toolRegistry, services.shellPaths, configManager);
   registerAgentAutonomyScheduleTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentReminderScheduleTool(toolRegistry, services.shellPaths, configManager);
+  registerAgentReminderScheduleTool(toolRegistry, services.shellPaths, configManager, services.artifactStore);
   registerAgentScheduleEditTool(toolRegistry, services.shellPaths, configManager);
   registerAgentScheduleTool(toolRegistry, services.shellPaths, configManager);
   registerAgentWorkPlanTool(toolRegistry, services.workPlan);

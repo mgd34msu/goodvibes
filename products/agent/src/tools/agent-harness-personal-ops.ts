@@ -14,7 +14,7 @@ import { previewHarnessText } from './agent-harness-text.ts';
 import { LANE_IDS, QUEUE_CAPABILITIES, type AgentHarnessPersonalOpsArgs, type McpToolSchema, type PersonalOpsBriefingStatus, type PersonalOpsLane, type PersonalOpsLaneId, type PersonalOpsLaneResolution, type PersonalOpsLiveRecord, type PersonalOpsReadRunResult, type PersonalOpsStatus, type PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
 import { connectorSignals, mcpServerRecords, mcpToolRecords, mcpToolSchema, qualifiedToolName, readLimit, readString } from './agent-harness-personal-ops-discovery.ts';
 import { buildLanes } from './agent-harness-personal-ops-lanes.ts';
-import { PERSONAL_OPS_LIVE_READ_TEMPLATE, connectorRecords, describeLane, laneStatusRank, savedArtifactScanWindowFull, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedLabelsUntrusted, savedRecordsAtCap, searchText } from './agent-harness-personal-ops-records.ts';
+import { PERSONAL_OPS_LIVE_READ_TEMPLATE, connectorRecords, describeLane, laneStatusRank, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedLabelsUntrusted, savedRecordsAtCap, searchText } from './agent-harness-personal-ops-records.ts';
 import { boundedPersonalOpsResult, executionRouteForRecord, liveRecordSearchText, invalidInputFields, missingRequiredInputFields, personalOpsReadNextRoutes, personalOpsReadReviewRecords, readInputFields, readRunControlBoolean, readRunControlString, redactedPersonalOpsText, resolveRunRecord, savePersonalOpsReviewArtifact, summarizeRunRecord } from './agent-harness-personal-ops-runner.ts';
 import { protectPersonalOpsResult } from './agent-harness-personal-ops-source.ts';
 import { buildPersonalOpsIntakeCandidates, nextActions } from './agent-harness-personal-ops-intake.ts';
@@ -275,7 +275,7 @@ async function ownedPersonalOpsSummary(context: CommandContext, args: AgentHarne
       attention: workflows.filter((workflow) => workflow.status === 'attention').length,
       needsSetup: workflows.filter((workflow) => workflow.status === 'needs-setup').length,
     },
-    policy: 'Personal Ops unifies inbox, agenda, notes, tasks, reminders, routines, and delivery. Lanes include live records when Agent owns them, daemon/platform provider read-model queue records when published, and schema-derived connector operation records when MCP schemas are available. Missing email/calendar connectors, messages, and events are reported as setup/data gaps, not faked.',
+    policy: 'Personal Ops unifies inbox, agenda, notes, tasks, reminders, routines, and delivery. Lanes include live records when Agent owns them, saved review cards and receipts of provider effects the Agent performed, and schema-derived connector operation records when MCP schemas are available. Missing email/calendar connectors, messages, and events are reported as setup/data gaps, not faked.',
     nextActions: nextActions(lanes),
   };
 }
@@ -340,7 +340,6 @@ export function describeQueueItem(lane: PersonalOpsLane, record: PersonalOpsLive
       ...(record.artifactId ? { artifact: artifactShowRoute(record.artifactId, true) } : {}),
     },
     followUpRoutes,
-    ...(includeParameters && record.certification ? { certification: record.certification } : {}),
     ...(includeParameters && record.tags && record.tags.length > 0 ? { tags: record.tags } : {}),
     ...(includeParameters && record.requiredFields ? { requiredFields: record.requiredFields } : {}),
     ...(includeParameters && record.sampleInput ? { sampleInput: record.sampleInput } : {}),
@@ -387,7 +386,7 @@ async function ownedPersonalOpsQueueSummary(context: CommandContext, args: Agent
   const refreshableSavedRecords = allItems.filter((item) => item.record.freshness?.status === 'saved-review-refreshable').length;
   const savedReviewRecords = allItems.filter((item) => item.record.freshness?.source === 'saved-review-artifact' || typeof item.record.reviewRecordCount === 'number').length;
   const savedCapped = queueLanes.some((lane) => savedRecordsAtCap(lane.liveRecords ?? []));
-  const scanWindowFull = savedArtifactScanWindowFull(context);
+  const scanWindowFull = queueLanes.some((lane) => lane.signals.includes(SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL));
   const attentionRecords = allItems.filter((item) => item.record.freshness?.status === 'connector-attention' || item.lane.status === 'gap' || item.lane.status === 'needs-setup').length;
   return {
     status: allItems.length > 0 ? attentionRecords > 0 ? 'attention' : 'ready' : 'empty',
@@ -427,7 +426,7 @@ async function ownedPersonalOpsQueueSummary(context: CommandContext, args: Agent
         'Run personal_ops action:"intake" for the user request to find a safe connector route.',
         'Set up an inbox or calendar connector before promising fresh queue state.',
       ],
-    policy: 'Personal Ops queue is read-only. It aggregates existing saved review artifacts, connector read-route records, and daemon/platform provider read-model records; it does not execute MCP tools, read live provider data beyond already-published read models, send messages, edit calendar events, create reminders, or mutate artifacts.',
+    policy: 'Personal Ops queue is read-only. It aggregates existing saved review artifacts and connector read-route records; it does not execute MCP tools, read live provider data, send messages, edit calendar events, create reminders, or mutate artifacts.',
   };
 }
 

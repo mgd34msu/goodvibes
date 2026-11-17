@@ -8,6 +8,16 @@ import {
 } from '../agent/reminder-schedule.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './agent-personal-ops-effect-receipt.ts';
+
+function createdScheduleId(output: string | undefined): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(output ?? '');
+    const body = parsed && typeof parsed === 'object' && 'body' in parsed ? parsed.body : undefined;
+    return body && typeof body === 'object' && 'id' in body && typeof body.id === 'string' ? body.id : undefined;
+  } catch { return undefined; }
+}
 
 type ReminderScheduleKind = 'at' | 'every' | 'cron';
 
@@ -86,7 +96,13 @@ export function createAgentReminderScheduleTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
   registry: ToolRegistry,
+  artifactStore?: ArtifactStore,
 ): Tool {
+  /** The Personal Ops reminders lane lists one receipt per schedule request that reached the connected host. */
+  const recordEffect = (status: PersonalOpsEffectReceiptStatus, summary: string, subjectId?: string) => writePersonalOpsEffectReceipt(artifactStore, {
+    laneId: 'reminders', sourceTool: 'agent_reminder_schedule', operation: 'automation.schedules.create', providerId: 'connected-host', status, summary,
+    ...(subjectId ? { subjectId } : {}), ...(status === 'succeeded' ? {} : { failureReason: summary }),
+  });
   return {
     definition: {
       name: 'agent_reminder_schedule',
@@ -161,11 +177,15 @@ export function createAgentReminderScheduleTool(
           ? { ...preview.payload, prompt: `Request provenance:\n${provenance}\n\n${preview.payload.prompt}` }
           : preview.payload;
         const result = await effect.invoke('automation.schedules.create', payload);
+        const when = `${String(rawArgs.scheduleKind ?? '')} ${String(rawArgs.scheduleValue ?? '')}`.trim();
+        if (result.success) await recordEffect('succeeded', `Reminder scheduled (${when}).`, createdScheduleId(result.output));
+        else await recordEffect('failed', result.error ?? 'The connected host refused the reminder schedule.');
         return formatScheduleOperatorResult(result, 'Created GoodVibes schedule for Agent reminder');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         // Only a request already handed to the transport can have been applied.
         if (effect?.sent) {
+          await recordEffect('unknown', `The reminder schedule request was sent and then failed (${message}).`);
           return { success: false, error: `outcome_unknown: the schedule request was sent to the connected host and then failed (${message}). It may have been applied; read the schedule list before repeating it.` };
         }
         return { success: false, error: effect ? `${message} Nothing was sent to the connected host.` : message };
@@ -178,6 +198,7 @@ export function registerAgentReminderScheduleTool(
   registry: ToolRegistry,
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
+  artifactStore?: ArtifactStore,
 ): void {
-  registry.register(createAgentReminderScheduleTool(shellPaths, configManager, registry), { inputProjection: createScheduleInputProjector(shellPaths, configManager) });
+  registry.register(createAgentReminderScheduleTool(shellPaths, configManager, registry, artifactStore), { inputProjection: createScheduleInputProjector(shellPaths, configManager) });
 }

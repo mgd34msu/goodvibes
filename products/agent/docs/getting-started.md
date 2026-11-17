@@ -129,8 +129,7 @@ The workspace opens into a set of operator areas. Each area below names what it 
   - optional saved redacted review-card artifacts
   - structured next-route packets for refresh/lane/queue/artifact/local-draft/confirmed-effect boundaries
   - saved review artifacts resurfaced as redacted inbox thread/calendar event queue records
-  - certified provider-effect receipts for inbox/calendar/task/reminder outcomes
-  - fresh daemon/platform-published inbox/calendar/task/reminder queue records with durable ids, labels, redacted snippets/notes, agenda windows, conflict signals, due times, cadence, delivery targets, freshness status, source paths, schema/version/publication/publisher/provenance/receipt evidence, read-only inspect routes, local draft/reminder follow-up routes, and confirmed provider-effect boundaries only when matching routes are published
+  - a receipt for every mail the Agent sent (`google action:"mail.send"`), event it created (`google action:"calendar.create"`) and reminder it scheduled, listed in the inbox, calendar and reminders lanes with its outcome (succeeded, failed, or unknown when the provider could not confirm)
   - live records for Agent-owned notes, routines, schedule receipts, delivery channels, and redacted delivery receipts
 - Memory & Skills:
   - VIBE.md personality inspection and import

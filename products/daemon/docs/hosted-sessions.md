@@ -77,7 +77,10 @@ stores the Agent uses) and the session has the Agent's `profile`, `occasions`,
 `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_channel_send`, `browser` and `google`
 tools beside the platform tools (using the daemon's own channel delivery, media providers, webhook notifier,
 memory store, the browser its `browser.*` methods drive, and the Google account and `calendar.events.*`
-methods it holds), and `agent_work_plan` when the session is in the daemon's own project. Its platform tools carry the
+methods it holds), and `agent_work_plan` when the session is in the daemon's own project. Its `schedule`,
+`agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` tools list, create, edit, run,
+pause, resume and delete the daemon's own schedules through the daemon's own request path under the Agent's
+credential, so each change is judged as the Agent's. Its platform tools carry the
 Agent's read-mode table, so a mode reads or changes exactly as it does in the Agent, and a
 `profile` or `occasions` call is admitted with the scopes the paired Agent's credential holds. The Agent tools that work through the Agent's own
 command session are named in that prompt with the platform tool that covers the

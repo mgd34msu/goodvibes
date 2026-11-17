@@ -1,10 +1,6 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import {
-  buildReminderSchedulePreview,
-  createReminderSchedule,
-  parseReminderScheduleArgs,
-  resolveReminderConnectedHostConnection,
-} from '../../agent/reminder-schedule.ts';
+import { buildReminderSchedulePreview, parseReminderScheduleArgs } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createReminderSchedule, resolveReminderConnectedHostConnection } from '../../agent/reminder-schedule.ts';
 import {
   formatReminderScheduleFailure,
   formatReminderSchedulePreview,
@@ -24,12 +20,8 @@ import {
   RoutineScheduleReceiptStore,
 } from '../../agent/routine-schedule-receipts.ts';
 import { latestRunPerJob, listAutomationRunsSince } from '../../agent/automation-runs-source.ts';
-import {
-  buildScheduleEditPreview,
-  editConnectedSchedule,
-  enrichScheduleEditPreviewFromConnectedHost,
-  parseScheduleEditArgs,
-} from '../../agent/schedule-edit.ts';
+import { buildScheduleEditPreview, parseScheduleEditArgs } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { editConnectedSchedule, enrichScheduleEditPreviewFromConnectedHost } from '../../agent/schedule-edit.ts';
 import {
   formatScheduleEditFailure,
   formatScheduleEditPreview,

@@ -23,6 +23,19 @@ type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;
 type ScheduleDeliveryInput = NonNullable<ScheduleCreateInput['delivery']>;
 type ScheduleDeliveryTargetInput = ScheduleDeliveryInput['targets'] extends readonly (infer T)[] ? T : never;
 
+/** The host's schedule route and the two methods every Agent schedule command creates and reads through. */
+export const ROUTINE_SCHEDULE_ROUTE = '/api/automation/schedules';
+export const ROUTINE_SCHEDULE_METHOD = 'automation.schedules.create';
+export const ROUTINE_SCHEDULE_LIST_METHOD = 'automation.schedules.list';
+
+export type RoutineScheduleKind = 'cron' | 'every' | 'at';
+
+/** One schedule selector as the commands take it: `--cron`, `--every` or `--at` with its value. */
+export interface RoutineScheduleSpec {
+  readonly kind: RoutineScheduleKind;
+  readonly value: string;
+}
+
 /** Every channel surface a schedule may deliver to. The one list. */
 export const DELIVERY_SURFACE_KINDS = [
   'tui',

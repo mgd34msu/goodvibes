@@ -15,9 +15,16 @@ import {
   type RoutineScheduleDeliveryTargetSpec,
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
-export const ROUTINE_SCHEDULE_ROUTE = '/api/automation/schedules';
-export const ROUTINE_SCHEDULE_METHOD = 'automation.schedules.create';
-export const ROUTINE_SCHEDULE_LIST_METHOD = 'automation.schedules.list';
+import {
+  ROUTINE_SCHEDULE_LIST_METHOD,
+  ROUTINE_SCHEDULE_METHOD,
+  ROUTINE_SCHEDULE_ROUTE,
+  type RoutineScheduleKind,
+  type RoutineScheduleSpec,
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+
+// The schedule vocabulary is owned by the shared Agent turn; re-exported for this file's importers.
+export { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD, ROUTINE_SCHEDULE_ROUTE, type RoutineScheduleKind, type RoutineScheduleSpec };
 
 type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;
 type ScheduleCreateOutput = OperatorMethodOutput<'automation.schedules.create'>;
@@ -30,13 +37,6 @@ export interface AgentConnectedHostConnection {
   readonly baseUrl: string;
   readonly token: string | null;
   readonly tokenPath: string;
-}
-
-export type RoutineScheduleKind = 'cron' | 'every' | 'at';
-
-export interface RoutineScheduleSpec {
-  readonly kind: RoutineScheduleKind;
-  readonly value: string;
 }
 
 // The delivery-target vocabulary is owned by schedule-delivery-targets.ts and

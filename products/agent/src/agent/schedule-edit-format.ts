@@ -3,7 +3,7 @@ import type {
   ScheduleEditFailure,
   ScheduleEditPreview,
   ScheduleEditSuccess,
-} from './schedule-edit.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 function isRecord(value: unknown): value is Record<string, unknown> {

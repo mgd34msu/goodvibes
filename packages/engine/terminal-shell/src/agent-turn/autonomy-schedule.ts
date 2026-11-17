@@ -1,14 +1,10 @@
+/**
+ * autonomy-schedule.ts, the arguments and the create request of one autonomous
+ * Agent schedule: parsed from the command's options and built into the
+ * `automation.schedules.create` body. Sending it is the caller's: the
+ * `agent_autonomy_schedule` tool sends it under its own effect admission.
+ */
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { createConnectedSchedule } from './connected-schedule.ts';
-import {
-  resolveAgentConnectedHostConnection,
-  ROUTINE_SCHEDULE_METHOD,
-  ROUTINE_SCHEDULE_ROUTE,
-  type AgentConnectedHostConfigReader,
-  type AgentConnectedHostConnection,
-  type RoutineScheduleKind,
-  type RoutineScheduleSpec,
-} from './routine-schedule-promotion.ts';
 import {
   deliveryModeFromTargets,
   normalizeProviderModel,
@@ -17,10 +13,13 @@ import {
   parseRouteDeliveryTarget,
   parseWebhookDeliveryTarget,
   readOptionValue as optionValue,
+  ROUTINE_SCHEDULE_METHOD,
+  ROUTINE_SCHEDULE_ROUTE,
   toDeliveryTargetInput,
   validateDeliveryTargets,
   type RoutineScheduleDeliveryTargetSpec,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+  type RoutineScheduleSpec,
+} from './schedule-delivery-targets.js';
 
 type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;
 type ScheduleCreateOutput = OperatorMethodOutput<'automation.schedules.create'>;
@@ -33,10 +32,10 @@ export interface ParsedAutonomyScheduleArgs {
   readonly successCriteria: string | null;
   readonly schedule: RoutineScheduleSpec | null;
   readonly deliveryTargets: readonly RoutineScheduleDeliveryTargetSpec[];
-  readonly name?: string;
-  readonly timezone?: string;
-  readonly provider?: string;
-  readonly model?: string;
+  readonly name?: string | undefined;
+  readonly timezone?: string | undefined;
+  readonly provider?: string | undefined;
+  readonly model?: string | undefined;
   readonly enabled: boolean;
   readonly yes: boolean;
   readonly explicitUserRequest: string | null;
@@ -61,7 +60,7 @@ export interface AutonomyScheduleSuccess {
   readonly schedule: ScheduleCreateOutput;
   readonly request: ScheduleCreateInput;
   /** True when an earlier create already made this schedule (its answer was lost); nothing new was created. */
-  readonly alreadyExisted?: boolean;
+  readonly alreadyExisted?: boolean | undefined;
 }
 
 export interface AutonomyScheduleFailure {
@@ -75,7 +74,7 @@ export interface AutonomyScheduleFailure {
     | 'connected_host_error';
   readonly error: string;
   readonly route: typeof AUTONOMY_SCHEDULE_ROUTE;
-  readonly baseUrl?: string;
+  readonly baseUrl?: string | undefined;
 }
 
 export type AutonomyScheduleResult = AutonomyScheduleSuccess | AutonomyScheduleFailure;
@@ -299,7 +298,7 @@ export function buildAutonomySchedulePayload(parsed: ParsedAutonomyScheduleArgs)
     return {
       ...payload,
       cron: parsed.schedule.value,
-      timezone: parsed.timezone,
+      ...(parsed.timezone ? { timezone: parsed.timezone } : {}),
     };
   }
   if (parsed.schedule.kind === 'every') {
@@ -319,34 +318,4 @@ export function buildAutonomySchedulePreview(parsed: ParsedAutonomyScheduleArgs)
     method: AUTONOMY_SCHEDULE_METHOD,
     payload: buildAutonomySchedulePayload(parsed),
   };
-}
-
-/**
- * Create the autonomous schedule on the connected host. A retry after a lost
- * answer returns the schedule the first attempt made instead of adding a second
- * one that would run the same task twice on every tick.
- */
-export async function createAutonomySchedule(
-  connection: AgentConnectedHostConnection,
-  preview: AutonomySchedulePreview,
-  options: { readonly signal?: AbortSignal | undefined } = {},
-): Promise<AutonomyScheduleResult> {
-  const created = await createConnectedSchedule(connection, preview.payload, options);
-  if (!created.ok) {
-    return { ok: false, kind: created.kind, error: created.error, route: AUTONOMY_SCHEDULE_ROUTE, baseUrl: created.baseUrl };
-  }
-  return {
-    ok: true,
-    kind: AUTONOMY_SCHEDULE_METHOD,
-    route: AUTONOMY_SCHEDULE_ROUTE,
-    task: preview.task,
-    successCriteria: preview.successCriteria,
-    schedule: created.schedule,
-    request: preview.payload,
-    ...(created.alreadyExisted ? { alreadyExisted: true } : {}),
-  };
-}
-
-export function resolveAutonomyConnectedHostConnection(configManager: AgentConnectedHostConfigReader, homeDirectory: string): AgentConnectedHostConnection {
-  return resolveAgentConnectedHostConnection(configManager, homeDirectory);
 }

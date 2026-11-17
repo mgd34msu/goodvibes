@@ -16,7 +16,7 @@ test('a cut stream resumes with exactly the frames it missed, and the next turn\
   const positions: Array<string | null> = [];
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input));
-    const request = new Request(url, { headers: init?.headers, signal: init?.signal ?? null });
+    const request = new Request(url, { ...(init?.headers ? { headers: init.headers } : {}), signal: init?.signal ?? null });
     positions.push(request.headers.get('last-event-id'));
     const response = gateway.createEventStream(request, { admin: true, clientKind: 'web', requestedDomains: (url.searchParams.get('domains') ?? '').split(',') });
     const reader = response.body!.getReader();

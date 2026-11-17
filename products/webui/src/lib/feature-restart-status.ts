@@ -5,7 +5,7 @@
  * other than the one it shows as saved.
  */
 
-export type FeatureGateState = 'enabled' | 'disabled' | 'killed';
+export type FeatureGateState = 'enabled' | 'disabled';
 
 export interface FeaturePendingRestart {
   readonly featureId: string;
@@ -20,7 +20,7 @@ export interface FeatureRestartStatus {
 }
 
 function isGateState(value: unknown): value is FeatureGateState {
-  return value === 'enabled' || value === 'disabled' || value === 'killed';
+  return value === 'enabled' || value === 'disabled';
 }
 
 /** Validate the wire answer; a malformed one is refused rather than shown as "nothing pending". */

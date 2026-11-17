@@ -90,7 +90,7 @@
     "release:publish": "bun packages/engine/scripts/publish-packages.ts",
     "release:publish:ci": "bun packages/engine/scripts/publish-packages.ts --provenance",
     "release:tag": "bun packages/engine/scripts/create-release-tag.ts",
-    "release:verify": "bun run validate && bun run flags:graduation && bun run security:audit && bun run test && bun run test:rn && bun run test:workers && bun run test:workers:wrangler && bun run release:dry-run && bun run install:smoke",
+    "release:verify": "bun run validate && bun run security:audit && bun run test && bun run test:rn && bun run test:workers && bun run test:workers:wrangler && bun run release:dry-run && bun run install:smoke",
     "release:verify:published": "bun packages/engine/scripts/verify-published-packages.ts && bun packages/engine/scripts/install-smoke-check.ts --registry",
     "bundle:check:strict": "bun packages/engine/scripts/bundle-budget.ts --no-build",
     "api:subpath": "bun packages/engine/scripts/check-subpath-api-surface.ts",

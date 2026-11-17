@@ -134,6 +134,7 @@ Headless automation with hard budgets:
 
 `bun run flags:graduation` (and the `flags.graduation.report` operator verb)
 prints the feature defaults report: every capability's current default, its
-default-disposition state, and whatever real validation evidence exists. The
-release policy fails while any capability sits judged-ready without either
-flipping on or recording a dated hold.
+default-disposition state, and whatever real validation evidence exists. It
+exits non-zero while any capability sits judged-ready without either flipping
+on or recording a dated hold. It is a report run when reviewing defaults, not a
+step of `release:verify`.

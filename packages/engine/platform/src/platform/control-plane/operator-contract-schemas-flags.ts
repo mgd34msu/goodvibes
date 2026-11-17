@@ -53,7 +53,7 @@ const FLAG_GRADUATION_ENTRY_SCHEMA = objectSchema(
     flagId: STRING_SCHEMA,
     name: STRING_SCHEMA,
     tier: NUMBER_SCHEMA,
-    currentDefault: enumSchema(['enabled', 'disabled', 'killed']),
+    currentDefault: enumSchema(['enabled', 'disabled']),
     runtimeToggleable: BOOLEAN_SCHEMA,
     state: enumSchema(['dark', 'soaking', 'graduate-candidate', 'graduated', 'blocked']),
     evidence: FLAG_GRADUATION_EVIDENCE_SCHEMA,

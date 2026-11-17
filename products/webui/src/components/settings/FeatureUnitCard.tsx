@@ -31,7 +31,7 @@
 import { useState } from 'react';
 import type { FeatureUnitModel } from '../../lib/settings-model';
 import { client as platformClient, type ConfigSetOutcome } from '../../lib/goodvibes';
-import type { FeatureGateState, FeaturePendingRestart } from '../../lib/feature-restart-status';
+import type { FeaturePendingRestart } from '../../lib/feature-restart-status';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Button } from '../ui/Button';
@@ -193,10 +193,6 @@ export function FeatureUnitCard({
   );
 }
 
-function gateStateLabel(state: FeatureGateState): string {
-  return state === 'killed' ? 'switched off by a kill switch' : state;
-}
-
 /**
  * The daemon's own report that this feature runs in a state other than its
  * saved one, with the restart that applies it. Restarting ends every running
@@ -237,7 +233,7 @@ function PendingRestartNotice({ featureId, featureName, pending }: {
     <>
       <div className="feature-unit-pending" role="status" data-pending-restart={featureId}>
         <p>
-          Saved as {gateStateLabel(pending.saved)}; the daemon is running it {gateStateLabel(pending.running)} until it
+          Saved as {pending.saved}; the daemon is running it {pending.running} until it
           restarts.
         </p>
         <Button size="sm" disabled={restarting} onClick={() => void restartDaemon()}>

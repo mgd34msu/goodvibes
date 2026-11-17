@@ -15,7 +15,7 @@ import {
 /** flags.status takes no arguments. */
 export const FLAGS_STATUS_INPUT_SCHEMA = objectSchema({}, []);
 
-const FLAG_STATE_SCHEMA = enumSchema(['enabled', 'disabled', 'killed']);
+const FLAG_STATE_SCHEMA = enumSchema(['enabled', 'disabled']);
 
 const FLAG_PENDING_RESTART_SCHEMA = objectSchema(
   {

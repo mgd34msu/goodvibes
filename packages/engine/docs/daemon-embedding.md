@@ -72,6 +72,13 @@ memory lives (`'home'`, the one store every shipped product opens; `'project'`; 
 an explicit path), whether a workspace trust owner stands in front of every ask
 (`'surface'` or `'none'`), how an ask is raised (`permissionHost.raiseApproval`,
 by default the graph's own broker), and `extras` for what only that host adds.
+The terminal app, the Agent and the daemon each compose through it. A product
+that runs once per home can also keep approvals, watchers and channel policies
+per user (`roots.stateScope: 'home'`), claim the home as its single writer
+(`homeSingleWriter: 'claim'`), keep its project knowledge in the agent's own
+store with no wiki (`knowledge: 'agent'`), keep agent hooks from spawning agents
+(`hookAgentRuns: 'withhold'`), and open the code index and pairing tokens only
+when something reads them (`codeIndex` and `pairingTokens: 'on-demand'`).
 
 The platform does not replace your server framework. You still own:
 - **request routing**: matching incoming requests to the handlers this package builds.

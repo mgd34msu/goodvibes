@@ -59,6 +59,7 @@ import { buildAgentRecoveryApply } from './shell/recovery-apply.ts';
 import { announceRecoveryOffer } from './shell/startup-wiring.ts';
 import { whenCrashSnapshotFound } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
+import { cardAwaitsTab } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import { createWorkspaceRegistrationQuestion } from './shell/workspace-registration-question.ts';
 import { createDaemonRepairQuestion } from './shell/daemon-repair-prompt.ts';
 import { getTerminalSize } from './shell/terminal-size.ts';
@@ -1215,7 +1216,9 @@ async function main() {
         headerRows: shellHeaderLines.length,
         footerRows: shellFooterLines.length,
         contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel) ?? 0,
-        permission: pendingPermission ? PermissionPromptUI.createPromptLayer(width, height, pendingPermission) : null,
+        permission: pendingPermission
+          ? PermissionPromptUI.createPromptLayer(width, height, pendingPermission, { awaitingTab: cardAwaitsTab(pendingPermission, input.prompt.length === 0) })
+          : null,
       }),
     });
   }

@@ -65,6 +65,14 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
   } = options;
 
   if (pendingPermission) {
+    // Ctrl+C is always the hard abort: deny and stop the turn, even while a
+    // draft or a typing burst sends every other key to the composer.
+    if (data === '\x03') {
+      pendingPermission.resolve(false, false);
+      abortTurn();
+      render();
+      return { handled: true, pendingPermission: null, recoveryPending };
+    }
     // A sentence being typed when the card appeared keeps going to the composer:
     // only a key after a pause (or Tab) addresses the card.
     const now = options.now ?? Date.now();

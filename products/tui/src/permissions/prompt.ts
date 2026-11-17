@@ -6,6 +6,7 @@ import '../renderer/theme.ts';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import type { HunkSelectionState } from './hunk-selection.ts';
 import { rememberScope, renderPermissionCard, type PermissionCardState } from './prompt-card.ts';
+import { cardAwaitsTab } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 export { buildPendingPermissionExtras } from './hunk-selection.ts';
 export { permissionButtons, type PermissionButton, type PermissionButtonId, type PermissionCardState } from './prompt-card.ts';
 
@@ -40,6 +41,8 @@ export interface PendingPromptView {
   readonly submenuOpen?: boolean | undefined;
   readonly submenuIndex?: number | undefined;
   readonly scroll?: number | undefined;
+  /** The person has addressed the card (a key after a pause, or Tab). */
+  readonly addressed?: boolean | undefined;
 }
 
 /**
@@ -47,8 +50,10 @@ export interface PendingPromptView {
  * see prompt-card.ts for the layout).
  *
  * Keys (shell/blocking-input.ts): ←→ choose a button, Enter confirms it;
- * y allow once, a allow for this session (1-9 remember at a tier when the
- * request offers tiers), n deny, d details; typing denies with a reason.
+ * y allow once, a then Enter allow for this session (1-9 then Enter remember
+ * at a tier when the request offers tiers), n deny, d details; typing denies
+ * with a reason. While the composer holds a draft the keys type into it and
+ * the card shows only that Tab moves to it.
  */
 export class PermissionPromptUI extends PermissionPromptFacts {
   /**
@@ -87,6 +92,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     request: PermissionRequest,
     pending: PendingPromptView,
     broker?: Parameters<typeof PermissionPromptUI.promptViewState>[1],
+    composerEmpty = true,
   ): SurfaceLayer {
     const view = this.promptViewState(pending, broker);
     const state: PermissionCardState = {
@@ -100,6 +106,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
       submenuOpen: pending.submenuOpen,
       submenuIndex: pending.submenuIndex,
       scroll: pending.scroll,
+      awaitingTab: cardAwaitsTab(pending, composerEmpty),
     };
     return renderPermissionCard(request, state, screenWidth, screenHeight);
   }

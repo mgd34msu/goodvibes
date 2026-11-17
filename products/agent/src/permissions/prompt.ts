@@ -97,7 +97,12 @@ export class PermissionPromptUI extends PermissionPromptFacts {
    * shell/blocking-input.ts. A command waiting on its terminal shows the answer
    * being typed, masked, in place of the choices.
    */
-  static createPromptLayer(screenWidth: number, screenHeight: number, request: PermissionRequest & { readonly replyBuffer?: string | undefined }): SurfaceLayer {
+  static createPromptLayer(
+    screenWidth: number,
+    screenHeight: number,
+    request: PermissionRequest & { readonly replyBuffer?: string | undefined },
+    view: { readonly awaitingTab?: boolean | undefined } = {},
+  ): SurfaceLayer {
     const tokens = activeTokens();
     const analysis = fallbackAnalysis(request);
     const brief = buildPermissionApprovalBrief(request);
@@ -116,7 +121,8 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     const diff = approvalDiffText(request, Math.max(1, screenHeight));
     const diffLines = diff ? renderDiffView(diff.text, width) : [];
     const body = factRows + diffLines.length + (diff && diff.hiddenLines > 0 ? 1 : 0) + 2;
-    const hints = promptHints(request, (request.replyBuffer ?? '').length > 0);
+    // While the composer holds a draft every key but Tab and Ctrl+C types into it.
+    const hints = view.awaitingTab ? AWAITING_TAB_HINTS : promptHints(request, (request.replyBuffer ?? '').length > 0);
     const height = modalHeightFor(screenWidth, screenHeight, { hints }, body);
     const f = beginModal(screenWidth, screenHeight, {
       title: brief.title,
@@ -226,9 +232,13 @@ function drawLine(target: Line | undefined, x: number, row: Line): void {
 /** Keycap hints of the permission dialog (the keys live in shell/blocking-input.ts). */
 const PROMPT_HINTS: readonly KitHint[] = [
   ['y', 'allow once'],
-  ['a', 'allow for this session'],
+  ['a, enter', 'allow for this session'],
   ['n', 'deny'],
   ['esc', 'deny'],
+];
+const AWAITING_TAB_HINTS: readonly KitHint[] = [
+  ['tab', 'answer this request (your draft stays)'],
+  ['ctrl+c', 'deny and stop the turn'],
 ];
 const PROMPT_CHOICES: ReadonlyArray<readonly [key: string, text: string, tone: ButtonTone]> = [
   ['y', 'Allow once', 'primary'],

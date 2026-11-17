@@ -68,3 +68,13 @@ export function routeCardInput(
   if (typeahead) return { answer: false, card: { ...card, lastTypedAt: now } };
   return { answer: true, card: { ...card, addressed: true } };
 }
+
+/**
+ * True while a card's keys go to the composer because it holds a draft and
+ * the card has not been addressed: the card then says only that Tab moves to
+ * it (and that Ctrl+C still denies), since its answer keys would type into
+ * the draft.
+ */
+export function cardAwaitsTab(card: { readonly addressed?: boolean | undefined }, composerEmpty: boolean): boolean {
+  return !composerEmpty && card.addressed !== true;
+}

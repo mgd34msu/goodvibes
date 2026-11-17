@@ -76,6 +76,8 @@ export interface PermissionCardState {
   readonly submenuIndex?: number | undefined;
   /** First body row shown when the card is taller than the screen. */
   readonly scroll?: number | undefined;
+  /** The composer holds a draft and the card was not addressed: every key but Tab and Ctrl+C types into the draft. */
+  readonly awaitingTab?: boolean | undefined;
 }
 
 export type PermissionButtonId = 'allow' | 'session' | 'remember' | 'apply' | 'deny';
@@ -392,6 +394,7 @@ function bodyRows(request: PermissionPromptRequest, state: PermissionCardState, 
 }
 
 function cardHints(request: PermissionPromptRequest, state: PermissionCardState): KitHint[] {
+  if (state.awaitingTab) return [['tab', 'answer this request (your draft stays)'], ['ctrl+c', 'deny and stop the turn']];
   if (state.replyMode === 'exec-answer') return [['⏎', 'send answer'], ['esc', (state.replyBuffer ?? '').length > 0 ? 'clear' : 'decline'], ['ctrl+c', 'abort turn']];
   if (state.replyMode === 'deny-reason') return [['⏎', 'deny with this reason'], ['esc', 'back'], ['ctrl+c', 'abort turn']];
   if (state.submenuOpen) return [['↑↓', 'tier'], ['⏎', 'allow and remember'], ['esc', 'back']];
@@ -400,7 +403,7 @@ function cardHints(request: PermissionPromptRequest, state: PermissionCardState)
   const tiers = request.rememberOptions?.length ?? 0;
   return [
     ['←→', 'choose'], ['⏎', 'confirm'], ['y', 'allow once'],
-    tiers > 0 ? [tiers > 1 ? `1-${tiers}` : '1', 'remember'] : ['a', 'allow for session'],
+    tiers > 0 ? [tiers > 1 ? `1-${tiers}, ⏎` : '1, ⏎', 'remember'] : ['a, ⏎', 'allow for session'],
     ['n', 'deny'], ['type', 'a reason to deny'],
   ];
 }

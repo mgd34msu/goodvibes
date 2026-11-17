@@ -138,9 +138,10 @@ export function resolveApprovalRequester(
  * zero for this change, main.ts sits at the 800-line architecture cap and must
  * never grow it.
  *
- * `openedAt` is the moment the prompt appeared; the blocking-input handler uses
- * it to swallow typed-ahead keystrokes for a short settle window so buffered
- * text cannot answer a prompt the user has not seen yet. `requestedBy` is the
+ * `openedAt` is the moment the prompt appeared; the blocking-input handler
+ * (routeCardInput) passes keys typed within the settle time after it, or as
+ * one burst, to the composer, so typed-ahead text cannot answer a prompt the
+ * user has not seen yet and is not lost. `requestedBy` is the
  * requester attribution resolved from the broker (see resolveApprovalRequester).
  */
 export function buildPendingPermissionExtras(

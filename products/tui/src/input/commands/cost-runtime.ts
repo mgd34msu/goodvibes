@@ -64,7 +64,7 @@ export function registerCostRuntimeCommands(registry: CommandRegistry): void {
         const options = args.slice(1);
         const unknownOptions = options.filter((option) => option !== '24h' && option !== '7d' && option !== '--json');
         if (unknownOptions.length > 0 || (options.includes('24h') && options.includes('7d'))) {
-          ctx.print(`Unknown or conflicting option(s): ${unknownOptions.length > 0 ? unknownOptions.join(', ') : '24h and 7d'}. Usage: /cost attribution [24h|7d] [--json]`);
+          ctx.print(`Nothing shown: ${unknownOptions.length > 0 ? `unknown option(s) ${unknownOptions.join(', ')}` : '24h and 7d conflict'}, so the window would not be the one asked for. Usage: /cost attribution [24h|7d] [--json]`);
           return;
         }
         const window: CostWindow = options.includes('7d') ? '7d' : '24h';

@@ -118,7 +118,7 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
         const watchOptions = args.slice(2);
         const unknownFlags = watchOptions.filter((value) => value.startsWith('--') && value !== '--fix-session');
         if (unknownFlags.length > 0) {
-          ctx.print(`Unknown option(s): ${unknownFlags.join(', ')}. Usage: /ci watch <repo-or-pr> <deliveryChannel> [--fix-session]`);
+          ctx.print(`No watch was created: unknown option(s) ${unknownFlags.join(', ')}, so the delivery channel could be misread. Usage: /ci watch <repo-or-pr> <deliveryChannel> [--fix-session]`);
           return;
         }
         // The channel is the first word that is not a flag, so `--fix-session` before it is never read as the channel.

@@ -136,7 +136,8 @@ const GATE_RESULT_SCHEMA = objectSchema({
       passed: NUMBER_SCHEMA, failed: NUMBER_SCHEMA, skipped: NUMBER_SCHEMA,
     }, ['passed', 'failed', 'skipped']) }, ['kind', 'runner', 'checks']),
   ] },
-  provenance: objectSchema({ sourceBefore: STRING_SCHEMA, sourceAfter: STRING_SCHEMA, definitionBefore: STRING_SCHEMA, definitionAfter: STRING_SCHEMA },
+  provenance: objectSchema({ sourceBefore: STRING_SCHEMA, sourceAfter: STRING_SCHEMA, definitionBefore: STRING_SCHEMA, definitionAfter: STRING_SCHEMA,
+    root: STRING_SCHEMA, scope: STRING_LIST_SCHEMA },
     ['sourceBefore', 'sourceAfter', 'definitionBefore', 'definitionAfter']),
 }, ['gate', 'passed', 'output', 'durationMs']);
 

@@ -610,7 +610,10 @@ function gateEvidence(gates: NonNullable<UnitEvidence['gates']>): JsonValue {
     if (gate.reason !== undefined) record['reason'] = gate.reason;
     if (gate.completion?.kind === 'assertions') record['completion'] = { kind: gate.completion.kind, runner: gate.completion.runner, checks: { ...gate.completion.checks } };
     else if (gate.completion?.kind === 'command-exit') record['completion'] = { kind: gate.completion.kind, exitCode: gate.completion.exitCode };
-    if (gate.provenance) record['provenance'] = { ...gate.provenance };
+    if (gate.provenance) {
+      const { scope, ...provenance } = gate.provenance;
+      record['provenance'] = scope === undefined ? { ...provenance } : { ...provenance, scope: [...scope] };
+    }
     return record;
   });
 }

@@ -745,7 +745,7 @@ export {
   commandOk, commandRefused, formatRefusal, isRefusal, readNextSteps, readRefusal, refusal, refusalErrorBody, toRefusal,
   type CommandResult, type Refusal, type RefusalInit,
 } from './refusal.js';
-export { installJudgmentPort, judgmentPort, restoreJudgmentPort, JudgmentPortMissingError } from './judgment-port.js';
+export { installJudgmentPort, installJudgmentRuntimeScope, judgmentPort, restoreJudgmentPort, JudgmentPortMissingError } from './judgment-port.js';
 export { assertDecisionModelsEnabled, decisionModelPolicyState, installDecisionModelPolicyObserver, DecisionModelsDisabledError,
   tryClassicDecisionFallback, runDecisionOrClassic, DECISION_MODEL_POLICIES, parseDecisionModelPolicy, DECISION_MODEL_POLICY_HEADER,
   readDecisionModelPolicyHeader, type DecisionModelPolicy, type DecisionModelPolicyState } from './decision-policy.js';

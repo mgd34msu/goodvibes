@@ -25,6 +25,30 @@ export class JudgmentPortMissingError extends Error {
 const installationFor = (port: JudgmentPort): Installation => ({ port, controller: new AbortController(), identities: new WeakMap() });
 
 /**
+ * Names the port of the runtime the current call belongs to, when the host can
+ * tell (the platform keeps it per async call chain; this package stays free of
+ * Node-only modules). Unset, or naming no runtime still installed, the
+ * process-current installation answers.
+ */
+let runtimeScope: (() => JudgmentPort | undefined) | undefined;
+
+/**
+ * Installs how a call names its runtime's port. With two runtimes alongside,
+ * a reading started by the older one then keeps that runtime's port and
+ * lifetime, so stopping the newer runtime never ends it.
+ */
+export function installJudgmentRuntimeScope(read: (() => JudgmentPort | undefined) | undefined): void {
+  runtimeScope = read;
+}
+
+/** The installation the current call belongs to: its own runtime's while that runtime is installed, else the current one. */
+function currentInstallation(): Installation | undefined {
+  const scoped = runtimeScope?.();
+  if (scoped === undefined || scoped === installed?.port) return installed;
+  return alongside.find((entry) => entry.port === scoped && !entry.controller.signal.aborted) ?? installed;
+}
+
+/**
  * Make `next` current. The replaced installation's readers end, except when a
  * runtime joins alongside another runtime that is still running.
  */
@@ -81,11 +105,16 @@ export function restoreJudgmentPort(owner: JudgmentPort, previous: JudgmentPort 
   retiring?.controller.abort();
 }
 
-/** The installed port; throws when none is installed. */
+/** The installed port (the calling runtime's own, when it runs alongside another); throws when none is installed. */
 export function judgmentPort(site: string): JudgmentPort {
+  return requireInstallation(site).port;
+}
+
+function requireInstallation(site: string): Installation {
   assertDecisionModelsEnabled(site);
-  if (installed === undefined) throw new JudgmentPortMissingError(site);
-  return installed.port;
+  const current = currentInstallation();
+  if (current === undefined) throw new JudgmentPortMissingError(site);
+  return current;
 }
 
 /** Package-private installation facts; identities contain no source or credential data. */
@@ -94,8 +123,7 @@ export function judgmentPortInstallation(site: string): {
   readonly signal: AbortSignal;
   readonly identityFor: (owner: object) => object;
 } {
-  judgmentPort(site);
-  const current = installed!;
+  const current = requireInstallation(site);
   return {
     port: current.port,
     signal: current.controller.signal,

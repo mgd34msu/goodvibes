@@ -23,6 +23,7 @@ import { parseDaemonJsonBody } from './http/router-request-body.js';
 import { authenticationRequiredResponse } from './http/error-response.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitAuthFailed } from '../runtime/emitters/security.js';
+import { captureJudgmentRuntime } from '../runtime/judgment-runtime-scope.js';
 
 export { isCloudflareIp } from './client-address.js';
 
@@ -244,13 +245,15 @@ export class HttpListener {
       await requirePortAvailable(this.port, this.host, 'HTTP listener');
     }
     const self = this;
+    // Requests are the starting daemon's work (its judgment port), started from its start().
+    const inRuntime = captureJudgmentRuntime();
     this.tlsState = resolveInboundTlsContext(this.configManager, 'httpListener');
     this.server = this.serveFactory({
       port: this.port,
       hostname: this.host,
       ...(this.tlsState.tls ? { tls: this.tlsState.tls } : {}),
       async fetch(req, server): Promise<Response> {
-        return self.handleRequest(req, server.requestIP(req)?.address);
+        return inRuntime(() => self.handleRequest(req, server.requestIP(req)?.address));
       },
     });
 

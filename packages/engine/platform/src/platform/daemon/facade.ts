@@ -86,6 +86,7 @@ import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
+import { createJudgmentRuntimeScope, runInJudgmentRuntime } from '../runtime/judgment-runtime-scope.js';
 import { configureVoiceRequestLifetime } from './http/voice-request-lifetime.js';
 import { bindClientAddress, bindLocalOrigin, isDirectLoopbackRequest, resolveClientAddress } from './client-address.js';
 import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './http/listener-admission.js';
@@ -255,6 +256,12 @@ export class DaemonServer {
   private tornDown = false; // True once stop() tore this daemon down; cleared by a successful bind. Teardown was gated on `server === null`, which conflated "never bound a socket" with "has nothing to release". The CONSTRUCTOR starts the companion-chat GC sweep and the batch tick, so enable() plus a failed or never-called start() left both running with no reachable stop. What must not run twice is the teardown, so that is what this guards.
   /** External stop/fence retires a pending boot; its own native handover does not. */
   private externalStopEpoch = 0;
+  /**
+   * This daemon's judgment scope: its composition, start, requests and
+   * embedded submissions run inside it, so its readings keep its own judgment
+   * port when another daemon runs in the same process.
+   */
+  private readonly judgmentRuntime = createJudgmentRuntimeScope();
 
   /** Prepare the actual configured project before creating an owned runtime.
    * Synchronous construction remains available with an already prepared context
@@ -278,7 +285,7 @@ export class DaemonServer {
     try {
     this.nativeHandoverDrain = config.drainForNativeHandover;
     this.deferNativeActivationUntilHostReady = config.deferNativeActivationUntilHostReady === true;
-    const resolved = resolveDaemonFacadeRuntime(config, supplementalOwnership, () => this.authToken);
+    const resolved = runInJudgmentRuntime(this.judgmentRuntime, () => resolveDaemonFacadeRuntime(config, supplementalOwnership, () => this.authToken));
     this.configManager = resolved.configManager;
     this.runtimeServices = resolved.runtimeServices;
     this.ownsRuntimeServices = resolved.ownsRuntimeServices;
@@ -588,6 +595,15 @@ export class DaemonServer {
    * Start the daemon. Refuses to start if not explicitly enabled.
    */
   async start(): Promise<void | NativeHandover> {
+    return runInJudgmentRuntime(this.judgmentRuntime, () => this.startInJudgmentRuntime());
+  }
+
+  /** Runs `fn` (and the work it starts) as this daemon's, for judgment readings. */
+  inJudgmentRuntime<T>(fn: () => T): T {
+    return runInJudgmentRuntime(this.judgmentRuntime, fn);
+  }
+
+  private async startInJudgmentRuntime(): Promise<void | NativeHandover> {
     const stopEpoch = this.externalStopEpoch;
     await this.restartCycle.pending;
     await this.stoppingRuntime;
@@ -931,21 +947,21 @@ export class DaemonServer {
           const upgrade = self.tryUpgradeControlPlaneWebSocket(req, server);
           if (upgrade === 'upgraded') return;
           if (upgrade) return upgrade;
-          return self.handleRequest(req);
+          return runInJudgmentRuntime(self.judgmentRuntime, () => self.handleRequest(req));
         },
         websocket: {
           open(ws) {
             self.handleControlPlaneWebSocketOpen(ws as unknown as { data: ControlPlaneWebSocketData; send(message: string): void });
           },
           message(ws, message) {
-            void self.handleControlPlaneWebSocketMessage(
+            void runInJudgmentRuntime(self.judgmentRuntime, () => self.handleControlPlaneWebSocketMessage(
               ws as unknown as { data: ControlPlaneWebSocketData; send(message: string): void },
               message,
             ).catch((error: unknown) => {
               logger.warn('DaemonServer: control-plane websocket message failed', {
                 error: summarizeError(error),
               });
-            });
+            }));
           },
           close(ws) {
             self.handleControlPlaneWebSocketClose(ws as unknown as { data: ControlPlaneWebSocketData });

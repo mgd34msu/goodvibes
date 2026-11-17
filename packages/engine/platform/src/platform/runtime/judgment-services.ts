@@ -3,6 +3,7 @@ import { activateClassicFallback, configureDecisionModelPolicy } from './decisio
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import { bindJudgmentPortAuthority, installJudgmentPort, restoreJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { createJudgmentSourceLifetime } from './judgment-source-lifetime.js';
+import { claimJudgmentRuntimeScope } from './judgment-runtime-scope.js';
 import {
   createSystemOnePort,
   assertSynchronousJudgmentGuard,
@@ -359,6 +360,8 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   bindJudgmentPortAuthority(port, sourceLifetime.capture);
   bindJudgmentPortAuthority(browserPort, sourceLifetime.capture);
   const previous = installJudgmentPort(port, { alongside: true });
+  // A daemon composing this runtime inside its scope: its readings keep this port.
+  claimJudgmentRuntimeScope(port);
   input.disposal.add('judgment port and decision log', () => {
     retired.add(port);
     retention.dispose();

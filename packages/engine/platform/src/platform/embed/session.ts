@@ -313,7 +313,9 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
     events: server.eventBus,
     approvals: booted.approvals,
     sessions,
-    submit: async (input) => {
+    // Run as the daemon's own work: its readings keep this daemon's judgment
+    // port when another daemon runs in this process.
+    submit: (input) => server.inJudgmentRuntime(async () => {
       if (stopped) throw new Error('This embedded session has stopped; create a new one to submit input.');
       const body = typeof input === 'string' ? input : input.body;
       const structured = typeof input === 'string' ? undefined : input;
@@ -366,7 +368,7 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
         watch.abandon();
         throw error;
       }
-    },
+    }),
     cancelActive: (agentIds) => {
       let cancelled = 0;
       for (const agentId of agentIds) {

@@ -12,6 +12,7 @@ export function registerStateRuntimeCommands(registry: CommandRegistry): void {
     description: 'Show what this app\'s runtime store holds now, by domain (session, conversation, agents, tasks, permissions...), for debugging',
     usage: '[domain...]',
     argsHint: '[domain...]',
+    effect: 'read-only',
     handler(args, ctx) {
       const store = ctx.platform.runtimeStore;
       if (!store) {

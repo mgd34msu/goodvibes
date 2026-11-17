@@ -57,8 +57,6 @@ export const FLEET_SNAPSHOT_NODE_CAP = 2000;
 export const FLEET_LIST_DEFAULT_LIMIT = 100;
 export const FLEET_LIST_MAX_LIMIT = 500;
 
-const PROCESS_KINDS: readonly string[] = FLEET_NODE_KINDS;
-const PROCESS_STATES: readonly string[] = FLEET_NODE_STATES;
 
 function asStringArray(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined;
@@ -73,7 +71,7 @@ function readFleetQueryFilter(query: Record<string, unknown> | undefined): Fleet
   const rawStates = asStringArray(query.states);
   let kinds: ProcessKind[] | undefined;
   if (rawKinds) {
-    const invalid = rawKinds.filter((k) => !PROCESS_KINDS.includes(k));
+    const invalid = rawKinds.filter((k) => !(FLEET_NODE_KINDS as readonly string[]).includes(k));
     if (invalid.length > 0) {
       throw new GatewayVerbError(`Unknown fleet kind(s): ${invalid.join(', ')}`, 'INVALID_ARGUMENT', 400, 'kinds');
     }
@@ -81,7 +79,7 @@ function readFleetQueryFilter(query: Record<string, unknown> | undefined): Fleet
   }
   let states: ProcessState[] | undefined;
   if (rawStates) {
-    const invalid = rawStates.filter((s) => !PROCESS_STATES.includes(s));
+    const invalid = rawStates.filter((s) => !(FLEET_NODE_STATES as readonly string[]).includes(s));
     if (invalid.length > 0) {
       throw new GatewayVerbError(`Unknown fleet state(s): ${invalid.join(', ')}`, 'INVALID_ARGUMENT', 400, 'states');
     }

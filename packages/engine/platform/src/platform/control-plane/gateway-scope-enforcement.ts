@@ -49,19 +49,6 @@ const DECLARED_WIRE_EVENTS: ReadonlySet<string> = new Set(
 );
 
 /**
- * The read scope a declared broadcast wire event needs beyond `read:events`,
- * derived from the event descriptors (the one owner of that fact).
- */
-export const CHANNEL_REQUIRED_SCOPE: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries(
-  builtinGatewayEventDescriptors
-    .filter((descriptor) => descriptor.category !== 'runtime-domain')
-    .flatMap((descriptor) => {
-      const scope = descriptor.scopes.find((entry) => entry !== 'read:events');
-      return scope === undefined ? [] : (descriptor.wireEvents ?? []).map((event) => [event, scope] as const);
-    }),
-));
-
-/**
  * Resolve, once, what a client may receive. A client that carries a
  * principal's scopes and is not an admin is restricted, whatever kind it calls
  * itself (a socket names its own kind); for it an event is granted when its
@@ -103,21 +90,6 @@ export function grantAllowsDomain(grant: EventGrant, domain: RuntimeEventDomain)
 export function grantAllowsEvent(grant: EventGrant, event: string, addressedToClient: boolean): boolean {
   if (grant.all || grant.wireEvents.has(event) || grant.domains.has(event as RuntimeEventDomain)) return true;
   return addressedToClient && !DECLARED_WIRE_EVENTS.has(event);
-}
-
-/**
- * Whether a live client may receive a scope-gated channel. Only web SSE/WS
- * clients (which carry a principal's scopes) are filtered; in-process/local and
- * service ('daemon') clients are trusted and always pass, and an admin token
- * bypasses. A `*` scope is a wildcard grant. A principal-scoped client is
- * filtered only when it carries an explicit scopes array; internal streams with
- * no scopes stay trusted.
- */
-export function clientMaySeeScopedChannel(client: ScopedClientView, requiredScope: string): boolean {
-  if (client.kind !== 'web') return true;
-  if (client.admin) return true;
-  if (client.scopes === undefined) return true;
-  return missingScopes(client.scopes, [requiredScope]).length === 0;
 }
 
 /**

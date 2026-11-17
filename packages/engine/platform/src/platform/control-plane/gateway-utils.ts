@@ -3,7 +3,7 @@ import type { AnyRuntimeEvent, RuntimeEventDomain, RuntimeEventEnvelope } from '
 import { isRuntimeEventDomain } from '../runtime/events/index.js';
 import type { ControlPlaneClientDescriptor } from './types.js';
 import type { ControlPlaneServerConfig } from './types.js';
-import { CHANNEL_REQUIRED_SCOPE, clientMayReceiveEventDomain, clientMaySeeScopedChannel } from './gateway-scope-enforcement.js';
+import { clientMayReceiveEventDomain } from './gateway-scope-enforcement.js';
 import { OPERATOR_SESSION_TTL_MS } from '../security/user-auth.js';
 
 export const DEFAULT_SERVER_CONFIG: ControlPlaneServerConfig = {
@@ -257,8 +257,9 @@ export function pruneDisconnectedClientRecords(
 }
 
 /**
- * Replay recent traffic to a freshly-connected client. Mirrors live delivery:
- * canReplayEventToClient applies the kind/route/surface/domain-name filters, and
+ * Replay recent traffic to a freshly-connected client. `recentEvents` is the
+ * window already cut to the client's event grant (the scopes it holds), so no
+ * scope check repeats here. Mirrors live delivery: canReplayEventToClient applies the kind/route/surface/domain-name filters, and
  * the EVENT_DOMAIN broadcast-domain filter is applied on top so a domain-narrowed
  * client is not handed a replayed broadcast (e.g. session-update) for a domain it
  * did not subscribe to.
@@ -284,8 +285,6 @@ export function replayRecentTraffic(
   const mayReceive = (recentEvent: ScopedControlPlaneRecentEvent): boolean => {
     if (!canReplayEventToClient(recentEvent, options)) return false;
     if (!clientMayReceiveEventDomain(replayDomains, recentEvent.event)) return false;
-    const requiredScope = CHANNEL_REQUIRED_SCOPE[recentEvent.event];
-    if (requiredScope && !clientMaySeeScopedChannel({ kind: options.clientKind ?? 'web', scopes: options.scopes, admin: options.admin }, requiredScope)) return false;
     return acceptPayload === undefined || acceptPayload(recentEvent.payload);
   };
   const resolution = resolveReplayWindow(recentEvents, sinceId, mayReceive);

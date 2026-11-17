@@ -1,5 +1,5 @@
 // Proves: A provider redelivery starts a second agent run, a message whose handling failed is never run, a refused sender is run, or a webhook caller reaches another caller's callback, the platform's own markers or another surface's session.
-// Red when: The shared pipeline runs a refused sender or answers a refusal with a failure, a claim is kept after a failed handling or dropped after a success, telephony keys spoken turns by call id, or a webhook caller inherits another's callback, sets platform markers or enters another surface's session.
+// Red when: The shared pipeline runs a refused sender or answers a refusal with a failure, a claim (the shared pipeline's or ntfy's own) is kept after a failed handling or dropped after a success, telephony keys spoken turns by call id, or a webhook caller inherits another's callback, sets platform markers or enters another surface's session.
 /**
  * What the webhook adapters do when a provider redelivers, a sender is refused,
  * or a caller supplies more than it should: no second run of a message already
@@ -16,14 +16,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
 import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
-import { surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
+import { ntfyInboundDedup, surfaceInboundDedup } from '../platform/src/platform/adapters/inbound-dedup.ts';
+import { handleNtfySurfacePayload } from '../platform/src/platform/adapters/ntfy/index.ts';
 import { handleWhatsAppSurfaceWebhook } from '../platform/src/platform/adapters/whatsapp/index.ts';
 import { handleTelephonySurfaceWebhook } from '../platform/src/platform/adapters/telephony/index.ts';
 import { handleGenericWebhookSurface } from '../platform/src/platform/adapters/webhook/index.ts';
 
 type Call = { kind: string; input: unknown };
 
-afterEach(() => { surfaceInboundDedup.clear(); });
+afterEach(() => { surfaceInboundDedup.clear(); ntfyInboundDedup.clear(); });
 
 function sharedContext(config: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
   const calls: Call[] = [];
@@ -108,6 +109,41 @@ describe('whatsapp', () => {
     expect(third.status).toBe(200);
     expect(spawns(calls)).toBe(3);
   });
+});
+
+test('ntfy: one message that arrives by both routes starts one agent, and one whose start failed is started when it arrives again', async () => {
+  const topic = 'gv-agent-fixture-redelivery';
+  let refuseNext = false;
+  const { context, calls } = sharedContext({ 'surfaces.ntfy.agentTopic': topic }, {
+    sessionBroker: {
+      getSession: () => null,
+      findPreferredSession: async () => null,
+      listSessions: () => [],
+      submitMessage: async (input: unknown) => {
+        calls.push({ kind: 'submitMessage', input });
+        return { mode: 'spawn', task: { prompt: 'task' }, session: { id: 'session-1' }, input: { id: 'input-1' } };
+      },
+      bindAgent: async () => undefined,
+    },
+    trySpawnAgent: (input: unknown) => {
+      calls.push({ kind: 'trySpawnAgent', input });
+      if (refuseNext) { refuseNext = false; return Response.json({ error: 'busy' }, { status: 503 }); }
+      return { id: `agent-${spawns(calls)}` };
+    },
+  });
+  const arrive = (id: string) => handleNtfySurfacePayload({ id, topic, event: 'message', message: `message ${id}` }, context);
+
+  // The subscription and the webhook route both hand over n1.
+  await arrive('n1');
+  await arrive('n1');
+  expect(spawns(calls)).toBe(1);
+
+  // n2's first start finds no free agent; its next arrival starts it, and a third does nothing.
+  refuseNext = true;
+  expect((await arrive('n2')).status).toBe(503);
+  await arrive('n2');
+  await arrive('n2');
+  expect(spawns(calls)).toBe(3);
 });
 
 describe('telephony', () => {

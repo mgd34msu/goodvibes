@@ -18,12 +18,74 @@ export interface ChannelTargetResolutionInput {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+export type ChannelTargetSource = 'explicit' | 'directory' | 'route' | 'normalized' | 'synthetic' | 'miss';
+
+/** A conversation `resolveTarget` found; the routes pass it back to authorization unchanged. */
+export interface ChannelResolvedTargetLike {
+  readonly surface: ChannelSurface;
+  readonly input: string;
+  readonly normalized: string;
+  readonly kind: ChannelConversationKind;
+  readonly to: string;
+  readonly display?: string | undefined;
+  readonly accountId?: string | undefined;
+  readonly workspaceId?: string | undefined;
+  readonly channelId?: string | undefined;
+  readonly groupId?: string | undefined;
+  readonly threadId?: string | undefined;
+  readonly parentId?: string | undefined;
+  readonly sessionId?: string | undefined;
+  readonly sessionTarget?: string | undefined;
+  readonly bindingId?: string | undefined;
+  readonly directoryEntryId?: string | undefined;
+  readonly source: ChannelTargetSource;
+  readonly metadata: Record<string, unknown>;
+}
+
 export interface ChannelAuthorizeActionInput {
   readonly actionId: string;
   readonly actorId?: string | undefined;
   readonly accountId?: string | undefined;
-  readonly target?: unknown | undefined;
+  readonly target?: ChannelResolvedTargetLike | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export type ChannelConversationPolicy = 'allow' | 'deny' | 'inherit';
+
+export interface ChannelGroupPolicyInput {
+  readonly id: string;
+  readonly label?: string;
+  readonly groupId?: string;
+  readonly channelId?: string;
+  readonly workspaceId?: string;
+  readonly requireMention?: boolean;
+  readonly allowGroupMessages?: boolean;
+  readonly allowThreadMessages?: boolean;
+  readonly allowTextCommandsWithoutMention?: boolean;
+  readonly allowlistUserIds?: readonly string[];
+  readonly allowlistChannelIds?: readonly string[];
+  readonly allowlistGroupIds?: readonly string[];
+  readonly allowedCommands?: readonly string[];
+  readonly metadata?: Record<string, unknown>;
+}
+
+/** The fields a policy write may change; each one the route checked. */
+export interface ChannelPolicyPatch {
+  readonly enabled?: boolean;
+  readonly requireMention?: boolean;
+  readonly allowDirectMessages?: boolean;
+  readonly allowGroupMessages?: boolean;
+  readonly allowThreadMessages?: boolean;
+  readonly allowTextCommandsWithoutMention?: boolean;
+  readonly open?: boolean;
+  readonly dmPolicy?: ChannelConversationPolicy;
+  readonly groupPolicy?: ChannelConversationPolicy;
+  readonly allowlistUserIds?: readonly string[];
+  readonly allowlistChannelIds?: readonly string[];
+  readonly allowlistGroupIds?: readonly string[];
+  readonly allowedCommands?: readonly string[];
+  readonly groupPolicies?: readonly ChannelGroupPolicyInput[];
+  readonly metadata?: Record<string, unknown>;
 }
 
 export interface ChannelAllowlistInput {
@@ -63,7 +125,7 @@ export interface ChannelPluginServiceLike {
   runTool(surface: ChannelSurface, toolId: string, input?: JsonRecord): Promise<unknown | null>;
   listOperatorActions(surface?: ChannelSurface): Promise<readonly unknown[]>;
   runOperatorAction(surface: ChannelSurface, actionId: string, input?: JsonRecord): Promise<unknown | null>;
-  resolveTarget(surface: ChannelSurface, input: ChannelTargetResolutionInput): Promise<unknown | null>;
+  resolveTarget(surface: ChannelSurface, input: ChannelTargetResolutionInput): Promise<ChannelResolvedTargetLike | null>;
   authorizeActorAction(surface: ChannelSurface, input: ChannelAuthorizeActionInput): Promise<unknown | null>;
   resolveAllowlist(surface: ChannelSurface, input: ChannelAllowlistInput): Promise<unknown | null>;
   editAllowlist(surface: ChannelSurface, input: ChannelAllowlistInput): Promise<unknown | null>;
@@ -73,7 +135,8 @@ export interface ChannelPluginServiceLike {
 
 export interface ChannelPolicyServiceLike {
   listPolicies(): readonly unknown[];
-  upsertPolicy(surface: ChannelSurface, input: Record<string, unknown>): Promise<unknown>;
+  /** Null when no channel by that name exists; nothing is written then. */
+  upsertPolicy(surface: ChannelSurface, input: ChannelPolicyPatch): Promise<unknown | null>;
   listAudit(limit: number): readonly unknown[];
 }
 

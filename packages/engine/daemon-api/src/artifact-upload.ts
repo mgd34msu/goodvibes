@@ -7,24 +7,54 @@ import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js
 
 export type ArtifactUploadFieldMap = Record<string, unknown>;
 
+/** The kinds an artifact is stored as; a request naming another kind is refused. */
+export const ARTIFACT_KINDS = ['file', 'image', 'audio', 'video', 'document', 'archive', 'data'] as const;
+export type ArtifactKind = typeof ARTIFACT_KINDS[number];
+export type ArtifactAcquisitionMode = 'inline-data' | 'local-path' | 'remote-fetch' | 'unknown';
+export type ArtifactFetchMode = 'not-applicable' | 'public-only' | 'allow-private-hosts' | 'unknown';
+
+export function isArtifactKind(value: string): value is ArtifactKind {
+  return (ARTIFACT_KINDS as readonly string[]).includes(value);
+}
+
+/** One artifact from inline data, text, a local path or a URI. */
+export interface ArtifactCreateRequest {
+  readonly kind?: ArtifactKind | undefined;
+  readonly mimeType?: string | undefined;
+  readonly filename?: string | undefined;
+  readonly dataBase64?: string | undefined;
+  readonly text?: string | undefined;
+  readonly path?: string | undefined;
+  readonly uri?: string | undefined;
+  readonly sourceUri?: string | undefined;
+  readonly retentionMs?: number | undefined;
+  readonly acquisitionMode?: ArtifactAcquisitionMode | undefined;
+  readonly fetchMode?: ArtifactFetchMode | undefined;
+  readonly allowPrivateHosts?: boolean | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface ArtifactStreamCreateRequest {
+  readonly stream:
+    | ReadableStream<Uint8Array>
+    | AsyncIterable<Uint8Array | Buffer | string>
+    | Iterable<Uint8Array | Buffer | string>;
+  readonly kind?: ArtifactKind | undefined;
+  readonly mimeType?: string | undefined;
+  readonly filename?: string | undefined;
+  readonly sourceUri?: string | undefined;
+  readonly sizeBytes?: number | undefined;
+  readonly retentionMs?: number | undefined;
+  readonly acquisitionMode?: ArtifactAcquisitionMode | undefined;
+  readonly fetchMode?: ArtifactFetchMode | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+/** Function-typed properties, so the platform's store is checked against them strictly. */
 export interface ArtifactStoreUploadLike {
-  create(input: Record<string, unknown>): Promise<unknown>;
-  getMaxBytes?(): number;
-  createFromStream?(input: {
-    readonly stream:
-      | ReadableStream<Uint8Array>
-      | AsyncIterable<Uint8Array | Buffer | string>
-      | Iterable<Uint8Array | Buffer | string>;
-    readonly kind?: string | undefined;
-    readonly mimeType?: string | undefined;
-    readonly filename?: string | undefined;
-    readonly sourceUri?: string | undefined;
-    readonly sizeBytes?: number | undefined;
-    readonly retentionMs?: number | undefined;
-    readonly acquisitionMode?: string | undefined;
-    readonly fetchMode?: string | undefined;
-    readonly metadata?: Record<string, unknown> | undefined;
-  }): Promise<unknown>;
+  readonly create: (input: ArtifactCreateRequest) => Promise<unknown>;
+  readonly getMaxBytes?: (() => number) | undefined;
+  readonly createFromStream?: ((input: ArtifactStreamCreateRequest) => Promise<unknown>) | undefined;
 }
 
 export interface ArtifactUploadResult {
@@ -632,15 +662,19 @@ async function createArtifactFromStream(
   if (typeof input.maxBytes === 'number' && typeof input.sizeBytes === 'number' && input.sizeBytes > input.maxBytes) {
     throw artifactSizeError(input.maxBytes);
   }
+  const kind = readStringField(input.fields, 'kind');
+  if (kind !== undefined && !isArtifactKind(kind)) {
+    throw artifactUploadError(`kind must be one of ${ARTIFACT_KINDS.join(', ')}; got "${kind}". Nothing was stored.`, { code: 'INVALID_ARGUMENT' });
+  }
   const base = {
-    ...(readStringField(input.fields, 'kind') ? { kind: readStringField(input.fields, 'kind') } : {}),
+    ...(kind !== undefined ? { kind } : {}),
     ...(input.mimeType ? { mimeType: input.mimeType } : {}),
     ...(input.filename ? { filename: input.filename } : {}),
     ...(readStringField(input.fields, 'sourceUri') ? { sourceUri: readStringField(input.fields, 'sourceUri') } : {}),
     ...(typeof input.sizeBytes === 'number' ? { sizeBytes: input.sizeBytes } : {}),
     ...(typeof readNumberField(input.fields, 'retentionMs') === 'number' ? { retentionMs: readNumberField(input.fields, 'retentionMs') } : {}),
-    acquisitionMode: 'inline-data',
-    fetchMode: 'not-applicable',
+    acquisitionMode: 'inline-data' as const,
+    fetchMode: 'not-applicable' as const,
     metadata: readMetadata(input.fields),
   };
   if (artifactStore.createFromStream) {

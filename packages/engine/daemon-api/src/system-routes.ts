@@ -12,16 +12,22 @@ import { withAdmin } from './auth-helpers.js';
 import { requestActor } from './http-policy.js';
 import type {
   ApprovalRememberTier,
-  AutomationDeliveryGuarantee,
   AutomationRouteBindingKind,
-  AutomationSessionPolicy,
-  AutomationSurfaceKind,
-  AutomationThreadPolicy,
   DaemonSystemRouteContext,
+  RouteBindingSurfaceKind,
   WatcherKind,
+  WatcherSourceKind,
+  WatcherSourceRecord,
 } from './system-route-types.js';
-import { APPROVAL_REMEMBER_TIERS } from './system-route-types.js';
-import type { WatcherRecord, WatcherRegistryLike } from './system-route-types.js';
+import {
+  APPROVAL_REMEMBER_TIERS,
+  AUTOMATION_DELIVERY_GUARANTEES,
+  AUTOMATION_SESSION_POLICIES,
+  AUTOMATION_THREAD_POLICIES,
+  ROUTE_BINDING_KINDS,
+  ROUTE_BINDING_SURFACE_KINDS,
+} from './system-route-types.js';
+import type { WatcherRecord } from './system-route-types.js';
 import { RefusalError } from '@goodvibes-jev/engine/errors';
 
 type ServiceAction = 'install' | 'start' | 'stop' | 'restart' | 'uninstall';
@@ -48,6 +54,24 @@ async function serviceAction(context: DaemonSystemRouteContext, req: Request, ac
 }
 
 const WATCHER_KIND_VALUES: readonly WatcherKind[] = ['filesystem', 'webhook', 'socket', 'integration', 'polling'];
+
+function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
+  return (accepted as readonly string[]).includes(value);
+}
+
+/**
+ * A choice field: a string outside `accepted` is a 400 naming the field and the
+ * accepted values; any other non-string value reads as absent.
+ */
+function readChoice<T extends string>(value: unknown, field: string, accepted: readonly T[]): T | undefined | Response {
+  if (typeof value !== 'string') return undefined;
+  if (isOneOf(accepted, value)) return value;
+  return jsonErrorResponse({
+    error: `${field} must be one of ${accepted.join(', ')}; got "${value}". Nothing was changed.`,
+    code: 'INVALID_ARGUMENT',
+    field,
+  }, { status: 400 });
+}
 const WATCHER_SOURCE_KIND_MAP: Readonly<Record<string, WatcherKind>> = {
   webhook: 'webhook',
   file: 'filesystem',
@@ -65,7 +89,7 @@ const MIN_WATCHER_INTERVAL_MS = 1_000;
 const MAX_WATCHER_INTERVAL_MS = 86_400_000;
 
 interface RouteBindingCreateBody {
-  readonly surfaceKind: AutomationSurfaceKind;
+  readonly surfaceKind: RouteBindingSurfaceKind;
   readonly kind: AutomationRouteBindingKind;
   readonly surfaceId: string;
   readonly externalId: string;
@@ -80,9 +104,13 @@ const systemBodySchemas = createRouteBodySchemaRegistry({
     if (!surfaceKind || !kind || !surfaceId || !externalId) {
       return jsonErrorResponse({ error: 'Missing required route binding fields' }, { status: 400 });
     }
+    const checkedSurface = readChoice(surfaceKind, 'surfaceKind', ROUTE_BINDING_SURFACE_KINDS);
+    if (checkedSurface === undefined || checkedSurface instanceof Response) return checkedSurface ?? jsonErrorResponse({ error: 'Missing surfaceKind' }, { status: 400 });
+    const checkedKind = readChoice(kind, 'kind', ROUTE_BINDING_KINDS);
+    if (checkedKind === undefined || checkedKind instanceof Response) return checkedKind ?? jsonErrorResponse({ error: 'Missing kind' }, { status: 400 });
     return {
-      surfaceKind: surfaceKind as AutomationSurfaceKind,
-      kind: kind as AutomationRouteBindingKind,
+      surfaceKind: checkedSurface,
+      kind: checkedKind,
       surfaceId,
       externalId,
     };
@@ -153,15 +181,21 @@ export function createDaemonSystemRouteHandlers(
       if (body instanceof Response) return body;
       const input = systemBodySchemas.routeBindingCreate.parse(body);
       if (input instanceof Response) return input;
+      const sessionPolicy = readChoice(body.sessionPolicy, 'sessionPolicy', AUTOMATION_SESSION_POLICIES);
+      if (sessionPolicy instanceof Response) return sessionPolicy;
+      const threadPolicy = readChoice(body.threadPolicy, 'threadPolicy', AUTOMATION_THREAD_POLICIES);
+      if (threadPolicy instanceof Response) return threadPolicy;
+      const deliveryGuarantee = readChoice(body.deliveryGuarantee, 'deliveryGuarantee', AUTOMATION_DELIVERY_GUARANTEES);
+      if (deliveryGuarantee instanceof Response) return deliveryGuarantee;
       const binding = await context.routeBindings.upsertBinding({
         id: typeof body.id === 'string' ? body.id : undefined,
         kind: input.kind,
         surfaceKind: input.surfaceKind,
         surfaceId: input.surfaceId,
         externalId: input.externalId,
-        sessionPolicy: typeof body.sessionPolicy === 'string' ? body.sessionPolicy as AutomationSessionPolicy : undefined,
-        threadPolicy: typeof body.threadPolicy === 'string' ? body.threadPolicy as AutomationThreadPolicy : undefined,
-        deliveryGuarantee: typeof body.deliveryGuarantee === 'string' ? body.deliveryGuarantee as AutomationDeliveryGuarantee : undefined,
+        sessionPolicy,
+        threadPolicy,
+        deliveryGuarantee,
         threadId: typeof body.threadId === 'string' ? body.threadId : undefined,
         channelId: typeof body.channelId === 'string' ? body.channelId : undefined,
         sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
@@ -177,10 +211,16 @@ export function createDaemonSystemRouteHandlers(
       if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
+      const sessionPolicy = readChoice(body.sessionPolicy, 'sessionPolicy', AUTOMATION_SESSION_POLICIES);
+      if (sessionPolicy instanceof Response) return sessionPolicy;
+      const threadPolicy = readChoice(body.threadPolicy, 'threadPolicy', AUTOMATION_THREAD_POLICIES);
+      if (threadPolicy instanceof Response) return threadPolicy;
+      const deliveryGuarantee = readChoice(body.deliveryGuarantee, 'deliveryGuarantee', AUTOMATION_DELIVERY_GUARANTEES);
+      if (deliveryGuarantee instanceof Response) return deliveryGuarantee;
       const updated = await context.routeBindings.patchBinding(bindingId, {
-        ...(body.sessionPolicy !== undefined ? { sessionPolicy: typeof body.sessionPolicy === 'string' ? body.sessionPolicy as AutomationSessionPolicy : undefined } : {}),
-        ...(body.threadPolicy !== undefined ? { threadPolicy: typeof body.threadPolicy === 'string' ? body.threadPolicy as AutomationThreadPolicy : undefined } : {}),
-        ...(body.deliveryGuarantee !== undefined ? { deliveryGuarantee: typeof body.deliveryGuarantee === 'string' ? body.deliveryGuarantee as AutomationDeliveryGuarantee : undefined } : {}),
+        ...(body.sessionPolicy !== undefined ? { sessionPolicy } : {}),
+        ...(body.threadPolicy !== undefined ? { threadPolicy } : {}),
+        ...(body.deliveryGuarantee !== undefined ? { deliveryGuarantee } : {}),
         ...(body.threadId !== undefined ? { threadId: typeof body.threadId === 'string' ? body.threadId : undefined } : {}),
         ...(body.channelId !== undefined ? { channelId: typeof body.channelId === 'string' ? body.channelId : undefined } : {}),
         ...(body.sessionId !== undefined ? { sessionId: body.sessionId === null ? null : typeof body.sessionId === 'string' ? body.sessionId : undefined } : {}),
@@ -430,20 +470,13 @@ function refuseRunText(body: Record<string, unknown>): Response | null {
   );
 }
 
-interface WatcherSnapshotSaveFailure {
-  readonly filePath: string;
-  readonly code?: string | undefined;
-  readonly error: string;
-}
-
 /**
  * The watcher answer, saying so when the change holds only until the next
  * restart because the watcher store could not be saved. Hosts that do not
  * expose the save state answer as before.
  */
 function watcherResponse(context: DaemonSystemRouteContext, body: WatcherRecord | Record<string, unknown>, status = 200): Response {
-  const registry = context.watcherRegistry as WatcherRegistryLike & { snapshotSaveFailure?: () => WatcherSnapshotSaveFailure | undefined };
-  const failure = registry.snapshotSaveFailure?.();
+  const failure = context.watcherRegistry.snapshotSaveFailure?.();
   if (failure === undefined) return Response.json(body, { status });
   return Response.json({
     ...body,
@@ -568,9 +601,7 @@ async function handleWorkingDirectoryConfig(
 }
 
 function readWatcherKind(kind: unknown, sourceKind: unknown, fallback: WatcherKind): WatcherKind {
-  if (typeof kind === 'string' && (WATCHER_KIND_VALUES as readonly string[]).includes(kind)) {
-    return kind as WatcherKind;
-  }
+  if (typeof kind === 'string' && isOneOf(WATCHER_KIND_VALUES, kind)) return kind;
   return typeof sourceKind === 'string'
     ? WATCHER_SOURCE_KIND_MAP[sourceKind] ?? fallback
     : fallback;
@@ -594,9 +625,11 @@ async function handleUpdateWatcher(context: DaemonSystemRouteContext, watcherId:
   if (!current) {
     return jsonErrorResponse({ error: 'Unknown watcher' }, { status: 404 });
   }
-  const nextSourceKind = typeof body.sourceKind === 'string'
+  const nextSourceKind: WatcherSourceKind = typeof body.sourceKind === 'string'
     ? WATCHER_SOURCE_RECORD_KIND_MAP[body.sourceKind] ?? 'watcher'
     : current.source.kind;
+  const sourcePatch = readWatcherSourcePatch(body.source);
+  if (sourcePatch instanceof Response) return sourcePatch;
   let updated: WatcherRecord;
   try {
     updated = context.watcherRegistry.registerWatcher({
@@ -605,7 +638,7 @@ async function handleUpdateWatcher(context: DaemonSystemRouteContext, watcherId:
       kind: readWatcherKind(body.kind, undefined, current.kind),
       source: {
         ...current.source,
-        ...(typeof body.source === 'object' && body.source !== null ? body.source as Partial<typeof current.source> : {}),
+        ...sourcePatch,
         kind: nextSourceKind,
         ...(typeof body.sourceId === 'string' && body.sourceId.trim().length > 0 ? { id: body.sourceId.trim() } : {}),
         ...(typeof body.label === 'string' && body.label.trim().length > 0 ? { label: body.label.trim() } : {}),
@@ -629,6 +662,28 @@ async function handleUpdateWatcher(context: DaemonSystemRouteContext, watcherId:
     return watcherRefusal(error);
   }
   return watcherResponse(context, updated);
+}
+
+/**
+ * The source fields a watcher update may set through `source`. Its id, label,
+ * enablement and metadata have their own top-level fields; the store's own
+ * stamps (created, updated, last seen) are never taken from a request.
+ */
+function readWatcherSourcePatch(value: unknown): Partial<Pick<WatcherSourceRecord, 'routeId' | 'surfaceKind'>> | Response {
+  if (value === undefined || value === null) return {};
+  if (!isJsonRecord(value)) return jsonErrorResponse({ error: 'source must be an object.', code: 'INVALID_ARGUMENT', field: 'source' }, { status: 400 });
+  if (value.routeId !== undefined && typeof value.routeId !== 'string') {
+    return jsonErrorResponse({ error: 'source.routeId must be a string.', code: 'INVALID_ARGUMENT', field: 'source.routeId' }, { status: 400 });
+  }
+  const surfaceKind = value.surfaceKind === undefined ? undefined : readChoice(value.surfaceKind, 'source.surfaceKind', ROUTE_BINDING_SURFACE_KINDS);
+  if (surfaceKind instanceof Response) return surfaceKind;
+  if (value.surfaceKind !== undefined && surfaceKind === undefined) {
+    return jsonErrorResponse({ error: `source.surfaceKind must be one of ${ROUTE_BINDING_SURFACE_KINDS.join(', ')}.`, code: 'INVALID_ARGUMENT', field: 'source.surfaceKind' }, { status: 400 });
+  }
+  return {
+    ...(typeof value.routeId === 'string' ? { routeId: value.routeId } : {}),
+    ...(surfaceKind ? { surfaceKind } : {}),
+  };
 }
 
 async function handleWatcherAction(

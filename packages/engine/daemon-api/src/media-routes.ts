@@ -11,19 +11,115 @@ import {
   readStringArrayField,
   type JsonRecord,
 } from './route-helpers.js';
-import type {
-  ArtifactKind,
-  DaemonMediaRouteContext,
-  FetchExtractMode,
-  MediaArtifact,
-  MultimodalAnalysisResult,
-  MultimodalDetail,
-  VoiceAudioArtifact,
-  VoiceSynthesisStreamLike,
-  WebSearchSafeSearch,
-  WebSearchTimeRange,
-  WebSearchVerbosity,
+import {
+  ARTIFACT_KINDS,
+  FETCH_EXTRACT_MODES,
+  MULTIMODAL_DETAILS,
+  WEB_SEARCH_SAFE_SEARCH,
+  WEB_SEARCH_TIME_RANGES,
+  WEB_SEARCH_VERBOSITIES,
+  type DaemonMediaRouteContext,
+  type MediaArtifact,
+  type MultimodalAnalysisResult,
+  type MultimodalArtifactInput,
+  type MultimodalDetail,
+  type VoiceAudioArtifact,
+  type VoiceSynthesisStreamLike,
+  type WebSearchInput,
 } from './media-route-types.js';
+
+function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
+  return (accepted as readonly string[]).includes(value);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A 400 that names the field and what it must be, so a client or agent can repair the request. */
+function invalidField(field: string, expectation: string): Response {
+  return jsonErrorResponse({ error: `${field} must be ${expectation}.`, code: 'INVALID_ARGUMENT', field }, { status: 400 });
+}
+
+/** An optional string field that, when present, is one of `accepted`. */
+function readOptionalChoice<T extends string>(body: JsonRecord, field: string, accepted: readonly T[]): T | undefined | Response {
+  const value = readOptionalStringField(body, field);
+  if (value === undefined) return undefined;
+  return isOneOf(accepted, value) ? value : invalidField(field, `one of ${accepted.join(', ')}`);
+}
+
+const OPTIONAL_ARTIFACT_STRINGS = ['id', 'artifactId', 'dataBase64', 'uri', 'filename', 'sha256'] as const;
+
+/** A media file named in a request body, checked field by field. */
+function readMediaArtifact(value: unknown, field = 'artifact'): MediaArtifact | Response {
+  if (!isPlainRecord(value)) return invalidField(field, 'an object');
+  const mimeType = value.mimeType;
+  if (typeof mimeType !== 'string' || !mimeType.trim()) return invalidField(`${field}.mimeType`, 'a non-empty string');
+  for (const key of OPTIONAL_ARTIFACT_STRINGS) {
+    if (value[key] !== undefined && typeof value[key] !== 'string') return invalidField(`${field}.${key}`, 'a string');
+  }
+  if (value.sizeBytes !== undefined && (typeof value.sizeBytes !== 'number' || !Number.isFinite(value.sizeBytes))) return invalidField(`${field}.sizeBytes`, 'a number');
+  if (value.metadata !== undefined && !isPlainRecord(value.metadata)) return invalidField(`${field}.metadata`, 'an object');
+  return {
+    mimeType,
+    metadata: isPlainRecord(value.metadata) ? value.metadata : {},
+    ...(typeof value.id === 'string' ? { id: value.id } : {}),
+    ...(typeof value.artifactId === 'string' ? { artifactId: value.artifactId } : {}),
+    ...(typeof value.dataBase64 === 'string' ? { dataBase64: value.dataBase64 } : {}),
+    ...(typeof value.uri === 'string' ? { uri: value.uri } : {}),
+    ...(typeof value.filename === 'string' ? { filename: value.filename } : {}),
+    ...(typeof value.sizeBytes === 'number' ? { sizeBytes: value.sizeBytes } : {}),
+    ...(typeof value.sha256 === 'string' ? { sha256: value.sha256 } : {}),
+  };
+}
+
+/** Audio to transcribe; `format` defaults to the MIME subtype (`audio/wav` is `wav`). */
+function readVoiceAudio(value: unknown): VoiceAudioArtifact | Response {
+  if (!isPlainRecord(value)) return jsonErrorResponse({ error: 'Missing audio artifact' }, { status: 400 });
+  const mimeType = value.mimeType;
+  if (typeof mimeType !== 'string' || !mimeType.trim()) return invalidField('audio.mimeType', 'a non-empty string');
+  if (value.format !== undefined && typeof value.format !== 'string') return invalidField('audio.format', 'a string');
+  for (const key of ['dataBase64', 'uri'] as const) {
+    if (value[key] !== undefined && typeof value[key] !== 'string') return invalidField(`audio.${key}`, 'a string');
+  }
+  for (const key of ['sampleRateHz', 'durationMs'] as const) {
+    const entry = value[key];
+    if (entry !== undefined && (typeof entry !== 'number' || !Number.isFinite(entry))) return invalidField(`audio.${key}`, 'a number');
+  }
+  if (value.metadata !== undefined && !isPlainRecord(value.metadata)) return invalidField('audio.metadata', 'an object');
+  const format = typeof value.format === 'string' && value.format.trim()
+    ? value.format.trim()
+    : (mimeType.split(';')[0]?.split('/')[1]?.trim() ?? mimeType);
+  return {
+    mimeType,
+    format,
+    metadata: isPlainRecord(value.metadata) ? value.metadata : {},
+    ...(typeof value.dataBase64 === 'string' ? { dataBase64: value.dataBase64 } : {}),
+    ...(typeof value.uri === 'string' ? { uri: value.uri } : {}),
+    ...(typeof value.sampleRateHz === 'number' ? { sampleRateHz: value.sampleRateHz } : {}),
+    ...(typeof value.durationMs === 'number' ? { durationMs: value.durationMs } : {}),
+  };
+}
+
+/**
+ * The file a multimodal analysis reads when it is not a stored artifact. Only the
+ * fields the service reads are kept: private-host access comes from the daemon's
+ * policy, never from a field on the artifact.
+ */
+function readMultimodalArtifact(value: Record<string, unknown>): MultimodalArtifactInput | Response {
+  for (const key of ['artifactId', 'mimeType', 'dataBase64', 'uri', 'filename'] as const) {
+    if (value[key] !== undefined && typeof value[key] !== 'string') return invalidField(`artifact.${key}`, 'a string');
+  }
+  if (value.metadata !== undefined && !isPlainRecord(value.metadata)) return invalidField('artifact.metadata', 'an object');
+  return {
+    ...(typeof value.artifactId === 'string' ? { artifactId: value.artifactId } : {}),
+    ...(typeof value.mimeType === 'string' ? { mimeType: value.mimeType } : {}),
+    ...(typeof value.dataBase64 === 'string' ? { dataBase64: value.dataBase64 } : {}),
+    ...(typeof value.uri === 'string' ? { uri: value.uri } : {}),
+    ...(typeof value.filename === 'string' ? { filename: value.filename } : {}),
+    ...(isPlainRecord(value.metadata) ? { metadata: value.metadata } : {}),
+  };
+}
 
 function readErrorMessage(error: unknown): string {
   if (typeof error === 'string') return error;
@@ -142,19 +238,7 @@ function readVoiceSynthesisRequest(
   };
 }
 
-type WebSearchBody = {
-  readonly query: string;
-  readonly providerId?: string | undefined;
-  readonly maxResults?: number | undefined;
-  readonly verbosity?: WebSearchVerbosity | undefined;
-  readonly region?: string | undefined;
-  readonly safeSearch?: WebSearchSafeSearch | undefined;
-  readonly timeRange?: WebSearchTimeRange | undefined;
-  readonly includeInstantAnswer?: boolean | undefined;
-  readonly includeEvidence?: boolean | undefined;
-  readonly evidenceTopN?: number | undefined;
-  readonly evidenceExtract?: FetchExtractMode | undefined;
-};
+type WebSearchBody = WebSearchInput;
 
 type MultimodalPacketBody = {
   readonly analysis: MultimodalAnalysisResult;
@@ -167,33 +251,38 @@ const mediaBodySchemas = createRouteBodySchemaRegistry({
     const query = readOptionalStringField(body, 'query');
     if (!query) return jsonErrorResponse({ error: 'Missing query' }, { status: 400 });
     const providerId = readOptionalStringField(body, 'providerId');
-    const verbosity = readOptionalStringField(body, 'verbosity');
+    const verbosity = readOptionalChoice(body, 'verbosity', WEB_SEARCH_VERBOSITIES);
+    if (verbosity instanceof Response) return verbosity;
     const region = readOptionalStringField(body, 'region');
-    const safeSearch = readOptionalStringField(body, 'safeSearch');
-    const timeRange = readOptionalStringField(body, 'timeRange');
-    const evidenceExtract = readOptionalStringField(body, 'evidenceExtract');
+    const safeSearch = readOptionalChoice(body, 'safeSearch', WEB_SEARCH_SAFE_SEARCH);
+    if (safeSearch instanceof Response) return safeSearch;
+    const timeRange = readOptionalChoice(body, 'timeRange', WEB_SEARCH_TIME_RANGES);
+    if (timeRange instanceof Response) return timeRange;
+    const evidenceExtract = readOptionalChoice(body, 'evidenceExtract', FETCH_EXTRACT_MODES);
+    if (evidenceExtract instanceof Response) return evidenceExtract;
     return {
       query,
       ...(providerId ? { providerId } : {}),
       ...(Object.hasOwn(body, 'maxResults') ? { maxResults: readBoundedBodyInteger(body.maxResults, 5, 50) } : {}),
-      ...(verbosity ? { verbosity: verbosity as WebSearchVerbosity } : {}),
+      ...(verbosity ? { verbosity } : {}),
       ...(region ? { region } : {}),
-      ...(safeSearch ? { safeSearch: safeSearch as WebSearchSafeSearch } : {}),
-      ...(timeRange ? { timeRange: timeRange as WebSearchTimeRange } : {}),
+      ...(safeSearch ? { safeSearch } : {}),
+      ...(timeRange ? { timeRange } : {}),
       ...(typeof body.includeInstantAnswer === 'boolean' ? { includeInstantAnswer: body.includeInstantAnswer } : {}),
       ...(typeof body.includeEvidence === 'boolean' ? { includeEvidence: body.includeEvidence } : {}),
       ...(Object.hasOwn(body, 'evidenceTopN') ? { evidenceTopN: readBoundedBodyInteger(body.evidenceTopN, 3, 20) } : {}),
-      ...(evidenceExtract ? { evidenceExtract: evidenceExtract as FetchExtractMode } : {}),
+      ...(evidenceExtract ? { evidenceExtract } : {}),
     };
   }),
   multimodalPacket: createRouteBodySchema<MultimodalPacketBody>('POST /api/multimodal/packet', (body) => {
     if (typeof body.analysis !== 'object' || body.analysis === null) {
       return jsonErrorResponse({ error: 'Missing analysis payload' }, { status: 400 });
     }
-    const detail = readOptionalStringField(body, 'detail');
+    const detail = readOptionalChoice(body, 'detail', MULTIMODAL_DETAILS);
+    if (detail instanceof Response) return detail;
     return {
-      analysis: body.analysis as MultimodalAnalysisResult,
-      detail: (detail as MultimodalDetail | undefined) ?? 'standard',
+      analysis: body.analysis,
+      detail: detail ?? 'standard',
       ...(Object.hasOwn(body, 'budgetLimit') ? { budgetLimit: readBoundedBodyInteger(body.budgetLimit, 8, 100) } : {}),
     };
   }),
@@ -285,14 +374,13 @@ async function handleVoiceStt(context: DaemonMediaRouteContext, req: Request): P
   if (admin) return admin;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
-  if (typeof body.audio !== 'object' || body.audio === null) {
-    return jsonErrorResponse({ error: 'Missing audio artifact' }, { status: 400 });
-  }
+  const audio = readVoiceAudio(body.audio);
+  if (audio instanceof Response) return audio;
   try {
     const result = await context.voiceService.transcribe(
       typeof body.providerId === 'string' ? body.providerId : undefined,
       {
-        audio: body.audio as VoiceAudioArtifact,
+        audio,
         language: typeof body.language === 'string' ? body.language : undefined,
         modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
         prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
@@ -349,7 +437,9 @@ async function handleMediaAnalyze(context: DaemonMediaRouteContext, req: Request
   if (!provider?.analyze) return jsonErrorResponse({ error: 'No media analysis provider is registered' }, { status: 404 });
   let artifact: MediaArtifact | null = null;
   if (typeof body.artifact === 'object' && body.artifact !== null) {
-    artifact = body.artifact as MediaArtifact;
+    const named = readMediaArtifact(body.artifact);
+    if (named instanceof Response) return named;
+    artifact = named;
   } else if (typeof body.artifactId === 'string' && body.artifactId.trim().length > 0) {
     const artifactId = body.artifactId.trim();
     // A provider may branch on the type, so it gets the stored record's own, not a generic one.
@@ -397,9 +487,11 @@ async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Reque
   if (typeof body.dataBase64 !== 'string' && typeof body.text !== 'string' && typeof body.path !== 'string' && typeof body.uri !== 'string') {
     return jsonErrorResponse({ error: 'Artifact input requires dataBase64, text, path, or uri.', code: 'INVALID_REQUEST' }, { status: 400 });
   }
+  const kind = readOptionalChoice(body, 'kind', ARTIFACT_KINDS);
+  if (kind instanceof Response) return kind;
   try {
     const artifact = await context.artifactStore.create({
-      ...(typeof body.kind === 'string' ? { kind: body.kind as ArtifactKind } : {}),
+      ...(kind ? { kind } : {}),
       ...(typeof body.mimeType === 'string' ? { mimeType: body.mimeType } : {}),
       ...(typeof body.filename === 'string' ? { filename: body.filename } : {}),
       ...(typeof body.dataBase64 === 'string' ? { dataBase64: body.dataBase64 } : {}),
@@ -478,11 +570,13 @@ async function handleMediaTransform(context: DaemonMediaRouteContext, req: Reque
   if (typeof body.artifact !== 'object' || body.artifact === null) {
     return jsonErrorResponse({ error: 'Missing media artifact' }, { status: 400 });
   }
+  const artifact = readMediaArtifact(body.artifact);
+  if (artifact instanceof Response) return artifact;
   const operation = typeof body.operation === 'string' ? body.operation : '';
   if (!operation) return jsonErrorResponse({ error: 'Missing media transform operation' }, { status: 400 });
   try {
     return Response.json(await provider.transform({
-      artifact: body.artifact as MediaArtifact,
+      artifact,
       operation,
       outputMimeType: typeof body.outputMimeType === 'string' ? body.outputMimeType : undefined,
       options: typeof body.options === 'object' && body.options !== null ? body.options as Record<string, unknown> : {},
@@ -539,9 +633,7 @@ async function handleMultimodalAnalyze(context: DaemonMediaRouteContext, req: Re
   if (admin) return admin;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
-  const requestedArtifact = typeof body.artifact === 'object' && body.artifact !== null
-    ? body.artifact as Record<string, unknown>
-    : null;
+  const requestedArtifact = isPlainRecord(body.artifact) ? body.artifact : null;
   const privateHostFetchOptions = resolvePrivateHostFetchOptions(
     body.allowPrivateHosts === true || requestedArtifact?.allowPrivateHosts === true,
     {
@@ -557,9 +649,10 @@ async function handleMultimodalAnalyze(context: DaemonMediaRouteContext, req: Re
   // The private-host flags come from the gate above and nowhere else; a caller-supplied
   // `fetchMode` or `allowPrivateHosts` on the artifact would otherwise reach the artifact
   // store and skip the config policy.
-  const artifactFields = requestedArtifact
-    ? Object.fromEntries(Object.entries(requestedArtifact).filter(([key]) => key !== 'fetchMode' && key !== 'allowPrivateHosts'))
-    : null;
+  const artifactFields = requestedArtifact ? readMultimodalArtifact(requestedArtifact) : null;
+  if (artifactFields instanceof Response) return artifactFields;
+  const detail = readOptionalChoice(body, 'detail', MULTIMODAL_DETAILS);
+  if (detail instanceof Response) return detail;
   let analysis: MultimodalAnalysisResult;
   try {
     analysis = await context.multimodalService.analyze({
@@ -575,7 +668,7 @@ async function handleMultimodalAnalyze(context: DaemonMediaRouteContext, req: Re
       ...(typeof body.audioProviderId === 'string' ? { audioProviderId: body.audioProviderId } : {}),
       ...(typeof body.modelId === 'string' ? { modelId: body.modelId } : {}),
       ...(typeof body.language === 'string' ? { language: body.language } : {}),
-      ...(typeof body.detail === 'string' ? { detail: body.detail as MultimodalDetail } : {}),
+      ...(detail ? { detail } : {}),
       ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
     }, { signal: req.signal });
   } catch (error) {
@@ -589,10 +682,7 @@ async function handleMultimodalAnalyze(context: DaemonMediaRouteContext, req: Re
   let packet: unknown;
   if (includePacket) {
     try {
-      packet = context.multimodalService.buildPacket(
-        analysis,
-        typeof body.detail === 'string' ? body.detail as MultimodalDetail : 'standard',
-      );
+      packet = context.multimodalService.buildPacket(analysis, detail ?? 'standard');
     } catch (error) {
       return readServiceErrorResponse(error, { fallbackStatus: 400 });
     }
@@ -651,7 +741,7 @@ async function handleMultimodalWriteback(context: DaemonMediaRouteContext, req: 
   const tags = readStringArrayField(body, 'tags', MAX_MEDIA_WRITEBACK_TAGS);
   try {
     const writeback = await context.multimodalService.writeBackAnalysis(
-      body.analysis as MultimodalAnalysisResult,
+      body.analysis,
       {
         ...(typeof body.sessionId === 'string' ? { sessionId: body.sessionId } : {}),
         ...(typeof body.title === 'string' ? { title: body.title } : {}),

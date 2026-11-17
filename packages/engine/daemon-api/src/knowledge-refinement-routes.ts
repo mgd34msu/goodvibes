@@ -1,6 +1,6 @@
 import type { DaemonKnowledgeRefinementRouteHandlers } from './context.js';
 import { jsonErrorResponse } from './error-response.js';
-import type { DaemonKnowledgeRouteContext } from './knowledge-route-types.js';
+import type { DaemonKnowledgeRouteContext, KnowledgeRefinementTaskFilter } from './knowledge-route-types.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -41,7 +41,7 @@ function readLimit(url: URL, fallback: number): number {
   return readBoundedPositiveInteger(url.searchParams.get('limit'), fallback, 1_000);
 }
 
-function readRefinementTaskFilter(url: URL): Record<string, unknown> {
+function readRefinementTaskFilter(url: URL): KnowledgeRefinementTaskFilter {
   return {
     ...(url.searchParams.get('spaceId') ? { spaceId: url.searchParams.get('spaceId')! } : {}),
     ...(url.searchParams.get('knowledgeSpaceId') ? { spaceId: url.searchParams.get('knowledgeSpaceId')! } : {}),

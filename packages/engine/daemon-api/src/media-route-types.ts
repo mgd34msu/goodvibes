@@ -1,11 +1,47 @@
 import type { JsonRecord } from './route-helpers.js';
+import type { ArtifactStoreUploadLike } from './artifact-upload.js';
 
-export type ArtifactKind = string;
-export type FetchExtractMode = string;
-export type MediaArtifact = Record<string, unknown>;
+export { ARTIFACT_KINDS, type ArtifactKind } from './artifact-upload.js';
+export const FETCH_EXTRACT_MODES = [
+  'raw', 'text', 'json', 'markdown', 'readable', 'code_blocks', 'links', 'metadata', 'structured', 'tables', 'pdf', 'summary',
+] as const;
+export type FetchExtractMode = typeof FETCH_EXTRACT_MODES[number];
+export const MULTIMODAL_DETAILS = ['compact', 'standard', 'detailed'] as const;
+export type MultimodalDetail = typeof MULTIMODAL_DETAILS[number];
+export const WEB_SEARCH_VERBOSITIES = ['urls_only', 'titles', 'snippets', 'evidence', 'full'] as const;
+export type WebSearchVerbosity = typeof WEB_SEARCH_VERBOSITIES[number];
+export const WEB_SEARCH_SAFE_SEARCH = ['strict', 'moderate', 'off'] as const;
+export type WebSearchSafeSearch = typeof WEB_SEARCH_SAFE_SEARCH[number];
+export const WEB_SEARCH_TIME_RANGES = ['any', 'day', 'week', 'month', 'year'] as const;
+export type WebSearchTimeRange = typeof WEB_SEARCH_TIME_RANGES[number];
+
+/** An analysis as the daemon returned it; the service re-reads it and refuses one it did not produce. */
 export type MultimodalAnalysisResult = unknown;
-export type MultimodalDetail = string;
-export type VoiceAudioArtifact = Record<string, unknown>;
+
+/** A media file a provider reads: inline bytes, a URI, or a stored artifact's id. */
+export interface MediaArtifact {
+  readonly id?: string | undefined;
+  readonly artifactId?: string | undefined;
+  readonly mimeType: string;
+  readonly dataBase64?: string | undefined;
+  readonly uri?: string | undefined;
+  readonly filename?: string | undefined;
+  readonly sizeBytes?: number | undefined;
+  readonly sha256?: string | undefined;
+  readonly metadata: Record<string, unknown>;
+}
+
+/** Audio a transcription reads: inline base64 or a URI. */
+export interface VoiceAudioArtifact {
+  readonly mimeType: string;
+  readonly format: string;
+  readonly dataBase64?: string | undefined;
+  readonly uri?: string | undefined;
+  readonly sampleRateHz?: number | undefined;
+  readonly durationMs?: number | undefined;
+  readonly metadata: Record<string, unknown>;
+}
+
 export interface VoiceSynthesisStreamLike {
   readonly providerId: string;
   readonly mimeType: string;
@@ -13,67 +49,161 @@ export interface VoiceSynthesisStreamLike {
   readonly chunks: AsyncIterable<{ readonly data: Uint8Array }>;
   readonly metadata: Record<string, unknown>;
 }
-export type WebSearchSafeSearch = string;
-export type WebSearchTimeRange = string;
-export type WebSearchVerbosity = string;
 
 export interface ConfigManagerLike {
   get(key: string): unknown;
 }
 
+export interface VoiceSynthesisInput {
+  readonly text: string;
+  readonly voiceId?: string | undefined;
+  readonly modelId?: string | undefined;
+  readonly format?: string | undefined;
+  readonly speed?: number | undefined;
+  readonly signal?: AbortSignal | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface VoiceTranscriptionInput {
+  readonly audio: VoiceAudioArtifact;
+  readonly language?: string | undefined;
+  readonly modelId?: string | undefined;
+  readonly prompt?: string | undefined;
+  readonly signal?: AbortSignal | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface VoiceRealtimeSessionInput {
+  readonly modelId?: string | undefined;
+  readonly voiceId?: string | undefined;
+  readonly inputFormat?: string | undefined;
+  readonly outputFormat?: string | undefined;
+  readonly instructions?: string | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+/**
+ * The service members are function-typed properties, so the platform's
+ * services are checked against them strictly where the router passes them in.
+ */
 export interface VoiceServiceLike {
-  getStatus(enabled: boolean): Promise<{ providers: readonly unknown[] }>;
-  listVoices(providerId?: string): Promise<readonly unknown[]>;
-  synthesize(providerId: string | undefined, input: Record<string, unknown>): Promise<unknown>;
-  synthesizeStream(providerId: string | undefined, input: Record<string, unknown>): Promise<VoiceSynthesisStreamLike>;
-  transcribe(providerId: string | undefined, input: Record<string, unknown>): Promise<unknown>;
-  openRealtimeSession(providerId: string | undefined, input: Record<string, unknown>): Promise<unknown>;
+  readonly getStatus: (enabled: boolean) => Promise<{ readonly providers: readonly unknown[] }>;
+  readonly listVoices: (providerId?: string) => Promise<readonly unknown[]>;
+  readonly synthesize: (providerId: string | undefined, input: VoiceSynthesisInput) => Promise<unknown>;
+  readonly synthesizeStream: (providerId: string | undefined, input: VoiceSynthesisInput) => Promise<VoiceSynthesisStreamLike>;
+  readonly transcribe: (providerId: string | undefined, input: VoiceTranscriptionInput) => Promise<unknown>;
+  readonly openRealtimeSession: (providerId: string | undefined, input: VoiceRealtimeSessionInput) => Promise<unknown>;
+}
+
+export interface WebSearchInput {
+  readonly query: string;
+  readonly providerId?: string | undefined;
+  readonly maxResults?: number | undefined;
+  readonly verbosity?: WebSearchVerbosity | undefined;
+  readonly region?: string | undefined;
+  readonly safeSearch?: WebSearchSafeSearch | undefined;
+  readonly timeRange?: WebSearchTimeRange | undefined;
+  readonly includeInstantAnswer?: boolean | undefined;
+  readonly includeEvidence?: boolean | undefined;
+  readonly evidenceTopN?: number | undefined;
+  readonly evidenceExtract?: FetchExtractMode | undefined;
 }
 
 export interface WebSearchServiceLike {
-  getStatus(): Promise<{ providers: readonly unknown[] }>;
-  search(input: Record<string, unknown>): Promise<unknown>;
+  readonly getStatus: () => Promise<{ readonly providers: readonly unknown[] }>;
+  readonly search: (input: WebSearchInput) => Promise<unknown>;
 }
 
-export interface ArtifactStoreLike {
-  list(): readonly unknown[];
-  create(input: Record<string, unknown>): Promise<unknown>;
-  get(artifactId: string): unknown | null;
-  readContent(artifactId: string): Promise<{
+export interface ArtifactStoreLike extends ArtifactStoreUploadLike {
+  readonly list: () => readonly unknown[];
+  readonly get: (artifactId: string) => unknown | null;
+  readonly readContent: (artifactId: string) => Promise<{
     // `| undefined` is required: the real ArtifactRecord declares
     // `filename?: string | undefined`, and under exactOptionalPropertyTypes
-    // `filename?: string` is a DIFFERENT type, an ArtifactStore could not
-    // satisfy this interface as written. Surfaced by typechecking test/ for the
-    // first time; a test rig had to adapt around it.
+    // `filename?: string` is a DIFFERENT type.
     readonly record: { readonly mimeType: string; readonly filename?: string | undefined };
     readonly buffer: ArrayBuffer | Uint8Array;
   }>;
 }
 
+export interface MediaAnalysisInput {
+  readonly artifact: MediaArtifact;
+  readonly prompt?: string | undefined;
+  readonly modelId?: string | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface MediaTransformInput {
+  readonly artifact: MediaArtifact;
+  readonly operation: string;
+  readonly outputMimeType?: string | undefined;
+  readonly options?: Record<string, unknown> | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface MediaGenerationInput {
+  readonly prompt: string;
+  readonly outputMimeType?: string | undefined;
+  readonly modelId?: string | undefined;
+  readonly options?: Record<string, unknown> | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
 export interface MediaProviderLike {
-  analyze?(input: Record<string, unknown>): Promise<unknown>;
-  transform?(input: Record<string, unknown>): Promise<unknown>;
-  generate?(input: Record<string, unknown>): Promise<unknown>;
+  readonly analyze?: ((input: MediaAnalysisInput) => Promise<unknown>) | undefined;
+  readonly transform?: ((input: MediaTransformInput) => Promise<unknown>) | undefined;
+  readonly generate?: ((input: MediaGenerationInput) => Promise<unknown>) | undefined;
 }
 
 export interface MediaProviderRegistryLike {
-  status(): Promise<unknown>;
-  findProvider(
+  readonly status: () => Promise<unknown>;
+  readonly findProvider: (
     capability: 'understand' | 'transform' | 'generate',
     providerId?: string,
-  ): MediaProviderLike | null;
+  ) => MediaProviderLike | null;
+}
+
+/** A file to analyse when it is not a stored artifact; private hosts come only from the daemon's policy. */
+export interface MultimodalArtifactInput {
+  readonly artifactId?: string | undefined;
+  readonly mimeType?: string | undefined;
+  readonly dataBase64?: string | undefined;
+  readonly uri?: string | undefined;
+  readonly allowPrivateHosts?: boolean | undefined;
+  readonly filename?: string | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface MultimodalAnalysisInput {
+  readonly artifactId?: string | undefined;
+  readonly artifact?: MultimodalArtifactInput | undefined;
+  readonly prompt?: string | undefined;
+  readonly imageProviderId?: string | undefined;
+  readonly audioProviderId?: string | undefined;
+  readonly modelId?: string | undefined;
+  readonly language?: string | undefined;
+  readonly detail?: MultimodalDetail | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+}
+
+export interface MultimodalWritebackInput {
+  readonly sessionId?: string | undefined;
+  readonly title?: string | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly folderPath?: string | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
 }
 
 export interface MultimodalServiceLike {
-  getStatus(): Promise<unknown>;
-  listProviders(): Promise<readonly unknown[]>;
-  analyze(input: Record<string, unknown>, options?: { readonly signal?: AbortSignal | undefined }): Promise<MultimodalAnalysisResult>;
-  buildPacket(
+  readonly getStatus: () => Promise<unknown>;
+  readonly listProviders: () => Promise<readonly unknown[]>;
+  readonly analyze: (input: MultimodalAnalysisInput, options?: { readonly signal?: AbortSignal | undefined }) => Promise<MultimodalAnalysisResult>;
+  readonly buildPacket: (analysis: MultimodalAnalysisResult, detail: MultimodalDetail, budgetLimit?: number) => unknown;
+  readonly writeBackAnalysis: (
     analysis: MultimodalAnalysisResult,
-    detail: MultimodalDetail,
-    budgetLimit?: number,
-  ): unknown;
-  writeBackAnalysis(analysis: MultimodalAnalysisResult, input: Record<string, unknown>, options?: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined }): Promise<unknown>;
+    input: MultimodalWritebackInput,
+    options?: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined },
+  ) => Promise<unknown>;
 }
 
 export interface DaemonMediaRouteContext {

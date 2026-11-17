@@ -153,7 +153,8 @@ export class MultimodalService {
   }
 
   /** The held analysis a caller's copy names, refused with the reason and next step when it is gone or was changed. */
-  private held(result: MultimodalAnalysisResult): HeldAnalysis {
+  /** The analysis this daemon returned and still holds, found by the id in a submitted copy; the copy must match it. */
+  private held(result: unknown): HeldAnalysis {
     const snapshot = captureOwnedJson(result) as MultimodalAnalysisResult;
     const id = typeof snapshot?.id === 'string' ? snapshot.id : undefined;
     const held = id === undefined ? undefined : this.analyses.get(id);
@@ -298,7 +299,7 @@ export class MultimodalService {
    * from before a restart. What does not fit is cut or left out, and the last
    * line says so.
    */
-  buildPacket(result: MultimodalAnalysisResult, detail: MultimodalDetail = 'standard', budgetLimit = PACKET_BUDGETS[detail]): MultimodalPacket {
+  buildPacket(result: unknown, detail: MultimodalDetail = 'standard', budgetLimit = PACKET_BUDGETS[detail]): MultimodalPacket {
     const value = captureOwnedJson(result) as Partial<MultimodalAnalysisResult> | null;
     const metadata = value?.metadata && typeof value.metadata === 'object' ? value.metadata : {};
     const summary = typeof value?.summary === 'string' ? value.summary : undefined;
@@ -345,7 +346,7 @@ export class MultimodalService {
   }
 
   async writeBackAnalysis(
-    result: MultimodalAnalysisResult,
+    submitted: unknown,
     input: {
       readonly sessionId?: string | undefined;
       readonly title?: string | undefined;
@@ -355,7 +356,7 @@ export class MultimodalService {
     } = {},
     options: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined } = {},
   ): Promise<MultimodalWritebackResult> {
-    const held = this.held(result), signal = options.signal, assertOwner = options.assertCurrent?.bind(options);
+    const held = this.held(submitted), signal = options.signal, assertOwner = options.assertCurrent?.bind(options);
     const owned = { assertCurrent: () => {
       signal?.throwIfAborted();
       assertSynchronousJudgmentGuard(assertOwner, () => new TypeError('Multimodal write owner must complete synchronously and return no value.'));
@@ -363,7 +364,7 @@ export class MultimodalService {
     } };
     input = captureOwnedJson(input) as typeof input;
     owned.assertCurrent();
-    result = await this.entitiesFor(held, signal);
+    const result = await this.entitiesFor(held, signal);
     owned.assertCurrent();
     const created = await this.artifactStore.createForPublication({
       kind: 'document',

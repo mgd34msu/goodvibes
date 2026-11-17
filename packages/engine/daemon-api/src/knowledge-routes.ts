@@ -16,16 +16,24 @@ import {
 } from './route-helpers.js';
 import { createDaemonKnowledgeRefinementRouteHandlers } from './knowledge-refinement-routes.js';
 import {
+  KNOWLEDGE_BROWSER_KINDS,
   KNOWLEDGE_CANDIDATE_STATUSES,
+  KNOWLEDGE_PACKET_DETAILS,
+  KNOWLEDGE_REVIEW_ACTIONS,
   KNOWLEDGE_SOURCE_TYPES,
+  KNOWLEDGE_SUBJECT_KINDS,
   KNOWLEDGE_USAGE_KINDS,
   type AutomationScheduleDefinition,
   type DaemonKnowledgeRouteContext,
-  type KnowledgeCandidateStatus,
+  type KnowledgeAskRequest,
+  type KnowledgeBrowserKind,
+  type KnowledgeBrowserSourceKind,
+  type KnowledgeMapQuery,
   type KnowledgePacketDetail,
-  type KnowledgeProjectionTargetKind,
+  type KnowledgeProjectionRequest,
   type KnowledgeSourceType,
-  type KnowledgeUsageKind,
+  type KnowledgeSpaceScope,
+  type KnowledgeSubjectKind,
   type KnowledgeScopeReadOptions,
 } from './knowledge-route-types.js';
 
@@ -36,18 +44,7 @@ type KnowledgeSearchBody = {
   readonly includeAllSpaces?: boolean | undefined;
 };
 
-type KnowledgeAskBody = {
-  readonly query: string;
-  readonly knowledgeSpaceId?: string | undefined;
-  readonly limit?: number | undefined;
-  readonly mode?: 'concise' | 'standard' | 'detailed' | undefined;
-  readonly includeSources?: boolean | undefined;
-  readonly includeConfidence?: boolean | undefined;
-  readonly includeLinkedObjects?: boolean | undefined;
-  readonly candidateSourceIds?: string[] | undefined;
-  readonly candidateNodeIds?: string[] | undefined;
-  readonly strictCandidates?: boolean | undefined;
-};
+type KnowledgeAskBody = KnowledgeAskRequest;
 
 type KnowledgePacketBody = {
   readonly task: string;
@@ -99,13 +96,17 @@ export function createDaemonKnowledgeRouteHandlers(
     getKnowledgeProjectionTargets: (url, request) => readScopedKnowledgeResponse(context, request, async options => Response.json({
       targets: await context.knowledgeService.listProjectionTargets(readLimit(url, 25), readKnowledgeSpaceQuery(url), options),
     })),
-    getKnowledgeMap: (url, request) => readScopedKnowledgeResponse(context, request, async options => Response.json(await context.knowledgeService.map({
-      limit: readLimit(url, 500),
-      includeSources: readBooleanQuery(url, 'includeSources'),
-      includeIssues: readBooleanQuery(url, 'includeIssues'),
-      includeGenerated: readBooleanQuery(url, 'includeGenerated'),
-      ...readKnowledgeMapFilters(url),
-    }, options))),
+    getKnowledgeMap: (url, request) => {
+      const filters = readKnowledgeMapFilters(url);
+      if (filters instanceof Response) return filters;
+      return readScopedKnowledgeResponse(context, request, async options => Response.json(await context.knowledgeService.map({
+        limit: readLimit(url, 500),
+        includeSources: readBooleanQuery(url, 'includeSources'),
+        includeIssues: readBooleanQuery(url, 'includeIssues'),
+        includeGenerated: readBooleanQuery(url, 'includeGenerated'),
+        ...filters,
+      }, options)));
+    },
     getKnowledgeGraphqlSchema: () => Response.json({
       language: 'graphql',
       domain: 'knowledge',
@@ -130,9 +131,9 @@ export function createDaemonKnowledgeRouteHandlers(
       if (usageKind instanceof Response) return usageKind;
       return Response.json({
         usage: context.knowledgeService.listUsageRecords(readLimit(url, 100), {
-          ...(targetKind ? { targetKind: targetKind as 'source' | 'node' | 'issue' } : {}),
+          ...(targetKind ? { targetKind } : {}),
           ...(targetId ? { targetId } : {}),
-          ...(usageKind ? { usageKind: usageKind as KnowledgeUsageKind } : {}),
+          ...(usageKind ? { usageKind } : {}),
         }),
       });
     },
@@ -144,8 +145,8 @@ export function createDaemonKnowledgeRouteHandlers(
       const subjectId = url.searchParams.get('subjectId') ?? undefined;
       return Response.json({
         candidates: context.knowledgeService.listConsolidationCandidates(readLimit(url, 100), {
-          ...(status ? { status: status as KnowledgeCandidateStatus } : {}),
-          ...(subjectKind ? { subjectKind: subjectKind as 'source' | 'node' | 'issue' } : {}),
+          ...(status ? { status } : {}),
+          ...(subjectKind ? { subjectKind } : {}),
           ...(subjectId ? { subjectId } : {}),
         }),
       });
@@ -344,20 +345,29 @@ function readBooleanQuery(url: URL, key: string): boolean | undefined {
   return raw === '1' || raw.toLowerCase() === 'true' || raw.toLowerCase() === 'yes';
 }
 
-function readKnowledgeSpaceQuery(url: URL): JsonRecord {
+function readKnowledgeSpaceQuery(url: URL): KnowledgeSpaceScope {
   return {
     ...(url.searchParams.get('knowledgeSpaceId') ? { knowledgeSpaceId: url.searchParams.get('knowledgeSpaceId')! } : {}),
     ...(readBooleanQuery(url, 'includeAllSpaces') === true ? { includeAllSpaces: true } : {}),
   };
 }
 
-function readKnowledgeMapFilters(url: URL): JsonRecord {
+/** The map's query filters; a record kind outside source, node and issue is a 400, not a filter that matches nothing. */
+function readKnowledgeMapFilters(url: URL): Omit<KnowledgeMapQuery, 'limit' | 'includeSources' | 'includeIssues' | 'includeGenerated'> | Response {
   const minConfidence = readOptionalBoundedInteger(url.searchParams.get('minConfidence'), 0, 100);
+  const requestedKinds = readStringList(url, 'recordKinds', 'recordKind');
+  const unknownKind = requestedKinds.find((kind) => !isOneOf(KNOWLEDGE_SUBJECT_KINDS, kind));
+  if (unknownKind !== undefined) {
+    return jsonErrorResponse({
+      error: `recordKinds must be among ${KNOWLEDGE_SUBJECT_KINDS.join(', ')}; got "${unknownKind}". No map was built.`,
+      code: 'INVALID_ARGUMENT',
+    }, { status: 400 });
+  }
   return {
     ...readKnowledgeSpaceQuery(url),
     ...(url.searchParams.get('query') ? { query: url.searchParams.get('query')! } : {}),
-    ...(Number.isFinite(minConfidence) ? { minConfidence } : {}),
-    recordKinds: readStringList(url, 'recordKinds', 'recordKind'),
+    ...(minConfidence !== undefined && Number.isFinite(minConfidence) ? { minConfidence } : {}),
+    recordKinds: requestedKinds.filter((kind): kind is KnowledgeSubjectKind => isOneOf(KNOWLEDGE_SUBJECT_KINDS, kind)),
     ids: readStringList(url, 'ids', 'id'),
     linkedToIds: readStringList(url, 'linkedToIds', 'linkedToId'),
     nodeKinds: readStringList(url, 'nodeKinds', 'nodeKind'),
@@ -416,6 +426,7 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
     const task = readOptionalStringField(body, 'task');
     if (!task) return jsonErrorResponse({ error: 'Missing task' }, { status: 400 });
     const detail = readKnowledgePacketDetail(body.detail);
+    if (detail instanceof Response) return detail;
     const budgetLimit = Object.hasOwn(body, 'budgetLimit')
       ? readBoundedBodyInteger(body.budgetLimit, 6, 100)
       : undefined;
@@ -441,7 +452,9 @@ const knowledgeBodySchemas = createRouteBodySchemaRegistry({
   }),
 });
 
-const KNOWLEDGE_SUBJECT_KINDS: readonly string[] = ['source', 'node', 'issue'];
+function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
+  return (accepted as readonly string[]).includes(value);
+}
 
 /**
  * A query filter checked against its accepted values. An empty value is absent;
@@ -449,10 +462,10 @@ const KNOWLEDGE_SUBJECT_KINDS: readonly string[] = ['source', 'node', 'issue'];
  * dropped filter returns every record and a passed-through typo returns none,
  * and either reads as a true answer to the question asked.
  */
-function readKnowledgeFilter(url: URL, name: string, accepted: readonly string[]): string | undefined | Response {
+function readKnowledgeFilter<T extends string>(url: URL, name: string, accepted: readonly T[]): T | undefined | Response {
   const value = url.searchParams.get(name);
   if (value === null || value === '') return undefined;
-  if (accepted.includes(value)) return value;
+  if (isOneOf(accepted, value)) return value;
   return jsonErrorResponse({
     error: `${name} must be one of ${accepted.join(', ')}; got "${value}". No filter was applied.`,
     code: 'INVALID_ARGUMENT',
@@ -466,8 +479,8 @@ function readKnowledgeFilter(url: URL, name: string, accepted: readonly string[]
  */
 function readKnowledgeSourceType(value: unknown): { sourceType?: KnowledgeSourceType } | Response {
   if (value === undefined || value === null || value === '') return {};
-  if (typeof value === 'string' && (KNOWLEDGE_SOURCE_TYPES as readonly string[]).includes(value)) {
-    return { sourceType: value as KnowledgeSourceType };
+  if (typeof value === 'string' && isOneOf(KNOWLEDGE_SOURCE_TYPES, value)) {
+    return { sourceType: value };
   }
   return jsonErrorResponse({
     error: `sourceType must be one of ${KNOWLEDGE_SOURCE_TYPES.join(', ')}; got ${JSON.stringify(value)}. Nothing was ingested.`,
@@ -479,8 +492,15 @@ function readKnowledgeAnswerMode(value: unknown): 'concise' | 'standard' | 'deta
   return value === 'concise' || value === 'standard' || value === 'detailed' ? value : undefined;
 }
 
-function readKnowledgePacketDetail(value: unknown): KnowledgePacketDetail | undefined {
-  return typeof value === 'string' ? value.toLowerCase() as KnowledgePacketDetail : undefined;
+/** A packet's `detail`: absent stays absent (the service default); a value outside the list is a 400. */
+function readKnowledgePacketDetail(value: unknown): KnowledgePacketDetail | undefined | Response {
+  if (value === undefined || value === null || value === '') return undefined;
+  const detail = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (isOneOf(KNOWLEDGE_PACKET_DETAILS, detail)) return detail;
+  return jsonErrorResponse({
+    error: `detail must be one of ${KNOWLEDGE_PACKET_DETAILS.join(', ')}; got ${JSON.stringify(value)}.`,
+    code: 'INVALID_ARGUMENT',
+  }, { status: 400 });
 }
 
 function readKnowledgeJobRunMode(value: unknown): 'inline' | 'background' | undefined {
@@ -489,7 +509,7 @@ function readKnowledgeJobRunMode(value: unknown): 'inline' | 'background' | unde
 
 function readKnowledgeProjectionRequest(
   body: JsonRecord,
-): { kind: KnowledgeProjectionTargetKind; id?: string; limit?: number; knowledgeSpaceId?: string; includeAllSpaces?: boolean } | Response {
+): KnowledgeProjectionRequest | Response {
   const rawKind = typeof body.kind === 'string' ? body.kind.trim().toLowerCase() : '';
   if (
     rawKind !== 'overview'
@@ -795,11 +815,19 @@ async function handleKnowledgeSyncBrowserHistory(context: DaemonKnowledgeRouteCo
   if (body instanceof Response) return body;
   const input = body ?? {};
   const sourceKinds = Array.isArray(input.sourceKinds)
-    ? input.sourceKinds.filter((entry): entry is string => entry === 'history' || entry === 'bookmark')
+    ? input.sourceKinds.filter((entry): entry is KnowledgeBrowserSourceKind => entry === 'history' || entry === 'bookmark')
     : undefined;
-  const browsers = Array.isArray(input.browsers)
-    ? input.browsers.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+  const named = Array.isArray(input.browsers)
+    ? input.browsers.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).map((entry) => entry.trim().toLowerCase())
     : undefined;
+  const unknownBrowser = named?.find((entry) => !isOneOf(KNOWLEDGE_BROWSER_KINDS, entry));
+  if (unknownBrowser !== undefined) {
+    return jsonErrorResponse({
+      error: `browsers must be among ${KNOWLEDGE_BROWSER_KINDS.join(', ')}; got "${unknownBrowser}". Nothing was synced.`,
+      code: 'INVALID_ARGUMENT',
+    }, { status: 400 });
+  }
+  const browsers = named?.filter((entry): entry is KnowledgeBrowserKind => isOneOf(KNOWLEDGE_BROWSER_KINDS, entry));
   try {
     return Response.json(await context.knowledgeService.syncBrowserHistory({
       ...(Object.hasOwn(input, 'limit') ? { limit: readBoundedBodyInteger(input.limit, 50, 500) } : {}),
@@ -931,7 +959,7 @@ async function handleKnowledgeReviewIssue(context: DaemonKnowledgeRouteContext, 
   const body = await context.parseOptionalJsonBody(request);
   if (body instanceof Response) return body;
   const action = typeof body?.action === 'string' ? body.action.trim().toLowerCase() : '';
-  if (!['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'].includes(action)) {
+  if (!isOneOf(KNOWLEDGE_REVIEW_ACTIONS, action)) {
     return jsonErrorResponse({ error: 'Action must be accept, reject, resolve, reopen, edit, or forget.' }, { status: 400 });
   }
   // The reviewer recorded on the issue is who the daemon authenticated, never a name the

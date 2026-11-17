@@ -2,12 +2,19 @@ import { randomUUID } from 'node:crypto';
 import type { DaemonChannelRouteHandlers } from './context.js';
 import { jsonErrorResponse } from './error-response.js';
 import {
+  isJsonRecord,
   readBoundedPositiveInteger,
   readChannelConversationKind,
   readChannelLifecycleAction,
   type JsonRecord,
 } from './route-helpers.js';
-import type { ChannelDirectoryScope, ChannelSurface, DaemonChannelRouteContext } from './channel-route-types.js';
+import type {
+  ChannelConversationPolicy,
+  ChannelDirectoryScope,
+  ChannelGroupPolicyInput,
+  ChannelSurface,
+  DaemonChannelRouteContext,
+} from './channel-route-types.js';
 
 /** The free-form input a channel plugin's tool, action or account action reads; the plugin owns its shape. */
 async function readOptionalChannelBody(
@@ -36,6 +43,10 @@ function invalidPolicyField(field: string, expected: string): Response {
     { error: `Channel policy field ${field} must be ${expected}; nothing was changed.`, code: 'INVALID_ARGUMENT' },
     { status: 400 },
   );
+}
+
+function unknownPolicySurface(surface: string): Response {
+  return jsonErrorResponse({ error: `Unknown channel surface: ${surface}; no policy was written.`, code: 'UNKNOWN_CHANNEL_SURFACE' }, { status: 404 });
 }
 
 function invalidChannelField(field: string, expected: string): Response {
@@ -106,6 +117,14 @@ function readAllowlistBody(body: JsonRecord): AllowlistInput | Response {
   return input as AllowlistInput;
 }
 
+type PolicyBooleanField = typeof POLICY_BOOLEAN_FIELDS[number];
+type PolicyModeField = typeof POLICY_MODE_FIELDS[number];
+type PolicyListField = typeof POLICY_LIST_FIELDS[number];
+type PolicyFields =
+  & Partial<Record<PolicyBooleanField, boolean>>
+  & Partial<Record<PolicyModeField, ChannelConversationPolicy>>
+  & Partial<Record<PolicyListField, readonly string[]>>;
+
 /**
  * Read the fields of a policy patch, refusing a value of the wrong type instead
  * of coercing it: `"false"` is a non-empty string, so coercing it turned a
@@ -113,43 +132,44 @@ function readAllowlistBody(body: JsonRecord): AllowlistInput | Response {
  * misspelled `dmPolicy` was dropped while the route answered 200.
  */
 function readPolicyFields(source: JsonRecord, label: string, keys: {
-  readonly booleans: readonly string[];
-  readonly modes: readonly string[];
-  readonly lists: readonly string[];
-}): Record<string, unknown> | Response {
-  const fields: Record<string, unknown> = {};
+  readonly booleans: readonly PolicyBooleanField[];
+  readonly modes: readonly PolicyModeField[];
+}): PolicyFields | Response {
+  const booleans: Partial<Record<PolicyBooleanField, boolean>> = {};
+  const modes: Partial<Record<PolicyModeField, ChannelConversationPolicy>> = {};
+  const lists: Partial<Record<PolicyListField, readonly string[]>> = {};
   const name = (key: string) => (label ? `${label}.${key}` : key);
   for (const key of keys.booleans) {
     const value = source[key];
     if (value === undefined) continue;
     if (typeof value !== 'boolean') return invalidPolicyField(name(key), 'true or false');
-    fields[key] = value;
+    booleans[key] = value;
   }
   for (const key of keys.modes) {
     const value = source[key];
     if (value === undefined) continue;
     if (value !== 'allow' && value !== 'deny' && value !== 'inherit') return invalidPolicyField(name(key), 'one of allow, deny or inherit');
-    fields[key] = value;
+    modes[key] = value;
   }
-  for (const key of keys.lists) {
+  for (const key of POLICY_LIST_FIELDS) {
     const value = source[key];
     if (value === undefined) continue;
-    if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) return invalidPolicyField(name(key), 'an array of strings');
-    fields[key] = value;
+    if (!Array.isArray(value) || !value.every((entry): entry is string => typeof entry === 'string')) return invalidPolicyField(name(key), 'an array of strings');
+    lists[key] = value;
   }
-  return fields;
+  return { ...booleans, ...modes, ...lists };
 }
 
 // Shared by patchChannelPolicy and postChannelPolicy. Excludes `metadata` so
 // each caller can place it after its own extra fields (postChannelPolicy
 // inserts `groupPolicies` between the fields below and `metadata`).
-function buildChannelPolicyPatchFields(body: JsonRecord, extraKeys: readonly string[] = []): Record<string, unknown> | Response {
+function buildChannelPolicyPatchFields(body: JsonRecord, extraKeys: readonly string[] = []): PolicyFields | Response {
   const unknown = refuseUnknownKeys(body, '', new Set([...POLICY_KEYS, ...extraKeys]));
   if (unknown) return unknown;
   if (body.metadata !== undefined && (typeof body.metadata !== 'object' || body.metadata === null || Array.isArray(body.metadata))) {
     return invalidPolicyField('metadata', 'an object');
   }
-  return readPolicyFields(body, '', { booleans: POLICY_BOOLEAN_FIELDS, modes: POLICY_MODE_FIELDS, lists: POLICY_LIST_FIELDS });
+  return readPolicyFields(body, '', { booleans: POLICY_BOOLEAN_FIELDS, modes: POLICY_MODE_FIELDS });
 }
 
 const POLICY_KEYS: readonly string[] = ['surface', 'metadata', ...POLICY_BOOLEAN_FIELDS, ...POLICY_MODE_FIELDS, ...POLICY_LIST_FIELDS];
@@ -385,9 +405,9 @@ export function createDaemonChannelRouteHandlers(
       if (fields instanceof Response) return fields;
       const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
         ...fields,
-        ...(body.metadata !== undefined ? { metadata: body.metadata as Record<string, unknown> } : {}),
+        ...(isJsonRecord(body.metadata) ? { metadata: body.metadata } : {}),
       });
-      return Response.json(updated);
+      return updated === null ? unknownPolicySurface(surface) : Response.json(updated);
     },
     postChannelPolicy: async (surface, req) => {
       const admin = context.requireAdmin(req);
@@ -396,7 +416,7 @@ export function createDaemonChannelRouteHandlers(
       if (body instanceof Response) return body;
       const fields = buildChannelPolicyPatchFields(body, ['groupPolicies']);
       if (fields instanceof Response) return fields;
-      let groupPolicies: Record<string, unknown>[] | undefined;
+      let groupPolicies: ChannelGroupPolicyInput[] | undefined;
       if (body.groupPolicies !== undefined) {
         if (!Array.isArray(body.groupPolicies)) return invalidPolicyField('groupPolicies', 'an array of group policy objects');
         groupPolicies = [];
@@ -412,7 +432,7 @@ export function createDaemonChannelRouteHandlers(
           if (entry.metadata !== undefined && (typeof entry.metadata !== 'object' || entry.metadata === null || Array.isArray(entry.metadata))) {
             return invalidPolicyField(`${label}.metadata`, 'an object');
           }
-          const checked = readPolicyFields(entry, label, { booleans: GROUP_POLICY_BOOLEAN_FIELDS, modes: [], lists: POLICY_LIST_FIELDS });
+          const checked = readPolicyFields(entry, label, { booleans: GROUP_POLICY_BOOLEAN_FIELDS, modes: [] });
           if (checked instanceof Response) return checked;
           groupPolicies.push({
             // use the full UUID to avoid birthday-paradox collisions at scale.
@@ -422,16 +442,16 @@ export function createDaemonChannelRouteHandlers(
             ...(typeof entry.channelId === 'string' ? { channelId: entry.channelId } : {}),
             ...(typeof entry.workspaceId === 'string' ? { workspaceId: entry.workspaceId } : {}),
             ...checked,
-            ...(entry.metadata !== undefined ? { metadata: entry.metadata as Record<string, unknown> } : {}),
+            ...(isJsonRecord(entry.metadata) ? { metadata: entry.metadata } : {}),
           });
         }
       }
       const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
         ...fields,
         ...(groupPolicies ? { groupPolicies } : {}),
-        ...(body.metadata !== undefined ? { metadata: body.metadata as Record<string, unknown> } : {}),
+        ...(isJsonRecord(body.metadata) ? { metadata: body.metadata } : {}),
       });
-      return Response.json(updated);
+      return updated === null ? unknownPolicySurface(surface) : Response.json(updated);
     },
 
     getChannelPolicyAudit: (limit) => Response.json({ audit: context.channelPolicy.listAudit(limit) }),

@@ -19,11 +19,24 @@ export type DaemonApiClientKind =
   | 'matrix'
   | 'daemon';
 
-export type AutomationRouteBindingKind = string;
-export type AutomationSessionPolicy = string;
-export type AutomationThreadPolicy = string;
-export type AutomationDeliveryGuarantee = string;
-export type WatcherKind = string;
+/** The surfaces a route binding can name (the platform's transport surfaces). */
+export const ROUTE_BINDING_SURFACE_KINDS = [
+  'tui', 'web', 'slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'google-chat',
+  'signal', 'whatsapp', 'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix', 'service',
+] as const;
+export type RouteBindingSurfaceKind = typeof ROUTE_BINDING_SURFACE_KINDS[number];
+export const ROUTE_BINDING_KINDS = ['session', 'thread', 'channel', 'message'] as const;
+export type AutomationRouteBindingKind = typeof ROUTE_BINDING_KINDS[number];
+export const AUTOMATION_SESSION_POLICIES = ['create-or-bind', 'continue-existing', 'require-existing'] as const;
+export type AutomationSessionPolicy = typeof AUTOMATION_SESSION_POLICIES[number];
+export const AUTOMATION_THREAD_POLICIES = ['preserve', 'replace', 'detached'] as const;
+export type AutomationThreadPolicy = typeof AUTOMATION_THREAD_POLICIES[number];
+export const AUTOMATION_DELIVERY_GUARANTEES = ['best-effort', 'at-least-once'] as const;
+export type AutomationDeliveryGuarantee = typeof AUTOMATION_DELIVERY_GUARANTEES[number];
+export const WATCHER_KINDS = ['webhook', 'polling', 'filesystem', 'socket', 'integration', 'manual'] as const;
+export type WatcherKind = typeof WATCHER_KINDS[number];
+export const WATCHER_SOURCE_KINDS = ['schedule', 'manual', 'hook', 'webhook', 'surface', 'watcher'] as const;
+export type WatcherSourceKind = typeof WATCHER_SOURCE_KINDS[number];
 
 export interface ConfigManagerLike {
   get(key: string): unknown;
@@ -73,7 +86,7 @@ export interface PlatformServiceManagerLike {
 export interface RouteBindingRecordInput {
   readonly id?: string | undefined;
   readonly kind: AutomationRouteBindingKind;
-  readonly surfaceKind: AutomationSurfaceKind;
+  readonly surfaceKind: RouteBindingSurfaceKind;
   readonly surfaceId: string;
   readonly externalId: string;
   readonly sessionPolicy?: AutomationSessionPolicy | undefined;
@@ -81,13 +94,14 @@ export interface RouteBindingRecordInput {
   readonly deliveryGuarantee?: AutomationDeliveryGuarantee | undefined;
   readonly threadId?: string | undefined;
   readonly channelId?: string | undefined;
-  readonly sessionId?: string | null | undefined;
-  readonly jobId?: string | null | undefined;
-  readonly runId?: string | null | undefined;
+  readonly sessionId?: string | undefined;
+  readonly jobId?: string | undefined;
+  readonly runId?: string | undefined;
   readonly title?: string | undefined;
   readonly metadata: Record<string, unknown>;
 }
 
+/** A change to a binding; `null` clears a session, job or run link. */
 export interface RouteBindingPatchInput {
   readonly sessionPolicy?: AutomationSessionPolicy | undefined;
   readonly threadPolicy?: AutomationThreadPolicy | undefined;
@@ -101,20 +115,24 @@ export interface RouteBindingPatchInput {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+/** Function-typed properties, so the platform's manager is checked against them strictly. */
 export interface RouteBindingManagerLike {
-  listBindings(): readonly unknown[];
-  upsertBinding(input: RouteBindingRecordInput): Promise<unknown>;
-  patchBinding(bindingId: string, input: RouteBindingPatchInput): Promise<unknown | null>;
-  removeBinding(bindingId: string): Promise<boolean>;
+  readonly listBindings: () => readonly unknown[];
+  readonly upsertBinding: (input: RouteBindingRecordInput) => Promise<unknown>;
+  readonly patchBinding: (bindingId: string, input: RouteBindingPatchInput) => Promise<unknown | null>;
+  readonly removeBinding: (bindingId: string) => Promise<boolean>;
 }
 
 export interface WatcherSourceRecord {
   readonly id: string;
-  readonly kind: string;
+  readonly kind: WatcherSourceKind;
   readonly label: string;
+  readonly surfaceKind?: RouteBindingSurfaceKind | undefined;
+  readonly routeId?: string | undefined;
   readonly enabled: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
+  readonly lastSeenAt?: number | undefined;
   readonly metadata: Record<string, unknown>;
 }
 
@@ -127,22 +145,34 @@ export interface WatcherRecord {
   readonly metadata: Record<string, unknown>;
 }
 
+export interface WatcherRegistration {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: WatcherKind;
+  readonly source: WatcherSourceRecord;
+  readonly intervalMs: number;
+  readonly metadata: Record<string, unknown>;
+  readonly run?: (() => string) | undefined;
+}
+
+/** The watcher store could not be saved: the change holds until the next restart. */
+export interface WatcherSnapshotSaveFailure {
+  readonly filePath: string;
+  readonly code?: string | undefined;
+  readonly error: string;
+}
+
+/** Function-typed properties, so the platform's registry is checked against them strictly. */
 export interface WatcherRegistryLike {
-  list(): readonly unknown[];
-  removeWatcher(watcherId: string): boolean;
-  registerWatcher(input: {
-    readonly id: string;
-    readonly label: string;
-    readonly kind: WatcherKind;
-    readonly source: WatcherSourceRecord;
-    readonly intervalMs: number;
-    readonly metadata: Record<string, unknown>;
-    readonly run?: (() => string) | undefined;
-  }): WatcherRecord;
-  getWatcher(watcherId: string): WatcherRecord | null;
-  startWatcher(watcherId: string): WatcherRecord | null;
-  stopWatcher(watcherId: string, reason: string): WatcherRecord | null;
-  runWatcherNow(watcherId: string): Promise<WatcherRecord | null>;
+  readonly list: () => readonly unknown[];
+  readonly removeWatcher: (watcherId: string) => boolean;
+  readonly registerWatcher: (input: WatcherRegistration) => WatcherRecord;
+  readonly getWatcher: (watcherId: string) => WatcherRecord | null;
+  readonly startWatcher: (watcherId: string) => WatcherRecord | null;
+  readonly stopWatcher: (watcherId: string, reason: string) => WatcherRecord | null;
+  readonly runWatcherNow: (watcherId: string) => Promise<WatcherRecord | null>;
+  /** Present when the host reports a failed save of the watcher store. */
+  readonly snapshotSaveFailure?: (() => WatcherSnapshotSaveFailure | undefined) | undefined;
 }
 
 /**

@@ -78,7 +78,7 @@ A call is retried when one rule holds: the call is marked idempotent, whatever i
 
 The operator client marks a method idempotent from the contract: a method the contract marks `idempotent: true`, a method whose replay key is the `Idempotency-Key` header (`contracts.start`), or a method whose replay key is a body field every call must carry. A mutating idempotent call gets one `Idempotency-Key`, generated once and sent on every attempt, so the daemon recognises a repeat. When neither the transport nor the call sets `maxAttempts`, an idempotent call gets 3 attempts (`DEFAULT_IDEMPOTENT_MAX_ATTEMPTS`), so a lost response or a transient 503 does not fail it and does not start the work twice. Safe methods are retried once you raise `maxAttempts`.
 
-`perMethodPolicy` entries tune how a call is retried (attempts and delays per method id); they do not decide whether it may be.
+`perMethodPolicy` entries tune how a call is retried (attempts and delays per method id). An entry whose `maxAttempts` is above 1 also marks that method idempotent: you state that the server recognises a repeat, so a mutating call to it is retried and carries one generated `Idempotency-Key` on every attempt. Give a method more than one attempt only when its server deduplicates by that key or by a replay field.
 
 To keep your own key across calls (a dispatcher that may send the same work again later), pass it as the `idempotencyKey` call option; a caller-set `Idempotency-Key` header also wins over a generated one.
 

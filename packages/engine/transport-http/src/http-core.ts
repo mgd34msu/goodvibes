@@ -420,15 +420,19 @@ export function createHttpJsonTransport(options: HttpJsonTransportOptions): Http
       : buildUrl(baseUrl, pathOrUrl);
     const method = requestOptions.method ?? (requestOptions.body === undefined ? 'GET' : 'POST');
     const methodId = requestOptions.methodId;
-    const idempotent = requestOptions.idempotent === true;
     const baseRetry = resolveHttpRetryPolicy(retryPolicy, requestOptions.retry);
+    // A caller that gives a method more than one attempt in `perMethodPolicy` states
+    // that the server deduplicates it: the call is treated as idempotent (retried, and
+    // a mutating one carries one generated Idempotency-Key on every attempt).
+    const perMethodAttempts = methodId === undefined ? undefined : baseRetry.perMethodPolicy[methodId]?.maxAttempts;
+    const idempotent = requestOptions.idempotent === true || (perMethodAttempts !== undefined && perMethodAttempts > 1);
     const methodRetry = methodId ? applyPerMethodPolicy(baseRetry, methodId) : baseRetry;
     // One rule decides whether a call may be repeated (isRetryableCall: a safe
     // verb, or an idempotent mark); an idempotent call nobody gave an attempt
     // count to gets a small default so a lost response does not fail it.
     const attemptsUnset = retryPolicy?.maxAttempts === undefined
       && requestOptions.retry === undefined
-      && (methodId === undefined || baseRetry.perMethodPolicy[methodId]?.maxAttempts === undefined);
+      && perMethodAttempts === undefined;
     const resolvedRetry = idempotent && attemptsUnset
       ? { ...methodRetry, maxAttempts: DEFAULT_IDEMPOTENT_MAX_ATTEMPTS }
       : methodRetry;

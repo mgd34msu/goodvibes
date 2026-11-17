@@ -14,8 +14,9 @@ export interface HttpRetryPolicy extends BackoffPolicy {
   readonly retryOnNetworkError?: boolean | undefined;
   /**
    * Attempt and delay overrides keyed by method ID. They tune how a call that
-   * may be retried is retried; whether it may be retried at all is decided by
-   * its verb or its idempotent mark.
+   * may be retried is retried. An entry with `maxAttempts` above 1 also marks
+   * that method idempotent (the caller states the server deduplicates it): a
+   * mutating call is then retried and carries one generated `Idempotency-Key`.
    */
   readonly perMethodPolicy?: Readonly<Record<string, PerMethodRetryPolicy>> | undefined;
 }

@@ -85,10 +85,11 @@ function setupLaneSummary(metrics: AssistantCockpitMetrics): string {
 }
 
 function setupLaneNextAction(metrics: AssistantCockpitMetrics): string {
-  if (metrics.setupSmokeTrend === 'regressing') return 'Review recent smoke history, fix new blockers, then rerun setup smoke.';
-  if (metrics.setupSmokeResult === 'blocked') return 'Review the saved smoke artifact, resolve blockers, then rerun setup smoke.';
-  if (metrics.setupSmokeResult === 'ready-for-user-run') return 'Complete remaining user-run smoke checks, then start the user task.';
-  if (metrics.setupBlockers === 0 && !metrics.setupSmokeResult) return 'Run setup smoke before trusting ongoing autonomous work.';
+  if (metrics.setupSmokeTrend === 'regressing') return 'Review recent smoke history, fix new blockers, then save new setup evidence.';
+  if (metrics.setupSmokeResult === 'blocked') return 'Review the saved smoke artifact, resolve blockers, then save new setup evidence.';
+  if (metrics.setupSmokeResult === 'passed') return 'Setup evidence passed; start the user task.';
+  if (metrics.setupSmokeResult === 'ready-for-user-run') return 'Have the user run the remaining user-run checks, then save what they saw as setup evidence.';
+  if (metrics.setupBlockers === 0 && !metrics.setupSmokeResult) return 'Have the user run the setup smoke checks (setup action:"item" setupItemId:"install-smoke"), then save the evidence.';
   return 'Use setup posture for the next visible setup step.';
 }
 

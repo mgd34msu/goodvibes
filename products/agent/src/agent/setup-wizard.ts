@@ -445,7 +445,7 @@ function buildStepHistory(input: {
   if (input.smokeHistory.latestEvidenceId && smokeAt) {
     const item = byId.get('install-smoke');
     const result = input.smokeHistory.latestResult ?? 'unknown';
-    const ready = result === 'ready-for-user-run';
+    const ready = result === 'ready-for-user-run' || result === 'passed';
     history.push({
       id: `setup-step-history:install-smoke:setup-smoke:${input.smokeHistory.latestEvidenceId}`,
       stepId: 'install-smoke',
@@ -540,7 +540,7 @@ function buildCloseout(input: {
     critical.has(item.id) && item.status === 'blocked'
   )) ?? input.items.find((item) => critical.has(item.id) && item.status !== 'ready' && item.status !== 'optional') ?? null;
   const smokeReady = input.smokeVerdict
-    ?? (input.smokeHistory.status === 'available' && input.smokeHistory.latestResult === 'ready-for-user-run');
+    ?? (input.smokeHistory.status === 'available' && (input.smokeHistory.latestResult === 'ready-for-user-run' || input.smokeHistory.latestResult === 'passed'));
   const latestSmoke = input.smokeHistory.status === 'available'
     ? input.smokeHistory.latestResult ?? 'unknown'
     : input.smokeHistory.status;

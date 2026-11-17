@@ -428,6 +428,16 @@ export class ArtifactStore {
       .map((record) => this.toDescriptor(record));
   }
 
+  /** Every live artifact a producer saved under this `metadata.purpose`, newest first; nothing else is described. */
+  listByPurpose(purpose: string): ArtifactDescriptor[] {
+    const now = Date.now();
+    this.pruneExpired(now);
+    return [...this.records.values()]
+      .filter((record) => !isExpired(record, now) && record.metadata?.['purpose'] === purpose)
+      .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
+      .map((record) => this.toDescriptor(record));
+  }
+
   get(id: string): ArtifactDescriptor | null {
     const record = this.liveRecord(id);
     return record ? this.toDescriptor(record) : null;

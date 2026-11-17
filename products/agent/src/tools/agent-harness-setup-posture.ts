@@ -1,4 +1,3 @@
-import { captureSetupReadSource } from './agent-harness-setup-read-source.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
 import { readAgentHostPairing } from '../runtime/connected-host-pairing-store.ts';
@@ -21,39 +20,48 @@ import { previewHarnessText } from './agent-harness-text.ts';
 import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import type { AgentHarnessSetupArgs, SetupResolution } from './agent-harness-setup-posture-types.ts';
-import { buildSetupPlan } from './agent-harness-setup-plan.ts';
-import { buildSetupWizard, describeInstallSmokeCheck, ignoredSetupSmokeEvidenceFields, installSmokeNextAction, SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, installSmokeRunResult, installSmokeRunSummary, latestSetupSmokeEvidence, saveSetupSmokeArtifact, setupCompletionMarkerExists, setupSmokeEvidenceHistory } from './agent-harness-setup-smoke.ts';
+import { buildSetupPlan, SETUP_PLAN_ROW_IDS } from './agent-harness-setup-plan.ts';
+import { buildSetupWizard, describeInstallSmokeCheck, ignoredSetupSmokeEvidenceFields, installSmokeNextAction, SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, installSmokeRunResult, installSmokeRunSummary, latestSetupSmokeEvidence, saveSetupSmokeArtifact, setupCompletionMarkerExists, setupSmokeEvidenceArtifacts, setupSmokeEvidenceHistory, setupWizardCheckpoint } from './agent-harness-setup-smoke.ts';
 import { confirmedRepairCandidates, describeCandidate, describeHandoffCard, describeItem, describePlanItem, describeRepairCard, describeRepairDecision, describeServiceLifecycleDecision, nextSetupHandoffSummaries, planSummary, primarySetupRepairDecision, setupRepairTarget } from './agent-harness-setup-describe.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
 import { homeRelativePath } from './agent-harness-tool-utils.ts';
 import { collectServicePosture, collectSnapshot, lookupFromArgs, quoteRouteValue, readLimit, readString, safeFileMode, safeIso, summarizeLocalBehavior } from './agent-harness-setup-posture-utils.ts';
 
-function captureSetupCaller<T>(context: CommandContext, args: T, options: CatalogRankingOptions) {
-  const assertNative = captureSetupReadSource(context);
-  const caller = captureAsyncHarnessInput(args, options, true, [assertNative]);
+/**
+ * A setup read is correct for the moment it was taken (it carries
+ * `capturedAt`); the next read corrects a stale one. So a call checks only
+ * that it is still wanted (its signal and its caller), never re-reads its
+ * sources.
+ */
+function captureSetupCaller<T>(_context: CommandContext, args: T, options: CatalogRankingOptions) {
+  const caller = captureAsyncHarnessInput(args, options, true);
   return { ...caller,
-    // Browser/runtime and auth reads acquire their own complete native owners.
-    // Preserve caller restrictions there; join their guards with the setup
-    // observation before publishing the completed plan.
-    childOptions: { ...caller.options, assertCurrent: caller.assertCallerCurrent },
     publish<R>(result: R): R { caller.retainSourceCurrent('agent.setup.sources'); return result; },
   };
 }
 
+/** One observation per setup call: snapshot, capabilities, saved smoke evidence (one listing) and the plan. */
+async function observeSetup(context: CommandContext, options: CatalogRankingOptions, only?: ReadonlySet<string>,
+  observed?: Awaited<ReturnType<typeof collectSnapshot>>) {
+  const snapshot = observed ?? await collectSnapshot(context, options);
+  const capabilities = deriveStep1Capabilities(snapshot);
+  let probe: Promise<Awaited<ReturnType<typeof collectServicePosture>>> | undefined;
+  const probeServices = () => probe ??= collectServicePosture(context, { signal: options.signal, assertCurrent: options.assertCurrent ?? (() => {}) });
+  const smoke = setupSmokeEvidenceArtifacts(context);
+  const plan = await buildSetupPlan(context, { snapshot, capabilities, probeServices, smoke }, options, only);
+  return { snapshot, capabilities, smoke, plan };
+}
+
 export async function setupPostureCatalogStatus(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const caller = captureSetupCaller(context, {}, options);
-  const snapshot = await collectSnapshot(context, caller.options);
+  const { snapshot, capabilities, smoke, plan } = await observeSetup(context, caller.options);
   caller.assertCurrent();
-  const servicePosture = await collectServicePosture(context, { signal: caller.options.signal, assertCurrent: caller.assertCurrent });
-  caller.assertCurrent();
-  const plan = await buildSetupPlan(context, snapshot, deriveStep1Capabilities(snapshot), servicePosture, caller.childOptions);
-  caller.assertCurrent();
-  const setupSmokeEvidence = latestSetupSmokeEvidence(context);
-  const setupSmokeHistory = setupSmokeEvidenceHistory(context);
-  const setupWizard = buildSetupWizard(plan, context);
+  const setupSmokeEvidence = latestSetupSmokeEvidence(smoke);
+  const setupSmokeHistory = setupSmokeEvidenceHistory(smoke);
+  const setupWizard = buildSetupWizard(plan, context, smoke);
   return caller.publish({
     modes: ['setup_posture', 'setup_item', 'setup_repair', 'setup_checkpoint', 'mark_setup_checkpoint', 'clear_setup_checkpoint', 'provision_connected_host_token', 'run_setup_smoke'],
-    capabilities: deriveStep1Capabilities(snapshot).length,
+    capabilities: capabilities.length,
     planItems: plan.length,
     blockedPlanItems: plan.filter((item) => item.status === 'blocked').length,
     autonomyBlockers: plan.filter((item) => item.blocksAutonomy && item.status !== 'ready').length,
@@ -70,13 +78,9 @@ export async function setupPostureCatalogStatus(context: CommandContext, options
 
 export async function setupRepairSummary(context: CommandContext, rawArgs: AgentHarnessSetupArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const caller = captureSetupCaller(context, rawArgs, options), args = caller.args;
-  const snapshot = await collectSnapshot(context, caller.options);
+  const { snapshot, smoke, plan } = await observeSetup(context, caller.options);
   caller.assertCurrent();
-  const servicePosture = await collectServicePosture(context, { signal: caller.options.signal, assertCurrent: caller.assertCurrent });
-  caller.assertCurrent();
-  const plan = await buildSetupPlan(context, snapshot, deriveStep1Capabilities(snapshot), servicePosture, caller.childOptions);
-  caller.assertCurrent();
-  const setupWizard = buildSetupWizard(plan, context);
+  const setupWizard = buildSetupWizard(plan, context, smoke);
   const includeParameters = args.includeParameters === true;
   const target = await setupRepairTarget(plan, setupWizard, args, caller.options);
   caller.assertCurrent();
@@ -133,18 +137,14 @@ export async function setupRepairSummary(context: CommandContext, rawArgs: Agent
 
 export async function setupPostureSummary(context: CommandContext, rawArgs: AgentHarnessSetupArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const caller = captureSetupCaller(context, rawArgs, options), args = caller.args;
-  const snapshot = await collectSnapshot(context, caller.options);
-  caller.assertCurrent();
-  const servicePosture = await collectServicePosture(context, { signal: caller.options.signal, assertCurrent: caller.assertCurrent });
-  caller.assertCurrent();
   const query = readString(args.query);
   const includeParameters = args.includeParameters === true;
-  const all = deriveStep1Capabilities(snapshot);
-  const plan = await buildSetupPlan(context, snapshot, all, servicePosture, caller.childOptions);
+  const { snapshot, capabilities: all, smoke, plan } = await observeSetup(context, caller.options);
   caller.assertCurrent();
-  const setupSmokeEvidence = latestSetupSmokeEvidence(context);
-  const setupSmokeHistory = setupSmokeEvidenceHistory(context);
-  const setupWizard = buildSetupWizard(plan, context);
+  const setupSmokeEvidence = latestSetupSmokeEvidence(smoke);
+  const setupSmokeHistory = setupSmokeEvidenceHistory(smoke);
+  const setupWizard = buildSetupWizard(plan, context, smoke);
+  const servicePosture = plan.find((item) => item.id === 'connected-host-readiness')?.serviceProbe ?? null;
   // These two capture times are created by the native snapshot collectors.
   // Keep the complete original observation bound while expressing its clocks
   // as ISO timestamps; an epoch can coincidentally satisfy the card checksum.
@@ -190,16 +190,6 @@ export async function setupPostureSummary(context: CommandContext, rawArgs: Agen
       localBehavior: summarizeLocalBehavior(snapshot),
       capabilityFlags: deriveStep1CapabilityFlags(snapshot),
       readinessPlan: planSummary(plan),
-      setupSmokeEvidence,
-      setupSmokeHistory,
-      setupWizard: {
-        status: setupWizard.status,
-        progressLabel: setupWizard.progressLabel,
-        currentStepId: setupWizard.currentStepId,
-        currentStepLabel: setupWizard.currentStepLabel,
-        repeatedBlocker: setupWizard._diagnostic.repeatedBlocker,
-      },
-      setupCloseout: setupWizard._diagnostic.closeout,
     },
     setupSmokeEvidence,
     setupSmokeHistory,
@@ -221,28 +211,14 @@ export async function setupPostureSummary(context: CommandContext, rawArgs: Agen
   });
 }
 
+/** The saved checkpoint, read from its file: no host probe, no plan. setup action:"status" shows where the wizard stands now. */
 export async function setupCheckpointSummary(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const caller = captureSetupCaller(context, {}, options);
-  const snapshot = await collectSnapshot(context, caller.options);
-  caller.assertCurrent();
-  const servicePosture = await collectServicePosture(context, { signal: caller.options.signal, assertCurrent: caller.assertCurrent });
-  caller.assertCurrent();
-  const plan = await buildSetupPlan(context, snapshot, deriveStep1Capabilities(snapshot), servicePosture, caller.childOptions);
-  caller.assertCurrent();
-  const setupWizard = buildSetupWizard(plan, context);
+  const checkpoint = setupWizardCheckpoint(context);
   return caller.publish({
     mode: 'setup_checkpoint',
-    checkpoint: setupWizard._diagnostic.checkpoint,
-    currentStep: setupWizard.currentStepId
-      ? setupWizard.steps.find((step) => step.id === setupWizard.currentStepId) ?? null
-      : null,
-    setupWizard: {
-      status: setupWizard.status,
-      progressLabel: setupWizard.progressLabel,
-      currentStepId: setupWizard.currentStepId,
-      currentStepLabel: setupWizard.currentStepLabel,
-      next: setupWizard.next,
-    },
+    checkpoint,
+    currentStep: checkpoint.currentStepId ? { id: checkpoint.currentStepId, label: checkpoint.currentStepLabel } : null,
     routes: {
       inspectSetup: DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE,
       markCurrent: DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE,
@@ -255,13 +231,9 @@ export async function setupCheckpointSummary(context: CommandContext, options: C
 export async function markSetupCheckpoint(context: CommandContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): Promise<Record<string, unknown>> {
   const assertCurrent = captureHarnessLocalEffect(context, args, options, paths => [setupWizardCheckpointPath(paths)]);
   const platform = context.platform, config = platform.configManager, incarnation = config.getConfigurationIncarnation();
-  const snapshot = await collectSnapshot(context, { signal: options?.signal, assertCurrent });
+  const { smoke, plan } = await observeSetup(context, { signal: options?.signal, assertCurrent });
   assertCurrent();
-  const servicePosture = await collectServicePosture(context, { signal: options?.signal, assertCurrent });
-  assertCurrent();
-  const plan = await buildSetupPlan(context, snapshot, deriveStep1Capabilities(snapshot), servicePosture, { signal: options?.signal, assertCurrent });
-  assertCurrent();
-  const setupWizard = buildSetupWizard(plan, context);
+  const setupWizard = buildSetupWizard(plan, context, smoke);
   const requestedStepId = readString(args.setupItemId);
   const step = requestedStepId
     ? setupWizard.steps.find((candidate) => candidate.id === requestedStepId)
@@ -306,7 +278,7 @@ export async function markSetupCheckpoint(context: CommandContext, args: Record<
     source: 'harness',
     note: 'Recorded model-admitted setup wizard checkpoint.',
   });
-  const updatedWizard = buildSetupWizard(plan, context);
+  const updatedWizard = buildSetupWizard(plan, context, smoke);
   return {
     status: 'checkpoint_saved',
     mode: 'mark_setup_checkpoint',
@@ -501,11 +473,7 @@ export async function runSetupInstallSmoke(context: CommandContext, args: AgentH
     };
   }
 
-  const snapshot = await collectSnapshot(context, { signal, assertCurrent: ownership.assertCurrent });
-  ownership.assertCurrent();
-  const servicePosture = await collectServicePosture(context, { signal, assertCurrent: ownership.assertCurrent });
-  ownership.assertCurrent();
-  const plan = await buildSetupPlan(context, snapshot, deriveStep1Capabilities(snapshot), servicePosture, { signal, assertCurrent: ownership.assertCurrent });
+  const { snapshot, plan } = await observeSetup(context, { signal, assertCurrent: ownership.assertCurrent }, new Set(['install-smoke']));
   ownership.assertCurrent();
   const installSmoke = plan.find((item) => item.id === 'install-smoke');
   const smokePlan = installSmoke?.installSmokePlan;
@@ -535,7 +503,7 @@ export async function runSetupInstallSmoke(context: CommandContext, args: AgentH
     ownership,
   });
   ownership.assertCurrent();
-  const result = installSmokeRunResult(smokePlan);
+  const result = installSmokeRunResult(smokePlan, evidenceFields.map((field) => field.id));
   const ignoredFields = ignoredSetupSmokeEvidenceFields(args.fields);
   return {
     // Nothing is executed here: the plan is read and a snapshot saved, so the
@@ -584,18 +552,22 @@ export async function describeHarnessSetupItem(context: CommandContext, rawArgs:
       usage: 'setup_item requires setupItemId, target, or query. Use mode:"setup_posture" to inspect setup item ids.',
     });
   }
+  const normalized = lookup.input.toLowerCase();
+  // An exact plan row id builds that row alone: the host is probed only for a row that reports it.
+  const planId = SETUP_PLAN_ROW_IDS.find((id) => id === lookup.input) ?? SETUP_PLAN_ROW_IDS.find((id) => id === normalized);
   const snapshot = await collectSnapshot(context, caller.options);
   caller.assertCurrent();
-  const servicePosture = await collectServicePosture(context, { signal: caller.options.signal, assertCurrent: caller.assertCurrent });
-  caller.assertCurrent();
   const items = deriveStep1Capabilities(snapshot);
-  const plan = await buildSetupPlan(context, snapshot, items, servicePosture, caller.childOptions);
-  caller.assertCurrent();
-  const normalized = lookup.input.toLowerCase();
   const exact = items.find((item) => item.id === lookup.input);
   if (exact) return publish({ status: 'found', item: describeItem(exact, snapshot, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'id' } }) });
-  const exactPlan = plan.find((item) => item.id === lookup.input);
-  if (exactPlan) return publish({ status: 'found', item: { ...describePlanItem(exactPlan, true), lookup: { ...lookup, resolvedBy: 'plan-id' } } });
+  if (planId) {
+    const { plan: rows } = await observeSetup(context, caller.options, new Set([planId]), snapshot);
+    caller.assertCurrent();
+    const row = rows[0];
+    if (row) return publish({ status: 'found', item: { ...describePlanItem(row, true), lookup: { ...lookup, resolvedBy: planId === lookup.input ? 'plan-id' : 'case-insensitive-plan-id' } } });
+  }
+  const { plan } = await observeSetup(context, caller.options, undefined, snapshot);
+  caller.assertCurrent();
   const insensitive = items.find((item) => item.id.toLowerCase() === normalized);
   if (insensitive) return publish({ status: 'found', item: describeItem(insensitive, snapshot, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'case-insensitive-id' } }) });
   const insensitivePlan = plan.find((item) => item.id.toLowerCase() === normalized);

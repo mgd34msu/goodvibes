@@ -12,6 +12,7 @@ function isSetupSmokeEvidenceArtifact(artifact: ArtifactDescriptor): boolean {
 
 function setupSmokeEvidenceScore(artifact: ArtifactDescriptor): number {
   const result = readArtifactMetadataString(artifact.metadata, 'result');
+  if (result === 'passed') return 3;
   if (result === 'ready-for-user-run') return 2;
   if (result === 'blocked') return 0;
   return 1;
@@ -25,6 +26,7 @@ function setupSmokeEvidenceTrend(artifacts: readonly ArtifactDescriptor[]): stri
   if (latest > previous) return 'improving';
   if (latest < previous) return 'regressing';
   const result = readArtifactMetadataString(artifacts[0]!.metadata, 'result');
+  if (result === 'passed') return 'unchanged-passed';
   if (result === 'ready-for-user-run') return 'unchanged-ready';
   if (result === 'blocked') return 'unchanged-blocked';
   return 'unchanged';

@@ -75,6 +75,22 @@ function connectedHostFindings(
   return findings;
 }
 
+/** What the last host status read found for the Agent Knowledge route, for the setup plan to report without probing again. */
+export interface AgentKnowledgeReadiness {
+  readonly ready: boolean;
+  readonly reachable: boolean;
+  readonly route: string;
+  readonly kind: string;
+  readonly checkedAt: number;
+}
+
+let lastAgentKnowledgeReadiness: AgentKnowledgeReadiness | null = null;
+
+/** The Agent Knowledge readiness `host action:"status"` last observed in this process, or null when it has not run. */
+export function latestAgentKnowledgeReadiness(): AgentKnowledgeReadiness | null {
+  return lastAgentKnowledgeReadiness;
+}
+
 export async function connectedHostStatusSummary(
   context: CommandContext,
   toolRegistry: ToolRegistry,
@@ -90,6 +106,8 @@ export async function connectedHostStatusSummary(
   });
   const tokenUsable = Boolean(token.token);
   const tokenPath = harnessDisplayPath(token.path, homeDirectory);
+  lastAgentKnowledgeReadiness = { ready: runtime.reachable && runtime.agentKnowledge.ready, reachable: runtime.reachable,
+    route: runtime.agentKnowledge.route, kind: String(runtime.agentKnowledge.kind), checkedAt: Date.now() };
 
   return {
     ownership: CONNECTED_HOST_OWNERSHIP,

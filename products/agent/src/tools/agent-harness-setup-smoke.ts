@@ -6,12 +6,11 @@ import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts'
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
-import { buildSetupWizardDurableReceipts } from '../agent/setup-wizard-artifact-receipts.ts';
 import { clearSetupWizardCheckpoint, readSetupWizardCheckpoint, saveSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { homeRelativePath } from './agent-harness-tool-utils.ts';
-import { listEveryArtifact, readFieldMap, readString, safeIso, setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
+import { readFieldMap, readString, safeIso, setupSmokeArtifactStore } from './agent-harness-setup-posture-utils.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
 import type { SetupConnectedHostAuthPosture, SetupInstallSmokeCheck, SetupInstallSmokePlan, SetupInstallSmokeRunSummary, SetupPlanItem, SetupServiceProbe, SetupSmokeEvidenceField } from './agent-harness-setup-posture-types.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
@@ -105,6 +104,31 @@ export const SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS: readonly { readonly id: str
 ];
 
 export const MAX_SETUP_SMOKE_FIELD_CHARS = 8_000;
+
+/** The evidence fields that show a user-run check was run: any one of them is enough. */
+export const SETUP_SMOKE_USER_RUN_EVIDENCE: Readonly<Record<string, readonly string[]>> = {
+  'agent-binary': ['agentBinaryOutput', 'statusJson'],
+  'setup-posture': ['setupPostureOutput'],
+  'first-assistant-turn': ['firstAssistantTurn'],
+};
+
+/** The user-run checks whose output is not in these evidence fields. */
+export function missingUserRunEvidence(userRunChecks: readonly string[], evidenceFieldIds: readonly string[]): readonly string[] {
+  const saved = new Set(evidenceFieldIds);
+  return userRunChecks.filter((check) => !(SETUP_SMOKE_USER_RUN_EVIDENCE[check] ?? []).some((field) => saved.has(field)));
+}
+
+export type SetupSmokeResult = 'blocked' | 'ready-for-user-run' | 'passed';
+
+/**
+ * What a smoke run proves: blocked while a check the Agent reads is blocked;
+ * passed once nothing is blocked and every user-run check has its output in
+ * the saved evidence; otherwise it waits for the user-run checks.
+ */
+export function setupSmokeResult(blockedChecks: readonly string[], userRunChecks: readonly string[], evidenceFieldIds: readonly string[]): SetupSmokeResult {
+  if (blockedChecks.length > 0) return 'blocked';
+  return missingUserRunEvidence(userRunChecks, evidenceFieldIds).length === 0 ? 'passed' : 'ready-for-user-run';
+}
 
 function assertIssuerSafeJsonScalars(text: string): void {
   const pending = [text];
@@ -357,7 +381,7 @@ export async function saveSetupSmokeArtifact(input: {
       source: 'agent-harness-run-setup-smoke',
       capturedAt: input.capturedAt,
       smokeStatus: input.smokePlan.status,
-      result: input.blockedChecks.length > 0 ? 'blocked' : 'ready-for-user-run',
+      result: setupSmokeResult(input.blockedChecks, input.userRunChecks, input.evidenceFields.map((field) => field.id)),
       blockedChecks: input.blockedChecks,
       userRunChecks: input.userRunChecks,
       evidenceFields: input.evidenceFields.map((field) => field.id),
@@ -392,23 +416,31 @@ export function readArtifactMetadataStringArray(artifact: ArtifactDescriptor, ke
   return Array.isArray(value) ? value.map((entry) => readString(entry)).filter(Boolean) : [];
 }
 
-export function setupSmokeEvidenceArtifacts(context: CommandContext): { readonly status: 'available'; readonly artifacts: readonly ArtifactDescriptor[] } | { readonly status: 'unavailable'; readonly reason: string } {
+export type SetupSmokeEvidenceList = { readonly status: 'available'; readonly artifacts: readonly ArtifactDescriptor[] } | { readonly status: 'unavailable'; readonly reason: string };
+
+/** The saved smoke evidence, newest first: one purpose-filtered listing, read once per setup call. */
+export function setupSmokeEvidenceArtifacts(context: CommandContext): SetupSmokeEvidenceList {
   const artifactStore = setupSmokeArtifactStore(context);
-  if (!artifactStore?.list) {
+  if (!artifactStore?.listByPurpose) {
     return {
       status: 'unavailable',
       reason: 'Artifact list support is unavailable in this runtime.',
     };
   }
-  const list = artifactStore.list;
-  const artifacts = listEveryArtifact((limit) => list.call(artifactStore, limit))
-    .filter((artifact) => readArtifactMetadataString(artifact, 'purpose') === 'agent-setup-smoke-evidence')
-    .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0));
-  return { status: 'available', artifacts };
+  return { status: 'available', artifacts: artifactStore.listByPurpose('agent-setup-smoke-evidence') };
+}
+
+/** The result a saved smoke artifact proves, including ones saved before `passed` existed. */
+export function setupSmokeArtifactResult(artifact: ArtifactDescriptor): string {
+  const result = readArtifactMetadataString(artifact, 'result');
+  if (result !== 'ready-for-user-run') return result || 'unknown';
+  return setupSmokeResult(readArtifactMetadataStringArray(artifact, 'blockedChecks'), readArtifactMetadataStringArray(artifact, 'userRunChecks'),
+    readArtifactMetadataStringArray(artifact, 'evidenceFields'));
 }
 
 export function setupSmokeEvidenceScore(artifact: ArtifactDescriptor): number {
-  const result = readArtifactMetadataString(artifact, 'result');
+  const result = setupSmokeArtifactResult(artifact);
+  if (result === 'passed') return 3;
   if (result === 'ready-for-user-run') return 2;
   if (result === 'blocked') return 0;
   return 1;
@@ -421,7 +453,8 @@ export function setupSmokeEvidenceTrend(artifacts: readonly ArtifactDescriptor[]
   const previous = setupSmokeEvidenceScore(artifacts[1]!);
   if (latest > previous) return 'improving';
   if (latest < previous) return 'regressing';
-  const result = readArtifactMetadataString(artifacts[0]!, 'result');
+  const result = setupSmokeArtifactResult(artifacts[0]!);
+  if (result === 'passed') return 'unchanged-passed';
   if (result === 'ready-for-user-run') return 'unchanged-ready';
   if (result === 'blocked') return 'unchanged-blocked';
   return 'unchanged';
@@ -451,7 +484,7 @@ export function describeSetupSmokeEvidenceArtifact(artifact: ArtifactDescriptor)
     artifactId: artifact.id,
     filename: artifact.filename ?? null,
     capturedAt: readArtifactMetadataString(artifact, 'capturedAt') || safeIso(artifact.createdAt),
-    result: readArtifactMetadataString(artifact, 'result') || 'unknown',
+    result: setupSmokeArtifactResult(artifact),
     smokeStatus: readArtifactMetadataString(artifact, 'smokeStatus') || 'unknown',
     blockedChecks: readArtifactMetadataStringArray(artifact, 'blockedChecks'),
     userRunChecks: readArtifactMetadataStringArray(artifact, 'userRunChecks'),
@@ -460,8 +493,7 @@ export function describeSetupSmokeEvidenceArtifact(artifact: ArtifactDescriptor)
   };
 }
 
-export function latestSetupSmokeEvidence(context: CommandContext): Record<string, unknown> {
-  const listed = setupSmokeEvidenceArtifacts(context);
+export function latestSetupSmokeEvidence(listed: SetupSmokeEvidenceList): Record<string, unknown> {
   if (listed.status === 'unavailable') return listed;
   const artifacts = listed.artifacts;
   const latest = artifacts[0];
@@ -479,8 +511,7 @@ export function latestSetupSmokeEvidence(context: CommandContext): Record<string
   };
 }
 
-export function setupSmokeEvidenceHistory(context: CommandContext): Record<string, unknown> {
-  const listed = setupSmokeEvidenceArtifacts(context);
+export function setupSmokeEvidenceHistory(listed: SetupSmokeEvidenceList): Record<string, unknown> {
   if (listed.status === 'unavailable') return listed;
   const artifacts = listed.artifacts;
   if (artifacts.length === 0) {
@@ -493,7 +524,7 @@ export function setupSmokeEvidenceHistory(context: CommandContext): Record<strin
     };
   }
   const resultCounts = artifacts.reduce<Record<string, number>>((counts, artifact) => {
-    const result = readArtifactMetadataString(artifact, 'result') || 'unknown';
+    const result = setupSmokeArtifactResult(artifact);
     counts[result] = (counts[result] ?? 0) + 1;
     return counts;
   }, {});
@@ -501,8 +532,8 @@ export function setupSmokeEvidenceHistory(context: CommandContext): Record<strin
     status: 'available',
     total: artifacts.length,
     trend: setupSmokeEvidenceTrend(artifacts),
-    latestResult: readArtifactMetadataString(artifacts[0]!, 'result') || 'unknown',
-    previousResult: artifacts[1] ? readArtifactMetadataString(artifacts[1], 'result') || 'unknown' : null,
+    latestResult: setupSmokeArtifactResult(artifacts[0]!),
+    previousResult: artifacts[1] ? setupSmokeArtifactResult(artifacts[1]) : null,
     latestEvidenceId: artifacts[0]!.id,
     latestEvidenceAt: artifactCreatedAtIso(artifacts[0]!),
     resultCounts,
@@ -514,8 +545,7 @@ export function setupSmokeEvidenceHistory(context: CommandContext): Record<strin
   };
 }
 
-export function setupWizardSmokeHistory(context: CommandContext): AgentSetupWizardSmokeHistory {
-  const listed = setupSmokeEvidenceArtifacts(context);
+export function setupWizardSmokeHistory(listed: SetupSmokeEvidenceList): AgentSetupWizardSmokeHistory {
   if (listed.status === 'unavailable') {
     return {
       ...emptyAgentSetupSmokeHistory(listed.reason),
@@ -525,7 +555,7 @@ export function setupWizardSmokeHistory(context: CommandContext): AgentSetupWiza
   const artifacts = listed.artifacts;
   if (artifacts.length === 0) return emptyAgentSetupSmokeHistory();
   const resultCounts = artifacts.reduce<Record<string, number>>((counts, artifact) => {
-    const result = readArtifactMetadataString(artifact, 'result') || 'unknown';
+    const result = setupSmokeArtifactResult(artifact);
     counts[result] = (counts[result] ?? 0) + 1;
     return counts;
   }, {});
@@ -533,8 +563,8 @@ export function setupWizardSmokeHistory(context: CommandContext): AgentSetupWiza
     status: 'available',
     total: artifacts.length,
     trend: setupSmokeEvidenceTrend(artifacts),
-    latestResult: readArtifactMetadataString(artifacts[0]!, 'result') || 'unknown',
-    previousResult: artifacts[1] ? readArtifactMetadataString(artifacts[1], 'result') || 'unknown' : null,
+    latestResult: setupSmokeArtifactResult(artifacts[0]!),
+    previousResult: artifacts[1] ? setupSmokeArtifactResult(artifacts[1]) : null,
     latestEvidenceId: artifacts[0]!.id,
     latestEvidenceAt: artifactCreatedAtIso(artifacts[0]!),
     resultCounts,
@@ -594,16 +624,6 @@ export function setupWizardCheckpoint(context: CommandContext): AgentSetupWizard
   }
 }
 
-export function setupWizardDurableReceipts(context: CommandContext): readonly AgentSetupWizardDurableReceipt[] {
-  const artifactStore = setupSmokeArtifactStore(context);
-  if (!artifactStore?.list) return [];
-  try {
-    return buildSetupWizardDurableReceipts(listEveryArtifact((limit) => artifactStore.list!(limit)));
-  } catch {
-    return [];
-  }
-}
-
 export function setupCompletionMarkerExists(context: CommandContext): boolean {
   try {
     return isOnboardingComplete(requireShellPaths(context));
@@ -634,15 +654,18 @@ export function setupPlanItemToWizardSource(item: SetupPlanItem): AgentSetupWiza
   };
 }
 
-export function buildSetupWizard(plan: readonly SetupPlanItem[], context: CommandContext): AgentSetupWizard {
+/** No producer publishes setup receipts as artifacts; the Agent's own checks and the smoke evidence are what setup reads. */
+const NO_DURABLE_SETUP_RECEIPTS: readonly AgentSetupWizardDurableReceipt[] = [];
+
+export function buildSetupWizard(plan: readonly SetupPlanItem[], context: CommandContext, smoke: SetupSmokeEvidenceList): AgentSetupWizard {
   const markerItem = plan.find((item) => item.id === 'finish-onboarding');
   return buildAgentSetupWizard({
     items: plan.map(setupPlanItemToWizardSource),
-    smokeHistory: setupWizardSmokeHistory(context),
+    smokeHistory: setupWizardSmokeHistory(smoke),
     checkpoint: setupWizardCheckpoint(context),
     closeoutCriticalStepIds: plan.filter((item) => item.blocksAutonomy).map((item) => item.id),
     receiptRequiredStepIds: ['connected-host-readiness', 'connected-host-auth', 'install-smoke'],
-    durableReceipts: setupWizardDurableReceipts(context),
+    durableReceipts: NO_DURABLE_SETUP_RECEIPTS,
     setupMarkerExists: markerItem?.status === 'ready' || setupCompletionMarkerExists(context),
     repeatedBlockerAliases: SETUP_WIZARD_PLAN_BLOCKER_ALIASES,
   });
@@ -657,8 +680,9 @@ export function installSmokeRunSummary(plan: SetupInstallSmokePlan): SetupInstal
   };
 }
 
-export function installSmokeRunResult(plan: SetupInstallSmokePlan): 'blocked' | 'ready-for-user-run' {
-  return plan.checks.some((check) => check.status === 'blocked') ? 'blocked' : 'ready-for-user-run';
+export function installSmokeRunResult(plan: SetupInstallSmokePlan, evidenceFieldIds: readonly string[]): SetupSmokeResult {
+  return setupSmokeResult(plan.checks.filter((check) => check.status === 'blocked').map((check) => check.id),
+    plan.checks.filter((check) => check.status === 'user-run').map((check) => check.id), evidenceFieldIds);
 }
 
 export function installSmokeNextAction(plan: SetupInstallSmokePlan): string {

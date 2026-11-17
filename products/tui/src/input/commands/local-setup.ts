@@ -41,6 +41,10 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
       transfer: '<export [--overwrite]|inspect|import> <path>', link: '<surface> [target]', 'open-link': '<uri>',
     },
     confirm(args, ctx) {
+      // One admission, at the caller when the caller is not a person: the owner
+      // who typed the import has decided; a model-run import shows the owner the
+      // plan (every security-bearing change in full) once.
+      if (ctx.invokedByModel !== true) return undefined;
       if (args[0] !== 'transfer' || args[1]?.toLowerCase() !== 'import') return undefined;
       const pathArg = args.slice(2).find((value) => !value.startsWith('--'));
       if (!pathArg) return undefined;

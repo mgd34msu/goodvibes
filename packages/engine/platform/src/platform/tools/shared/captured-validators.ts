@@ -10,11 +10,13 @@ import { validatorCommand, type ValidatorRunner } from './validators.js';
 
 export function createCapturedValidatorRunner(binding: CapturedExecAuthority, options: {
   readonly sandbox?: ExecSandboxRuntime | null | undefined;
-  readonly credentialEnvScrub?: CredentialEnvScrubConfig | undefined;
+  /** A fixed scrub, or its source, read at each validator run so a changed allowlist applies to the next one. */
+  readonly credentialEnvScrub?: CredentialEnvScrubConfig | (() => CredentialEnvScrubConfig) | undefined;
 } = {}): ValidatorRunner {
   binding = Object.freeze({ ...binding, dependencyInputs: binding.dependencyInputs ? Object.freeze([...binding.dependencyInputs]) : undefined });
   const sandbox = options.sandbox ?? null;
-  const scrub = resolveCredentialEnvScrub(options.credentialEnvScrub);
+  const scrubConfig = options.credentialEnvScrub;
+  const fixedScrub = typeof scrubConfig === 'function' ? undefined : resolveCredentialEnvScrub(scrubConfig);
   return async (name, cwd, execution) => {
     execution?.assertCurrent();
     const context = capturedToolPublicationContext();
@@ -47,6 +49,7 @@ export function createCapturedValidatorRunner(binding: CapturedExecAuthority, op
     const signal = admission ? AbortSignal.any([admission.signal, ...(context.signal ? [context.signal] : [])]) : context.signal;
     try {
       const ambient = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+      const scrub = fixedScrub ?? resolveCredentialEnvScrub(typeof scrubConfig === 'function' ? scrubConfig() : scrubConfig);
       const environment = await executePolicyCheck(() => scrubCredentialEnv(ambient, scrub), signal);
       const network = !plan || plan.network === 'enabled' ? 'enabled' : 'disabled';
       const result = await runCapturedCommand(executionBinding, command, {}, cwd, 30_000, signal, network, environment.env, {

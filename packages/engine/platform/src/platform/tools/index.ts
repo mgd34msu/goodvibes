@@ -632,7 +632,7 @@ export function registerAllTools(
   const capturedAutoHeal = deps.capturedExec ? createCapturedAutoHealBackend(deps.capturedExec) : undefined;
   // Validators run only through exec's own path (sandbox plan, containment, credential scrub), never a separate spawn.
   const validatorRunner = deps.capturedExec
-    ? createCapturedValidatorRunner(deps.capturedExec, { sandbox: execSandbox, credentialEnvScrub: typeof credentialEnvScrub === 'function' ? credentialEnvScrub() : credentialEnvScrub })
+    ? createCapturedValidatorRunner(deps.capturedExec, { sandbox: execSandbox, credentialEnvScrub })
     : createExecValidatorRunner(processManager, execOptions);
   registerTool(
     createWriteTool({

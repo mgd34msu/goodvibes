@@ -4,7 +4,7 @@ import { activateClassicFallback, isClassicOperation, withConfiguredDecisionMode
 import type { JudgmentPort, JudgmentResult, Questions } from '@goodvibes-jev/judgment/decisions';
 import {
   BrowserJudgmentError, BROWSER_JUDGMENT_LIMITS as LIMIT, parseBrowserJudgmentRequest, captureBrowserJudgmentJson, missingScopes,
-  type AuthenticatedPrincipal, type BrowserJudgmentRequest, type BrowserJudgmentChatSessions,
+  type AuthenticatedPrincipal, type BrowserJudgmentRequest,
 } from '@goodvibes-jev/engine/daemon-api';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { BrowserJudgmentReferences } from './references.js';
@@ -21,7 +21,6 @@ export interface BrowserJudgmentServiceOptions {
   readonly currentRoute: () => BrowserJudgmentRoute | undefined;
   /** Server policy only. Read access/reference possession never implies outbound clearance. */
   readonly authorize: (input: BrowserJudgmentAuthorization) => boolean;
-  readonly bindChatSessions?: (source: BrowserJudgmentChatSessions) => () => void;
 }
 type Evidence = Pick<JudgmentResult<Questions>, 'decisionId' | 'model' | 'requestedModel' | 'usage' | 'latencyMs'>;
 
@@ -48,11 +47,6 @@ export class BrowserJudgmentService {
   #close: Promise<void> | undefined;
   readonly #providerCalls = new BrowserJudgmentCallLimit(8, LIMIT.totalRuns * 4);
   constructor(private readonly options: BrowserJudgmentServiceOptions) {}
-
-  bindChatSessions(source: BrowserJudgmentChatSessions): () => void {
-    if (this.#closing) throw new BrowserJudgmentError('JUDGMENT_SHUTTING_DOWN');
-    return this.options.bindChatSessions?.(source) ?? (() => {});
-  }
 
   async execute(raw: unknown, principal: AuthenticatedPrincipal, signal: AbortSignal, currentPrincipal: () => AuthenticatedPrincipal): Promise<object> {
     if (this.#closing) throw new BrowserJudgmentError('JUDGMENT_SHUTTING_DOWN');
@@ -213,7 +207,7 @@ export class BrowserJudgmentService {
         const projection = battery.project(result);
         try { projected = captureBrowserJudgmentJson(projection) as typeof projected; }
         catch { throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE'); }
-        validateBrowserJudgmentProjection(request, projected, state);
+        validateBrowserJudgmentProjection(request, projected);
         const outcomes = Object.values(projected.readings).map((reading) => reading.outcome);
         if (projected.status === 'held' && projected.compoundOutcome !== undefined) outcomes.push(projected.compoundOutcome);
         const outcome = outcomes.includes('escalate') ? 'escalate' : outcomes.includes('confirm') ? 'confirm' : 'act';

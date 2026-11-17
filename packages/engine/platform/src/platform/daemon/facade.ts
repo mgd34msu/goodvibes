@@ -214,7 +214,6 @@ export class DaemonServer {
   /** Lifecycle sidecar: clean-shutdown marker, receipts, hourly auto-update. */
   private lifecycle: DaemonLifecycleRuntime | null = null;
   private readonly companionChatManager: CompanionChatManager;
-  private releaseBrowserJudgmentChats: (() => void) | undefined;
   private readonly hostedSessions: HostedSessionManager | null;
   private relayReachability: RelayReachability | null = null;
   private agentTaskAdapter: import('../runtime/tasks/adapters/agent-adapter.js').AgentTaskAdapter | null = null;
@@ -650,7 +649,6 @@ export class DaemonServer {
       await this.clusterCoordinator.start();
       this.channelHealth.start(); // after the coordinator, so the first sweep sees the ingress this node actually won rather than calling every surface dead mid-election
       await this.companionChatManager.init();
-      this.releaseBrowserJudgmentChats = this.runtimeServices.browserJudgment?.bindChatSessions?.(this.companionChatManager);
       // Restore what survived; the report states what could not come back.
       // Once per manager: a second init (a start retried after a failure) would stack a second set of bus subscriptions and reset live entries.
       if (this.hostedSessions && !this.hostedSessionsRestored) {
@@ -726,8 +724,6 @@ export class DaemonServer {
     } catch (err) {
       this.settingsLifetime = null;
       const message = summarizeError(err);
-      this.releaseBrowserJudgmentChats?.();
-      this.releaseBrowserJudgmentChats = undefined;
       this.replySettlement?.();
       this.replySettlement = null;
       this.workProposals.dispose();
@@ -1135,8 +1131,6 @@ export class DaemonServer {
     this.httpRouter.dispose();
     this.controlPlaneHelper.dispose();
     this.surfaceActionHelper.closeDelegatedTelegram();
-    this.releaseBrowserJudgmentChats?.();
-    this.releaseBrowserJudgmentChats = undefined;
     try { await this.companionChatManager.close(); }
     catch (error) { runtimeCloseFailures.push(error); }
     // Kill-policy sessions end here; survive-policy ones are parked with their transcript.

@@ -10,9 +10,6 @@ const providerKeys = objectSchema({
 const matches = objectSchema({ matches: arraySchema(BOOLEAN_SCHEMA) }, ['matches']);
 /** Each battery's input and settled value, side by side so the two can never be paired up wrongly. */
 const batteries: readonly (readonly [BrowserJudgmentBatteryId, Record<string, unknown>, Record<string, unknown>])[] = [
-  ['webui.voice.speech-seams',
-    objectSchema({ sessionId: ref, messageId: ref, start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1, maximum: 1_000_000 }, contentRevision: ref, cursor: { type: 'integer', minimum: 0, maximum: 4095, multipleOf: 64 } }, ['sessionId', 'messageId', 'start', 'end', 'contentRevision', 'cursor']),
-    objectSchema({ endOffsets: { ...arraySchema({ type: 'integer', minimum: 1, maximum: 32768 }), maxItems: 64 }, nextCursor: { anyOf: [{ type: 'integer', minimum: 64, maximum: 4095 }, { type: 'null' }] } }, ['endOffsets', 'nextCursor'])],
   ['webui.models.catalog-provider-match', providerKeys, matches],
 ];
 const envelope = (battery: BrowserJudgmentBatteryId, input: Record<string, unknown>) => objectSchema({

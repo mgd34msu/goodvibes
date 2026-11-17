@@ -1,8 +1,6 @@
-import { snapshotSpeechSeams } from './speech-source.js';
 import type { Reading } from '@goodvibes-jev/judgment/decisions';
-import { readYesNo } from '@goodvibes-jev/judgment';
 import {
-  BrowserJudgmentError, BROWSER_SPEECH_SEAM_BAND, judgmentRecord, type BrowserJudgmentRequest,
+  BrowserJudgmentError, judgmentRecord, type BrowserJudgmentRequest,
 } from '@goodvibes-jev/engine/daemon-api';
 import type { BrowserJudgmentProjection } from './types.js';
 
@@ -17,7 +15,7 @@ function validateReading(reading: Reading): void {
 }
 
 /** Reject malformed values and refuse executable values backed by unsettled readings. */
-export function validateBrowserJudgmentProjection(request: BrowserJudgmentRequest, result: BrowserJudgmentProjection<unknown>, state?: unknown): void {
+export function validateBrowserJudgmentProjection(request: BrowserJudgmentRequest, result: BrowserJudgmentProjection<unknown>): void {
   try {
     const hasCompound = Object.hasOwn(result, 'compoundOutcome');
     judgmentRecord(result, [...(result.status === 'settled' ? ['status', 'value', 'readings'] : ['status', 'reason', 'readings']),
@@ -27,15 +25,7 @@ export function validateBrowserJudgmentProjection(request: BrowserJudgmentReques
     const readings = Object.values(result.readings);
     if (!readings.length || readings.length > 128) return invalid();
     readings.forEach(validateReading);
-    if (request.battery === 'webui.voice.speech-seams') {
-      const source = snapshotSpeechSeams(state);
-      judgmentRecord(result.readings, source.candidates.map((_, i) => `seam_${i}`));
-      if (readings.some(reading => {
-        if (reading.kind !== 'yes-no') return true;
-        const expected = readYesNo({ type: 'noul', noul: reading.probability }, BROWSER_SPEECH_SEAM_BAND);
-        return reading.verdict !== expected.verdict || reading.outcome !== expected.outcome;
-      })) return invalid();
-    } else if (request.battery === 'webui.models.catalog-provider-match') {
+    if (request.battery === 'webui.models.catalog-provider-match') {
       judgmentRecord(result.readings, request.input.keys.map((_, index) => `key_${index}`));
       if (readings.some(reading => reading.kind !== 'yes-no')) return invalid();
     } else return invalid();
@@ -44,11 +34,7 @@ export function validateBrowserJudgmentProjection(request: BrowserJudgmentReques
       return;
     }
     if (result.status !== 'settled' || readings.some((r) => r.outcome !== 'act' || (r.kind === 'yes-no' && r.verdict === 'uncertain'))) return invalid();
-    if (request.battery === 'webui.voice.speech-seams') {
-      const source = snapshotSpeechSeams(state); const value = judgmentRecord(result.value, ['endOffsets', 'nextCursor']);
-      const expected = source.candidates.filter((_, i) => { const r = result.readings[`seam_${i}`]; return r?.kind === 'yes-no' && r.verdict === 'yes'; });
-      if (value.nextCursor !== source.nextCursor || !Array.isArray(value.endOffsets) || JSON.stringify(value.endOffsets) !== JSON.stringify(expected)) return invalid();
-    } else if (request.battery === 'webui.models.catalog-provider-match') {
+    if (request.battery === 'webui.models.catalog-provider-match') {
       const value = judgmentRecord(result.value, ['matches']);
       if (!Array.isArray(value.matches) || value.matches.length !== request.input.keys.length) return invalid();
       value.matches.forEach((match, index) => {

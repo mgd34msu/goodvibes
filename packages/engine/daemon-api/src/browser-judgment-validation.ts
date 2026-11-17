@@ -67,14 +67,7 @@ export function parseBrowserJudgmentRequest(value: unknown): BrowserJudgmentRequ
   if (!(BROWSER_JUDGMENT_BATTERY_IDS as readonly string[]).includes(battery)) throw new BrowserJudgmentError('JUDGMENT_BATTERY_UNKNOWN');
   if (!Number.isInteger(request.batteryVersion) || Number(request.batteryVersion) < 1) return invalid();
   if (request.batteryVersion !== BROWSER_JUDGMENT_BATTERY_VERSIONS[battery as BrowserJudgmentBatteryId]) throw new BrowserJudgmentError('JUDGMENT_BATTERY_VERSION_UNSUPPORTED');
-  if (battery === 'webui.voice.speech-seams') {
-    const input = judgmentRecord(request.input, ['sessionId', 'messageId', 'start', 'end', 'contentRevision', 'cursor']);
-    if (typeof input.cursor !== 'number' || !Number.isInteger(input.cursor) || input.cursor < 0 || input.cursor >= 4096 || input.cursor % 64 !== 0) return invalid();
-    judgmentText(input.sessionId); judgmentText(input.messageId);
-    judgmentText(input.contentRevision);
-    if (typeof input.start !== 'number' || !Number.isInteger(input.start) || input.start < 0
-      || typeof input.end !== 'number' || !Number.isInteger(input.end) || input.end <= input.start || input.end > 1_000_000) return invalid();
-  } else if (battery === 'webui.models.catalog-provider-match') {
+  if (battery === 'webui.models.catalog-provider-match') {
     const input = judgmentRecord(request.input, ['providerId', 'keys']); judgmentText(input.providerId, 128);
     if (!Array.isArray(input.keys) || input.keys.length < 1 || input.keys.length > 64) return invalid();
     const seen = new Set<string>();

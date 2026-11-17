@@ -1,8 +1,6 @@
-import { createSpeechSeamsAdapter } from './batteries/speech-seams.js';
-import { canonicalSpeechSeams, snapshotSpeechSeams } from './speech-source.js';
 import {
   BrowserJudgmentError, missingScopes,
-  type AuthenticatedPrincipal, type BrowserJudgmentBatteryId, type BrowserJudgmentChatSessions,
+  type AuthenticatedPrincipal, type BrowserJudgmentBatteryId,
 } from '@goodvibes-jev/engine/daemon-api';
 import type { GatewayMethodDescriptor } from '../control-plane/method-catalog-shared.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
@@ -14,7 +12,7 @@ import { createWebuiCatalogProviderAdapter } from './batteries/webui-adapters.js
 import { snapshotWebuiCredentialNames } from './batteries/webui-readers.js';
 import { granted, requireSynchronousAssertion } from './guards.js';
 
-export type WebuiJudgmentSourceKind = 'chat-speech' | 'provider-catalog-ids';
+export type WebuiJudgmentSourceKind = 'provider-catalog-ids';
 
 /** Source/purpose permission is owned by the host, separately from read scopes. */
 export interface WebuiBrowserJudgmentOptions {
@@ -37,15 +35,14 @@ function canRead(principal: AuthenticatedPrincipal, scopes: readonly string[]): 
 }
 
 /**
- * The real WebUI source owner. Only host chat messages read for speech and
- * provider catalog ids enter this closed registry. Daemon refusals carry their
- * machine code, so the web UI reads them without a battery. Status enums stay
- * in the pure catalog; no dynamic status issuer is invented.
+ * The real WebUI source owner. Only provider catalog ids enter this closed
+ * registry; read-aloud splits text in the browser by code. Daemon refusals
+ * carry their machine code, so the web UI reads them without a battery. Status
+ * enums stay in the pure catalog; no dynamic status issuer is invented.
  */
 export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions): BrowserJudgmentService {
   const references = new BrowserJudgmentReferences();
   const registry = new BrowserJudgmentRegistry();
-  let chatSource: BrowserJudgmentChatSessions | undefined;
   const bindings = new Map<string, { readonly principalId: string; readonly principalKind: AuthenticatedPrincipal['principalKind']; readonly battery: BrowserJudgmentBatteryId;
     readonly sources: readonly WebuiJudgmentSourceKind[] }>();
   const remember = (id: string, principal: AuthenticatedPrincipal, battery: BrowserJudgmentBatteryId,
@@ -58,40 +55,6 @@ export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions)
     } catch (error) { references.revoke(id); throw error; }
   };
 
-  registry.register(createSpeechSeamsAdapter(async (input, context) => {
-    const battery = 'webui.voice.speech-seams';
-    const principal = context.currentPrincipal();
-    const sessions = chatSource;
-    if (!sessions || (!sessions.getMessage && !sessions.getMessages) || !canRead(principal, ['read:sessions'])) return held();
-    const session = sessions.getSession(input.sessionId);
-    const readMessage = () => sessions.getMessage
-      ? sessions.getMessage(input.sessionId, input.messageId)
-      : sessions.getMessages?.(input.sessionId).find(item => item.id === input.messageId);
-    const message = readMessage();
-    if (!session || session.id !== input.sessionId || !message || message.id !== input.messageId || message.sessionId !== input.sessionId || !message.contentRevision || message.contentRevision !== input.contentRevision) return held();
-    const content = message.content; const contentRevision = message.contentRevision; const createdAt = message.createdAt; const supersededAt = message.supersededAt;
-    const assertCurrent = () => {
-      context.signal.throwIfAborted();
-      const current = context.currentPrincipal();
-      if (current.principalId !== principal.principalId || current.principalKind !== principal.principalKind || !canRead(current, ['read:sessions'])
-        || chatSource !== sessions || sessions.getSession(input.sessionId) !== session || session.id !== input.sessionId
-        || readMessage() !== message
-        || message.id !== input.messageId || message.sessionId !== input.sessionId || message.contentRevision !== contentRevision || message.content !== content || message.createdAt !== createdAt || message.supersededAt !== supersededAt) return held();
-    };
-    assertCurrent();
-    let snapshot;
-    try {
-      // Screen the complete canonical source before selecting any outward content.
-      const original = snapshotJudgmentInput({ content }) as { readonly content: string };
-      snapshot = canonicalSpeechSeams(original.content, input.start, input.end, input.cursor);
-    } catch { throw new BrowserJudgmentError('JUDGMENT_INPUT_HELD'); }
-    const id = remember(references.issue({ principalId: principal.principalId, battery, revision: crypto.randomUUID(),
-      expiresAt: Date.now() + 300_000, snapshot, assertCurrent,
-      mayRead: actor => actor.principalId === principal.principalId && actor.principalKind === principal.principalKind && canRead(actor, ['read:sessions']),
-    }), principal, battery, ['chat-speech']);
-    try { return { ...references.resolve(id, context.currentPrincipal, battery, snapshotSpeechSeams), dispose: () => references.revoke(id) }; }
-    catch (error) { references.revoke(id); throw error; }
-  }));
   registry.register(createWebuiCatalogProviderAdapter(async (input, context) => {
     const battery = 'webui.models.catalog-provider-match';
     const principal = context.currentPrincipal();
@@ -139,14 +102,6 @@ export function createWebuiBrowserJudgment(options: WebuiBrowserJudgmentOptions)
     } catch (error) { captured.signal.removeEventListener('abort', revoke); revoke(); throw error; }
   }));
   return new BrowserJudgmentService({ registry, references, currentRoute: options.currentRoute,
-    bindChatSessions(source) {
-      const invalidate = () => {
-        for (const [id, binding] of bindings) if (binding.sources.includes('chat-speech')) references.revoke(id);
-      };
-      invalidate();
-      chatSource = source;
-      return () => { if (chatSource === source) { chatSource = undefined; invalidate(); } };
-    },
     authorize(input) {
       const binding = bindings.get(input.sourceBinding);
       return !!binding && binding.principalId === input.principal.principalId && binding.principalKind === input.principal.principalKind && binding.battery === input.battery

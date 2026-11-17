@@ -8,23 +8,6 @@ import { parseBrowserJudgmentRequest } from './browser-judgment-validation.js';
 
 export interface BrowserJudgmentCapability {
   execute(input: unknown, principal: AuthenticatedPrincipal, signal: AbortSignal, currentPrincipal: () => AuthenticatedPrincipal): Promise<object>;
-  /** Binds the actual host chat store; the returned release fences that store's lifetime. */
-  bindChatSessions?(source: BrowserJudgmentChatSessions): () => void;
-}
-export interface BrowserJudgmentChatMessage {
-  readonly id: string;
-  readonly sessionId: string;
-  readonly content: string;
-  readonly contentRevision?: string | undefined;
-  readonly createdAt: number;
-  readonly supersededAt?: number | undefined;
-}
-export interface BrowserJudgmentChatSessions {
-  /** Native single-message lookup avoids copying transcript arrays at each await guard. */
-  getMessage?(sessionId: string, messageId: string): BrowserJudgmentChatMessage | undefined;
-  /** Optional canonical completed messages; absence holds code-language reading. */
-  getMessages?(sessionId: string): readonly BrowserJudgmentChatMessage[];
-  getSession(id: string): { readonly id: string; readonly title: string; readonly createdAt: number; readonly updatedAt: number } | null;
 }
 export interface BrowserJudgmentHttpContext {
   readonly authenticate: (req: Request) => AuthenticatedPrincipal | null;

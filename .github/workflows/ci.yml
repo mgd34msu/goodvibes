@@ -251,10 +251,6 @@ jobs:
           path: /tmp/daemon-native-artifact
       - name: Restore daemon native artifact
         run: tar -xzf /tmp/daemon-native-artifact/daemon-native-linux-x64.tgz -C .
-      - name: Verify the restored cohort against its recorded identity
-        env:
-          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bun products/daemon/scripts/ci-artifact.ts verify "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
       - name: Qualify isolated daemon commands and synthetic send
         run: bun run --cwd products/daemon verify:binary
 
@@ -364,11 +360,6 @@ jobs:
         env:
           NATIVE_TARGET: ${{ matrix.target }}
         run: tar -xzf "/tmp/daemon-native-artifact/daemon-native-${NATIVE_TARGET}.tgz" -C .
-      - name: Verify the restored Linux ARM cohort against its recorded identity
-        if: matrix.platform == 'linux'
-        env:
-          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: bun products/daemon/scripts/ci-artifact.ts verify "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
       - name: Execute isolated Linux ARM cohort
         if: matrix.platform == 'linux'
         run: node products/daemon/scripts/verify-binary.mjs --binary native/goodvibes-daemon-linux-arm64

@@ -407,11 +407,11 @@ export function browserGatewayOverEngine(
     async closeTab(target, args) {
       return (await engineFor()).closeTab(target, args);
     },
-    async goBack(target) {
-      return (await engineFor()).goBack(target);
+    async goBack(target, args) {
+      return (await engineFor()).goBack(target, args);
     },
-    async goForward(target) {
-      return (await engineFor()).goForward(target);
+    async goForward(target, args) {
+      return (await engineFor()).goForward(target, args);
     },
     async retainAdmittedToolAction(args, options, current) {
       return (await engineFor()).retainAdmittedToolAction(args, options, current);

@@ -583,8 +583,8 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
       return moved ? {} : null;
     },
     waitForLoadState: async (state?: string, options?: Record<string, unknown>) => {
-      await pageCall('waitForLoadState', { state, ...options });
-      await refreshAfterAction();
+      try { await pageCall('waitForLoadState', { state, ...options }); }
+      finally { await refreshAfterAction(); }
     },
     waitForURL: async (target: string, options?: Record<string, unknown>) => {
       url = await pageCall('waitForURL', { url: target, ...options }) as string;

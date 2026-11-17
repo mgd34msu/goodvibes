@@ -39,7 +39,9 @@ import {
   DEFAULT_WAIT_TIMEOUT_MS,
   boundedBrowserCall,
   classifyNavigationTarget,
+  deadlineError,
   deadlineFor,
+  isDeadlineError,
   launchNote,
   normalizeUrl,
   readElementData,
@@ -94,6 +96,16 @@ export interface RestoredCheckoutPage extends RestoredBrowserPage {
 class BrowserClickOutcomeUnknownError extends Error {
   override readonly name = 'BrowserClickOutcomeUnknownError';
   constructor() { super('The browser click was attempted, but its result could not be confirmed. Inspect the page before trying again.'); }
+}
+
+/**
+ * Whether a driver deadline error shows the click reached the page. The
+ * driver's call log names the step it was on; a click that timed out while
+ * waiting for the element to become clickable never logged performing it.
+ */
+function clickReachedPage(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /performing click action|click action done/i.test(message);
 }
 
 /**
@@ -891,6 +903,11 @@ export class BrowserEngine {
           next: 'Refs are cleared after a click. Call action:"snapshot" for current refs.',
         };
       } catch (error) {
+        if (attempted && isDeadlineError(error) && !clickReachedPage(error)) {
+          // Nothing was sent to the page, so this is an ordinary deadline with a next step, not an unknown outcome.
+          attempted = false;
+          throw deadlineError({ action: 'click', deadlineMs, next: 'The element never became clickable. Call action:"snapshot" to check it is present, visible, enabled and not covered.' });
+        }
         if (attempted) throw new BrowserClickOutcomeUnknownError();
         throw error;
       }
@@ -1076,7 +1093,7 @@ export class BrowserEngine {
 
   async scroll(
     target: BrowserTarget,
-    args: { readonly ref?: string | undefined; readonly direction?: 'up' | 'down' | undefined; readonly amount?: number | undefined },
+    args: { readonly ref?: string | undefined; readonly direction?: 'up' | 'down' | undefined; readonly amount?: number | undefined; readonly timeoutMs?: number | undefined },
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
@@ -1086,8 +1103,9 @@ export class BrowserEngine {
       if (args.ref) {
         const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
         await revalidate(); assertCurrent();
-        await boundedBrowserCall({ action: 'scroll', deadlineMs: DEFAULT_ACTION_TIMEOUT_MS, next: 'Call action:"snapshot" to check the element is still on the page.' },
-          () => work.wait(() => locator.scrollIntoViewIfNeeded({ timeout: DEFAULT_ACTION_TIMEOUT_MS })));
+        const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
+        await boundedBrowserCall({ action: 'scroll', deadlineMs, next: 'Call action:"snapshot" to check the element is still on the page.' },
+          () => work.wait(() => locator.scrollIntoViewIfNeeded({ timeout: deadlineMs })));
         return { sessionId, pageId, scrolledTo: { ref: args.ref, role: element.role, name: element.name } };
       }
       const amount = args.amount ?? 600;
@@ -1126,14 +1144,14 @@ export class BrowserEngine {
     });
   }
 
-  async readText(target: BrowserTarget, args: { readonly maxChars?: number | undefined } = {}): Promise<Record<string, unknown>> {
+  async readText(target: BrowserTarget, args: { readonly maxChars?: number | undefined; readonly timeoutMs?: number | undefined } = {}): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
     return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
       assertPageTextAllowed(this.cardGuard, sessionId, pageId);
       const limit = Math.max(200, Math.min(200_000, args.maxChars ?? DEFAULT_TEXT_LIMIT));
       await this.requireReadableAddress(sessionId, pageId, page.url()); current();
       const read = <T>(run: () => Promise<T>) => boundedBrowserCall({
-        action: 'read_text', deadlineMs: DEFAULT_ACTION_TIMEOUT_MS, signal, next: 'The page is not answering; call action:"screenshot" or navigate again.',
+        action: 'read_text', deadlineMs: deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS), signal, next: 'The page is not answering; call action:"screenshot" or navigate again.',
       }, run);
       // innerText ignores shadow DOM, so a page that renders its content inside a
       // component would read as empty. Open shadow roots are walked and appended.
@@ -1219,7 +1237,7 @@ export class BrowserEngine {
 
   async screenshot(
     target: BrowserTarget,
-    args: { readonly fullPage?: boolean | undefined; readonly path?: string | undefined } = {},
+    args: { readonly fullPage?: boolean | undefined; readonly path?: string | undefined; readonly timeoutMs?: number | undefined } = {},
   ): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
     return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
@@ -1250,8 +1268,9 @@ export class BrowserEngine {
       }
       let buffer: Awaited<ReturnType<Page['screenshot']>>;
       try {
-        buffer = await boundedBrowserCall({ action: 'screenshot', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: 'Try again with fullPage off, or call action:"read_text".' },
-          () => page.screenshot({ fullPage: args.fullPage === true, timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }));
+        const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_NAVIGATION_TIMEOUT_MS);
+        buffer = await boundedBrowserCall({ action: 'screenshot', deadlineMs, signal, next: 'Try again with fullPage off, or call action:"read_text".' },
+          () => page.screenshot({ fullPage: args.fullPage === true, timeout: deadlineMs }));
       } catch (error) {
         current();
         if (error instanceof BrowserSessionError) throw error;
@@ -1297,7 +1316,7 @@ export class BrowserEngine {
 
   async newTab(
     target: BrowserTarget,
-    args: { readonly url?: string | undefined; readonly launch?: BrowserLaunchOptions | undefined } = {},
+    args: { readonly url?: string | undefined; readonly launch?: BrowserLaunchOptions | undefined; readonly timeoutMs?: number | undefined } = {},
   ): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
     const startUrl = args.url ? normalizeUrl(args.url) : undefined;
@@ -1311,8 +1330,9 @@ export class BrowserEngine {
       if (approvedOrigin !== null) this.rememberLocalReach(sessionId, pageId, approvedOrigin, approvedOrigin);
       if (startUrl) {
         const signal = target.signal ? AbortSignal.any([pageSignal, target.signal]) : pageSignal;
-        await boundedBrowserCall({ action: 'new_tab', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: `The tab is open as ${pageId}; call action:"snapshot" on it to see what loaded.` },
-          () => page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }));
+        const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_NAVIGATION_TIMEOUT_MS);
+        await boundedBrowserCall({ action: 'new_tab', deadlineMs, signal, next: `The tab is open as ${pageId}; call action:"snapshot" on it to see what loaded.` },
+          () => page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: deadlineMs }));
         current();
         await this.requireReadableAddress(sessionId, pageId, page.url());
       }
@@ -1337,22 +1357,24 @@ export class BrowserEngine {
     return { sessionId, closedPageId: args.pageId, pages: await this.sessions.pageList(sessionId) };
   }
 
-  async goBack(target: BrowserTarget): Promise<Record<string, unknown>> {
+  async goBack(target: BrowserTarget, args: { readonly timeoutMs?: number | undefined } = {}): Promise<Record<string, unknown>> {
     target = { ...target };
+    const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_NAVIGATION_TIMEOUT_MS);
     return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
-      const response = await boundedBrowserCall({ action: 'back', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: 'Call action:"snapshot" to see where the page is.' },
-        () => page.goBack({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }));
+      const response = await boundedBrowserCall({ action: 'back', deadlineMs, signal, next: 'Call action:"snapshot" to see where the page is.' },
+        () => page.goBack({ timeout: deadlineMs }));
       current();
       this.snapshots.clear(sessionId, pageId);
       return { sessionId, pageId, url: page.url(), moved: response !== null };
     });
   }
 
-  async goForward(target: BrowserTarget): Promise<Record<string, unknown>> {
+  async goForward(target: BrowserTarget, args: { readonly timeoutMs?: number | undefined } = {}): Promise<Record<string, unknown>> {
     target = { ...target };
+    const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_NAVIGATION_TIMEOUT_MS);
     return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
-      const response = await boundedBrowserCall({ action: 'forward', deadlineMs: DEFAULT_NAVIGATION_TIMEOUT_MS, signal, next: 'Call action:"snapshot" to see where the page is.' },
-        () => page.goForward({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }));
+      const response = await boundedBrowserCall({ action: 'forward', deadlineMs, signal, next: 'Call action:"snapshot" to see where the page is.' },
+        () => page.goForward({ timeout: deadlineMs }));
       current();
       this.snapshots.clear(sessionId, pageId);
       return { sessionId, pageId, url: page.url(), moved: response !== null };

@@ -360,6 +360,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
       ref: STRING_SCHEMA,
       direction: STRING_SCHEMA,
       amount: NUMBER_SCHEMA,
+      timeoutMs: NUMBER_SCHEMA,
     }),
     outputSchema: pageResultSchema({
       scrolledBy: NUMBER_SCHEMA,
@@ -392,7 +393,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     category: 'browser',
     scopes: ['read:browser'],
     http: { method: 'POST', path: '/api/browser/read-text' },
-    inputSchema: pageInputSchema({ maxChars: NUMBER_SCHEMA }),
+    inputSchema: pageInputSchema({ maxChars: NUMBER_SCHEMA, timeoutMs: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({
       title: STRING_SCHEMA,
       content: UNTRUSTED_ENVELOPE_SCHEMA,
@@ -430,6 +431,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     inputSchema: pageInputSchema({
       fullPage: BOOLEAN_SCHEMA,
       path: STRING_SCHEMA,
+      timeoutMs: NUMBER_SCHEMA,
     }),
     outputSchema: pageResultSchema({
       path: STRING_SCHEMA,
@@ -461,6 +463,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
       url: STRING_SCHEMA,
       profileName: STRING_SCHEMA,
       headless: BOOLEAN_SCHEMA,
+      timeoutMs: NUMBER_SCHEMA,
     }),
     outputSchema: pageResultSchema({ pages: arraySchema(BROWSER_PAGE_SCHEMA) }),
   }),
@@ -498,7 +501,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     category: 'browser',
     scopes: ['write:browser'],
     http: { method: 'POST', path: '/api/browser/history/back' },
-    inputSchema: pageInputSchema(),
+    inputSchema: pageInputSchema({ timeoutMs: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({ moved: BOOLEAN_SCHEMA }),
   }),
   methodDescriptor({
@@ -508,7 +511,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     category: 'browser',
     scopes: ['write:browser'],
     http: { method: 'POST', path: '/api/browser/history/forward' },
-    inputSchema: pageInputSchema(),
+    inputSchema: pageInputSchema({ timeoutMs: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({ moved: BOOLEAN_SCHEMA }),
   }),
 ];

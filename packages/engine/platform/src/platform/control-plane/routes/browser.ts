@@ -121,13 +121,14 @@ export interface BrowserGatewayService {
     readonly ref?: string | undefined;
     readonly direction?: 'up' | 'down' | undefined;
     readonly amount?: number | undefined;
+    readonly timeoutMs?: number | undefined;
   }): Promise<BrowserGatewayResult>;
   waitFor(target: BrowserGatewayTarget, args: {
     readonly text?: string | undefined;
     readonly url?: string | undefined;
     readonly timeoutMs?: number | undefined;
   }): Promise<BrowserGatewayResult>;
-  readText(target: BrowserGatewayTarget, args: { readonly maxChars?: number | undefined }): Promise<BrowserGatewayResult>;
+  readText(target: BrowserGatewayTarget, args: { readonly maxChars?: number | undefined; readonly timeoutMs?: number | undefined }): Promise<BrowserGatewayResult>;
   extract(target: BrowserGatewayTarget, args: {
     readonly ref?: string | undefined;
     readonly selector?: string | undefined;
@@ -138,16 +139,18 @@ export interface BrowserGatewayService {
   screenshot(target: BrowserGatewayTarget, args: {
     readonly fullPage?: boolean | undefined;
     readonly path?: string | undefined;
+    readonly timeoutMs?: number | undefined;
   }): Promise<BrowserGatewayResult>;
   tabs(target: BrowserGatewayTarget): Promise<BrowserGatewayResult>;
   newTab(target: BrowserGatewayTarget, args: {
     readonly url?: string | undefined;
     readonly launch?: BrowserGatewayLaunchArgs | undefined;
+    readonly timeoutMs?: number | undefined;
   }): Promise<BrowserGatewayResult>;
   switchTab(target: BrowserGatewayTarget, args: { readonly pageId: string }): Promise<BrowserGatewayResult>;
   closeTab(target: BrowserGatewayTarget, args: { readonly pageId: string }): Promise<BrowserGatewayResult>;
-  goBack(target: BrowserGatewayTarget): Promise<BrowserGatewayResult>;
-  goForward(target: BrowserGatewayTarget): Promise<BrowserGatewayResult>;
+  goBack(target: BrowserGatewayTarget, args?: { readonly timeoutMs?: number | undefined }): Promise<BrowserGatewayResult>;
+  goForward(target: BrowserGatewayTarget, args?: { readonly timeoutMs?: number | undefined }): Promise<BrowserGatewayResult>;
 }
 
 function readOptionalString(value: unknown): string | undefined {
@@ -361,6 +364,7 @@ export function createBrowserGatewayHandlers(
         ref: readOptionalString(params.ref),
         ...(direction !== undefined && SCROLL_DIRECTIONS.has(direction) ? { direction: direction as 'up' | 'down' } : {}),
         amount: readOptionalNumber(params.amount),
+        timeoutMs: readOptionalNumber(params.timeoutMs),
       });
     })],
     ['browser.waitFor', handler(async (params, invocation) => service.waitFor(readTarget(params, invocation), {
@@ -370,6 +374,7 @@ export function createBrowserGatewayHandlers(
     }))],
     ['browser.readText', handler(async (params, invocation) => service.readText(readTarget(params, invocation), {
       maxChars: readOptionalNumber(params.maxChars),
+      timeoutMs: readOptionalNumber(params.timeoutMs),
     }))],
     ['browser.extract', handler(async (params, invocation) => {
       const fields = readExtractFields(params.fields);
@@ -384,11 +389,13 @@ export function createBrowserGatewayHandlers(
     ['browser.screenshot', handler(async (params, invocation) => service.screenshot(readTarget(params, invocation), {
       fullPage: readOptionalBoolean(params.fullPage),
       path: readOptionalString(params.path),
+      timeoutMs: readOptionalNumber(params.timeoutMs),
     }))],
     ['browser.tabs.list', handler(async (params, invocation) => service.tabs(readTarget(params, invocation)))],
     ['browser.tabs.create', handler(async (params, invocation) => service.newTab(readTarget(params, invocation), {
       url: readOptionalString(params.url),
       launch: { ...readLaunchArgs(params), ...provisionLifetime(invocation) },
+      timeoutMs: readOptionalNumber(params.timeoutMs),
     }))],
     ['browser.tabs.switch', handler(async (params, invocation) => service.switchTab(readTarget(params, invocation), {
       pageId: requireStringValue(params.pageId, 'pageId'),
@@ -396,8 +403,12 @@ export function createBrowserGatewayHandlers(
     ['browser.tabs.close', handler(async (params, invocation) => service.closeTab(readTarget(params, invocation), {
       pageId: requireStringValue(params.pageId, 'pageId'),
     }))],
-    ['browser.history.back', handler(async (params, invocation) => service.goBack(readTarget(params, invocation)))],
-    ['browser.history.forward', handler(async (params, invocation) => service.goForward(readTarget(params, invocation)))],
+    ['browser.history.back', handler(async (params, invocation) => service.goBack(readTarget(params, invocation), {
+      timeoutMs: readOptionalNumber(params.timeoutMs),
+    }))],
+    ['browser.history.forward', handler(async (params, invocation) => service.goForward(readTarget(params, invocation), {
+      timeoutMs: readOptionalNumber(params.timeoutMs),
+    }))],
   ];
   return new Map(entries);
 }

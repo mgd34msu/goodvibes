@@ -205,7 +205,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions): Tool {
           amount: { type: 'number', description: 'Scroll distance in pixels.' },
           limit: { type: 'number', description: 'Maximum elements to include in a snapshot.' },
           maxChars: { type: 'number', description: 'Maximum characters to return from action:"read_text".' },
-          timeoutMs: { type: 'number', description: 'Deadline for this one call, in milliseconds (up to 600000). Defaults: navigate, back, forward, new_tab and wait_for 30000; click, type, select and press 15000. A call that passes its deadline fails and says what to do next. Never affects the browser.' },
+          timeoutMs: { type: 'number', description: 'Deadline for this one call, in milliseconds (up to 600000). Defaults: navigate, back, forward, new_tab, wait_for and screenshot 30000; click, type, select, press, scroll and read_text 15000. A call that passes its deadline fails and says what to do next. Never affects the browser.' },
           repair: { type: 'boolean', description: 'For provision: reinstall even if a browser is cached.' },
           button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button for action:"click".' },
         },
@@ -343,6 +343,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions): Tool {
               ...(readString(args.ref) ? { ref: readString(args.ref) } : {}),
               ...(args.direction === 'up' || args.direction === 'down' ? { direction: args.direction } : {}),
               ...(readNumber(args.amount) === undefined ? {} : { amount: readNumber(args.amount) }),
+              ...(timeoutMs === undefined ? {} : { timeoutMs }),
             }));
           case 'wait_for':
             return output(await browser.waitFor(target, {
@@ -351,27 +352,31 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions): Tool {
               ...(timeoutMs === undefined ? {} : { timeoutMs }),
             }));
           case 'read_text':
-            return output(await browser.readText(target, { ...(readNumber(args.maxChars) === undefined ? {} : { maxChars: readNumber(args.maxChars) }) }));
+            return output(await browser.readText(target, {
+              ...(readNumber(args.maxChars) === undefined ? {} : { maxChars: readNumber(args.maxChars) }),
+              ...(timeoutMs === undefined ? {} : { timeoutMs }),
+            }));
           case 'screenshot':
             return output(await browser.screenshot(target, {
               ...(args.fullPage === true ? { fullPage: true } : {}),
               ...(readString(args.path) ? { path: readString(args.path) } : {}),
+              ...(timeoutMs === undefined ? {} : { timeoutMs }),
             }));
           case 'tabs':
             return output(await browser.tabs(target));
           case 'new_tab': {
             const url = readString(args.url);
             if (url) await assertLocalAddressReadable(url, options.readAccess, signal);
-            return output(await browser.newTab(target, { launch, ...(url ? { url } : {}) }));
+            return output(await browser.newTab(target, { launch, ...(url ? { url } : {}), ...(timeoutMs === undefined ? {} : { timeoutMs }) }));
           }
           case 'switch_tab':
             return output(await browser.switchTab(target, { pageId: requireString(args.pageId, 'pageId', 'switch_tab') }));
           case 'close_tab':
             return output(await browser.closeTab(target, { pageId: requireString(args.pageId, 'pageId', 'close_tab') }));
           case 'back':
-            return output(await browser.goBack(target));
+            return output(await browser.goBack(target, timeoutMs === undefined ? {} : { timeoutMs }));
           case 'forward':
-            return output(await browser.goForward(target));
+            return output(await browser.goForward(target, timeoutMs === undefined ? {} : { timeoutMs }));
           case 'extract': {
             // A read: an unknown field name is dropped and named in the result rather
             // than costing a refusal and a second call; with none known, text is read.

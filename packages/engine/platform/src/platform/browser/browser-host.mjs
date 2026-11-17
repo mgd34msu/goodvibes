@@ -184,7 +184,9 @@ const handlers = {
         return { value: response !== null };
       }
       case 'waitForLoadState':
-        await page.waitForLoadState(args.state ?? 'domcontentloaded', { timeout: deadline(args) }).catch(() => undefined);
+        // A deadline that passes is forwarded as timedOut, as in process; the
+        // parent decides whether a settle wait may end quietly.
+        await page.waitForLoadState(args.state ?? 'domcontentloaded', { timeout: deadline(args) });
         return { value: null };
       case 'waitForURL':
         await page.waitForURL(args.url, { timeout: deadline(args) });

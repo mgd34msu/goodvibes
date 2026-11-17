@@ -81,7 +81,8 @@ export async function boundedBrowserCall<T>(
   }
 }
 
-function deadlineError(call: { readonly action: string; readonly deadlineMs: number; readonly next: string }): BrowserSessionError {
+/** The refusal for a browser call that passed its deadline: the action, the deadline and the next step. */
+export function deadlineError(call: { readonly action: string; readonly deadlineMs: number; readonly next: string }): BrowserSessionError {
   return new BrowserSessionError(
     `browser action:"${call.action}" did not finish within its ${seconds(call.deadlineMs)} deadline.`,
     `${call.next} To allow longer, pass timeoutMs (up to ${String(MAX_CALL_TIMEOUT_MS)}).`,

@@ -72,7 +72,7 @@ import {
   handleRemotePeerWorkComplete,
 } from './remote-routes.js';
 import { buildRouterSessionBrokerAdapter } from './router-session-broker-adapter.js';
-import { authenticationRequired, DaemonRequestRouter } from './request-router.js';
+import { authenticationRequired, DaemonRequestRouter, type DaemonRouteDispatcher } from './request-router.js';
 import { buildDaemonRouteTable, type DaemonRouteFamilies } from './route-table.js';
 import {
   buildChannelRouteContext,
@@ -284,7 +284,6 @@ export class DaemonHttpRouter {
       preAuth: (req) => this.dispatchPreAuthRoutes(req),
       refuseUnauthenticated: (req) => this.refuseUnauthenticated(req),
       admit: (req) => gateGatewayBinding(req, context),
-      beforeTable: (req) => this.dispatchUnlistedRoutes(req),
     });
     this.authFailures = createAuthFailureAudit(context.runtimeBus);
     const settingsConfigOwner = context.configManager;
@@ -547,114 +546,128 @@ export class DaemonHttpRouter {
     return this.requests.dispatch(req);
   }
 
-  /** Route families that are not part of the route table; tried before it. */
-  private async dispatchUnlistedRoutes(req: Request): Promise<Response | null> {
-    const url = new URL(req.url);
-    const openAICompatibleEnabled = this.getConfigValue('controlPlane.openaiCompatible.enabled') !== false;
-    if (openAICompatibleEnabled) {
-      const pathPrefix = this.getConfigValue('controlPlane.openaiCompatible.pathPrefix');
-      const response = await dispatchOpenAICompatibleRoutes(req, {
-        providerRegistry: this.context.providerRegistry,
-        parseJsonBody: (request: Request) => this.parseJsonBody(request),
-        recordApiResponse: (request, path, routeResponse) => this.recordApiResponse(request, path, routeResponse),
-        // Chat completions spend provider money; only listing models stays open.
-        requireAdmin: (request) => this.context.requireAdmin(request),
-      }, typeof pathPrefix === 'string' && pathPrefix.trim() ? pathPrefix : '/v1');
-      if (response) return response;
-    }
+  /**
+   * The route families served by their own dispatchers, tried before the
+   * handler table. Their contexts are built here, once, with the table; a
+   * request only reads the settings that switch a family on or move its path.
+   */
+  private ownRouteDispatcher(): DaemonRouteDispatcher {
+    const context = this.context;
+    const parseJsonBody = (request: Request) => this.parseJsonBody(request);
+    const parseOptionalJsonBody = (request: Request) => this.parseOptionalJsonBody(request);
+    const requireAdmin = (request: Request) => context.requireAdmin(request);
+    const openAICompatible: Parameters<typeof dispatchOpenAICompatibleRoutes>[1] = {
+      providerRegistry: context.providerRegistry,
+      parseJsonBody,
+      recordApiResponse: (request, path, routeResponse) => this.recordApiResponse(request, path, routeResponse),
+      // Chat completions spend provider money; only listing models stays open.
+      requireAdmin,
+    };
+    const batch: Parameters<typeof dispatchBatchRoutes>[1] | null = context.batchManager
+      ? { batchManager: context.batchManager, parseJsonBody, parseOptionalJsonBody }
+      : null;
+    const cloudflare: Parameters<typeof dispatchCloudflareRoutes>[1] = {
+      configManager: context.configManager,
+      secretsManager: context.secretsManager,
+      authToken: context.authToken,
+      parseJsonBody,
+      parseOptionalJsonBody,
+    };
+    const mcp: Parameters<typeof dispatchMcpRoutes>[1] = {
+      mcpRegistry: context.mcpRegistry,
+      roots: context.mcpConfigRoots,
+      parseJsonBody,
+      parseOptionalJsonBody,
+      requireAdmin,
+    };
+    const models: Parameters<typeof dispatchModelRoutes>[1] = {
+      providerRegistry: context.providerRegistry,
+      configManager: context.configManager,
+      runtimeBus: context.runtimeBus,
+      parseJsonBody,
+      secretsManager: context.secretsManager,
+    };
+    const gateway = context.controlPlaneGateway;
+    const chatManager = context.companionChatManager;
+    const companionChat: Parameters<typeof dispatchCompanionChatRoutes>[1] | null = chatManager ? {
+      chatManager,
+      parseJsonBody,
+      parseOptionalJsonBody,
+      resolveDefaultProviderModel: context.resolveDefaultProviderModel,
+      requireAdmin,
+      requireScope: (request, scope) => this.requireCallerScope(request, scope),
+      openSessionEventStream: (request: Request, sessionId: string) => {
+        // Turn events are published to the registered client, so it must be this connection's own id.
+        return openScopedSessionEventStream(gateway, request, {
+          clientPrefix: 'companion-chat', sessionId,
+          onClientId: (clientId) => chatManager.registerSubscriber(sessionId, clientId),
+          ...this.streamAuthority(request),
+        });
+      },
+    } : null;
 
-    // Creating, ticking or cancelling a batch spends provider money: those
-    // methods are admin-only in the catalog, which gateGatewayBinding enforced
-    // before this point. Listing stays open to any authenticated caller.
-    if (url.pathname.startsWith('/api/batch')) {
-      if (!this.context.batchManager) {
-        return Response.json({ error: 'Batch manager is not available', code: 'BATCH_MANAGER_UNAVAILABLE' }, { status: 503 });
+    return async (req) => {
+      const url = new URL(req.url);
+      if (this.getConfigValue('controlPlane.openaiCompatible.enabled') !== false) {
+        const pathPrefix = this.getConfigValue('controlPlane.openaiCompatible.pathPrefix');
+        const response = await dispatchOpenAICompatibleRoutes(req, openAICompatible, typeof pathPrefix === 'string' && pathPrefix.trim() ? pathPrefix : '/v1');
+        if (response) return response;
       }
-      const batchResponse = await dispatchBatchRoutes(req, {
-        batchManager: this.context.batchManager,
-        parseJsonBody: (request: Request) => this.parseJsonBody(request),
-        parseOptionalJsonBody: (request: Request) => this.parseOptionalJsonBody(request),
-      });
-      if (batchResponse) return batchResponse;
-    }
 
-    if (url.pathname.startsWith('/api/cloudflare')) {
-      const adminError = this.context.requireAdmin(req);
-      if (adminError) return adminError;
-      const cloudflareResponse = await dispatchCloudflareRoutes(req, {
-        configManager: this.context.configManager,
-        secretsManager: this.context.secretsManager,
-        authToken: this.context.authToken,
-        parseJsonBody: (request: Request) => this.parseJsonBody(request),
-        parseOptionalJsonBody: (request: Request) => this.parseOptionalJsonBody(request),
-      });
-      if (cloudflareResponse) return cloudflareResponse;
-    }
+      // Creating, ticking or cancelling a batch spends provider money: those
+      // methods are admin-only in the catalog, which gateGatewayBinding enforced
+      // before this point. Listing stays open to any authenticated caller.
+      if (url.pathname.startsWith('/api/batch')) {
+        if (!batch) {
+          return Response.json({ error: 'Batch manager is not available', code: 'BATCH_MANAGER_UNAVAILABLE' }, { status: 503 });
+        }
+        const batchResponse = await dispatchBatchRoutes(req, batch);
+        if (batchResponse) return batchResponse;
+      }
 
-    if (url.pathname.startsWith('/api/mcp')) {
-      const mcpResponse = await dispatchMcpRoutes(req, {
-        mcpRegistry: this.context.mcpRegistry,
-        roots: this.context.mcpConfigRoots,
-        parseJsonBody: (request: Request) => this.parseJsonBody(request),
-        parseOptionalJsonBody: (request: Request) => this.parseOptionalJsonBody(request),
-        requireAdmin: (request) => this.context.requireAdmin(request),
-      });
-      if (mcpResponse) return mcpResponse;
-    }
+      if (url.pathname.startsWith('/api/cloudflare')) {
+        const adminError = context.requireAdmin(req);
+        if (adminError) return adminError;
+        const cloudflareResponse = await dispatchCloudflareRoutes(req, cloudflare);
+        if (cloudflareResponse) return cloudflareResponse;
+      }
 
-    if (url.pathname.startsWith('/api/homeassistant')) {
-      const homeGraphResponse = await this.getHomeGraphRoutes().handle(req);
-      if (homeGraphResponse) return homeGraphResponse;
-      const homeAssistantResponse = await this.getHomeAssistantRoutes().handle(req);
-      if (homeAssistantResponse) return homeAssistantResponse;
-    }
+      if (url.pathname.startsWith('/api/mcp')) {
+        const mcpResponse = await dispatchMcpRoutes(req, mcp);
+        if (mcpResponse) return mcpResponse;
+      }
 
-    if (url.pathname.startsWith('/api/projects/planning')) {
-      const projectPlanningResponse = await this.getProjectPlanningRoutes().handle(req);
-      if (projectPlanningResponse) return projectPlanningResponse;
-    }
+      if (url.pathname.startsWith('/api/homeassistant')) {
+        const homeGraphResponse = await this.getHomeGraphRoutes().handle(req);
+        if (homeGraphResponse) return homeGraphResponse;
+        const homeAssistantResponse = await this.getHomeAssistantRoutes().handle(req);
+        if (homeAssistantResponse) return homeAssistantResponse;
+      }
 
-    // Companion chat routes, scoped to /api/companion/chat/..., session-isolated.
-    // Handled before the main API router so they never touch the global control-plane feed.
-    // Model catalog + model-switching routes. Provider runtime metadata is owned
-    // by the operator contract under /api/providers.
-    // Switching the model rewrites the daemon-wide setting: the catalog method
-    // needs write:providers, which only an admin holds, and gateGatewayBinding
-    // enforced it before this point.
-    if (url.pathname === '/api/models' || url.pathname.startsWith('/api/models/')) {
-      const providerResponse = await dispatchModelRoutes(req, {
-        providerRegistry: this.context.providerRegistry,
-        configManager: this.context.configManager,
-        runtimeBus: this.context.runtimeBus,
-        parseJsonBody: (request: Request) => this.parseJsonBody(request),
-        secretsManager: this.context.secretsManager,
-      });
-      if (providerResponse) return providerResponse;
-    }
+      if (url.pathname.startsWith('/api/projects/planning')) {
+        const projectPlanningResponse = await this.getProjectPlanningRoutes().handle(req);
+        if (projectPlanningResponse) return projectPlanningResponse;
+      }
 
-    if (this.context.companionChatManager && isCompanionChatPath(url)) {
-      const gateway = this.context.controlPlaneGateway;
-      const chatManager = this.context.companionChatManager;
-      const companionResponse = await dispatchCompanionChatRoutes(req, {
-        chatManager,
-        parseJsonBody: (request: Request) => this.parseJsonBody(request),
-        parseOptionalJsonBody: (request: Request) => this.parseOptionalJsonBody(request),
-        resolveDefaultProviderModel: this.context.resolveDefaultProviderModel,
-        requireAdmin: (request) => this.context.requireAdmin(request),
-        requireScope: (request, scope) => this.requireCallerScope(request, scope),
-        openSessionEventStream: (request: Request, sessionId: string) => {
-          // Turn events are published to the registered client, so it must be this connection's own id.
-          return openScopedSessionEventStream(gateway, request, {
-            clientPrefix: 'companion-chat', sessionId,
-            onClientId: (clientId) => chatManager.registerSubscriber(sessionId, clientId),
-            ...this.streamAuthority(request),
-          });
-        },
-      });
-      if (companionResponse) return companionResponse;
-    }
+      // Model catalog + model-switching routes. Provider runtime metadata is owned
+      // by the operator contract under /api/providers.
+      // Switching the model rewrites the daemon-wide setting: the catalog method
+      // needs write:providers, which only an admin holds, and gateGatewayBinding
+      // enforced it before this point.
+      if (url.pathname === '/api/models' || url.pathname.startsWith('/api/models/')) {
+        const providerResponse = await dispatchModelRoutes(req, models);
+        if (providerResponse) return providerResponse;
+      }
 
-    return null;
+      // Companion chat routes, scoped to /api/companion/chat/..., session-isolated.
+      // Handled before the handler table so they never touch the global control-plane feed.
+      if (companionChat && isCompanionChatPath(url)) {
+        const companionResponse = await dispatchCompanionChatRoutes(req, companionChat);
+        if (companionResponse) return companionResponse;
+      }
+
+      return null;
+    };
   }
 
   /**
@@ -876,6 +889,7 @@ export class DaemonHttpRouter {
         cors: () => this.servingPosture().cors,
         service: this.context.browserJudgment,
       },
+      ownDispatchers: [this.ownRouteDispatcher()],
       extensions: [
         clusterGroupRouteExtension(() => this.clusterGroupVerbs, {
           requireAdmin: (candidate) => this.context.requireAdmin(candidate),

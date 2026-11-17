@@ -13,11 +13,16 @@ import { AppError } from '../../types/errors.js';
 import type { RequestContext } from '../http-policy.js';
 import { jsonErrorResponse } from './error-response.js';
 
+/** A route family with its own dispatcher. Null: the request is not one of its routes. */
+export type DaemonRouteDispatcher = (req: Request) => Promise<Response | null> | Response | null;
+
 /**
- * The handlers the daemon serves and the extra dispatchers tried after them.
- * Built once: a handler keeps what it holds for as long as the table lives.
+ * The handlers the daemon serves and the extra dispatchers tried around them.
+ * Built once: a handler or dispatcher keeps what it holds for as long as the table lives.
  */
 export interface DaemonRouteTable {
+  /** Route families served by their own dispatchers, tried before the handlers. */
+  readonly before?: readonly DaemonRouteDispatcher[] | undefined;
   readonly handlers: Parameters<typeof dispatchDaemonApiRoutes>[1];
   readonly extensions?: Parameters<typeof dispatchDaemonApiRoutes>[2];
 }
@@ -39,8 +44,6 @@ export interface DaemonRequestRouterOptions {
   readonly refuseUnauthenticated?: ((req: Request) => Response) | undefined;
   /** A refusal for an authenticated request before any route sees it, or null to let it through. */
   readonly admit?: ((req: Request) => Response | null) | undefined;
-  /** Route families served outside the table, tried before it. Null: not one of theirs. */
-  readonly beforeTable?: ((req: Request) => Promise<Response | null> | Response | null) | undefined;
 }
 
 export class DaemonRequestRouter {
@@ -61,9 +64,11 @@ export class DaemonRequestRouter {
 
   /** The route that serves this request, without the credential check. Null: no route matched. */
   async dispatch(req: Request): Promise<Response | null> {
-    const early = await this.options.beforeTable?.(req);
-    if (early) return early;
     const table = this.routeTable();
+    for (const dispatcher of table.before ?? []) {
+      const early = await dispatcher(req);
+      if (early) return early;
+    }
     return dispatchDaemonApiRoutes(req, table.handlers, table.extensions);
   }
 

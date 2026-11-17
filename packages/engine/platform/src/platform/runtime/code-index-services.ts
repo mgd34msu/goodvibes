@@ -78,8 +78,6 @@ export interface CodeIndexServicesDeps {
    * admitted, exactly as before.
    */
   readonly isReindexPaused?: (() => boolean) | undefined;
-  /** Resolves when the governor resumes the 'code-index-reindex' job, so edits missed while paused are caught up then. */
-  readonly whenReindexResumed?: (() => Promise<void>) | undefined;
   readonly admitExpensiveWork?: ((label: string) => { allowed: boolean; reason?: string | undefined }) | undefined;
 }
 
@@ -152,7 +150,6 @@ export function createCodeIndexServices(deps: CodeIndexServicesDeps): CodeIndexS
     isEnabled: () => isCodeInjectionSettingEnabled(deps.configManager)
       && !(deps.isReindexPaused?.() ?? false)
       && (deps.admitExpensiveWork?.('code-index reindex').allowed ?? true),
-    whenResumed: deps.whenReindexResumed,
   });
   return { codeIndexStore, codeIndexReindexScheduler };
 }

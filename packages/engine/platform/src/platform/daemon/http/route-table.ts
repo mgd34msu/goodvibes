@@ -18,7 +18,7 @@ import { createDaemonRemoteRouteHandlers } from './remote-routes.js';
 import { createDaemonRuntimeRouteHandlers } from './runtime-routes.js';
 import { createDaemonSystemRouteHandlers } from './system-routes.js';
 import { createDaemonTelemetryRouteHandlers } from './telemetry-routes.js';
-import type { DaemonRouteTable } from './request-router.js';
+import type { DaemonRouteDispatcher, DaemonRouteTable } from './request-router.js';
 
 type RouteExtension = NonNullable<DaemonRouteTable['extensions']>[number];
 
@@ -40,6 +40,8 @@ export interface DaemonRouteFamilies {
   readonly agentKnowledge?: Parameters<typeof createDaemonKnowledgeRouteHandlers>[0] | undefined;
   /** Browser judgments. Absent: the route answers that judgments are unavailable. */
   readonly browserJudgment?: Parameters<typeof createBrowserJudgmentHttpHandler>[0] | undefined;
+  /** Families with their own dispatchers (OpenAI-compatible, batch, MCP, models, ...), tried before every family above. */
+  readonly ownDispatchers?: readonly DaemonRouteDispatcher[] | undefined;
   /** Further dispatchers, tried after every family above. */
   readonly extensions?: readonly RouteExtension[] | undefined;
 }
@@ -64,6 +66,7 @@ export function buildDaemonRouteTable(families: DaemonRouteFamilies): DaemonRout
   }
   if (families.extensions) extensions.push(...families.extensions);
   return {
+    before: families.ownDispatchers ?? [],
     handlers: families.browserJudgment
       ? { ...handlers, postBrowserJudgment: createBrowserJudgmentHttpHandler(families.browserJudgment) }
       : handlers,

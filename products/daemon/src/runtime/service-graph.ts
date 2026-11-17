@@ -503,7 +503,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const processManager = new ProcessManager();
     disposalScope.registry.add('background processes', () => processManager.close());
     // The source-tree index shares memory embeddings; auto-build is config-gated and off by default.
-    const { codeIndexStore, codeIndexReindexScheduler } = createCodeIndexServices({ workingDirectory, getWorkingDirectory: () => projectIndex.baseDir, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, configManager, memoryEmbeddingRegistry, isReindexPaused: () => pauseController.isPaused('code-index-reindex'), whenReindexResumed: () => pauseController.whenResumed('code-index-reindex'), admitExpensiveWork });
+    const { codeIndexStore, codeIndexReindexScheduler } = createCodeIndexServices({ workingDirectory, getWorkingDirectory: () => projectIndex.baseDir, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, configManager, memoryEmbeddingRegistry, isReindexPaused: () => pauseController.isPaused('code-index-reindex'), admitExpensiveWork });
     disposalScope.registry.add('code index store', () => codeIndexStore.close());
     disposalScope.ownUntilRegistered('code-index reindex scheduler', () => codeIndexReindexScheduler.dispose());
     // Store snapshots, the periodic append-only sweep, durable remembered-approval rules + the live credential chain.

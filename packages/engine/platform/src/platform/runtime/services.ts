@@ -687,7 +687,6 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     // scheduling new work until the governor resumes it, and the critical
     // memory tier refuses new reindex work outright.
     isEnabled: () => codeInjectionSettingEnabled() && !pauseController.isPaused('code-index-reindex') && admitExpensiveWork('code-index reindex').allowed,
-    whenResumed: () => pauseController.whenResumed('code-index-reindex'),
   });
   // Daily snapshots of the store that holds primary data, bounded by the retention engine (unref'd timers).
   // The memory vector index and the code index are derived and rebuilt from it and from the tree; they get

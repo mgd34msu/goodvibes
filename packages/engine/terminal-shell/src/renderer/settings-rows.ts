@@ -73,7 +73,7 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry>, Entry 
     const clamp = (length: number): number => Math.max(0, Math.min(modal.selectedIndex, length - 1));
     if (modal.searchFocused) {
       const rows = modal.searchResults;
-      if (!rows.length) return { rows: [{ label: 'No setting matches the search.', muted: true }], selected: -1 };
+      if (!rows.length) return { rows: [], selected: -1 };
       const selected = clamp(rows.length);
       return {
         rows: rows.map((entry, index) => settingRow(modal, entry, index === selected, true, width, policy.category(entry))),

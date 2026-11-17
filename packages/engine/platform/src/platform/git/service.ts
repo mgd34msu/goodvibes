@@ -567,7 +567,15 @@ export class GitService {
       // Capture before a borrowed post hook can change the new directories.
       worktreeCreations.set(this, captureWorktreeCreation(path, branch, this.cwd));
       if (isInsideProductWorktreeDirectory(this.cwd, path) && !markProductWorktree(resolve(this.cwd, path))) {
-        logger.warn('git: could not record that the product created this worktree; it will not be removed automatically', { path });
+        // Unmarked worktrees in the product's location are swept as left by an
+        // earlier version, so a worktree that cannot carry the record is not
+        // handed out: it is taken back while it is still empty of work.
+        worktreeCreations.delete(this);
+        await git.raw(['worktree', 'remove', '--force', path]).catch((error: unknown) => {
+          logger.warn('git: a worktree whose created-by record could not be written was not removed', { path, error: summarizeError(error) });
+        });
+        await git.raw(['branch', '-D', branch]).catch(() => undefined);
+        throw new Error(`could not record that the product created worktree ${path} (its git administrative directory is not writable); the worktree was not created`);
       }
       await this.firePost('worktreeAdd', { path, branch });
     } catch (err) {

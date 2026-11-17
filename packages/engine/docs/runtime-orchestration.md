@@ -377,8 +377,11 @@ waits.
   to a session or task. A worktree in one of the product's own locations that
   does not carry the record the product writes when it creates one was made by
   a version before that record existed: it is removed once no running owner
-  holds it, uncommitted changes and ignored files included, and its branch is
-  kept unless every commit on it is already in its base. `/worktree
+  holds it and it is no longer being created (git does not hold it locked and
+  it is more than ten minutes old), uncommitted changes and ignored files
+  included, and its branch is kept unless every commit on it is already in its
+  base. A new worktree whose record cannot be written is taken back at once
+  and its creation fails, so it is never mistaken for an old one. `/worktree
   review` and `/worktree inspect` show each worktree's age, size on disk and
   why it is kept, with the days left before pruning. When kept worktrees total
   more than 1 GB the daemon prints one line at startup naming the count and

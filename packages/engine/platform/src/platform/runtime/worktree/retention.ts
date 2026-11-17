@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { unsettledWorktreeReason } from '../../git/product-worktree-marker.js';
 
 /**
  * Retention policy for product-created worktrees under `.goodvibes/.worktrees`.
@@ -16,8 +17,9 @@ import { join, relative, sep } from 'node:path';
  *   folders setup installs (`node_modules`, `.venv`) are not local state at all.
  * - Uncommitted changes, or git state that cannot be read: never removed here.
  * - No created-by record (made by a version before the record existed): removed
- *   once no running owner holds it, whatever it holds; its branch is kept unless
- *   every commit on it is already in its base.
+ *   once no running owner holds it and its creation has settled (git no longer
+ *   holds it locked and it is older than the creation grace period), whatever it
+ *   holds; its branch is kept unless every commit on it is already in its base.
  */
 export const DEFAULT_WORKTREE_RETENTION_DAYS = 14;
 export const DEFAULT_WORKTREE_RETENTION_MS = DEFAULT_WORKTREE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -269,6 +271,11 @@ export async function evaluateUnmarkedWorktree(input: {
   const { path, rootDir, owner, now } = input;
   if (owner.state === 'running') {
     return { action: 'keep', reason: { why: 'running', detail: 'its contract or agent is still running' }, assessment: { kind: 'unreadable', reason: 'not read while running' }, sinceMs: now };
+  }
+  // Git lists a worktree from the moment its add begins, before the record is written.
+  const unsettled = unsettledWorktreeReason(path, now);
+  if (unsettled) {
+    return { action: 'keep', reason: { why: 'running', detail: `kept because ${unsettled}` }, assessment: { kind: 'unreadable', reason: 'not read while in creation' }, sinceMs: now };
   }
   const assessment = await assessWorktree(path, rootDir, owner.baseBranch);
   const sinceMs = owner.state === 'ended' && owner.endedAt !== undefined ? owner.endedAt : input.registeredAt;

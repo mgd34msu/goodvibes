@@ -97,6 +97,9 @@ export async function handleBrowserCommand(runtime: CliCommandRuntime): Promise<
       profileRoot: agentBrowserProfileRoot(home),
       homeDirectory: home,
     }),
+    // The owner typed this command: a file: address is his own read, so the
+    // model's read policy has nothing to decide here.
+    readAccess: async () => true,
   });
 
   const positional = rest.filter((entry) => !entry.startsWith('--'));

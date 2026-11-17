@@ -375,7 +375,7 @@ Code composes the facts into stakes (`gate/reading.ts`, `stakesFromFacts`). A fa
 | `medium` | Changes something |
 | `low` | Changes nothing |
 
-The stakes become the analysis `riskLevel`; the family, the facts, the side effects and the blast radius ride on the analysis and the decision (`reading`), and the tool pipeline emits them as `STAKES_READ` on the `gate` event domain. When Jev cannot answer, the judgment port's error propagates and the call fails; no heuristic stands in.
+The stakes become the analysis `riskLevel`; the family, the facts, the side effects and the blast radius ride on the analysis and the decision (`reading`), and the tool pipeline reports the decision as `DECISION_EMITTED` on the `gate` event domain with the reading's `classification` and `riskLevel` (after `GATE_REQUESTED`, which is sent before any owner prompt). When Jev cannot answer, the judgment port's error propagates and the call fails; no heuristic stands in.
 
 ### 4. Presets over the stakes table
 

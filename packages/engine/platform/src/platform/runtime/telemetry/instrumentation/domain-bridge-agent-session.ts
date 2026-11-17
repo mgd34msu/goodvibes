@@ -4,7 +4,7 @@ import type { GateEvent } from '../../../../events/gate.js';
 import type { SessionEvent } from '../../../../events/session.js';
 import { endAgentSpan, recordAgentPhase, startAgentSpan } from '../spans/agent.js';
 import { endCompactionSpan, recordCompactionPhase, startCompactionSpan } from '../spans/compaction.js';
-import { endPermissionSpan, recordPermissionPhase, startPermissionSpan } from '../spans/permission.js';
+import { endPermissionSpan, startPermissionSpan } from '../spans/permission.js';
 import { endSessionSpan, recordSessionPhase, startSessionSpan } from '../spans/session.js';
 import { trackSpan, type DomainBridgeAttachmentInput, type Env, type SpanMap } from './domain-bridge-shared.js';
 
@@ -126,51 +126,14 @@ export function attachPermissionDomain(
   );
 
   unsubs.push(
-    bus.on('STAKES_READ', (env: Env<Extract<GateEvent, { type: 'STAKES_READ' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(permissionSpans, env.payload.callId, (span) => {
-          recordPermissionPhase(span, 'stakes_read', {
-            'gate.family': env.payload.family,
-            'gate.stakes': env.payload.stakes,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('PRESET_EVALUATED', (env: Env<Extract<GateEvent, { type: 'PRESET_EVALUATED' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(permissionSpans, env.payload.callId, (span) => {
-          recordPermissionPhase(span, 'preset_evaluated', {
-            'gate.preset': env.payload.preset,
-            'gate.preset_result': env.payload.result,
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
-    bus.on('BOUNDARY_CHECKED', (env: Env<Extract<GateEvent, { type: 'BOUNDARY_CHECKED' }>>) => {
-      helpers.safe(() => {
-        helpers.withSpan(permissionSpans, env.payload.callId, (span) => {
-          recordPermissionPhase(span, 'boundary_checked', {
-            'gate.boundary_passed': env.payload.passed,
-            'gate.boundary_refused_by': env.payload.refusedBy ?? '',
-          });
-        });
-      });
-    }),
-  );
-
-  unsubs.push(
     bus.on('DECISION_EMITTED', (env: Env<Extract<GateEvent, { type: 'DECISION_EMITTED' }>>) => {
       helpers.safe(() => {
         helpers.closeSpan(permissionSpans, env.payload.callId, (span) => {
           endPermissionSpan(span, {
             approved: env.payload.approved,
             source: env.payload.source,
+            ...(env.payload.riskLevel ? { riskLevel: env.payload.riskLevel } : {}),
+            ...(env.payload.classification ? { classification: env.payload.classification } : {}),
           });
         });
       });

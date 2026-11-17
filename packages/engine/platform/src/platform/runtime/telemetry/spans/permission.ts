@@ -1,9 +1,9 @@
 /**
  * Gate decision span helpers.
  *
- * Tracks the gate's pipeline for one call:
- * GATE_REQUESTED, BOUNDARY_CHECKED, STAKES_READ, PRESET_EVALUATED,
- * DECISION_EMITTED.
+ * Tracks the gate for one call: GATE_REQUESTED opens the span, and
+ * DECISION_EMITTED closes it with the decision and the stakes reading's
+ * risk level and classification.
  *
  * One span per gate decision. Child of the active tool span
  * when a parentSpanId is supplied.
@@ -49,6 +49,10 @@ export interface PermissionSpanEndContext {
   readonly safe?: boolean | undefined;
   /** Safety warnings if any were raised. */
   readonly warnings?: string[] | undefined;
+  /** The stakes reading's risk level, as the decision carries it. */
+  readonly riskLevel?: string | undefined;
+  /** The stakes reading's classification, as the decision carries it. */
+  readonly classification?: string | undefined;
 }
 
 /**
@@ -105,6 +109,9 @@ export function endPermissionSpan(span: Span, ctx: PermissionSpanEndContext): vo
   if (ctx.safe !== undefined) {
     span.setAttribute('permission.safe', ctx.safe);
   }
+
+  if (ctx.riskLevel !== undefined) span.setAttribute('permission.risk_level', ctx.riskLevel);
+  if (ctx.classification !== undefined) span.setAttribute('permission.classification', ctx.classification);
 
   if (ctx.warnings !== undefined && ctx.warnings.length > 0) {
     span.setAttribute('permission.warning_count', ctx.warnings.length);

@@ -1,15 +1,10 @@
 /**
  * GateEvent, the discriminated union of the gate's events: the one path every
- * side effect takes (platform/gate). A call is requested, passes the
- * deterministic boundary, is read by Jev for its stakes, and the active
- * preset (or an explicit owner rule, or the owner's answer) decides it.
+ * side effect takes (platform/gate). A call is requested before any owner
+ * prompt, and its decision (the boundary, the stakes reading, the active
+ * preset, an owner rule or the owner's answer) is emitted once it settles,
+ * carrying the reading's classification and risk level.
  */
-
-/** One boundary check's outcome, as BOUNDARY_CHECKED carries it. */
-export interface GateBoundaryCheckRecord {
-  readonly check: string;
-  readonly result: 'pass' | 'refuse' | 'skipped';
-}
 
 export type GateEvent =
   /** A tool call has reached the gate. */
@@ -23,45 +18,6 @@ export type GateEvent =
       riskLevel?: string | undefined;
       summary?: string | undefined;
       reasons?: readonly string[] | undefined;
-    }
-  /**
-   * The deterministic boundary ran: catastrophic commands, surface authority,
-   * card shapes and the outward-effect check. `refusedBy` names the check
-   * that refused the call, when one did.
-   */
-  | {
-      type: 'BOUNDARY_CHECKED';
-      callId: string;
-      tool: string;
-      passed: boolean;
-      refusedBy?: string | undefined;
-      checks: readonly GateBoundaryCheckRecord[];
-    }
-  /** Jev read the call: its risk family, the facts behind its stakes, and the stakes code composed. */
-  | {
-      type: 'STAKES_READ';
-      callId: string;
-      tool: string;
-      family: string;
-      stakes: 'low' | 'medium' | 'high' | 'critical';
-      mutates: boolean;
-      outward: boolean;
-      secrets: boolean;
-      irreversible: boolean;
-      beyondProject: boolean;
-      weakensSecurity: boolean;
-      obfuscated: boolean;
-      /** Facts whose reading was uncertain and were therefore taken as true. */
-      uncertain: readonly string[];
-    }
-  /** The active preset mapped the call's stakes to an action. */
-  | {
-      type: 'PRESET_EVALUATED';
-      callId: string;
-      tool: string;
-      preset: string;
-      stakes: 'low' | 'medium' | 'high' | 'critical';
-      result: 'allow' | 'ask' | 'deny';
     }
   /**
    * The active preset changed (normal, accept-edits, plan, auto, custom).
@@ -94,9 +50,6 @@ export type GateEventType = GateEvent['type'];
 /** Every gate event type, for validators and consumers that enumerate the domain. */
 export const GATE_EVENT_TYPES: readonly GateEventType[] = [
   'GATE_REQUESTED',
-  'BOUNDARY_CHECKED',
-  'STAKES_READ',
-  'PRESET_EVALUATED',
   'PRESET_CHANGED',
   'DECISION_EMITTED',
 ];

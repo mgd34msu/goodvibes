@@ -102,7 +102,7 @@ export type {
   WorkPlanTaskEventRecord,
   WorkPlanTaskStatus,
 } from './planner.js';
-export type { GateBoundaryCheckRecord, GateEvent, GateEventType } from './gate.js';
+export type { GateEvent, GateEventType } from './gate.js';
 export { GATE_EVENT_TYPES } from './gate.js';
 export type { PluginEvent, PluginEventType } from './plugins.js';
 export type { McpEvent, McpEventType, McpServerRole, McpTrustMode, QuarantineReason } from './mcp.js';

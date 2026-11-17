@@ -33,6 +33,7 @@ import type {
   ProcessState,
 } from '../../runtime/fleet/types.js';
 import type { FleetArchiveView } from '../../runtime/fleet/archive.js';
+import { FLEET_NODE_KINDS, FLEET_NODE_STATES } from '../../../events/fleet.js';
 import { contractRawForWire } from '../../runtime/fleet/contract-wire.js';
 import type { AttemptJudgment, AttemptPickResult, HeldMergeGroup } from '../../orchestration/types.js';
 import { AttemptError } from '../../orchestration/attempts.js';
@@ -56,37 +57,8 @@ export const FLEET_SNAPSHOT_NODE_CAP = 2000;
 export const FLEET_LIST_DEFAULT_LIMIT = 100;
 export const FLEET_LIST_MAX_LIMIT = 500;
 
-const PROCESS_KINDS: readonly ProcessKind[] = [
-  'agent',
-  'contract',
-  'contract-group',
-  'contract-unit',
-  'workflow',
-  'trigger',
-  'hook-action',
-  'schedule',
-  'watcher',
-  'background-process',
-  'acp-agent',
-  'observed-external',
-  'code-index',
-];
-
-const PROCESS_STATES: readonly ProcessState[] = [
-  'thinking',
-  'executing-tool',
-  'awaiting-approval',
-  'streaming',
-  'stalled',
-  'retrying',
-  'done',
-  'failed',
-  'killed',
-  'interrupted',
-  'idle',
-  'queued',
-  'paused',
-];
+const PROCESS_KINDS: readonly string[] = FLEET_NODE_KINDS;
+const PROCESS_STATES: readonly string[] = FLEET_NODE_STATES;
 
 function asStringArray(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined;
@@ -101,7 +73,7 @@ function readFleetQueryFilter(query: Record<string, unknown> | undefined): Fleet
   const rawStates = asStringArray(query.states);
   let kinds: ProcessKind[] | undefined;
   if (rawKinds) {
-    const invalid = rawKinds.filter((k) => !PROCESS_KINDS.includes(k as ProcessKind));
+    const invalid = rawKinds.filter((k) => !PROCESS_KINDS.includes(k));
     if (invalid.length > 0) {
       throw new GatewayVerbError(`Unknown fleet kind(s): ${invalid.join(', ')}`, 'INVALID_ARGUMENT', 400, 'kinds');
     }
@@ -109,7 +81,7 @@ function readFleetQueryFilter(query: Record<string, unknown> | undefined): Fleet
   }
   let states: ProcessState[] | undefined;
   if (rawStates) {
-    const invalid = rawStates.filter((s) => !PROCESS_STATES.includes(s as ProcessState));
+    const invalid = rawStates.filter((s) => !PROCESS_STATES.includes(s));
     if (invalid.length > 0) {
       throw new GatewayVerbError(`Unknown fleet state(s): ${invalid.join(', ')}`, 'INVALID_ARGUMENT', 400, 'states');
     }

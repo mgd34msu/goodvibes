@@ -11,7 +11,6 @@ import {
   NUMBER_SCHEMA,
   STRING_SCHEMA,
   arraySchema,
-  exhaustiveStringEnumSchema,
   objectSchema,
 } from './method-catalog-shared.js';
 import {
@@ -20,40 +19,11 @@ import {
   nullableSchema,
 } from './operator-contract-schemas-shared.js';
 import { SHARED_SESSION_KIND_READ_SCHEMA, SHARED_SESSION_RECORD_SCHEMA } from './operator-contract-schemas-runtime.js';
-import type { ProcessKind, ProcessState } from '../runtime/fleet/types.js';
+import { FLEET_ATTENTION_REASONS, FLEET_NODE_KINDS, FLEET_NODE_STATES } from '../../events/fleet.js';
 import { CHECKPOINT_DIFF_REVISION_PATTERN } from '../workspace/checkpoint/diff-observation-contract.js';
 
-// Spelled out for the published schema; a ProcessKind/ProcessState added without an entry here fails to compile.
-const PROCESS_KIND_SCHEMA = exhaustiveStringEnumSchema<ProcessKind>()([
-  'agent',
-  'contract',
-  'contract-group',
-  'contract-unit',
-  'workflow',
-  'trigger',
-  'hook-action',
-  'schedule',
-  'watcher',
-  'background-process',
-  'acp-agent',
-  'observed-external',
-  'code-index',
-]);
-const PROCESS_STATE_SCHEMA = exhaustiveStringEnumSchema<ProcessState>()([
-  'thinking',
-  'executing-tool',
-  'awaiting-approval',
-  'streaming',
-  'stalled',
-  'retrying',
-  'done',
-  'failed',
-  'killed',
-  'interrupted',
-  'idle',
-  'queued',
-  'paused',
-]);
+const PROCESS_KIND_SCHEMA = enumSchema(FLEET_NODE_KINDS);
+const PROCESS_STATE_SCHEMA = enumSchema(FLEET_NODE_STATES);
 const PROCESS_COST_STATE_SCHEMA = enumSchema(['priced', 'unpriced', 'estimated']);
 // Where priced dollars came from: 'user' (manual/registration, "your price"),
 // 'provider' (provider-served rates), 'catalog' (dated catalog), 'mixed'
@@ -95,7 +65,7 @@ const PROCESS_SESSION_REF_SCHEMA = objectSchema({
 const PROCESS_ATTENTION_SCHEMA = objectSchema({
   // ONE waiting-on-human class: approval ask, operator input, a ready
   // best-of-N pick, and a merge conflict are all first-class reasons.
-  reason: enumSchema(['approval', 'input', 'pick', 'conflict']),
+  reason: enumSchema(FLEET_ATTENTION_REASONS),
   detail: STRING_SCHEMA,
 }, ['reason']);
 

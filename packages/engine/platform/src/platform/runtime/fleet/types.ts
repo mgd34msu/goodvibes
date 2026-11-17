@@ -10,42 +10,10 @@
  * nesting) build the tree from the flat list, this keeps the registry cheap
  * and lets each surface reorder/filter independently.
  */
+import type { FleetAttentionReason, FleetNodeKind, FleetNodeState } from '../../../events/fleet.js';
 
 /** The source family a ProcessNode was adapted from. */
-export type ProcessKind =
-  | 'agent'
-  // The contract tree (docs/design/contract-runner.md section 8.3): a
-  // contract (root) -> its groups -> their units, a best-of-N unit's attempts
-  // under the unit, and each unit's agents under the unit.
-  | 'contract'
-  | 'contract-group'
-  | 'contract-unit'
-  | 'workflow'
-  // The trigger family (platform/triggers: watchers, condition checks, on-exit
-  // process triggers), persisted and supervised.
-  | 'trigger'
-  // The workflow tool's hook actions: run a command when a hook event fires.
-  | 'hook-action'
-  | 'schedule'
-  | 'watcher'
-  | 'background-process'
-  // A HOSTED third-party coding agent (Claude Code / Codex CLI / opencode)
-  // running as a long-lived daemon session over the Agent Client Protocol,
-  // see platform/acp/host.ts and adapters/acp-host.ts.
-  | 'acp-agent'
-  // An externally-launched coding-agent session goodvibes did NOT spawn or host
-  // (someone's own Claude Code / Codex process on this host), found by read-only
-  // process-table detection. It is OBSERVED, not owned: it never counts against
-  // fleet.maxSize (fleet-count.ts accepts only owned sources by construction),
-  // stop is never offered, and steering rides whatever control channel the
-  // foreign session genuinely exposes (a tmux pane) or honestly says there is
-  // none. See adapters/observed.ts and observed/*.
-  | 'observed-external'
-  // The repo source-tree code index's initial build (Stage A). Not
-  // 'background-process': an index build has no pid (ProcessManager
-  // is shell/OS-process-only), so it gets its own kind, mirroring the
-  // other optional deps (degrades to today when absent).
-  | 'code-index';
+export type ProcessKind = FleetNodeKind;
 
 /**
  * Derived fine-grained process state.
@@ -67,20 +35,7 @@ export type ProcessKind =
  * (the previous behavior) was dishonest, since `killed` implies the
  * process is gone for good. See ProcessCapabilities.resumable.
  */
-export type ProcessState =
-  | 'thinking'
-  | 'executing-tool'
-  | 'awaiting-approval'
-  | 'streaming'
-  | 'stalled'
-  | 'retrying'
-  | 'done'
-  | 'failed'
-  | 'killed'
-  | 'interrupted'
-  | 'idle'
-  | 'queued'
-  | 'paused';
+export type ProcessState = FleetNodeState;
 
 /** Token/call usage aggregated onto a node. Mirrors AgentRecord.usage + toolCallCount. */
 export interface ProcessUsage {
@@ -162,7 +117,7 @@ export type ProcessCostSource = 'user' | 'provider' | 'catalog' | 'mixed';
  * - 'conflict', a merge conflict needs a human resolution before the work
  *   can land.
  */
-export type ProcessAttentionReason = 'approval' | 'input' | 'pick' | 'conflict';
+export type ProcessAttentionReason = FleetAttentionReason;
 
 /**
  * Derived attention marker for a node that is blocked on a human.

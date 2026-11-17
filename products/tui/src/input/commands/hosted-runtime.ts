@@ -32,8 +32,7 @@ import { describeOperatorRpcError } from '../../runtime/client/operator-endpoint
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 import {
   createDaemonVerbCaller,
-  resolveControlPlaneBaseUrl,
-  resolveDaemonStateDirectory,
+  resolveDaemonEndpoint,
 } from '../../runtime/client/operator-endpoint.ts';
 import {
   createHostedSessionsClient,
@@ -44,7 +43,6 @@ import {
   type HostedSessionsClient,
 } from '../../runtime/client/hosted-sessions.ts';
 import { newestHistoryTime, watchHostedSession, type HostedSessionSubscription } from '../../runtime/client/hosted-session-stream.ts';
-import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { getSharedHostedSessionFeed, type HostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import { getSharedHostedSessionRoster } from '../../runtime/client/hosted-roster.ts';
 
@@ -122,33 +120,35 @@ interface HostedCommandSeams {
   readonly client: HostedSessionsClient;
   readonly baseUrl: string | null;
   readonly authToken: string | null;
+  /** Why the live stream cannot be opened, when it cannot. */
+  readonly streamUnavailable: string | null;
 }
 
 /**
  * Resolve everything a `/hosted` subcommand needs, or refuse honestly.
  *
- * The verbs go through `createDaemonVerbCaller` because every
- * `sessions.hosted.*` verb is ws-declared with no REST path; the stream needs
- * the base URL and bearer directly, which is the same resolution the verb
- * caller performs internally.
+ * The verbs go through `createDaemonVerbCaller`; the stream needs the base
+ * URL and bearer directly, and takes both from `resolveDaemonEndpoint`, the
+ * resolver the verb caller uses, so the stream dials the same daemon with the
+ * same credential (a connected daemon's stored token, an /auth login session,
+ * GOODVIBES_DAEMON_TOKEN, or this machine's operator token for the local one).
  */
 function resolveSeams(context: CommandContext): HostedCommandSeams | null {
   const configManager = context.platform.configManager;
   const homeDirectory = (): string => requireShellPaths(context).homeDirectory;
   const client = createHostedSessionsClient(createDaemonVerbCaller({ configManager, homeDirectory }));
-  const baseUrl = resolveControlPlaneBaseUrl(configManager);
-  if (!baseUrl) return { client, baseUrl: null, authToken: null };
-  let authToken: string | null = null;
+  let endpoint: ReturnType<typeof resolveDaemonEndpoint>;
   try {
-    authToken = getOrCreateCompanionToken('tui', {
-      daemonHomeDir: resolveDaemonStateDirectory(homeDirectory()),
-    }).token;
-  } catch {
-    // A token this terminal cannot mint is a stream it cannot open; the verbs
-    // resolve their own and still work, so this is not a refusal of the command.
-    authToken = null;
+    endpoint = resolveDaemonEndpoint({ configManager, homeDirectory });
+  } catch (error) {
+    // Shell paths that are not wired here; the verbs report the same on their own.
+    endpoint = { available: false, reason: describeOperatorRpcError(error) };
   }
-  return { client, baseUrl, authToken };
+  // An endpoint that cannot be resolved is a stream that cannot be opened; the
+  // verbs report their own refusal, so this is not a refusal of the command.
+  return endpoint.available
+    ? { client, baseUrl: endpoint.baseUrl, authToken: endpoint.token, streamUnavailable: null }
+    : { client, baseUrl: null, authToken: null, streamUnavailable: endpoint.reason };
 }
 
 /**
@@ -183,12 +183,8 @@ async function openStream(
   // The feed owns the subscription handle: the exit path has to be able to
   // close it too, and it has no way to reach a variable in this module.
   feed.closeStream();
-  if (!seams.baseUrl) {
-    feed.setStreaming(false, 'no control-plane base URL is configured, so nothing can be watched live');
-    return;
-  }
-  if (!seams.authToken) {
-    feed.setStreaming(false, 'no bearer token could be read for the event stream');
+  if (!seams.baseUrl || !seams.authToken) {
+    feed.setStreaming(false, `nothing can be watched live: ${seams.streamUnavailable ?? 'no daemon address or access token could be resolved'}`);
     return;
   }
   const token = seams.authToken;

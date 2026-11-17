@@ -69,19 +69,21 @@ export function createNativeWorkLedgerHost(
 }
 
 export function registerNativeWorkLedgerCommand(registry: CommandRegistry, view: NativeWorkLedgerView): void {
-  const submitFile = view.submitFile, submissionStatus = view.submissionStatus, retrySubmission = view.retrySubmission;
+  const submitFile = view.submitFile, submissionStatus = view.submissionStatus, retrySubmission = view.retrySubmission,
+    discardSubmission = view.discardSubmission;
   const submission =
-    submitFile && submissionStatus && retrySubmission
+    submitFile && submissionStatus && retrySubmission && discardSubmission
       ? {
           submitFile: (path: string) => submitFile.call(view, path),
           status: () => submissionStatus.call(view),
           retry: () => retrySubmission.call(view),
+          discard: () => discardSubmission.call(view),
         }
       : undefined;
   registry.register({
     name: 'work',
     description:
-      'Inspect native work and recover ordinary input with intake-status/intake-retry/intake-resume/intake-cancel; /work <daemon-project-id> selects a project.',
+      'Inspect native work, submit source with submit-file <JSON-path> and settle it with submission-status/submission-retry/submission-discard, and recover ordinary input with intake-status/intake-retry/intake-resume/intake-cancel; /work <daemon-project-id> selects a project.',
     handler: async (args, ctx) => {
       if (await handleNativeIntakeCommand(args, ctx, false)) return;
       if (await handleNativeSubmissionCommand(args, (text) => ctx.print(text), submission)) return;

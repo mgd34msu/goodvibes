@@ -7,6 +7,8 @@ export interface NativeWorkLedgerView {
   submitFile?(path: string): Promise<NativeWorkSubmissionState | undefined>;
   submissionStatus?(): Promise<NativeWorkSubmissionState | undefined>;
   retrySubmission?(): Promise<NativeWorkSubmissionState | undefined>;
+  /** Drop the saved submission the host has no record of, so a corrected one can be sent. */
+  discardSubmission?(): Promise<NativeWorkSubmissionState | undefined>;
   selectProject(projectId: string): void;
   /** Show the selected project's ledger; discovers the project when none is selected. */
   open(): void;

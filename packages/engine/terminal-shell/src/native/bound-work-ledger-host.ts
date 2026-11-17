@@ -359,6 +359,7 @@ export function createBoundNativeWorkLedgerView(
       }),
     submissionStatus: () => preflight.run((_signal, current) => withSelection(() => submission.status(), current)),
     retrySubmission: () => preflight.run((_signal, current) => withSelection(() => submission.retry(), current)),
+    discardSubmission: () => preflight.run((_signal, current) => withSelection(() => submission.discard(), current)),
     selectProject(project) {
       preflight.close();
       intakePreflight.close();

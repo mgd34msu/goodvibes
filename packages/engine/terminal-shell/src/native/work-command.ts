@@ -43,7 +43,7 @@ export async function handleNativeIntakeCommand(
 export async function handleNativeSubmissionCommand(
   args: readonly string[],
   print: (text: string) => void,
-  submission: Pick<NativeWorkSubmissionActions, 'submitFile' | 'status' | 'retry'> & Partial<Pick<NativeWorkSubmissionActions, 'discard'>> | undefined,
+  submission: Pick<NativeWorkSubmissionActions, 'submitFile' | 'status' | 'retry' | 'discard'> | undefined,
 ): Promise<boolean> {
   const action = args[0];
   if (action !== 'submit-file' && action !== 'submission-status' && action !== 'submission-retry' && action !== 'submission-discard') return false;
@@ -56,17 +56,13 @@ export async function handleNativeSubmissionCommand(
     print('Native source submission is unavailable in this shell.');
     return true;
   }
-  if (action === 'submission-discard' && !submission.discard) {
-    print('Discarding a saved submission is unavailable in this shell.');
-    return true;
-  }
   const result =
     action === 'submit-file' && path !== undefined
       ? await submission.submitFile(path)
       : action === 'submission-status'
         ? await submission.status()
         : action === 'submission-discard'
-          ? await submission.discard!()
+          ? await submission.discard()
           : await submission.retry();
   print(
     nativeWorkSubmissionLines(result)

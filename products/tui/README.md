@@ -89,6 +89,10 @@ Both products use the same command contract:
 - `/work submission-status` looks up the retained request without writing work.
 - `/work submission-retry` first looks up that same request. Only a `not-found`
   result can lead to replay of the exact retained request.
+- `/work submission-discard` first looks up that same request. When the host
+  has it, its receipt is shown and nothing is dropped; otherwise the retained
+  request is removed and nothing is sent, so a corrected source can be
+  submitted.
 
 Example source file:
 

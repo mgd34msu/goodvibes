@@ -12,7 +12,7 @@ type LocalWorkPlanCommand =
   | { readonly action: 'remove'; readonly id: string }
   | { readonly action: 'clear_completed' };
 
-const USAGE = '/workplan show|markdown|add <title> [--owner <label>] [--source <label>] [--notes <text>] | pending|start|blocked|done|failed|cancelled <id> | remove <id> --yes | clear-completed --yes | submit-file <JSON-path> | submission-status | submission-retry';
+const USAGE = '/workplan show|markdown|add <title> [--owner <label>] [--source <label>] [--notes <text>] | pending|start|blocked|done|failed|cancelled <id> | remove <id> --yes | clear-completed --yes | submit-file <JSON-path> | submission-status | submission-retry | submission-discard';
 const clean = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' ');
 
 /** Local todos never become authority. Native source submission remains on the existing owner/journal route. */
@@ -24,7 +24,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
     usage: USAGE.replace('/workplan ', ''),
     async handler(args, ctx) {
       const action = args[0] ?? 'show';
-      if (['submit-file', 'submission-status', 'submission-retry'].includes(action)) {
+      if (['submit-file', 'submission-status', 'submission-retry', 'submission-discard'].includes(action)) {
         // Share the exact host/principal/source/journal controls, including detached/unknown outcomes.
         await registry.execute('work', args, ctx);
         return;

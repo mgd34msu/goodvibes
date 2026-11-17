@@ -21,20 +21,22 @@ export function registerAgentWorkspaceRuntimeCommands(registry: CommandRegistry)
     effect: 'ui-navigation',
     description: 'Inspect native work, recover ordinary input, or explicitly start, cancel or resume an existing attempt',
     usage:
-      '[daemon-project-id] | start|status|cancel|resume <work-id> | submit-file <JSON-path> | submission-status | submission-retry | intake-status | intake-retry | intake-resume | intake-cancel',
+      '[daemon-project-id] | start|status|cancel|resume <work-id> | submit-file <JSON-path> | submission-status | submission-retry | submission-discard | intake-status | intake-retry | intake-resume | intake-cancel',
     async handler(args, ctx) {
       const action = args[0];
       if (await handleNativeIntakeCommand(args, ctx, true)) return;
       const view = ctx.nativeWorkLedger;
       const submitFile = view?.submitFile,
         submissionStatus = view?.submissionStatus,
-        retrySubmission = view?.retrySubmission;
+        retrySubmission = view?.retrySubmission,
+        discardSubmission = view?.discardSubmission;
       const submission =
-        submitFile && submissionStatus && retrySubmission
+        submitFile && submissionStatus && retrySubmission && discardSubmission
           ? {
               submitFile: (path: string) => submitFile.call(view, path),
               status: () => submissionStatus.call(view),
               retry: () => retrySubmission.call(view),
+              discard: () => discardSubmission.call(view),
             }
           : undefined;
       if (await handleNativeSubmissionCommand(args, (text) => ctx.print(text), submission)) return;

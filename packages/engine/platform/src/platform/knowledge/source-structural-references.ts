@@ -139,8 +139,9 @@ export function projectKnowledgeNodeActivationMetadata(store: KnowledgeStore, no
   return { ...metadata, nodeActivation: projected };
 }
 
-/** Page ranking may omit only references backed by the exact current native
- * source and store. All other fields, including metadata, retain full preflight. */
+/** Page ranking may omit only the URIs of the exact current native source and
+ * store; ids reach the reader as they are. All other fields, including
+ * metadata, retain full preflight. */
 export function knowledgePageCandidateRepresentation(store: KnowledgeStore | undefined, candidate: unknown): unknown {
   captureOwnedJson(candidate);
   const raw = captureOwnedJson(knowledgeJudgmentRepresentation(candidate));
@@ -153,7 +154,6 @@ export function knowledgePageCandidateRepresentation(store: KnowledgeStore | und
   if (source && source === candidate) {
     const identity = currentSourceIdentity(source);
     if (identity?.store !== store) return raw;
-    replacements.set('id', 'source-reference');
     replacements.set('canonicalUri', undefined);
     if (identity.sourceUri !== undefined) replacements.set('sourceUri', undefined);
   } else {
@@ -163,11 +163,6 @@ export function knowledgePageCandidateRepresentation(store: KnowledgeStore | und
     // subtree cannot inherit their stored representation or reference proof.
     try { captureStrictJudgmentJson(node); } catch { throw new KnowledgeGeneratedFactSupportHeldError('malformed'); }
     replacements.set('metadata', projectKnowledgeNodeActivationMetadata(store, node, slots.metadata?.value));
-    const sourceId: unknown = slots.sourceId?.value;
-    if (typeof sourceId === 'string') {
-      const origin = store.getSource(sourceId);
-      if (origin && currentSourceIdentity(origin)?.store === store) replacements.set('sourceId', 'source-reference');
-    }
   }
   const result: Record<string, unknown> = Object.create(null);
   for (const [key, descriptor] of Object.entries(slots)) {
@@ -230,6 +225,7 @@ export function projectKnowledgeSourceReferences(source: KnowledgeSourceRecord, 
     || (known.extraction && (extraction?.id !== known.extraction.id || extraction.sourceId !== known.extraction.sourceId))) {
     throw new KnowledgeGeneratedFactSupportHeldError('stale');
   }
-  return { sourceId: 'source-reference', extractionId: known.extraction ? 'extraction-reference' : undefined,
+  // Ids are ordinary values a reader may see; only the producer-minted URIs are left out.
+  return { sourceId: known.source.id, extractionId: known.extraction?.id,
     omitCanonicalUri: true, omitSourceUri: known.source.sourceUri !== undefined };
 }

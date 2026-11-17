@@ -11,6 +11,7 @@ import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresent
 import { JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13, validateKnowledgeSchemaV14, validateKnowledgeSchemaV15, validateKnowledgeSchemaV16 } from './store-current-schema-validation.js';
 import { createKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
+import { rewriteKnowledgeTextClocks } from './store-integer-clocks.js';
 import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
 import { createGeneratedProjectionIdentityIndex } from './store-generated-projection-selector.js';
 import { createArtifactReferenceIndexes } from './store-artifact-references.js';
@@ -2045,6 +2046,13 @@ export class KnowledgeStore {
           validateKnowledgeSchemaV16(db);
           createHomeGraphSourceIdentityIndexes(db);
           validateCurrentKnowledgeSchema(db);
+        } },
+        // Clocks are stored as integers again: the ISO text an earlier build
+        // wrote into INTEGER clock columns becomes milliseconds, so each
+        // column holds one type. The tables and indexes are unchanged.
+        { toVersion: 18, migrate: db => {
+          validateCurrentKnowledgeSchema(db);
+          rewriteKnowledgeTextClocks(db);
         } },
       ],
     });

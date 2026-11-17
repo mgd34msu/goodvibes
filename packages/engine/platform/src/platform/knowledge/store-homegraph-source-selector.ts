@@ -72,7 +72,8 @@ export function homeGraphSourceCandidateQuery(input: HomeGraphSourceSelector): {
   // predicates let SQLite choose the actual role index without bound-value inference.
   if (selector.role === 'snapshot') {
     if (selector.capturedAt === undefined) return { sql: prefix + ' AND 0', params };
-    return { sql: prefix + ' AND last_crawled_at IN (?, ?)', params: [...params, selector.capturedAt, new Date(selector.capturedAt).toISOString()] };
+    // Clocks are integers in every row (schema v18 rewrote the ISO text older builds stored).
+    return { sql: prefix + ' AND last_crawled_at = ?', params: [...params, selector.capturedAt] };
   }
   if (selector.role === 'generated-page') return { sql: prefix + ` AND ${projection} = ? AND ${pageKey} IN (${selector.keys!.map(() => '?').join(',')}) AND ${profile} = ?`, params: [...params, selector.projectionKind!, ...selector.keys!, selector.projectionKind === 'packet' ? selector.sharingProfile! : ''] };
   return { sql: prefix + (selector.locator === 'uri' ? ' AND source_uri = ?' : ' AND artifact_id = ?'), params: [...params, selector.value!] };

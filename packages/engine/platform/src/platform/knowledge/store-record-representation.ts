@@ -1,9 +1,11 @@
 import { captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
 
-/** Representation evidence only, never permission to publish. Entries are issued
- * by actual writers/SQL decoders and bind complete object values. JSON copies,
- * replacements and caller-created lookalikes cannot mint this evidence. */
-const representations = new WeakMap<object, { readonly view: unknown; readonly raw: unknown }>();
+/**
+ * A knowledge record has one representation: the values code reads are the
+ * values stored, clocks as integer milliseconds. A row an older build wrote
+ * with an ISO clock is decoded to the number on read (`knowledgeClockNumber`)
+ * and the store rewrites such columns as integers once (store-schema.ts).
+ */
 const immutableRecordVersions = new WeakMap<object, string>();
 const versionGet = WeakMap.prototype.get, versionSet = WeakMap.prototype.set, applyVersion = Reflect.apply;
 export function knowledgeRecordVersion(value: unknown): string {
@@ -31,37 +33,14 @@ export function sameKnowledgeRecord(left: unknown, right: unknown): boolean {
   // existing representation and its original immutable-root memo instead.
   return knowledgeRecordVersion(left) === knowledgeRecordVersion(right);
 }
-function known(value: unknown): unknown | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const entry = representations.get(value);
-  if (!entry) return undefined;
-  try { return sameKnowledgeRecord(value, entry.view) ? entry.raw : undefined; } catch { return undefined; }
-}
-/** Bind decoder/writer-created numeric views to their exact canonical originals.
- * This is internal transport; callers of public replacement APIs never use it. */
-export function retainKnowledgeRepresentation<T>(view: T, raw: unknown): T {
-  if (view && typeof view === 'object') representations.delete(view);
-  let captured: unknown, capturedView: unknown;
-  // A legacy hydration may contain malformed numbers. Do not broaden at-rest
-  // rejection; it receives no representation proof and semantic admission holds.
-  try { captured = captureOwnedJson(raw); capturedView = captureOwnedJson(view); } catch { return view; }
-  // Capture each complete value once. Child bindings share their detached
-  // subtrees rather than serializing the same metadata at every nesting level.
-  const pending = [{ value: view as unknown, snapshot: capturedView, original: captured }];
-  while (pending.length) {
-    const entry = pending.pop()!;
-    if (!entry.value || typeof entry.value !== 'object') continue;
-    representations.set(entry.value, { view: entry.snapshot, raw: entry.original });
-    if (!entry.original || typeof entry.original !== 'object' || !entry.snapshot || typeof entry.snapshot !== 'object') continue;
-    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(entry.value))) {
-      if ((Array.isArray(entry.value) ? key !== 'length' : descriptor.enumerable) && Object.hasOwn(entry.original, key)
-        && Object.hasOwn(entry.snapshot, key)) pending.push({ value: descriptor.value,
-          snapshot: (entry.snapshot as Record<string, unknown>)[key], original: (entry.original as Record<string, unknown>)[key] });
-    }
-  }
+/**
+ * The record as stored. There is no second copy to bind any more: the stored
+ * form is the record itself, so this returns `view` as it is.
+ */
+export function retainKnowledgeRepresentation<T>(view: T, _stored?: unknown): T {
   return view;
 }
-/** Never converts a primitive based on its name, type, magnitude or value. */
+/** A detached plain copy of the record as it is written. Never converts a primitive based on its name, type, magnitude or value. */
 export function knowledgeRawRepresentation<T>(value: T): T {
   return knowledgeRepresentation(value, false);
 }
@@ -75,8 +54,6 @@ function knowledgeRepresentation<T>(value: T, includeHidden: boolean): T {
   // serialization behavior) without evaluating them or acquiring proof.
   const copied = new WeakMap<object, object>();
   const visit = (item: unknown, depth: number): unknown => {
-    const saved = known(item);
-    if (saved !== undefined) return captureOwnedJson(saved);
     if (!item || typeof item !== 'object' || depth > 64) return item;
     if (copied.has(item)) return copied.get(item);
     const array = Array.isArray(item), prototype = Object.getPrototypeOf(item);
@@ -118,7 +95,7 @@ export function normalizeKnowledgeStoredView<T>(value: T): T {
  * Unsupported ordinary inputs remain unchanged, without a new proof. */
 export function retainKnowledgePreparedRecord<T>(record: T): T {
   try { captureOwnedJson(record); } catch { return record; }
-  return retainKnowledgeRepresentation(normalizeKnowledgeStoredView(record), normalizeKnowledgeStoredView(knowledgeRawRepresentation(record)));
+  return normalizeKnowledgeStoredView(record);
 }
 /** Lossless successor to the import path's old snapshotNodeInput clone. Keep its
  * nonfinite-number preservation for downstream existing checks, but visit every
@@ -154,7 +131,7 @@ export function copyKnowledgeRepresentation<T>(original: T, copy: T): T {
   let unchanged: boolean;
   try { unchanged = sameKnowledgeRecord(original, copy); } catch { return copy; }
   if (!unchanged) throw new TypeError('Knowledge representation copy changed');
-  return retainKnowledgeRepresentation(copy, knowledgeRawRepresentation(original));
+  return copy;
 }
 export function knowledgeClockIso(value: number): string {
   if (!Number.isSafeInteger(value) || Math.abs(value) > 8_640_000_000_000_000) throw new TypeError('Invalid knowledge clock');
@@ -170,61 +147,34 @@ export function isKnowledgeClock(value: unknown): boolean {
 export function knowledgeClockNumber(value: unknown): number {
   return typeof value === 'string' && isKnowledgeClock(value) ? Date.parse(value) : Number(value);
 }
-/** Only an actual prepare operation invokes this at fresh clock creation. */
+/** Only an actual prepare operation invokes this at fresh clock creation; the clocks are stored as the numbers they are. */
 export function prepareKnowledgeOwnedClocks<T extends { readonly createdAt: number; readonly updatedAt: number }>(record: T, existing: T | null | undefined, now: number): T {
   if (record.updatedAt !== now || (existing ? !Object.is(record.createdAt, existing.createdAt) : record.createdAt !== now)) throw new TypeError('Owned knowledge clocks do not match their writer');
-  const raw = knowledgeRawRepresentation(record);
-  const old = existing ? knowledgeRawRepresentation(existing) : undefined;
-  return retainKnowledgeRepresentation(record, { ...raw,
-    createdAt: existing ? old!.createdAt : knowledgeClockIso(now), updatedAt: knowledgeClockIso(now) });
+  return record;
 }
-/** Carry already-owned top-level clocks over a producer's explicit record edit.
- * New content, including unknown metadata, is retained in full. */
-export function carryKnowledgeRecordClocks<T extends { readonly createdAt: number; readonly updatedAt: number }>(origin: T, record: T): T {
-  const prior = known(origin) as T | undefined;
-  const raw = knowledgeRawRepresentation(record);
-  return retainKnowledgeRepresentation(record, prior ? { ...raw,
-    createdAt: record.createdAt === origin.createdAt ? prior.createdAt : raw.createdAt,
-    updatedAt: record.updatedAt === origin.updatedAt ? prior.updatedAt : raw.updatedAt } : raw);
+/** A producer's explicit record edit keeps the clocks it carries; with one representation there is nothing else to carry. */
+export function carryKnowledgeRecordClocks<T extends { readonly createdAt: number; readonly updatedAt: number }>(_origin: T, record: T): T {
+  return record;
 }
 /** These constructors own the stamps; existing/caller numeric metadata is never
  * rewritten merely because it uses these same property names. */
 export function knowledgeDecisionStamp<T extends Record<string, unknown>>(now: number, fields: T): T & { decidedAt: number } {
-  const view = { ...fields, decidedAt: now };
-  return retainKnowledgeRepresentation(view, { ...fields, decidedAt: knowledgeClockIso(now) });
+  return { ...fields, decidedAt: now };
 }
 export function knowledgeReviewStamp<T extends Record<string, unknown>>(now: number, fields: T): T & { reviewedAt: number } {
-  const view = { ...fields, reviewedAt: now };
-  return retainKnowledgeRepresentation(view, { ...fields, reviewedAt: knowledgeClockIso(now) });
+  return { ...fields, reviewedAt: now };
 }
-/** Exact canonical metadata is decoded only for the compatibility view. Raw SQL
- * remains the admission source; arbitrary numeric metadata stays numeric. */
-function metadataClockView(raw: Record<string, unknown>, container: string | undefined, field: string): Record<string, unknown> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
-  const descriptors = Object.getOwnPropertyDescriptors(raw), child = container === undefined ? raw : descriptors[container]?.value;
-  if (!child || typeof child !== 'object' || Array.isArray(child)) return raw;
-  const fields = Object.getOwnPropertyDescriptors(child), clock = fields[field]?.value;
-  // Decoder-only immutable projection. Do not invoke accessors or impose the
-  // semantic capture budget on ordinary legacy hydration/writes.
-  if ([...Object.values(descriptors), ...Object.values(fields)].some(item => !('value' in item))
-    || typeof clock !== 'string' || !isKnowledgeClock(clock)) return raw;
-  const view = retainKnowledgeRepresentation(container === undefined
-    ? { ...raw, [field]: knowledgeClockNumber(clock) }
-    : { ...raw, [container]: { ...child, [field]: knowledgeClockNumber(clock) } }, raw);
-  return known(view) === undefined ? raw : view;
-}
+/**
+ * Record metadata reads exactly as it is stored: a clock a producer wrote as
+ * ISO text stays text, a number stays a number, so writing a record back
+ * never changes its metadata (or the identity and content revisions computed
+ * from it). A reader that needs the number uses `knowledgeClockNumber`.
+ */
 export function knowledgeNodeMetadataView(raw: Record<string, unknown>): Record<string, unknown> {
-  const decision = metadataClockView(raw, 'reviewProvenance', 'decidedAt');
-  let view = metadataClockView(decision, 'review', 'reviewedAt');
-  // Actual repair/supersession writers emit canonical strings before snapshotting. Decode
-  // only those strings; a caller's numeric lookalike remains an original number.
-  for (const field of ['lastRepairAttemptAt', 'nextRepairAttemptAt', 'repairedAt', 'supersededAt', 'sourceDetachedAt', 'refreshedAt']) view = metadataClockView(view, undefined, field);
-  return retainKnowledgeRepresentation(view, raw);
+  return raw;
 }
 export function knowledgeSourceMetadataView(raw: Record<string, unknown>): Record<string, unknown> {
-  let view = metadataClockView(raw, 'sourceDiscovery', 'searchedAt');
-  for (const field of ['generatedAt', 'capturedAt', 'refreshedAt']) view = metadataClockView(view, undefined, field);
-  return retainKnowledgeRepresentation(view, raw);
+  return raw;
 }
 /** The search producer emits canonical data immediately, so intervening ingest
  * copies never need to infer provenance from a caller's numeric searchedAt. */
@@ -235,6 +185,5 @@ export function knowledgeSearchStamp<T extends Record<string, unknown>>(fields: 
 export function knowledgeSourceCrawledNow<T extends object>(input: T): T & { lastCrawledAt: number } {
   captureOwnedJson(input);
   if (Object.hasOwn(input, 'lastCrawledAt')) throw new TypeError('Owned crawl input must not supply lastCrawledAt');
-  const view = { ...input, lastCrawledAt: Date.now() };
-  return retainKnowledgeRepresentation(view, { ...knowledgeRawRepresentation(input), lastCrawledAt: knowledgeClockIso(view.lastCrawledAt) });
+  return { ...input, lastCrawledAt: Date.now() };
 }

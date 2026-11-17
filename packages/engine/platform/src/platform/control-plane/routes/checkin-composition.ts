@@ -2,6 +2,7 @@
 import { CheckinService, CheckinReceiptStore, createProviderBackedCheckinJudge } from '../../checkin/index.js';
 import { createRuntimeCheckinStateReader, judgeOnlyWhenOwnerNeeded } from '../../checkin/state-reader.js';
 import type { ConfigKey } from '../../config/schema.js';
+import { RefusalError } from '@goodvibes-jev/engine/errors';
 import { parseChannelDeliveryTarget } from '../../channels/delivery/types.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayVerbGroupDeps } from './register-gateway-verb-groups.js';
@@ -12,22 +13,29 @@ import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 
 export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCatalog, deps: Pick<GatewayVerbGroupDeps,
   'channelDeliveryRouter' | 'providerRegistry' | 'automationManager' | 'sessionLister' | 'configManager' | 'shellPaths' | 'surfaceRoot' | 'disposal' | 'ownerInbox' | 'listContracts'>): void {
-  if (deps.channelDeliveryRouter && deps.providerRegistry && deps.automationManager && deps.sessionLister && deps.configManager.onDidInvalidate) {
+  if (deps.channelDeliveryRouter && deps.providerRegistry && deps.automationManager && deps.sessionLister) {
     const channelDeliveryRouter = deps.channelDeliveryRouter;
     const automation = deps.automationManager;
     const sessionLister = deps.sessionLister;
     // The check-in reads its checkin.* ConfigKeys through a string-keyed
     // surface; adapt the daemon's ConfigManager to it.
     const configManager = deps.configManager;
-    const onDidInvalidate = deps.configManager.onDidInvalidate.bind(configManager);
     const subscribe = configManager.subscribe?.bind(configManager);
     const resolveForConsumer = configManager.resolveForConsumer?.bind(configManager);
+    const setMany = configManager.setMany?.bind(configManager);
     const checkinConfig = {
       get: (key: string): unknown => configManager.get(key as ConfigKey),
       ...(resolveForConsumer ? { resolveForConsumer: (key: string): unknown => resolveForConsumer(key as ConfigKey) } : {}),
-      onDidInvalidate: (listener: () => void) => onDidInvalidate(listener),
       ...(subscribe ? { subscribe: (key: string, listener: () => void) => subscribe(key as ConfigKey, listener) } : {}),
       set: (key: string, value: string | boolean): void => configManager.set(key as ConfigKey, value as never),
+      // One admission and one settings write for the whole update, so the key
+      // subscriptions fire on a settled config and enabled never lands before its channel.
+      ...(setMany ? {
+        setMany: (changes: readonly { readonly key: string; readonly value: string | boolean }[]): void => {
+          const result = setMany(changes.map(change => ({ key: change.key as ConfigKey, value: change.value })), { kind: 'owner', surface: 'checkin.config.set' });
+          if (!result.ok) throw new RefusalError(result.refusal);
+        },
+      } : {}),
     };
     const ownerInbox = deps.ownerInbox;
     const listContracts = deps.listContracts;

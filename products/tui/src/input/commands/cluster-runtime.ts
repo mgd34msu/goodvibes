@@ -36,6 +36,7 @@ export function registerClusterRuntimeCommands(registry: CommandRegistry): void 
     usage: `[${CLUSTER_SUBCOMMANDS.join('|')}]: status is the default; `
       + 'add --host/--port/--token to reach a daemon on another machine',
     argsHint: `[${CLUSTER_SUBCOMMANDS.join('|')}]`,
+    subcommands: CLUSTER_SUBCOMMAND_ARG_HINTS,
     async handler(args, ctx) {
       const argv = args.length === 0 ? ['status'] : args;
       const result = await runClusterCommand({

@@ -125,6 +125,19 @@ export function registerLocalAuthRuntimeCommands(registry: CommandRegistry): voi
     aliases: ['auth-local'],
     description: 'Inspect and manage local daemon/listener auth users, sessions, and bootstrap credentials',
     usage: '[review|panel|add-user <username> <password> [roles, default user]|delete-user <username>|rotate-password <username> <password>|revoke-session <session-id-or-token>|clear-bootstrap-file]',
+    subcommands: {
+      'add-user': '<username> <password> [roles]', 'delete-user': '<username>', 'rotate-password': '<username> <password>',
+      'revoke-session': '<session-id-or-token>', 'clear-bootstrap-file': '',
+    },
+    confirm(args) {
+      if (args[0] === 'delete-user' && args[1]) {
+        return { title: `Delete local user ${args[1]}?`, detail: `${args[1]} can no longer sign in and the account cannot be recovered; add it again with /local-auth add-user.`, confirmLabel: 'Delete' };
+      }
+      if (args[0] === 'clear-bootstrap-file') {
+        return { title: 'Remove the bootstrap credential file?', detail: 'The first-run credential file is deleted. If no local user has been created, nobody can sign in to the web app until one is added with /local-auth add-user.', confirmLabel: 'Remove' };
+      }
+      return undefined;
+    },
     handler(args, ctx) {
       handleLocalAuthCommand(args, ctx);
     },

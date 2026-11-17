@@ -19,7 +19,7 @@
  *   /hosted later <text…>      queue a follow-up (ordinary verb)
  *   /hosted cancel [callId]    cancel one in-flight tool call (ordinary verb)
  *   /hosted detach             leave, the policy the record names then applies
- *   /hosted kill [id] --yes    end it regardless of policy (without --yes it only says what it would end)
+ *   /hosted kill [id]          end it regardless of policy (asks once first)
  *
  * There is no `/hosted steer` beside `say` and no hosted-only cancel: those
  * operations are `sessions.steer`, `sessions.followUp` and
@@ -243,8 +243,20 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'hosted',
     description: 'Daemon-hosted sessions: start, join, steer and leave a conversation whose loop runs in the daemon',
-    usage: '[new|list|attach|say|later|cancel|detach|kill <id> --yes] [args]',
+    usage: '[new|list|attach|say|later|cancel|detach|kill <id>] [args]',
     argsHint: '[new|list|attach|say|later|cancel|detach|kill]',
+    subcommands: { new: '[--survive|--kill] [prompt…]', list: '[--all]', attach: '<id|n>', say: '<text…>', later: '<text…>', cancel: '[callId]', kill: '[id|n]' },
+    confirm(args) {
+      if ((args[0] ?? '').toLowerCase() !== 'kill') return undefined;
+      const target = args[1] ? resolveIdArgument(args[1]) : getSharedHostedSessionFeed().getState().record?.id;
+      if (!target) return undefined;
+      // A list number is resolved against the last list printed in this process, which may be stale: show what it means.
+      return {
+        title: `End hosted session ${target}?`,
+        detail: `This ends session ${target} and its running turn, whatever its detach policy says. It cannot be undone.${args[1] && args[1] !== target ? ` (${args[1]} currently means ${target}.)` : ''}`,
+        confirmLabel: 'End session',
+      };
+    },
     async handler(args, ctx) {
       const feed = getSharedHostedSessionFeed();
       const sub = (args[0] ?? '').toLowerCase();
@@ -346,14 +358,8 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
             return;
           }
           case 'kill': {
-            const killArgs = args.slice(1).filter((word) => word !== '--yes');
-            const target = killArgs[0] ? resolveIdArgument(killArgs[0]) : attachedId;
-            if (!target) { ctx.print('Usage: /hosted kill <id> [--yes] (or attach one first)'); return; }
-            if (!args.includes('--yes')) {
-              // A list number is resolved against the last list printed in this process, which may be stale: show what it means.
-              ctx.print(`[hosted] this ends session ${target} and its running turn, and cannot be undone. Nothing was ended.\n  Run /hosted kill ${killArgs[0] ?? target} --yes to confirm (${killArgs[0] && killArgs[0] !== target ? `${killArgs[0]} currently means ${target}` : 'check the id with /hosted list'}).`);
-              return;
-            }
+            const target = args[1] ? resolveIdArgument(args[1]) : attachedId;
+            if (!target) { ctx.print('Usage: /hosted kill <id> (or attach one first)'); return; }
             const record = await seams.client.kill(target);
             forgetHostedAttachment(feed, target);
             if (target === feed.getState().record?.id) feed.clear();
@@ -361,7 +367,7 @@ export function registerHostedRuntimeCommands(registry: CommandRegistry): void {
             return;
           }
           default:
-            ctx.print('Usage: /hosted [status|new|list|attach|say|later|cancel|detach|kill <id> --yes]');
+            ctx.print('Usage: /hosted [status|new|list|attach|say|later|cancel|detach|kill <id>]');
             return;
         }
       } catch (error) {

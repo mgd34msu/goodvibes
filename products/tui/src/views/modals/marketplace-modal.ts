@@ -65,7 +65,7 @@ class MarketplaceModalSurface implements ConfigModalSurface {
 
   readonly actions = [
     { key: 'i', id: 'install', label: 'install', enabledFor: (row: ConfigModalRow | null) => this.canInstall(row) },
-    { key: 'u', id: 'uninstall', label: 'uninstall', enabledFor: (row: ConfigModalRow | null) => this.canUninstall(row) },
+    { key: 'u', id: 'uninstall', label: 'uninstall', confirm: true, enabledFor: (row: ConfigModalRow | null) => this.canUninstall(row) },
     { key: 'r', id: 'refresh', label: 'refresh' },
   ];
 

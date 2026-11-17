@@ -1,5 +1,6 @@
 import { REMINDER_SCHEDULE_METHOD, type ReminderScheduleFailure, type ReminderSchedulePreview, type ReminderScheduleSuccess } from '@goodvibes-jev/engine/terminal-shell/agent-turn/reminder-schedule';
 import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-next-routes';
+import { scheduleDeliveryLine } from './schedule-delivery-line.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -67,6 +68,7 @@ export function formatReminderScheduleSuccess(result: ReminderScheduleSuccess): 
       : 'Created GoodVibes schedule for Agent reminder',
     `  schedule ${id}`,
     `  status ${status}`,
+    scheduleDeliveryLine(record),
     `  route ${result.kind} ${result.route}`,
     `  reminder ${result.message}`,
     ...scheduleNextRouteLines(id),

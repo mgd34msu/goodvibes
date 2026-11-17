@@ -250,15 +250,33 @@ function isScheduleRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** One delivery target as a comparable key: what it reaches, not how it is labelled. */
+function deliveryTargetKey(target: unknown): string {
+  if (!isScheduleRecord(target)) return '';
+  const part = (value: unknown): string => (typeof value === 'string' ? value : '');
+  return [part(target.kind), part(target.surfaceKind), part(target.address), part(target.routeId)].join('\u0000');
+}
+
+/** The delivery mode and target keys of a policy; an absent policy is the host's default (`none`, no targets). */
+function deliveryShape(delivery: unknown): string {
+  const record = isScheduleRecord(delivery) ? delivery : {};
+  const mode = typeof record.mode === 'string' ? record.mode : 'none';
+  const targets = Array.isArray(record.targets) ? record.targets.map(deliveryTargetKey).sort() : [];
+  return JSON.stringify([mode, targets]);
+}
+
 /**
  * The listed job that is the schedule `payload` would create, or undefined.
  * The host takes no idempotency key on `automation.schedules.create`, so a
  * create whose answer was lost (a daemon restart, a laptop asleep mid-request)
  * would add a second standing schedule on the natural retry; every create path
- * reads the list first and matches here. Same name, same kind and time, and the
- * same prompt: matching the prompt keeps two different schedules that share a
- * name (the first 48 characters of a reminder) and a time from reading as one.
- * `listed` is the `automation.schedules.list` answer; any other shape matches nothing.
+ * reads the list first and matches here. Same name, same kind and time, the
+ * same prompt, the same on/off state and the same delivery: matching the prompt
+ * keeps two different schedules that share a name (the first 48 characters of a
+ * reminder) and a time from reading as one, and matching state and delivery
+ * keeps a paused schedule, or one that delivers elsewhere, from being reported
+ * as the one just asked for. `listed` is the `automation.schedules.list`
+ * answer; any other shape matches nothing.
  */
 export function findSameSchedule(listed: unknown, payload: ScheduleCreateInput): Record<string, unknown> | undefined {
   const jobs: readonly unknown[] = isScheduleRecord(listed) && Array.isArray(listed.jobs) ? listed.jobs : [];
@@ -266,10 +284,15 @@ export function findSameSchedule(listed: unknown, payload: ScheduleCreateInput):
   if (payload.kind === 'every') {
     try { intervalMs = parseEveryInterval(String(payload.every)); } catch { return undefined; }
   }
+  // The host creates a schedule switched on unless the request says otherwise.
+  const enabled = payload.enabled ?? true;
+  const delivery = deliveryShape(payload.delivery);
   return jobs.find((job): job is Record<string, unknown> => {
     if (!isScheduleRecord(job) || job.name !== payload.name) return false;
     const execution = job.execution;
     if (isScheduleRecord(execution) && typeof execution.prompt === 'string' && execution.prompt !== payload.prompt) return false;
+    if (job.enabled !== enabled) return false;
+    if (deliveryShape(job.delivery) !== delivery) return false;
     const schedule = job.schedule;
     if (!isScheduleRecord(schedule) || schedule.kind !== payload.kind) return false;
     if (payload.kind === 'cron') {

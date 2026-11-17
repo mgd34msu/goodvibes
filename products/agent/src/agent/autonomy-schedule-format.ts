@@ -1,5 +1,6 @@
 import { AUTONOMY_SCHEDULE_METHOD, type AutonomyScheduleFailure, type AutonomySchedulePreview, type AutonomyScheduleSuccess } from '@goodvibes-jev/engine/terminal-shell/agent-turn/autonomy-schedule';
 import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-next-routes';
+import { scheduleDeliveryLine } from './schedule-delivery-line.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -68,6 +69,7 @@ export function formatAutonomyScheduleSuccess(result: AutonomyScheduleSuccess): 
       : 'Created GoodVibes schedule for autonomous Agent work',
     `  schedule ${id}`,
     `  status ${status}`,
+    scheduleDeliveryLine(record),
     `  route ${result.kind} ${result.route}`,
     `  task ${result.task}`,
     ...scheduleNextRouteLines(id),

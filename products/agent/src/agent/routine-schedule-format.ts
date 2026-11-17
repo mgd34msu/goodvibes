@@ -2,6 +2,7 @@ import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD } from '@goodvibe
 import type { RoutineScheduleCorrelationResult, RoutineSchedulePromotionFailure, RoutineSchedulePromotionPreview, RoutineSchedulePromotionSuccess, RoutineScheduleReceipt, RoutineScheduleReceiptSnapshot } from './routine-schedule-promotion.ts';
 import { deliveryTargetFlag } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-next-routes';
+import { scheduleDeliveryLine } from './schedule-delivery-line.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -113,6 +114,7 @@ export function formatRoutineScheduleSuccess(result: RoutineSchedulePromotionSuc
     `  routine ${result.routineName} (${result.routineId})`,
     `  schedule ${id}`,
     `  status ${status}`,
+    scheduleDeliveryLine(record),
     `  route ${result.kind} ${result.route}`,
     ...scheduleNextRouteLines(id),
   ].join('\n');

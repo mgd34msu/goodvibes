@@ -1,5 +1,7 @@
 // Proves: The owner's knowledge rows are lost: one app's write drops another's rows, a partial update wipes fields it did not name, or deleting one source deletes what another still backs.
 // Red when: A store writes its in-memory copy over rows another saved, a status-only update wipes fields it did not name, or deleting a source deletes a node another source still backs.
+// Proves: A Home Graph reset aimed at a space that is not a Home Assistant space deletes that space's sources and nodes.
+// Red when: The Home Graph space check accepts the default space or a project space as a reset target.
 /**
  * Knowledge rows survive a reopen and a second writer on the same file: a
  * write by one store never drops a row another store saved, a partial update
@@ -11,6 +13,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { knowledgeSpaceMetadata } from '../platform/src/platform/knowledge/spaces.js';
+import { resolveHomeGraphResetSpace } from '../platform/src/platform/knowledge/home-graph/space-selection.js';
+import { resetHomeGraphSpace } from '../platform/src/platform/knowledge/home-graph/reset.js';
 
 const roots: string[] = [];
 const stores: KnowledgeStore[] = [];
@@ -78,4 +84,27 @@ test('deleting a source deletes the nodes only it produced and keeps a node anot
   expect(store.listNodes(100).map((node) => node.id).sort()).toEqual(['shared', 'unrelated']);
   expect(store.getSource('gone')).toBeNull();
   expect(store.getSource('other')).not.toBeNull();
+});
+
+test('a Home Graph reset can delete only a Home Assistant space; the default and a project space are refused and keep every row', async () => {
+  const file = path();
+  let store = await open(file);
+  const artifacts = new ArtifactStore({ rootDir: join(file, '..', 'artifacts') });
+  const inSpace = (spaceId: string) => ({ metadata: knowledgeSpaceMetadata(spaceId) });
+  await store.upsertSource(source('owner-notes'));
+  await store.upsertNode(fact('owner-fact', 'owner-notes'));
+  await store.upsertSource(source('project-doc', inSpace('project:alpha')));
+  await store.upsertNode(fact('project-fact', 'project-doc', knowledgeSpaceMetadata('project:alpha')));
+  await store.upsertSource(source('ha-device', inSpace('homeassistant:house')));
+  await store.upsertNode(fact('ha-fact', 'ha-device', knowledgeSpaceMetadata('homeassistant:house')));
+  const reset = async (knowledgeSpaceId: string) => resetHomeGraphSpace(store, artifacts, resolveHomeGraphResetSpace(store, { knowledgeSpaceId }));
+
+  for (const refused of ['default', 'project:alpha']) {
+    await expect(reset(refused)).rejects.toThrow('Home Graph can only address Home Assistant spaces');
+  }
+  expect((await reset('homeassistant:house')).deleted).toBeTruthy();
+
+  store = await reopen(store, file);
+  expect(store.listSources(100).map((record) => record.id).sort()).toEqual(['owner-notes', 'project-doc']);
+  expect(store.listNodes(100).map((record) => record.id).sort()).toEqual(['owner-fact', 'project-fact']);
 });

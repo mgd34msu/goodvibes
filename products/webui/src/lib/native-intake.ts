@@ -8,7 +8,7 @@ import {
   type NativeConversationIntakeUnsupportedSource,
   type NativeSelectedDiffSelector,
 } from "@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client";
-import { GOODVIBES_BASE_URL, client as platformClient } from "./goodvibes";
+import { GOODVIBES_BASE_URL, client as platformClient, type OperatorMethodId, type OperatorMethodInput } from "./goodvibes";
 import {
   isClientLifetimeCurrent,
   subscribeClientLifetime,
@@ -161,9 +161,10 @@ export async function openNativeIntake(
     // real call is the authority check (it refuses another principal or project with a typed
     // code), and a changed sign-in closes this form through the client-lifetime subscription.
     const binding = await readBinding(undefined, continuation ? "turn" : "intake");
-    const invoke = (async (
-      method: string,
-      input?: Record<string, unknown>,
+    // The native clients call only contract method ids, so each call keeps its typed body.
+    const invoke = (async <TMethodId extends OperatorMethodId>(
+      method: TMethodId,
+      input?: OperatorMethodInput<TMethodId>,
       options?: { signal?: AbortSignal }
     ) => {
       check();

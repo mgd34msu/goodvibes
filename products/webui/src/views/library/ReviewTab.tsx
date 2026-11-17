@@ -52,7 +52,7 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
   const candidates = useKnowledgeCandidates();
   const receipts = useConsolidationReceipts();
   const { count: total, capped } = useReviewTally();
-  const { remove, saveReview } = useMemoryRecordMutations();
+  const { remove, saveReview, saveEdit } = useMemoryRecordMutations();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [highlight, setHighlight] = useState<ReadonlySet<string>>(new Set());
   const listRef = useRef<HTMLDivElement>(null);
@@ -67,15 +67,14 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
   const proposalRecords = useQueries({
     queries: proposalIds.map((id) => ({
       queryKey: ['memory', 'record', id] as const,
-      queryFn: () => platformClient.operator.memory.get(id),
+      queryFn: async (): Promise<MemoryRecord> => (await platformClient.operator.memory.get(id)).record,
       retry: false,
     })),
   });
   const recordById = (id: string): MemoryRecord | undefined => {
     const queued = queueById.get(id);
     if (queued) return queued;
-    const loaded = proposalRecords[proposalIds.indexOf(id)]?.data as { record?: MemoryRecord } | MemoryRecord | undefined;
-    return loaded && 'record' in loaded ? loaded.record : (loaded as MemoryRecord | undefined);
+    return proposalRecords[proposalIds.indexOf(id)]?.data;
   };
   const decide = useMutation({
     mutationFn: (input: { proposalId: string; action: ConsolidationAction }) => platformClient.operator.memory.consolidation.decide(input),
@@ -95,7 +94,8 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
   // The mutations are shared by every row, so an error belongs to the record it was for.
   const saveError = saveReview.error && saveReview.variables?.id === selectedRecord?.id ? saveReview.error : null;
   const removeError = remove.error && remove.variables?.id === selectedRecord?.id ? remove.error : null;
-  const recordError = saveError ? formatError(saveError) : removeError ? formatError(removeError) : null;
+  const editError = saveEdit.error && saveEdit.variables?.id === selectedRecord?.id ? saveEdit.error : null;
+  const recordError = saveError ? formatError(saveError) : removeError ? formatError(removeError) : editError ? formatError(editError) : null;
   const selectedCandidate = useMemo(() => {
     if (selection?.kind !== 'candidate') return undefined;
     return candidateItems(candidates.data).map(parseCandidate).find((c) => c.id === selection.id);
@@ -167,6 +167,8 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
         deleting={remove.isPending && remove.variables.id === selectedRecord.id}
         onSaveReview={(id, input) => saveReview.mutate({ id, input })}
         saving={saveReview.isPending && saveReview.variables.id === selectedRecord.id}
+        onSaveEdit={(id, input) => saveEdit.mutate({ id, input })}
+        savingEdit={saveEdit.isPending && saveEdit.variables.id === selectedRecord.id}
         error={recordError}
       />
     );

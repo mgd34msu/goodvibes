@@ -9,6 +9,7 @@ import {
   invokeMethod,
   client as platformClient,
   type MemoryRecord,
+  type MemoryUpdateInput,
   type MemoryUpdateReviewInput,
 } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
@@ -72,7 +73,12 @@ export function useMemoryRecordMutations() {
       platformClient.operator.memory.updateReview(id, input),
     onSuccess: invalidate,
   });
-  return { remove, saveReview };
+  /** Saves edited words, tags or scope in place; the record keeps its id and history. */
+  const saveEdit = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: MemoryUpdateInput }) => platformClient.operator.memory.update(id, input),
+    onSuccess: invalidate,
+  });
+  return { remove, saveReview, saveEdit };
 }
 
 /** "fact" -> "Fact", "cross-scope-duplicate" -> "Cross scope duplicate". */

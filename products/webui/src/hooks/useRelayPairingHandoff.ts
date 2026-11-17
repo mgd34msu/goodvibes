@@ -77,16 +77,18 @@ export function resetRelayPairingCaptureForTest(): void {
 /** Decode the captured code into a pending offer, at most once per capture. Stores nothing. */
 function offerRelayPairingCode(code: string): RelayOutcome {
   if (capture.outcome !== null) return capture.outcome;
+  let outcome: RelayOutcome;
   try {
     const pairing = decodeRelayPairingCode(code);
     const held = getStoredRelayPairing();
     const alreadyHeld = held !== null && held.relayUrl === pairing.relayUrl
       && held.rid === pairing.rid && held.daemonPublicKey === pairing.daemonPublicKey;
-    capture.outcome = { status: alreadyHeld ? 'stored' : 'pending', pairing };
+    outcome = { status: alreadyHeld ? 'stored' : 'pending', pairing };
   } catch (error) {
-    capture.outcome = { status: 'error', error };
+    outcome = { status: 'error', error };
   }
-  return capture.outcome;
+  capture.outcome = outcome;
+  return outcome;
 }
 
 function viewOf(outcome: RelayOutcome | null): { status: RelayPairingHandoffStatus; error: unknown; pairing: RelayPairingPayload | null } {

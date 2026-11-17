@@ -15,7 +15,7 @@
  * serve memory" state, never a blank list that reads as "nothing is stored".
  */
 import { useEffect, useMemo, useState } from 'react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Database, Plus } from 'lucide-react';
 import {
   client as platformClient,
@@ -23,7 +23,6 @@ import {
   type MemoryRecord,
   type MemoryScope,
   type MemorySearchInput,
-  type MemoryUpdateInput,
 } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import { formatError, isMethodUnavailableError } from '../../lib/errors';
@@ -64,12 +63,7 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
   const [showCopies, setShowCopies] = useState(false);
   const tagsSettled = useDebouncedValue(tagsInput);
 
-  const { remove, saveReview } = useMemoryRecordMutations();
-  const queryClient = useQueryClient();
-  const saveEdit = useMutation({
-    mutationFn: ({ id, input }: { id: string; input: MemoryUpdateInput }) => platformClient.operator.memory.update(id, input),
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['memory'] }); },
-  });
+  const { remove, saveReview, saveEdit } = useMemoryRecordMutations();
 
   // The page size grows with "Show more" and starts over whenever the search changes.
   const filterKey = JSON.stringify([query.trim(), semantic, scopeFilter, clsFilter, tagsSettled, recall]);

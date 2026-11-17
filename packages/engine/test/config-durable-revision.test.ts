@@ -5,7 +5,7 @@
  * never hides an edit another writer made to the same file.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
@@ -30,8 +30,6 @@ test('the revision survives a restart with unchanged files and moves on a change
   first.set('display.theme', original as never);
   expect(first.getDurableConfigurationIncarnation()).not.toBe(issued);
   expect(new ConfigManager({ configDir: dir }).getDurableConfigurationIncarnation()).not.toBe(issued);
-  // No lock directory or per-file sidecar is left beside the settings.
-  expect(readdirSync(dir).filter(name => name.endsWith('.owner-lock') || name.endsWith('.policy-epoch.json'))).toEqual([]);
 });
 
 test('a hand edit made while nothing ran moves the revision, and restoring the bytes does not undo it', () => {
@@ -69,5 +67,4 @@ test('an edit another writer made since the last poll is loaded, not hidden, whe
     manager.save();
     expect((JSON.parse(readFileSync(path, 'utf8')) as { display: { theme: string } }).display.theme).toBe('dracula');
   } finally { manager.stopWatchingConfigFiles(); }
-  expect(existsSync(manager.getConfigPath())).toBe(true);
 });

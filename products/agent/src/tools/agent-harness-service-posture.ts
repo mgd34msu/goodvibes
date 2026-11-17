@@ -4,6 +4,7 @@ import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-
 import type { CommandContext } from '../input/command-registry.ts';
 import {
   buildCliServicePosture,
+  probeCliServiceEndpoint,
   type CliServiceEndpointPosture,
   type CliServicePosture,
 } from '../cli/service-posture.ts';
@@ -108,40 +109,22 @@ function endpointLookupFromArgs(args: AgentHarnessServicePostureArgs): { readonl
 }
 
 
-async function resolveEndpoint(
-  posture: CliServicePosture,
-  args: AgentHarnessServicePostureArgs,
-  options: { readonly includeParameters?: boolean } = {},
+const MISSING_ENDPOINT_LOOKUP = 'service_endpoint requires endpointId, target, or query. Valid endpoint ids are controlPlane, httpListener, and web.';
+
+async function matchEndpoint(
+  endpoints: readonly CliServiceEndpointPosture[],
+  lookup: { readonly source: ServiceEndpointLookupSource; readonly input: string },
   catalogOptions: CatalogRankingOptions = {},
-): Promise<ServiceEndpointResolution> {
-  const lookup = endpointLookupFromArgs(args);
-  if (!lookup) {
-    return {
-      status: 'missing_lookup',
-      usage: 'service_endpoint requires endpointId, target, or query. Valid endpoint ids are controlPlane, httpListener, and web.',
-    };
-  }
-  const endpoints = posture.endpoints;
+): Promise<{ readonly endpoint: CliServiceEndpointPosture; readonly resolvedBy: string } | null> {
   const normalized = lookup.input.toLowerCase();
   const exact = endpoints.find((endpoint) => endpoint.id === lookup.input);
-  if (exact) {
-    return { status: 'found', endpoint: describeEndpoint(exact, { includeParameters: options.includeParameters, lookup: { ...lookup, resolvedBy: 'id' } }) };
-  }
+  if (exact) return { endpoint: exact, resolvedBy: 'id' };
   const insensitive = endpoints.find((endpoint) => endpoint.id.toLowerCase() === normalized);
-  if (insensitive) {
-    return { status: 'found', endpoint: describeEndpoint(insensitive, { includeParameters: options.includeParameters, lookup: { ...lookup, resolvedBy: 'case-insensitive-id' } }) };
-  }
+  if (insensitive) return { endpoint: insensitive, resolvedBy: 'case-insensitive-id' };
   const label = endpoints.find((endpoint) => endpoint.label.toLowerCase() === normalized);
-  if (label) {
-    return { status: 'found', endpoint: describeEndpoint(label, { includeParameters: options.includeParameters, lookup: { ...lookup, resolvedBy: 'label' } }) };
-  }
+  if (label) return { endpoint: label, resolvedBy: 'label' };
   const selected = await selectHarnessCatalog(endpoints, lookup.input, endpoint => ({ id: endpoint.id, description: endpoint.label }), catalogOptions, 'agent.service.endpoint');
-  catalogOptions.assertCurrent?.();
-  if (selected) return { status: 'found', endpoint: describeEndpoint(selected, { includeParameters: options.includeParameters, lookup: { ...lookup, resolvedBy: 'search' } }) };
-  return {
-    status: 'missing_lookup',
-    usage: `Unknown service endpoint ${lookup.input}. Valid endpoint ids are controlPlane, httpListener, and web.`,
-  };
+  return selected ? { endpoint: selected, resolvedBy: 'search' } : null;
 }
 
 export function servicePostureCatalogStatus(): Record<string, unknown> {
@@ -185,20 +168,28 @@ export async function servicePostureSummary(
   };
 }
 
+/**
+ * One endpoint: the lookup is checked first, the posture is read without the
+ * log tail (this answer never shows it) and only the resolved endpoint is
+ * probed.
+ */
 export async function describeHarnessServiceEndpoint(
   context: CommandContext,
   args: AgentHarnessServicePostureArgs,
   options: CatalogRankingOptions = {},
 ): Promise<ServiceEndpointResolution> {
-  const request = captureStatefulCatalogRequest(context, args, options);
-  args = request.input;
-  const posture = await buildCliServicePosture(servicePostureRuntime(context), {
-    ...servicePostureOptions(args),
-    ...request.options,
-    probe: true,
-  });
-  request.assertCurrent();
-  const result = await resolveEndpoint(posture, args, { includeParameters: true }, request.options);
-  request.assertCurrent();
-  return result;
+  const lookup = endpointLookupFromArgs(args);
+  if (!lookup) return { status: 'missing_lookup', usage: MISSING_ENDPOINT_LOOKUP };
+  const runtime = servicePostureRuntime(context);
+  const posture = await buildCliServicePosture(runtime, { signal: options.signal, probe: false, logTailBytes: 0 });
+  const match = await matchEndpoint(posture.endpoints, lookup, options);
+  if (!match) {
+    return {
+      status: 'missing_lookup',
+      usage: `Unknown service endpoint ${lookup.input}. Valid endpoint ids are controlPlane, httpListener, and web.`,
+    };
+  }
+  const endpoint = await probeCliServiceEndpoint(runtime, match.endpoint);
+  options.signal?.throwIfAborted();
+  return { status: 'found', endpoint: describeEndpoint(endpoint, { includeParameters: true, lookup: { ...lookup, resolvedBy: match.resolvedBy } }) };
 }

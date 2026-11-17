@@ -157,6 +157,16 @@ export async function buildCliServicePosture(
   };
 }
 
+/**
+ * One endpoint's reachability, probed only when it is enabled, its binding is
+ * recognized and this surface may dial the connected host: the same rule the
+ * full posture applies to every endpoint.
+ */
+export async function probeCliServiceEndpoint(runtime: CliServiceRuntime, endpoint: CliServiceEndpointPosture): Promise<CliServiceEndpointPosture> {
+  if (!endpoint.enabled || !endpoint.binding.recognized || !resolveConnectedHostDialEnabled(runtime.configManager)) return endpoint;
+  return { ...endpoint, reachable: await probeTcp(endpoint.binding.host, endpoint.binding.port) };
+}
+
 export function formatCliServicePosture(posture: CliServicePosture, json = false): string {
   if (json) return JSON.stringify(posture, null, 2);
   return [

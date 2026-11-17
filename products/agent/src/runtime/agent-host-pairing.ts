@@ -117,9 +117,9 @@ function clearPreview(home: string, host: string, attemptId: string): AgentHostP
 
 /** What forgetting a stored credential did. The token stays valid on the host until it is revoked there. */
 function forgotten(result: RemoveAgentHostPairingResult, host: string, tokenId: string): AgentHostPairingResult {
+  if (result.status === 'unavailable') return { status: 'pairing-store-unreadable', host, message: `${result.reason} Nothing was forgotten.` };
   if (result.status === 'removed') return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again with goodvibes-agent setup pair --apply.` };
-  if (result.status === 'conflict') return changed();
-  return { status: 'pairing-store-unreadable', host, message: `${result.reason} Nothing was forgotten.` };
+  return changed();
 }
 
 /**

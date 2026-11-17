@@ -1,4 +1,3 @@
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isNativeConversationTurn, NATIVE_TURN_EXECUTION_REFUSAL } from '../../core/native-turn-scope.js';
 import { readDelegationRequest } from '../../core/delegation-request-context.js';
 import { delegationPlanHolds, delegationPlanKey } from '../../agents/delegation-plan-holds.js';
@@ -6,7 +5,9 @@ import { assertAgentBriefFidelity, DelegationPlanHeldError } from '../../agents/
 import { readCompletionRepairContext } from '../../core/completion-repair-context.js';
 import { assertCurrentToolInvocation } from '../registry.js';
 import type { Tool, ToolExecuteOptions } from '../../types/tools.js';
-import { AutomationCommands } from '../../workflow/automation-commands.js';
+import { AutomationCommands, type AutomationCommandExit } from '../../workflow/automation-commands.js';
+import { conditionProblem, HOOK_ACTION_TIMEOUT_MS, type HookActionFireResult } from '../../workflow/hook-action-executor.js';
+import { shellSplit } from '../../utils/shell-split.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import { workflowSchema } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -164,70 +165,132 @@ export class WorkflowManager {
 }
 
 // ---------------------------------------------------------------------------
-// TriggerManager
+// HookActionManager: the workflow tool's hook actions
 // ---------------------------------------------------------------------------
 
 /**
- * The WORKFLOW tool's event->action trigger: `on <event> do <action>` inside a
- * workflow FSM.
- *
- * NOTE, there is a second, unrelated `TriggerDefinition` in
- * platform/triggers/types.ts: the trigger FAMILY's definition (stream watchers,
- * model-free condition checks, on-exit process triggers), owned by
- * platform/triggers/manager.ts and gated by `watchers.triggers.enabled`. The
- * two live in separate export subpaths and never meet in one import, but BOTH
- * publish fleet nodes under the 'trigger' kind, which is why every fleet
- * control path routes on `isWatcherTriggerRaw` (adapters/watcher-trigger.ts)
- * rather than on the kind alone. If you are looking for backoff ladders,
- * breakers or termination metadata, you want the other one.
+ * A hook action of the workflow tool: `on <hook event> [if <condition>] run
+ * <command>`. The fleet shows these as 'hook-action' nodes. Not to be confused
+ * with the trigger family (platform/triggers: stream watchers, condition checks,
+ * on-exit process triggers, persisted and supervised), which owns the
+ * 'trigger' fleet kind and the `watchers.triggers.*` settings.
  */
-export interface TriggerDefinition {
+export interface HookActionDefinition {
   id: string;
   event: string;
   condition?: string | undefined;
   action: string;
+  /** The action as admitted at add time (split and guarded once); every fire starts exactly this. */
+  argv?: readonly string[] | undefined;
   enabled: boolean;
+  /** Fires that started the action or failed to. */
+  fireCount?: number | undefined;
+  /** The most recent fire: when, whether the action started, why not, and how it ended. */
+  lastFire?: HookActionFire | undefined;
 }
 
-export class TriggerManager {
-  private triggers = new Map<string, TriggerDefinition>();
+/** The most recent fire of a hook action. */
+export interface HookActionFire {
+  readonly at: number;
+  readonly executed: boolean;
+  readonly error?: string | undefined;
+  readonly pid?: number | undefined;
+  /** Set once the started action ended: its exit code, or null when a signal (the 60 s timeout or a kill) ended it. */
+  readonly exitCode?: number | null | undefined;
+  readonly timedOut?: boolean | undefined;
+}
 
-  /** `commands` starts, limits and tracks this manager's actions; WorkflowServices shares one with its schedules. */
+/** What `add` says about how long an automation lives. */
+export const WORKFLOW_AUTOMATION_LIFETIME = 'until this process exits; it is not saved and does not come back after a restart. For a routine that survives restarts use /schedule.';
+
+export class HookActionManager {
+  private actions = new Map<string, HookActionDefinition>();
+
+  /** `commands` admits, starts, limits and tracks this manager's actions; WorkflowServices shares one with its schedules. */
   constructor(readonly commands: AutomationCommands = new AutomationCommands()) {}
 
-  add(def: { event: string; condition?: string | undefined; action: string }): TriggerDefinition {
-    const id = `trg-${crypto.randomUUID().slice(0, 8)}`;
-    const trigger: TriggerDefinition = {
+  /**
+   * Stores a hook action that can run. A condition that cannot be parsed and an
+   * action that cannot be split are refused here, before anything is stored;
+   * the command guard is applied by {@link admit} before this is called.
+   */
+  add(def: { event: string; condition?: string | undefined; action: string }, argv?: readonly string[]): HookActionDefinition {
+    const event = def.event.trim();
+    if (!event) throw new Error('Hook action event is empty: give a hook event path such as Post:tool:exec or Post:tool:*.');
+    const condition = def.condition?.trim() || undefined;
+    if (condition) {
+      const problem = conditionProblem(condition);
+      if (problem) throw new Error(`Hook action condition cannot be evaluated: ${problem}. Use ===, !==, ==, !=, >, <, >=, <=, &&, ||, ! and parentheses over event.* and payload.* paths and literals.`);
+    }
+    let admitted: readonly string[];
+    try {
+      admitted = argv ?? shellSplit(def.action, { strict: true });
+    } catch (err) {
+      throw new Error(`Hook action command could not be parsed: ${summarizeError(err)}. Close the quote or escape the character.`);
+    }
+    if (admitted.length === 0) throw new Error('Hook action command is empty; give it a program to run.');
+    const id = `hook-${crypto.randomUUID().slice(0, 8)}`;
+    const hook: HookActionDefinition = {
       id,
-      event: def.event,
-      condition: def.condition,
+      event,
+      condition,
       action: def.action,
+      argv: admitted,
       enabled: true,
+      fireCount: 0,
     };
-    this.triggers.set(id, trigger);
-    return trigger;
+    this.actions.set(id, hook);
+    return hook;
+  }
+
+  /** Admits the action against the command guard, then stores it; a refusal names why and stores nothing. */
+  async admit(def: { event: string; condition?: string | undefined; action: string }): Promise<HookActionDefinition> {
+    const admission = await this.commands.admit(def.action);
+    if (!admission.admitted) throw new Error(`Hook action not added: ${admission.reason}`);
+    return this.add(def, admission.argv);
   }
 
   remove(id: string): boolean {
-    return this.triggers.delete(id);
+    this.commands.stop('hook-action', id);
+    return this.actions.delete(id);
   }
 
   enable(id: string): boolean {
-    const trigger = this.triggers.get(id);
-    if (!trigger) return false;
-    trigger.enabled = true;
+    const hook = this.actions.get(id);
+    if (!hook) return false;
+    hook.enabled = true;
     return true;
   }
 
   disable(id: string): boolean {
-    const trigger = this.triggers.get(id);
-    if (!trigger) return false;
-    trigger.enabled = false;
+    const hook = this.actions.get(id);
+    if (!hook) return false;
+    hook.enabled = false;
     return true;
   }
 
-  list(): TriggerDefinition[] {
-    return Array.from(this.triggers.values());
+  list(): HookActionDefinition[] {
+    return Array.from(this.actions.values());
+  }
+
+  /** Keeps a fire's outcome on the definition (a field write; the dispatcher already has the result). */
+  recordFire(result: HookActionFireResult): void {
+    const hook = this.actions.get(result.hookActionId);
+    if (!hook) return;
+    hook.fireCount = (hook.fireCount ?? 0) + 1;
+    hook.lastFire = {
+      at: Date.now(),
+      executed: result.executed,
+      ...(result.error !== undefined ? { error: result.error } : {}),
+      ...(result.pid !== undefined ? { pid: result.pid } : {}),
+    };
+  }
+
+  /** Keeps how the most recent started action ended; the exit of an older run is not that fire's outcome. */
+  recordExit(hookActionId: string, exit: AutomationCommandExit): void {
+    const hook = this.actions.get(hookActionId);
+    if (!hook?.lastFire?.executed || hook.lastFire.pid !== exit.pid) return;
+    hook.lastFire = { ...hook.lastFire, exitCode: exit.exitCode, ...(exit.timedOut ? { timedOut: true } : {}) };
   }
 }
 
@@ -244,16 +307,22 @@ export interface ScheduleEntry {
   name: string;
   interval: string;
   command: string;
+  /** The command as admitted at add time (split and guarded once); every run starts exactly this. */
+  argv?: readonly string[] | undefined;
   /** When the current or most recent run started. */
   lastRun?: number | undefined;
   nextRun?: number | undefined;
   enabled: boolean;
   /** True while a run of this schedule's command is executing. */
   running?: boolean | undefined;
-  /** The exit code of the most recent finished run; null when it was killed by a signal. */
+  /** The exit code of the most recent finished run; null when it was killed by a signal (its timeout, or a remove). */
   lastExitCode?: number | null | undefined;
   /** When the most recent run finished. */
   lastExitAt?: number | undefined;
+  /** Why the most recent tick did not run or did not finish cleanly; cleared by a clean run. */
+  lastError?: string | undefined;
+  /** Ticks skipped because the previous run was still going. */
+  skippedTicks?: number | undefined;
 }
 
 /**
@@ -280,87 +349,83 @@ const MAX_SCHEDULE_INTERVAL_MS = 2 ** 31 - 1;
 export const MIN_SCHEDULE_INTERVAL_MS = 1_000;
 
 /**
- * Splits a command line into argv. There is no shell: single and double quotes
- * group words, nothing else (no expansion, no escapes). An unclosed quote throws
- * so a mis-quoted command is refused instead of running with the wrong arguments.
+ * A run is killed when it outlasts its own interval (at least the hook-action
+ * timeout), so a hung run cannot block every later tick.
  */
-export function splitCommand(command: string): string[] {
-  const parts: string[] = [];
-  let current = '';
-  let quote: '"' | "'" | null = null;
-  let started = false;
-  for (const char of command) {
-    if (quote) {
-      if (char === quote) quote = null; else current += char;
-    } else if (char === '"' || char === "'") {
-      quote = char; started = true;
-    } else if (/\s/.test(char)) {
-      if (started || current.length > 0) { parts.push(current); current = ''; started = false; }
-    } else {
-      current += char; started = true;
-    }
+function scheduleRunTimeoutMs(intervalMs: number): number {
+  return Math.max(intervalMs, HOOK_ACTION_TIMEOUT_MS);
+}
+
+/** The interval in milliseconds, or the reason it cannot be scheduled. */
+function checkInterval(interval: string): number {
+  const intervalMs = parseInterval(interval);
+  if (intervalMs === null) {
+    throw new Error(`Unrecognised interval "${interval}": use a number followed by s, m, h or d, for example 30s, 5m or 1h.`);
   }
-  if (quote) throw new Error(`Command has an unclosed ${quote} quote: ${command}`);
-  if (started || current.length > 0) parts.push(current);
-  return parts;
+  if (intervalMs < MIN_SCHEDULE_INTERVAL_MS) throw new Error(`Interval "${interval}" is shorter than the ${MIN_SCHEDULE_INTERVAL_MS / 1000}s minimum; use 1s or longer.`);
+  if (intervalMs > MAX_SCHEDULE_INTERVAL_MS) {
+    throw new Error(`Interval "${interval}" is longer than the 24 day maximum a timer can hold; use a shorter one.`);
+  }
+  return intervalMs;
 }
 
 export class ScheduleManager {
   private schedules = new Map<string, ScheduleEntry>();
   /** Timer IDs keyed by schedule name */
   private timers = new Map<string, ReturnType<typeof setInterval>>();
-  /** The running process of each schedule (one run at a time), so remove can stop it. */
-  private runningProcs = new Map<string, { kill(): void }>();
 
   /**
-   * `commands` starts scheduled commands with the exec path's credential-env
-   * scrub, allows one run of a schedule at a time, and kills them on destroy().
+   * `commands` admits scheduled commands, starts them in the project root with
+   * the exec path's credential-env scrub, allows one run of a schedule at a
+   * time, times runs out, and kills them on remove and destroy().
    */
   constructor(readonly commands: AutomationCommands = new AutomationCommands()) {}
 
-  add(name: string, interval: string, command: string): ScheduleEntry {
-    // Refuse what could never run, before anything is stored: an entry with no timer
-    // would be reported as scheduled while nothing ever executes.
-    const intervalMs = parseInterval(interval);
-    if (intervalMs === null) {
-      throw new Error(`Unrecognised interval "${interval}": use a number followed by s, m, h or d, for example 30s, 5m or 1h.`);
+  /**
+   * Stores a schedule that can run and arms its timer. An interval or command
+   * that could never run is refused before anything is stored; the command
+   * guard is applied by {@link admit} before this is called.
+   */
+  add(name: string, interval: string, command: string, argv?: readonly string[]): ScheduleEntry {
+    const intervalMs = checkInterval(interval);
+    let admitted: readonly string[];
+    try {
+      admitted = argv ?? shellSplit(command, { strict: true });
+    } catch (err) {
+      throw new Error(`Schedule command could not be parsed: ${summarizeError(err)}. Close the quote or escape the character.`);
     }
-    if (!(intervalMs > 0)) throw new Error(`Interval "${interval}" must be greater than zero.`);
-    if (intervalMs > MAX_SCHEDULE_INTERVAL_MS) {
-      throw new Error(`Interval "${interval}" is longer than the 24 day maximum a timer can hold; use a shorter one.`);
-    }
-    if (splitCommand(command).length === 0) throw new Error('Schedule command is empty.');
+    if (admitted.length === 0) throw new Error('Schedule command is empty.');
 
-    // Clear existing timer if re-adding
+    // Re-adding a name replaces the schedule: its timer and any run of the old command stop.
     this._clearTimer(name);
+    this.commands.stop('schedule', name);
 
-    const now = Date.now();
     const entry: ScheduleEntry = {
       name,
       interval,
       command,
+      argv: admitted,
       enabled: true,
-      nextRun: now + intervalMs,
+      nextRun: Date.now() + intervalMs,
+      skippedTicks: 0,
     };
     this.schedules.set(name, entry);
-
-    const timer = setInterval(() => this._tick(name), intervalMs);
-    timer.unref?.();
-    this.timers.set(name, timer);
-
+    this._arm(name, intervalMs);
     return entry;
+  }
+
+  /** Admits the command against the command guard, then stores the schedule; a refusal names why and stores nothing. */
+  async admit(name: string, interval: string, command: string): Promise<ScheduleEntry> {
+    checkInterval(interval);
+    const admission = await this.commands.admit(command);
+    if (!admission.admitted) throw new Error(`Schedule not added: ${admission.reason}`);
+    return this.add(name, interval, command, admission.argv);
   }
 
   /** Removes the schedule and stops its command if a run is executing. */
   remove(name: string): boolean {
     this._clearTimer(name);
-    const proc = this.runningProcs.get(name);
-    this.runningProcs.delete(name);
-    if (proc) {
-      try { proc.kill(); } catch (error) {
-        logger.debug('[workflow] stopping a removed schedule\'s command failed', { workflow: name, error: summarizeError(error) });
-      }
-    }
+    this.commands.stop('schedule', name);
     return this.schedules.delete(name);
   }
 
@@ -369,17 +434,15 @@ export class ScheduleManager {
     if (!entry) return false;
     if (entry.enabled) return true;
     entry.enabled = true;
-    // Restart timer
     const intervalMs = parseInterval(entry.interval);
     if (intervalMs !== null && !this.timers.has(name)) {
       entry.nextRun = Date.now() + intervalMs;
-      const timer = setInterval(() => this._tick(name), intervalMs);
-      timer.unref?.();
-      this.timers.set(name, timer);
+      this._arm(name, intervalMs);
     }
     return true;
   }
 
+  /** Stops the timer; a run already executing finishes. */
   disable(name: string): boolean {
     const entry = this.schedules.get(name);
     if (!entry) return false;
@@ -395,68 +458,59 @@ export class ScheduleManager {
 
   /** Stop all timers and clear state when the manager is disposed. */
   destroy(): void {
-    for (const name of this.timers.keys()) {
+    for (const name of [...this.timers.keys()]) {
       this._clearTimer(name);
     }
     this.schedules.clear();
-    this.runningProcs.clear();
     this.commands.stop('schedule');
   }
 
-  /** Execute a schedule tick: run the command and update lastRun/nextRun. */
-  private _tick(name: string): void {
-    const entry = this.schedules.get(name);
-    if (!entry || !entry.enabled) return;
-
-    const intervalMs = parseInterval(entry.interval);
-    entry.nextRun = intervalMs !== null ? Date.now() + intervalMs : undefined;
-
-    let parts: string[];
-    try { parts = splitCommand(entry.command); } catch (error) {
-      logger.warn('[workflow] scheduled command could not be parsed', { workflow: name, error: summarizeError(error) });
-      return;
-    }
-    if (parts.length === 0) return;
-
-    void this._spawnScheduled(name, entry.command, parts);
+  private _arm(name: string, intervalMs: number): void {
+    const timer = setInterval(() => { void this._tick(name, intervalMs); }, intervalMs);
+    timer.unref?.();
+    this.timers.set(name, timer);
   }
 
   /**
-   * Starts a scheduled command with the environment the exec path gives a
-   * command: credential-bearing variables withheld, plus GV_SCHEDULE_NAME. One
-   * run of a schedule at a time: a tick while the previous run is still going
-   * is skipped so runs never pile up. A failed start is logged and the command
-   * does not run.
+   * One tick: start the admitted command with GV_SCHEDULE_NAME set. One run of
+   * a schedule at a time: a tick while the previous run is still going is
+   * skipped and counted, so runs never pile up. How each run ended is kept on
+   * the entry.
    */
-  private async _spawnScheduled(name: string, command: string, parts: string[]): Promise<void> {
-    // Spawned here so the entry can follow its run: running while it executes,
-    // and the exit code once it ends.
-    const spawn = ((...args: Parameters<typeof Bun.spawn>) => {
-      const proc = Bun.spawn(...args);
-      this.runningProcs.set(name, proc);
-      void proc.exited.then((code) => {
-        if (this.runningProcs.get(name) === proc) this.runningProcs.delete(name);
-        const entry = this.schedules.get(name);
-        if (!entry) return;
+  private async _tick(name: string, intervalMs: number): Promise<void> {
+    const entry = this.schedules.get(name);
+    if (!entry || !entry.enabled) return;
+    entry.nextRun = Date.now() + intervalMs;
+    const argv = entry.argv ?? shellSplit(entry.command, { strict: true });
+    const outcome = await this.commands.start({
+      kind: 'schedule',
+      key: name,
+      argv,
+      env: { GV_SCHEDULE_NAME: name },
+      maxInFlight: 1,
+      timeoutMs: scheduleRunTimeoutMs(intervalMs),
+      onExit: (exit) => {
+        const current = this.schedules.get(name);
+        if (current !== entry) return;
         entry.running = false;
-        entry.lastExitCode = proc.signalCode ? null : code;
-        entry.lastExitAt = Date.now();
-      }, () => { if (this.runningProcs.get(name) === proc) this.runningProcs.delete(name); });
-      return proc;
-    }) as typeof Bun.spawn;
-    const outcome = await this.commands.start({ kind: 'schedule', key: name, argv: parts, env: { GV_SCHEDULE_NAME: name }, maxInFlight: 1, spawn });
+        entry.lastExitCode = exit.exitCode;
+        entry.lastExitAt = exit.at;
+        if (exit.timedOut) entry.lastError = `The run was killed after ${Math.round(scheduleRunTimeoutMs(intervalMs) / 1000)}s, its time limit.`;
+        else if (exit.exitCode === 0) entry.lastError = undefined;
+        else if (exit.exitCode === null) entry.lastError = 'The run was stopped by a signal.';
+        else entry.lastError = `The run exited with code ${exit.exitCode}.`;
+      },
+    });
+    if (this.schedules.get(name) !== entry) return;
     if (outcome.started) {
       // Recorded only once the command actually started, so `list` never shows a run that did not happen.
-      const entry = this.schedules.get(name);
-      if (entry) {
-        entry.lastRun = Date.now();
-        // The run may already have ended (a very short command); only a live process is running.
-        entry.running = this.runningProcs.has(name);
-      }
+      entry.lastRun = Date.now();
+      entry.running = this.commands.running('schedule', name) > 0;
     } else if (outcome.reason === 'busy') {
-      logger.debug('[workflow] scheduled command still running; tick skipped', { workflow: name });
-    } else if (outcome.reason !== 'stopped') {
-      logger.warn('[workflow] scheduled command failed to start', { workflow: name, command, error: outcome.message });
+      entry.skippedTicks = (entry.skippedTicks ?? 0) + 1;
+    } else if (outcome.reason === 'failed') {
+      entry.lastError = `The command failed to start: ${outcome.message}`;
+      logger.warn('[workflow] scheduled command failed to start', { workflow: name, command: entry.command, error: outcome.message });
     }
   }
 
@@ -474,19 +528,19 @@ export class ScheduleManager {
 // ---------------------------------------------------------------------------
 
 export interface WorkflowInput {
-  mode: 'start' | 'status' | 'transition' | 'cancel' | 'list' | 'triggers' | 'schedule';
+  mode: 'start' | 'status' | 'transition' | 'cancel' | 'list' | 'hook-actions' | 'schedule';
   definition?: string | undefined;
   task?: string | undefined;
   workflowId?: string | undefined;
   targetState?: string | undefined;
-  triggerAction?: 'list' | 'add' | 'remove' | 'enable' | 'disable' | undefined;
-  triggerId?: string | undefined;
-  triggerDefinition?: {
+  hookAction?: 'list' | 'add' | 'remove' | 'enable' | 'disable' | undefined;
+  hookActionId?: string | undefined;
+  hookActionDefinition?: {
     event: string;
     condition?: string | undefined;
     action: string;
   };
-  scheduleAction?: 'list' | 'add' | 'remove' | undefined;
+  scheduleAction?: 'list' | 'add' | 'remove' | 'enable' | 'disable' | undefined;
   scheduleName?: string | undefined;
   scheduleInterval?: string | undefined;
   scheduleCommand?: string | undefined;
@@ -494,17 +548,19 @@ export interface WorkflowInput {
 
 export interface WorkflowServices {
   readonly workflowManager: WorkflowManager;
-  readonly triggerManager: TriggerManager;
+  readonly hookActions: HookActionManager;
   readonly scheduleManager: ScheduleManager;
-  /** Starts and tracks this runtime's trigger actions and scheduled commands; its scrub is the exec path's. */
+  /** Admits, starts and tracks this runtime's hook actions and scheduled commands; its scrub is the exec path's. */
   readonly commands: AutomationCommands;
 }
 
-export function createWorkflowServices(): WorkflowServices {
+/** `workingDirectory` is the project root hook actions and scheduled commands run in. */
+export function createWorkflowServices(options: { readonly workingDirectory?: string | undefined } = {}): WorkflowServices {
   const commands = new AutomationCommands();
+  commands.setWorkingDirectory(options.workingDirectory);
   return {
     workflowManager: new WorkflowManager(),
-    triggerManager: new TriggerManager(commands),
+    hookActions: new HookActionManager(commands),
     scheduleManager: new ScheduleManager(commands),
     commands,
   };
@@ -535,7 +591,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
 
         const input = args as unknown as WorkflowInput;
         const wm = services.workflowManager;
-        const tm = services.triggerManager;
+        const tm = services.hookActions;
         const sm = services.scheduleManager;
 
         switch (input.mode) {
@@ -554,20 +610,18 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
               : [...holds.values()].find(plan => plan.sessionId === sessionId);
             if (held) return { success: false, error: 'Delegation remains held. Repair and revalidate the pending agent plan before starting a replacement contract.',
               output: JSON.stringify({ recovery: { kind: 'revise-delegation', ...held, requiredMode: held.mode } }) };
-            const task = input.task, projectRoot = contracts.projectRoot, runner = contracts.contractRunner, start = runner.start;
+            const task = input.task, projectRoot = contracts.projectRoot, runner = contracts.contractRunner;
             const signal = source?.signal && options?.signal ? AbortSignal.any([source.signal, options.signal]) : source?.signal ?? options?.signal;
+            // Still wanted: the call's signal, the registry's one invocation check,
+            // the delegation's own check, and the session (the conversation can
+            // move on while the brief is read).
             const assertCurrent = () => {
               signal?.throwIfAborted();
               assertCurrentToolInvocation(args, options);
-              const checked: unknown = source?.assertCurrent?.();
-              if (checked !== undefined) {
-                drainOwned(checked);
-                throw new Error('Workflow contract source checks must be synchronous.');
+              source?.assertCurrent?.();
+              if (contracts.resolveSessionId() !== sessionId) {
+                throw new Error(`Contract not started: the conversation moved from session ${sessionId} to ${contracts.resolveSessionId()} while the proposal was checked. Start it again from the current session.`);
               }
-              if (input.task !== task || input.mode !== 'start' || input.definition !== CONTRACT_WORKFLOW_DEFINITION
-                || contracts.resolveSessionId() !== sessionId || contracts.projectRoot !== projectRoot
-                || contracts.contractRunner !== runner || runner.start !== start) throw new Error('Workflow contract proposal changed during validation.');
-              signal?.throwIfAborted();
             };
             assertCurrent();
             if (source) {
@@ -584,7 +638,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
               }
             }
             assertCurrent();
-            const started = await start.call(runner, {
+            const started = await runner.start({
               ask: task,
               sessionId,
               origin: 'agent-tool',
@@ -652,50 +706,35 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
           return { success: true, output: JSON.stringify({ workflows, count: workflows.length }) };
         }
 
-        case 'triggers': {
-          const action = input.triggerAction ?? 'list';
+        case 'hook-actions': {
+          const action = input.hookAction ?? 'list';
+          const notFound = (id: string) => ({ success: false, error: `Hook action not found: ${id}. List them with hookAction "list".` });
           switch (action) {
             case 'list': {
-              const triggers = tm.list();
-              return { success: true, output: JSON.stringify({ triggers, count: triggers.length }) };
+              const hookActions = tm.list();
+              return { success: true, output: JSON.stringify({ hookActions, count: hookActions.length, lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
             }
             case 'add': {
-              if (!input.triggerDefinition) {
-                return { success: false, error: 'triggers/add requires "triggerDefinition"' };
+              const def = input.hookActionDefinition;
+              if (!def || typeof def.event !== 'string' || typeof def.action !== 'string') {
+                return { success: false, error: 'hook-actions/add requires "hookActionDefinition" with "event" and "action" strings.' };
               }
-              const trigger = tm.add(input.triggerDefinition);
-              return { success: true, output: JSON.stringify(trigger) };
+              const added = await tm.admit(def);
+              return { success: true, output: JSON.stringify({ ...added, lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
             }
-            case 'remove': {
-              if (!input.triggerId) {
-                return { success: false, error: 'triggers/remove requires "triggerId"' };
-              }
-              const removed = tm.remove(input.triggerId);
-              return { success: true, output: JSON.stringify({ removed, triggerId: input.triggerId }) };
-            }
-            case 'enable': {
-              if (!input.triggerId) {
-                return { success: false, error: 'triggers/enable requires "triggerId"' };
-              }
-              const enabled = tm.enable(input.triggerId);
-              if (!enabled) {
-                return { success: false, error: `Trigger not found: ${input.triggerId}` };
-              }
-              return { success: true, output: JSON.stringify({ enabled: true, triggerId: input.triggerId }) };
-            }
+            case 'remove':
+            case 'enable':
             case 'disable': {
-              if (!input.triggerId) {
-                return { success: false, error: 'triggers/disable requires "triggerId"' };
-              }
-              const disabled = tm.disable(input.triggerId);
-              if (!disabled) {
-                return { success: false, error: `Trigger not found: ${input.triggerId}` };
-              }
-              return { success: true, output: JSON.stringify({ disabled: true, triggerId: input.triggerId }) };
+              const id = input.hookActionId;
+              if (!id) return { success: false, error: `hook-actions/${action} requires "hookActionId"` };
+              const done = action === 'remove' ? tm.remove(id) : action === 'enable' ? tm.enable(id) : tm.disable(id);
+              if (!done) return notFound(id);
+              const result = action === 'remove' ? { removed: true } : action === 'enable' ? { enabled: true } : { disabled: true };
+              return { success: true, output: JSON.stringify({ ...result, hookActionId: id }) };
             }
             default: {
               const exhaustive: never = action;
-              return { success: false, error: `Unknown triggerAction: ${exhaustive as string}` };
+              return { success: false, error: `Unknown hookAction: ${exhaustive as string}` };
             }
           }
         }
@@ -705,7 +744,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
           switch (action) {
             case 'list': {
               const schedules = sm.list();
-              return { success: true, output: JSON.stringify({ schedules, count: schedules.length }) };
+              return { success: true, output: JSON.stringify({ schedules, count: schedules.length, lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
             }
             case 'add': {
               if (!input.scheduleName) {
@@ -717,19 +756,21 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
               if (!input.scheduleCommand) {
                 return { success: false, error: 'schedule/add requires "scheduleCommand"' };
               }
-              const intervalMs = parseInterval(input.scheduleInterval);
-              if (intervalMs !== null && intervalMs < MIN_SCHEDULE_INTERVAL_MS) {
-                return { success: false, error: `schedule/add interval "${input.scheduleInterval}" is shorter than the ${MIN_SCHEDULE_INTERVAL_MS / 1000}s minimum; use 1s or longer.` };
-              }
-              const entry = sm.add(input.scheduleName, input.scheduleInterval, input.scheduleCommand);
-              return { success: true, output: JSON.stringify(entry) };
+              const entry = await sm.admit(input.scheduleName, input.scheduleInterval, input.scheduleCommand);
+              return { success: true, output: JSON.stringify({ ...entry, lifetime: WORKFLOW_AUTOMATION_LIFETIME }) };
             }
-            case 'remove': {
+            case 'remove':
+            case 'enable':
+            case 'disable': {
               if (!input.scheduleName) {
-                return { success: false, error: 'schedule/remove requires "scheduleName"' };
+                return { success: false, error: `schedule/${action} requires "scheduleName"` };
               }
-              const removed = sm.remove(input.scheduleName);
-              return { success: true, output: JSON.stringify({ removed, scheduleName: input.scheduleName }) };
+              const done = action === 'remove' ? sm.remove(input.scheduleName)
+                : action === 'enable' ? sm.enable(input.scheduleName)
+                  : sm.disable(input.scheduleName);
+              if (!done) return { success: false, error: `Schedule not found: ${input.scheduleName}. List them with scheduleAction "list".` };
+              const result = action === 'remove' ? { removed: true } : action === 'enable' ? { enabled: true } : { disabled: true };
+              return { success: true, output: JSON.stringify({ ...result, scheduleName: input.scheduleName }) };
             }
             default: {
               const exhaustive: never = action;

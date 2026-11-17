@@ -3,7 +3,7 @@
  * registry. One queryable + subscribable aggregation surface that
  * enumerates every live/completed runtime process (agents with their contract
  * roles, contracts with their groups and units, workflow-tool
- * FSMs/triggers/schedules, watchers, background processes) as flat
+ * FSMs/hook actions/schedules, watchers, background processes) as flat
  * `ProcessNode` records with parentId edges.
  *
  * Consumers (the TUI fleet tree, session tabs, orchestration
@@ -21,7 +21,11 @@ export type ProcessKind =
   | 'contract-group'
   | 'contract-unit'
   | 'workflow'
+  // The trigger family (platform/triggers: watchers, condition checks, on-exit
+  // process triggers), persisted and supervised.
   | 'trigger'
+  // The workflow tool's hook actions: run a command when a hook event fires.
+  | 'hook-action'
   | 'schedule'
   | 'watcher'
   | 'background-process'

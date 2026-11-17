@@ -312,12 +312,10 @@ export type TriggerSpec = StreamTriggerSpec | ConditionTriggerSpec | OnExitTrigg
  * The trigger FAMILY's definition, one stream watcher, condition check, or
  * on-exit process trigger, supervised by platform/triggers/manager.ts.
  *
- * NOTE, there is a second, unrelated `TriggerDefinition` in
- * platform/tools/workflow/index.ts: the workflow tool's `on <event> do <action>`
- * rule inside a workflow FSM. The two live in separate export subpaths and
- * never meet in one import, but BOTH publish fleet nodes under the 'trigger'
- * kind, so fleet control paths discriminate with `isWatcherTriggerRaw`
- * (runtime/fleet/adapters/watcher-trigger.ts) instead of trusting the kind.
+ * Not the workflow tool's hook actions (`HookActionDefinition` in
+ * platform/tools/workflow/index.ts): those run a command on a hook event, live
+ * only in the process and are 'hook-action' fleet nodes. This family owns the
+ * 'trigger' fleet kind.
  */
 export interface TriggerDefinition {
   readonly id: string;

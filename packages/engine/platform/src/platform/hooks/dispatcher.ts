@@ -18,10 +18,10 @@ import * as agentRunner from './runners/agent.js';
 import * as httpRunner from './runners/http.js';
 import * as tsRunner from './runners/typescript.js';
 import { ChainEngine } from './chain-engine.js';
-import { fireTriggers } from '../workflow/trigger-executor.js';
+import { fireHookActions } from '../workflow/hook-action-executor.js';
 import { guardExecCommand } from '../tools/exec/ast-guard.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
-import type { TriggerManagerLike } from '../workflow/trigger-executor.js';
+import type { HookActionManagerLike } from '../workflow/hook-action-executor.js';
 import { summarizeError } from '../utils/error-display.js';
 
 export type HookRunnerDeps = {
@@ -130,8 +130,7 @@ export class HookDispatcher {
   private readonly loadedHooks = new WeakSet<HookDefinition>();
   private readonly loadedChains = new WeakSet<HookChain>();
   private readonly chainEngine: ChainEngine;
-  private triggerManager: TriggerManagerLike | null = null;
-  private triggerFlags: Pick<FeatureFlagManager, 'isEnabled'> | null = null;
+  private hookActions: HookActionManagerLike | null = null;
   private hooksBaseDirectory: string | null = null;
   private readonly runnerDeps: HookRunnerDeps;
   private readonly activityTracker: HookActivityTracker;
@@ -180,18 +179,22 @@ export class HookDispatcher {
   }
 
   /**
-   * Attach a TriggerManager so hook events automatically fire matching triggers.
-   * Trigger commands go through the same command guard as the exec tool, using
-   * `featureFlags` for its AST setting. Returns a disposer that detaches the
-   * manager and kills that manager's trigger actions still running; other
+   * Attach the workflow tool's hook actions so hook events start the matching
+   * ones. The manager's commands are admitted against the exec tool's command
+   * guard (with `featureFlags` for its AST setting) once, when a hook action or
+   * schedule is added; a fire runs the admitted argv. Returns a disposer that
+   * detaches the manager and kills that manager's actions still running; other
    * runtimes' actions are left alone.
    */
-  setTriggerManager(tm: TriggerManagerLike | null, featureFlags?: Pick<FeatureFlagManager, 'isEnabled'>): () => void {
-    this.triggerManager = tm;
-    this.triggerFlags = featureFlags ?? null;
+  setHookActions(tm: HookActionManagerLike | null, featureFlags?: Pick<FeatureFlagManager, 'isEnabled'>): () => void {
+    this.hookActions = tm;
+    tm?.commands.setCommandGuard(async (command) => {
+      const guard = await guardExecCommand(command, featureFlags ?? null);
+      return guard.allowed ? undefined : (guard.denialMessage ?? 'Command refused by the command guard.');
+    });
     return () => {
-      if (this.triggerManager === tm) this.triggerManager = null;
-      tm?.commands.stop('trigger');
+      if (this.hookActions === tm) this.hookActions = null;
+      tm?.commands.stop('hook-action');
     };
   }
 
@@ -467,16 +470,11 @@ export class HookDispatcher {
     if (updatedInput) aggregated.updatedInput = updatedInput;
     if (contextParts.length > 0) aggregated.additionalContext = contextParts.join('\n');
 
-    // Trigger dispatch is asynchronous; failures are logged and do not change
+    // Hook action dispatch is asynchronous; failures are logged and do not change
     // the hook result returned to the caller.
-    if (this.triggerManager && !owner?.signal.aborted) {
-      fireTriggers(event, this.triggerManager, {
-        guardCommand: async (command) => {
-          const guard = await guardExecCommand(command, this.triggerFlags);
-          return guard.allowed ? undefined : (guard.denialMessage ?? 'Command refused by the command guard.');
-        },
-      }).catch((err) => {
-        logger.warn('HookDispatcher: trigger dispatch failed', {
+    if (this.hookActions && !owner?.signal.aborted) {
+      fireHookActions(event, this.hookActions).catch((err) => {
+        logger.warn('HookDispatcher: hook action dispatch failed', {
           path: event.path,
           error: summarizeError(err),
         });

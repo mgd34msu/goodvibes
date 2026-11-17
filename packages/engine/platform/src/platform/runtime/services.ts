@@ -871,8 +871,8 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     },
     stateFilePath: shellPaths.resolveUserPath(surfaceRoot, 'plugins.json'),
   });
-  const workflow = createWorkflowServices();
-  disposalScope.registry.add('trigger dispatch', hookDispatcher.setTriggerManager(workflow.triggerManager, featureFlags));
+  const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });
+  disposalScope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));
   const channelPolicy = new ChannelPolicyManager({
     storePath: shellPaths.resolveProjectPath(surfaceRoot, 'channels', 'policies.json'),
   });
@@ -1171,7 +1171,7 @@ function buildRuntimeGraph(product: ProductComposition, disposalScope: AsyncDisp
     triggerSupervisor: triggerManager,
     workflow: {
       workflowManager: workflow.workflowManager,
-      triggerManager: workflow.triggerManager,
+      hookActions: workflow.hookActions,
       scheduleManager: workflow.scheduleManager,
     },
     approvalBroker,

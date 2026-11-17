@@ -121,6 +121,7 @@ const FLEET_KIND_PHRASES: Record<ProcessKind, string> = {
   'contract-unit': 'Contract unit',
   'workflow': 'Workflow',
   'trigger': 'Trigger',
+  'hook-action': 'Hook action',
   'schedule': 'Schedule',
   'watcher': 'Watcher',
   'background-process': 'Background process',

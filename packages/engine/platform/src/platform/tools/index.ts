@@ -133,14 +133,14 @@ export type {
 } from './shared/overflow.js';
 export {
   WORKFLOW_DEFINITIONS,
-  TriggerManager,
+  HookActionManager,
   WorkflowManager,
   ScheduleManager,
   createWorkflowServices,
   createWorkflowTool,
   parseInterval,
 } from './workflow/index.js';
-export type { TriggerDefinition, WorkflowServices } from './workflow/index.js';
+export type { HookActionDefinition, WorkflowServices } from './workflow/index.js';
 export { loadSkillByTrigger } from './registry-tool/skill-loader.js';
 export type { SkillLoaderRoots } from './registry-tool/skill-loader.js';
 export { ReadTool } from './read/index.js';

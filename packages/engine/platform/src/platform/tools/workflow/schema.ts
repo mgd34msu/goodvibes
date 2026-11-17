@@ -2,16 +2,18 @@ import type { ToolDefinition } from '../../types/tools.js';
 
 /**
  * JSON Schema for the workflow tool's input.
- * Starts contracts, and manages workflow state machines, automation triggers and scheduled tasks.
+ * Starts contracts, and manages workflow state machines, hook actions and scheduled commands.
  */
 export const workflowSchema: ToolDefinition = {
   name: 'workflow',
   description:
     'Automation control plumbing. To run work, use the agent tool instead. ' +
-    'This tool manages: triggers (event-driven automations that fire shell commands on hook events), ' +
+    'This tool manages: hook actions (a command run when a hook event fires), ' +
     'schedule (recurring background commands on intervals), ' +
     'and workflow state tracking (does not execute anything). ' +
-    'Modes: triggers (manage event-driven automations), schedule (manage recurring tasks), ' +
+    'Hook actions and schedules run in the project root with credential variables withheld, are checked once when added (a refusal says why), ' +
+    'and last until this process exits; list shows each one\'s last run, exit code and error. For routines that survive restarts use /schedule. ' +
+    'Modes: hook-actions (manage hook actions), schedule (manage recurring commands), ' +
     'start/status/transition/cancel/list (state tracking only, no execution), ' +
     'except start with definition=contract, which hands the task to a new contract whose units are checked against acceptance criteria while they work.',
   sideEffects: ['workflow', 'state'],
@@ -22,7 +24,7 @@ export const workflowSchema: ToolDefinition = {
     properties: {
       mode: {
         type: 'string',
-        enum: ['start', 'status', 'transition', 'cancel', 'list', 'triggers', 'schedule'],
+        enum: ['start', 'status', 'transition', 'cancel', 'list', 'hook-actions', 'schedule'],
         description: 'Operation mode.',
       },
       // mode: start
@@ -45,19 +47,19 @@ export const workflowSchema: ToolDefinition = {
         type: 'string',
         description: 'State to transition to (mode: transition).',
       },
-      // mode: triggers
-      triggerAction: {
+      // mode: hook-actions
+      hookAction: {
         type: 'string',
         enum: ['list', 'add', 'remove', 'enable', 'disable'],
-        description: 'Trigger management action (mode: triggers).',
+        description: 'Hook action management (mode: hook-actions).',
       },
-      triggerId: {
+      hookActionId: {
         type: 'string',
-        description: 'Trigger ID for remove/enable/disable actions (mode: triggers).',
+        description: 'Hook action ID for remove/enable/disable (mode: hook-actions).',
       },
-      triggerDefinition: {
+      hookActionDefinition: {
         type: 'object',
-        description: 'Trigger definition for add action (mode: triggers).',
+        description: 'Hook action to add (mode: hook-actions, hookAction: add).',
         required: ['event', 'action'],
         properties: {
           event: {
@@ -66,19 +68,19 @@ export const workflowSchema: ToolDefinition = {
           },
           condition: {
             type: 'string',
-            description: 'Optional condition expression evaluated against event payload.',
+            description: "Optional condition over event.* and payload.* paths with ===, !==, ==, !=, >, <, >=, <=, &&, ||, ! and parentheses, e.g. payload.tool === 'exec'. One that cannot be parsed is refused when added.",
           },
           action: {
             type: 'string',
-            description: 'Action to execute when trigger fires.',
+            description: 'Command to run when the event fires, split into words with no shell (POSIX quoting and backslash escapes). Killed after 60 s.',
           },
         },
       },
       // mode: schedule
       scheduleAction: {
         type: 'string',
-        enum: ['list', 'add', 'remove'],
-        description: 'Schedule management action (mode: schedule).',
+        enum: ['list', 'add', 'remove', 'enable', 'disable'],
+        description: 'Schedule management action (mode: schedule). disable stops the timer and keeps the schedule; enable starts it again.',
       },
       scheduleName: {
         type: 'string',
@@ -90,7 +92,7 @@ export const workflowSchema: ToolDefinition = {
       },
       scheduleCommand: {
         type: 'string',
-        description: 'Command to run on each interval tick, split into words with no shell; single or double quotes group a word (mode: schedule, action: add). A tick is skipped while the previous run is still going.',
+        description: 'Command to run on each interval tick, split into words with no shell (POSIX quoting and backslash escapes) (mode: schedule, action: add). A tick is skipped (and counted) while the previous run is still going; a run longer than its interval (at least 60 s) is killed.',
       },
     },
   },

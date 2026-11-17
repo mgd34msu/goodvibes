@@ -10,7 +10,7 @@ stable subpath, and [Channel surfaces](./channel-surfaces.md) for the channel ru
 
 ## Daemon and platform surfaces (Bun-only)
 
-The full surface provides the agentic harness: tool execution, LSP and tree-sitter intelligence, MCP client/registry, workflow trigger executor, daemon HTTP server, file-based artifact storage, file state and KV caching, git service integration, ACP connection management, and companion pairing.
+The full surface provides the agentic harness: tool execution, LSP and tree-sitter intelligence, MCP client/registry, workflow hook-action executor, daemon HTTP server, file-based artifact storage, file state and KV caching, git service integration, ACP connection management, and companion pairing.
 
 Daemon-owned channel surfaces also live on this full surface. That includes
 Slack, Discord, ntfy, generic webhook, Telegram, Google Chat, Signal, WhatsApp,

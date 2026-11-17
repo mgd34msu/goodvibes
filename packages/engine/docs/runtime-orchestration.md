@@ -613,12 +613,31 @@ multi-event sequences and fire a configured action when their conditions pass.
 The hook workbench can load, save, reload, scaffold, simulate, inspect, import,
 and export managed hook config.
 
-## Workflow triggers
+## Hook actions
 
-Workflow triggers evaluate hook events and run configured actions when
-conditions match. Conditions support field-path lookup, comparisons, boolean
-logic, and event-derived values. Actions can dispatch shell work or agent work
-depending on the registered trigger definition.
+A hook action is the workflow tool's `mode: "hook-actions"` rule: when a hook
+event matching its pattern fires (and its optional condition holds), it runs a
+command. Conditions use `event.*` and `payload.*` paths with `===`, `!==`,
+`==`, `!=`, `>`, `<`, `>=`, `<=`, `&&`, `||`, `!` and parentheses. The
+command is split into words with no shell (POSIX quoting and escapes).
+
+A hook action and a workflow schedule (`mode: "schedule"`) are admitted once,
+when added: a condition that cannot be parsed, a command that cannot be split
+and a command the exec command guard refuses are refused there with the
+reason. Each run starts the admitted words in the project root with
+credential-bearing environment variables withheld (`GV_HOOK_ACTION_ID`,
+`GV_HOOK_EVENT` and `GV_HOOK_PHASE`, or `GV_SCHEDULE_NAME`, are added). A hook
+action's command is killed after 60 seconds and at most four of one action run
+at once; a scheduled command is killed when it outlasts its interval (at least
+60 seconds), and a tick while the previous run is still going is skipped and
+counted. `list` and the fleet show each one's last fire or run, exit code and
+error. Both live only in the process that added them; durable routines are
+`/schedule`.
+
+The fleet shows hook actions as `hook-action` nodes. The `trigger` kind
+belongs to the trigger family (`platform/triggers`: stream watchers, condition
+checks and on-exit process triggers, persisted and supervised, behind
+`watchers.triggers.enabled`).
 
 ## Runtime store and state
 

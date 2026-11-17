@@ -4,11 +4,9 @@ import type { ProcessNode, ProcessState } from '../types.js';
 /**
  * Trigger-family TriggerRecord → ProcessNode.
  *
- * Distinct from adapters/trigger.ts, which adapts the workflow tool's
- * event→action TriggerDefinition. Both surface under the 'trigger' kind, a
- * consumer showing "a thing armed to fire" should not have to learn two
- * vocabularies, so the raw payload is tagged (see isWatcherTriggerRaw) and
- * every control path routes on that tag rather than on the kind alone.
+ * Distinct from adapters/hook-action.ts, which adapts the workflow tool's hook
+ * actions as 'hook-action' nodes; this family owns the 'trigger' kind, so a
+ * control path routes on the kind alone.
  *
  * State mapping keeps the supervision story visible rather than flattening it:
  *   idle         → 'idle'      armed, waiting for its next check
@@ -93,14 +91,3 @@ function describeActivity(record: TriggerRecord): ProcessNode['currentActivity']
   return { kind: 'phase', text: 'armed', at };
 }
 
-/**
- * Discriminates a trigger-family node from a workflow-trigger node. Both use
- * the 'trigger' kind, and routing a control verb to the wrong manager would
- * silently no-op, so every control path asks this rather than assuming.
- */
-export function isWatcherTriggerRaw(raw: unknown): raw is { readonly watcherTrigger: TriggerRecord } {
-  return typeof raw === 'object'
-    && raw !== null
-    && 'watcherTrigger' in raw
-    && typeof (raw as { watcherTrigger?: unknown }).watcherTrigger === 'object';
-}

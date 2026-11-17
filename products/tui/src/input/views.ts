@@ -45,7 +45,7 @@ export const CHANGES_VIEW_NAMES: readonly string[] = ['changes', 'git', 'diff', 
 /** The public process kinds, plus the Tools tab's non-process target. */
 const VIEW_TARGET_KINDS = {
   agent: true, contract: true, 'contract-group': true, 'contract-unit': true,
-  workflow: true, trigger: true, schedule: true, watcher: true,
+  workflow: true, trigger: true, 'hook-action': true, schedule: true, watcher: true,
   'background-process': true, 'acp-agent': true, 'observed-external': true,
   'code-index': true, tool: true,
 } satisfies Record<ProcessKind | 'tool', true>;

@@ -1611,7 +1611,7 @@ export class PermissionManager {
     if (toolName === 'state' && isStateMutation(args)) return 'write';
     // A schedule or trigger registers a command that later runs on its own, so
     // adding one is execution, not delegation.
-    if (toolName === 'workflow' && ((args.mode === 'schedule' && args.scheduleAction === 'add') || (args.mode === 'triggers' && args.triggerAction === 'add'))) return 'execute';
+    if (toolName === 'workflow' && ((args.mode === 'schedule' && args.scheduleAction === 'add') || (args.mode === 'hook-actions' && args.hookAction === 'add'))) return 'execute';
     // Changing what an MCP server may do is not the delegation a remembered
     // allow for the mcp tool was given for.
     if (changesMcpTrust(toolName, args)) return 'execute';

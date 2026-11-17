@@ -367,7 +367,7 @@ The following table lists the notable platform subpaths. The `exports` map in `p
 | `platform/voice/wake/runtime` | The wake-word detector's runtime-neutral half (engine, detection rules, restart policy, listener) with no filesystem access, so a browser tab can import it without pulling in provisioning | beta |
 | `platform/watchers` | Watcher registry | beta |
 | `platform/web-search` | Web search provider registry, service, and providers | beta |
-| `platform/workflow` | Workflow trigger executor | beta |
+| `platform/workflow` | Workflow hook-action executor and automation commands | beta |
 | `platform/workflow/work-ledger` | Host-owned work ledger: revisioned records, opaque actor authority, service and storage contracts | beta |
 | `platform/workspace` | Daemon home and workspace swap manager | beta |
 

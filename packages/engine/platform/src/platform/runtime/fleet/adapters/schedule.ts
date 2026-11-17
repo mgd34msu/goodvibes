@@ -12,12 +12,17 @@ function scheduleState(entry: ScheduleEntry): ProcessState {
 }
 
 /** What the schedule did last, or is doing: the run in progress, or how the last one ended. */
-function scheduleActivity(entry: ScheduleEntry): ProcessNode['currentActivity'] {
-  if (entry.running && entry.lastRun !== undefined) return { kind: 'phase', text: `running: ${entry.command}`, at: entry.lastRun };
-  if (entry.lastExitAt === undefined) return undefined;
-  const ended = entry.lastExitCode === null ? 'last run was stopped by a signal'
-    : entry.lastExitCode === 0 ? 'last run succeeded' : `last run failed with exit code ${String(entry.lastExitCode)}`;
-  return { kind: 'phase', text: ended, at: entry.lastExitAt };
+function scheduleActivity(entry: ScheduleEntry, now: number): ProcessNode['currentActivity'] {
+  const skipped = entry.skippedTicks ? ` (${entry.skippedTicks} tick${entry.skippedTicks === 1 ? '' : 's'} skipped while a run was still going)` : '';
+  if (entry.running && entry.lastRun !== undefined) return { kind: 'phase', text: `running: ${entry.command}${skipped}`, at: entry.lastRun };
+  if (entry.lastExitAt === undefined) {
+    // A command that never started (not on PATH) has no exit; its error says why.
+    return entry.lastError ? { kind: 'phase', text: `${entry.lastError}${skipped}`, at: now } : undefined;
+  }
+  const ended = entry.lastError ? `last run: ${entry.lastError}`
+    : entry.lastExitCode === null ? 'last run was stopped by a signal'
+      : entry.lastExitCode === 0 ? 'last run succeeded' : `last run failed with exit code ${String(entry.lastExitCode)}`;
+  return { kind: 'phase', text: `${ended}${skipped}`, at: entry.lastExitAt };
 }
 
 /**
@@ -29,7 +34,7 @@ function scheduleActivity(entry: ScheduleEntry): ProcessNode['currentActivity'] 
  * only, unlike the durable `/schedule` routines shown under the same kind.
  */
 export function adaptSchedule(entry: ScheduleEntry, now: number = Date.now()): ProcessNode {
-  const activity = scheduleActivity(entry);
+  const activity = scheduleActivity(entry, now);
   return {
     id: scheduleNodeId(entry.name),
     kind: 'schedule',

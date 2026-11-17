@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { shellSplit } from '../utils/shell-split.js';
 import {
   resolveCredentialEnvScrub,
   scrubCredentialEnv,
@@ -10,28 +11,29 @@ import {
 // ---------------------------------------------------------------------------
 // AutomationCommands
 // ---------------------------------------------------------------------------
-// Starts the background commands of one runtime's workflow automation (trigger
-// actions and scheduled commands) and owns everything about them: the
-// credential-env scrub they start with, the per-trigger or per-schedule limit
-// on runs in flight, the kill timer, and the set of running processes that
-// shutdown kills. One instance per WorkflowServices, so disposing one runtime
-// stops only that runtime's commands.
+// Starts the background commands of one runtime's workflow automation (hook
+// actions and scheduled commands) and owns everything about them: admission
+// (split and command guard, once, when the automation is added), the project
+// root they run in, the credential-env scrub they start with, the per-action
+// or per-schedule limit on runs in flight, the kill timer, how each run ended,
+// and the set of running processes that shutdown kills. One instance per
+// WorkflowServices, so disposing one runtime stops only that runtime's commands.
 // ---------------------------------------------------------------------------
 
-export type AutomationCommandKind = 'trigger' | 'schedule';
+export type AutomationCommandKind = 'hook-action' | 'schedule';
 
 export interface AutomationCommandRequest {
   readonly kind: AutomationCommandKind;
-  /** The trigger id or schedule name; the in-flight limit counts runs of this kind and key. */
+  /** The hook action id or schedule name; the in-flight limit counts runs of this kind and key. */
   readonly key: string;
   readonly argv: readonly string[];
-  /** Variables added to the scrubbed environment, such as GV_TRIGGER_ID. */
+  /** Variables added to the scrubbed environment, such as GV_HOOK_ACTION_ID. */
   readonly env?: Readonly<Record<string, string>> | undefined;
   readonly maxInFlight: number;
   /** The run is killed after this long; omitted, it is not timed. */
   readonly timeoutMs?: number | undefined;
-  /** Returns a refusal reason when the command must not run. Runs after the slot is taken. */
-  readonly guard?: (() => Promise<string | undefined>) | undefined;
+  /** Called once with how the run ended: the exit code, or null when a signal (a kill or the timeout) ended it. */
+  readonly onExit?: ((exit: AutomationCommandExit) => void) | undefined;
   /** Starts the process. Defaults to Bun.spawn. */
   readonly spawn?: typeof Bun.spawn | undefined;
   /** Arms the kill timer and returns its canceller. Defaults to an unref'd setTimeout. */
@@ -41,7 +43,24 @@ export interface AutomationCommandRequest {
 export type AutomationCommandStart =
   | { readonly started: true; readonly pid: number }
   | { readonly started: false; readonly reason: 'busy'; readonly running: number; readonly limit: number }
-  | { readonly started: false; readonly reason: 'refused' | 'stopped' | 'failed'; readonly message: string };
+  | { readonly started: false; readonly reason: 'stopped' | 'failed'; readonly message: string };
+
+/** How one run ended. */
+export interface AutomationCommandExit {
+  /** The process that ended, so an outcome is kept only on the fire that started it. */
+  readonly pid: number;
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  readonly at: number;
+}
+
+/** The outcome of admitting a command line: the argv every run uses, or why it can never run. */
+export type AutomationCommandAdmission =
+  | { readonly admitted: true; readonly argv: readonly string[] }
+  | { readonly admitted: false; readonly reason: string };
+
+/** Returns a refusal reason when the command must not run (the exec path's command guard). */
+export type AutomationCommandGuard = (command: string) => Promise<string | undefined>;
 
 interface Run {
   readonly kind: AutomationCommandKind;
@@ -61,6 +80,37 @@ const DEFAULT_SCRUB: ResolvedCredentialEnvScrub = resolveCredentialEnvScrub();
 export class AutomationCommands {
   readonly #runs = new Set<Run>();
   #scrub: () => ResolvedCredentialEnvScrub = () => DEFAULT_SCRUB;
+  #guard: AutomationCommandGuard | undefined;
+  #cwd: string | undefined;
+
+  /** The command guard every added automation is admitted against (the hook dispatcher hands over the exec path's). */
+  setCommandGuard(guard: AutomationCommandGuard | undefined): void {
+    this.#guard = guard;
+  }
+
+  /** The project root automation commands run in; unset, they run in the process's working directory. */
+  setWorkingDirectory(directory: string | undefined): void {
+    this.#cwd = directory;
+  }
+
+  /**
+   * Decides once whether a command line can run: split it as the run will be
+   * (strict POSIX words, no shell), refuse an empty or mis-quoted one, and ask
+   * the command guard. The argv returned is what every later run starts, so
+   * nothing is split or guarded again per tick or per fire.
+   */
+  async admit(command: string): Promise<AutomationCommandAdmission> {
+    let argv: string[];
+    try {
+      argv = shellSplit(command, { strict: true });
+    } catch (err) {
+      return { admitted: false, reason: `The command could not be parsed: ${summarizeError(err)}. Close the quote or escape the character, then add it again.` };
+    }
+    if (argv.length === 0) return { admitted: false, reason: 'The command is empty; give it a program to run.' };
+    const refusal = this.#guard ? await this.#guard(command) : undefined;
+    if (refusal !== undefined) return { admitted: false, reason: `The command was refused by the command policy: ${refusal}` };
+    return { admitted: true, argv };
+  }
 
   /**
    * The credential-env scrub the exec tool uses; registerAllTools passes the
@@ -95,16 +145,17 @@ export class AutomationCommands {
     this.#runs.add(run);
     let spawned = false;
     try {
-      if (request.guard) {
-        const refusal = await request.guard();
-        if (refusal !== undefined) return { started: false, reason: 'refused', message: refusal };
-      }
       const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)) as Record<string, string>;
       const { env } = await scrubCredentialEnv(hostEnv, this.#scrub());
-      // stop() ran while the guard or the scrub was being read: nothing may start that stop() cannot kill.
+      // stop() ran while the scrub was being read: nothing may start that stop() cannot kill.
       if (run.stopped) return { started: false, reason: 'stopped', message: 'Automation was stopped before the command started.' };
       const spawn = request.spawn ?? Bun.spawn;
-      const proc = spawn([...request.argv], { env: { ...env, ...request.env }, stdout: 'ignore', stderr: 'ignore' });
+      const proc = spawn([...request.argv], {
+        env: { ...env, ...request.env },
+        ...(this.#cwd ? { cwd: this.#cwd } : {}),
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
       spawned = true;
       run.proc = proc;
       let timedOut = false;
@@ -115,6 +166,7 @@ export class AutomationCommands {
       proc.exited.then((code) => {
         if (timedOut) logger.warn('Automation command killed after its timeout', { kind, key, pid: proc.pid, timeoutMs: request.timeoutMs });
         else if (code !== 0 && !run.stopped) logger.warn('Automation command exited non-zero', { kind, key, pid: proc.pid, exitCode: code });
+        request.onExit?.({ pid: proc.pid, exitCode: proc.signalCode ? null : code, timedOut, at: Date.now() });
       }).catch((err: unknown) => {
         logger.warn('Automation command exit tracking failed', { kind, key, error: summarizeError(err) });
       }).finally(() => {
@@ -129,10 +181,11 @@ export class AutomationCommands {
     }
   }
 
-  /** Kills every command of `kind` (all kinds when omitted) and cancels any still starting. */
-  stop(kind?: AutomationCommandKind): void {
+  /** Kills every command of `kind` (all kinds when omitted; only `key`'s runs when given) and cancels any still starting. */
+  stop(kind?: AutomationCommandKind, key?: string): void {
     for (const run of [...this.#runs]) {
       if (kind !== undefined && run.kind !== kind) continue;
+      if (key !== undefined && run.key !== key) continue;
       run.stopped = true;
       this.#runs.delete(run);
       try { run.proc?.kill(); } catch (err) {

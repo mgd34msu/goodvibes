@@ -62,6 +62,7 @@ const PROCESS_KINDS: readonly ProcessKind[] = [
   'contract-unit',
   'workflow',
   'trigger',
+  'hook-action',
   'schedule',
   'watcher',
   'background-process',

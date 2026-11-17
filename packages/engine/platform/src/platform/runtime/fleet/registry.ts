@@ -19,7 +19,7 @@ import type { WatcherRegistry } from '../../watchers/registry.js';
 import type {
   ScheduleEntry,
   ScheduleManager,
-  TriggerManager,
+  HookActionManager,
   WorkflowManager,
 } from '../../tools/workflow/index.js';
 import type { AutomationManager } from '../../automation/index.js';
@@ -51,10 +51,10 @@ import {
   repriceContractOwnerNode,
 } from './adapters/contract.js';
 import { adaptWorkflow } from './adapters/workflow.js';
-import { adaptTrigger } from './adapters/trigger.js';
+import { adaptHookAction } from './adapters/hook-action.js';
 import { adaptSchedule } from './adapters/schedule.js';
 import { adaptWatcher } from './adapters/watcher.js';
-import { adaptWatcherTrigger, isWatcherTriggerRaw } from './adapters/watcher-trigger.js';
+import { adaptWatcherTrigger } from './adapters/watcher-trigger.js';
 import type { TriggerManager as WatcherTriggerManager } from '../../triggers/manager.js';
 import { adaptBackgroundProcess } from './adapters/background-process.js';
 import { adaptAutomationJob, automationJobNodeId, isAutomationJobRaw } from './adapters/automation.js';
@@ -130,15 +130,14 @@ export interface ProcessRegistryDeps {
   readonly workflow: {
     readonly workflowManager: Pick<WorkflowManager, 'list' | 'cancel'>;
     /** `enable` backs ProcessRegistry.resume(), the inverse of `disable`'s interrupt/pause. */
-    readonly triggerManager: Pick<TriggerManager, 'list' | 'remove' | 'disable' | 'enable'>;
+    readonly hookActions: Pick<HookActionManager, 'list' | 'remove' | 'disable' | 'enable'>;
     readonly scheduleManager: Pick<ScheduleManager, 'list' | 'remove' | 'disable' | 'enable'>;
   };
   /**
    * Optional: the trigger family's supervisor (stream watchers, condition
    * checks, on-exit process triggers). When present its records fold in as
-   * 'trigger' nodes alongside the workflow tool's event triggers, the two are
-   * told apart by `isWatcherTriggerRaw`, never by kind alone, so a control verb
-   * can never be routed to the wrong manager. Absent (the default, and the
+   * 'trigger' nodes; the workflow tool's hook actions are 'hook-action' nodes,
+   * so the kind alone routes a control verb to its manager. Absent (the default, and the
    * case whenever watchers.triggers.enabled is false) ⇒ exactly today's
    * behavior: zero extra nodes, no new capability.
    */
@@ -474,8 +473,8 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     for (const instance of deps.workflow.workflowManager.list()) {
       nodes.push(adaptWorkflow(instance, capturedAt));
     }
-    for (const trigger of deps.workflow.triggerManager.list()) {
-      nodes.push(adaptTrigger(trigger));
+    for (const action of deps.workflow.hookActions.list()) {
+      nodes.push(adaptHookAction(action, capturedAt));
     }
     if (deps.triggerSupervisor) {
       for (const record of deps.triggerSupervisor.list()) {
@@ -685,14 +684,10 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
       case 'workflow':
         return deps.workflow.workflowManager.cancel(node.id) ? [node.id] : [];
       case 'trigger':
-        // Two managers share this kind. Ask the raw payload which one owns the
-        // node rather than assuming, routing to the wrong manager would
-        // silently no-op and leave a supervised child process running.
-        if (isWatcherTriggerRaw(node.raw)) {
-          if (!deps.triggerSupervisor) return [];
-          return deps.triggerSupervisor.cancel(node.id) !== null ? [node.id] : [];
-        }
-        return deps.workflow.triggerManager.remove(node.id) ? [node.id] : [];
+        if (!deps.triggerSupervisor) return [];
+        return deps.triggerSupervisor.cancel(node.id) !== null ? [node.id] : [];
+      case 'hook-action':
+        return deps.workflow.hookActions.remove(node.id) ? [node.id] : [];
       case 'schedule': {
         if (isAutomationJobRaw(node.raw)) {
           if (!deps.automationManager) return [];
@@ -784,8 +779,9 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
         // The trigger family has no disable/enable pause cycle, its records
         // are either armed, walking the backoff ladder, or parked by the
         // breaker. Refuse honestly instead of pretending to pause one.
-        if (isWatcherTriggerRaw(target.raw)) return false;
-        return deps.workflow.triggerManager.disable(target.id);
+        return false;
+      case 'hook-action':
+        return deps.workflow.hookActions.disable(target.id);
       case 'schedule': {
         if (isAutomationJobRaw(target.raw)) {
           if (!deps.automationManager) return false;
@@ -822,11 +818,10 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
       case 'trigger':
         // For a trigger-family node, resumable means "the breaker is open".
         // Resuming it IS the explicit operator reset the breaker waits for.
-        if (isWatcherTriggerRaw(target.raw)) {
-          if (!deps.triggerSupervisor) return false;
-          return deps.triggerSupervisor.reset(target.id) !== null;
-        }
-        return deps.workflow.triggerManager.enable(target.id);
+        if (!deps.triggerSupervisor) return false;
+        return deps.triggerSupervisor.reset(target.id) !== null;
+      case 'hook-action':
+        return deps.workflow.hookActions.enable(target.id);
       case 'schedule': {
         if (isAutomationJobRaw(target.raw)) {
           if (!deps.automationManager) return false;

@@ -31,6 +31,7 @@ const PROCESS_KIND_SCHEMA = exhaustiveStringEnumSchema<ProcessKind>()([
   'contract-unit',
   'workflow',
   'trigger',
+  'hook-action',
   'schedule',
   'watcher',
   'background-process',

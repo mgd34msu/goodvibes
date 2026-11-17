@@ -159,6 +159,7 @@ const KIND_TAGS: Record<ProcessKind, string> = {
   'contract-unit': 'unit',
   workflow: 'flow',
   trigger: 'trig',
+  'hook-action': 'hook',
   schedule: 'sched',
   watcher: 'watch',
   'background-process': 'exec',

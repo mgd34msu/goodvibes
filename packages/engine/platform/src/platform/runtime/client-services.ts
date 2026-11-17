@@ -535,8 +535,8 @@ function composeClientRuntimeServices(
   configManager.attachHookDispatcher(hookDispatcher);
   const hookWorkbench = createHookWorkbench({ hookDispatcher, configManager });
 
-  const workflow = createWorkflowServices();
-  disposalScope.registry.add('trigger dispatch', hookDispatcher.setTriggerManager(workflow.triggerManager, featureFlags));
+  const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });
+  disposalScope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));
 
   const policyRuntimeState = createPolicyRuntimeState(configManager, featureFlags);
   // A host that already owns the rule file lends its store, so one instance is

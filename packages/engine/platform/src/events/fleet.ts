@@ -24,6 +24,7 @@ export const FLEET_NODE_KINDS = [
   'contract-unit',
   'workflow',
   'trigger',
+  'hook-action',
   'schedule',
   'watcher',
   'background-process',

@@ -1,30 +1,34 @@
 import { logger } from '../utils/logger.js';
 import { shellSplit } from '../utils/shell-split.js';
 import type { HookEvent } from '../hooks/types.js';
-import type { TriggerDefinition } from '../tools/workflow/index.js';
+import type { HookActionDefinition } from '../tools/workflow/index.js';
 import { matchesEventPath } from '../hooks/matcher.js';
 import { summarizeError } from '../utils/error-display.js';
 import { toRecord } from '../utils/record-coerce.js';
-import type { AutomationCommands } from './automation-commands.js';
+import type { AutomationCommandExit, AutomationCommands } from './automation-commands.js';
 
 // ---------------------------------------------------------------------------
-// TriggerExecutor
+// HookActionExecutor
 // ---------------------------------------------------------------------------
-// Evaluates trigger conditions and executes actions when a hook event fires.
-// Kept decoupled from HookDispatcher to avoid circular imports.
+// Evaluates hook-action conditions and starts their commands when a hook event
+// fires. Kept decoupled from HookDispatcher to avoid circular imports.
 // ---------------------------------------------------------------------------
 
-export interface TriggerManagerLike {
-  list(): TriggerDefinition[];
+export interface HookActionManagerLike {
+  list(): HookActionDefinition[];
   /** Starts, limits, times and tracks this manager's actions; disposing it stops only these. */
   readonly commands: AutomationCommands;
+  /** Keeps the outcome of a fire on the stored definition, so a list shows what happened. */
+  recordFire?(result: HookActionFireResult): void;
+  /** Keeps how a started action ended on the stored definition. */
+  recordExit?(hookActionId: string, exit: AutomationCommandExit): void;
 }
 
 /**
- * Result of a single trigger evaluation.
+ * Result of evaluating one hook action against a hook event.
  */
-export interface TriggerFireResult {
-  triggerId: string;
+export interface HookActionFireResult {
+  hookActionId: string;
   event: string;
   action: string;
   executed: boolean;
@@ -32,34 +36,33 @@ export interface TriggerFireResult {
   pid?: number | undefined;
 }
 
-/** A trigger action that runs longer than this is killed. */
-export const TRIGGER_ACTION_TIMEOUT_MS = 60_000;
-/** Most simultaneous running actions of one trigger; a further fire is refused with a stated reason. */
-export const TRIGGER_MAX_IN_FLIGHT = 4;
+/** A hook action's command that runs longer than this is killed. */
+export const HOOK_ACTION_TIMEOUT_MS = 60_000;
+/** Most simultaneous runs of one hook action; a further fire is refused with a stated reason. */
+export const HOOK_ACTION_MAX_IN_FLIGHT = 4;
 
-/** Test seams and per-call overrides for {@link fireTriggers}. */
-export interface TriggerExecutionOptions {
+/** Test seams and per-call overrides for {@link fireHookActions}. */
+export interface HookActionExecutionOptions {
   /** Starts the action process. Defaults to Bun.spawn. */
   readonly spawn?: typeof Bun.spawn | undefined;
   /** Arms the kill timer and returns its canceller. Defaults to an unref'd setTimeout. */
   readonly startTimer?: ((callback: () => void, ms: number) => () => void) | undefined;
   readonly timeoutMs?: number | undefined;
   readonly maxInFlight?: number | undefined;
-  /** Returns a refusal reason when the command must not run (the exec path's command guard). */
-  readonly guardCommand?: ((command: string) => Promise<string | undefined>) | undefined;
 }
 
 /**
- * Evaluate all enabled triggers against a fired hook event.
- * Matching triggers have their action started through `triggerManager.commands`.
+ * Evaluate all enabled hook actions against a fired hook event. Matching ones
+ * have their command started through `manager.commands`, and each fire's
+ * outcome is kept on its definition as soon as it is known.
  */
-export async function fireTriggers(
+export async function fireHookActions(
   event: HookEvent,
-  triggerManager: TriggerManagerLike,
-  options: TriggerExecutionOptions = {},
-): Promise<TriggerFireResult[]> {
-  const results: TriggerFireResult[] = [];
-  const triggers = triggerManager.list().filter((t) => t.enabled);
+  manager: HookActionManagerLike,
+  options: HookActionExecutionOptions = {},
+): Promise<HookActionFireResult[]> {
+  const results: HookActionFireResult[] = [];
+  const triggers = manager.list().filter((t) => t.enabled);
 
   for (const trigger of triggers) {
     if (!matchesEventPath(trigger.event, event.path)) continue;
@@ -68,21 +71,24 @@ export async function fireTriggers(
     if (trigger.condition) {
       const evaluation = evaluateCondition(trigger.condition, event);
       if (!evaluation.passed) {
-        results.push({
-          triggerId: trigger.id,
+        // A condition that could not be evaluated is not the same as one that did not match.
+        const result: HookActionFireResult = {
+          hookActionId: trigger.id,
           event: trigger.event,
           action: trigger.action,
           executed: false,
-          // A condition that could not be evaluated is not the same as one that did not match.
           ...(evaluation.error !== undefined ? { error: `Condition could not be evaluated: ${evaluation.error}` } : {}),
-        });
+        };
+        results.push(result);
+        // A condition that simply did not match is not a fire.
+        if (result.error !== undefined) manager.recordFire?.(result);
         continue;
       }
     }
 
-    // Execute the action
-    const fireResult = await executeAction(trigger, event, triggerManager.commands, options);
+    const fireResult = await executeAction(trigger, event, manager, options);
     results.push(fireResult);
+    manager.recordFire?.(fireResult);
   }
 
   return results;
@@ -96,7 +102,7 @@ export async function fireTriggers(
 // Safe condition evaluator, no eval() or new Function()
 // ---------------------------------------------------------------------------
 //
-// Supports a restricted expression language for trigger conditions.
+// Supports a restricted expression language for hook action conditions.
 // Operators: === !== == != > < >= <= && || ! (parentheses)
 // Operands: dotted property paths on `event` or `payload`, string literals,
 //           number literals, boolean literals (true/false/null/undefined).
@@ -115,19 +121,19 @@ function resolvePath(root: Record<string, unknown>, path: string): ConditionValu
     // Reject the condition, rather than treating a forbidden path as missing:
     // `payload.constructor === undefined` must not become an allowed action.
     if (part === '__proto__' || part === 'constructor' || part === 'prototype') {
-      throw new Error('Prototype paths are not supported in trigger conditions');
+      throw new Error('Prototype paths are not supported in hook action conditions');
     }
     if (cur == null || typeof cur !== 'object') return undefined;
     const property = Object.getOwnPropertyDescriptor(cur, part);
     if (property === undefined) return undefined;
-    if (!('value' in property)) throw new Error('Trigger conditions require data properties');
+    if (!('value' in property)) throw new Error('Hook action conditions require data properties');
     cur = property.value;
   }
   if (cur === null) return null;
   if (cur === undefined) return undefined;
   if (typeof cur === 'string' || typeof cur === 'number' || typeof cur === 'boolean') return cur;
   // Conditions operate on data, never user-defined coercion hooks.
-  throw new Error('Trigger conditions require primitive operands');
+  throw new Error('Hook action conditions require primitive operands');
 }
 
 /** Tokenise a condition string into an array of tokens. */
@@ -272,7 +278,7 @@ class ConditionParser {
       switch (op) {
         case '===': return left === right;
         case '!==': return left !== right;
-        // Loose equality is intentional: user-authored trigger conditions may
+        // Loose equality is intentional: user-authored hook action conditions may
         // use `==` to allow type-coercive matching (e.g. numeric payload field
         // compared to string literal). Strict `===` is also supported.
         // eslint-disable-next-line eqeqeq
@@ -302,13 +308,27 @@ class ConditionParser {
   }
 }
 
+/** An event with nothing in it: a condition is parsed against it once, when the hook action is added. */
+const EMPTY_EVENT: HookEvent = { path: 'Pre:tool:none', phase: 'Pre', category: 'tool', specific: 'none', sessionId: '', timestamp: 0, payload: {} };
+
+/**
+ * Why a condition can never be evaluated (an unsupported character or token, a
+ * prototype path, unbalanced parentheses), or undefined when it parses. Run
+ * once at add time so a typo is refused where the agent reads it, instead of
+ * failing silently on every event.
+ */
+export function conditionProblem(condition: string): string | undefined {
+  const evaluation = evaluateCondition(condition, EMPTY_EVENT, false);
+  return evaluation.error;
+}
+
 /**
  * Safely evaluate a simple boolean condition string.
  * The condition has access to `event` and `payload` (alias for event.payload).
  * Uses a restricted expression parser, no eval() or new Function().
  * Returns false if the condition is invalid or throws.
  */
-function evaluateCondition(condition: string, event: HookEvent): { passed: boolean; error?: string } {
+function evaluateCondition(condition: string, event: HookEvent, log = true): { passed: boolean; error?: string } {
   try {
     const tokens = tokenise(condition);
     if (tokens.length === 0) return { passed: true }; // empty condition = always pass
@@ -316,70 +336,66 @@ function evaluateCondition(condition: string, event: HookEvent): { passed: boole
     return { passed: parser.parse() };
   } catch (err) {
     const error = summarizeError(err);
-    logger.warn('TriggerExecutor: condition evaluation error', { condition, error });
+    if (log) logger.warn('HookActionExecutor: condition evaluation error', { condition, error });
     return { passed: false, error };
   }
 }
 
 /**
- * Starts a trigger action through the manager's automation commands: the
- * environment the exec path gives a command (credential-bearing variables
- * withheld), a kill timer, a per-trigger in-flight limit, and tracking so
- * disposal kills it. A non-zero exit is logged.
+ * Starts a hook action through the manager's automation commands: the argv
+ * admitted when it was added, the project root, the environment the exec path
+ * gives a command (credential-bearing variables withheld), a kill timer, a
+ * per-action in-flight limit, and tracking so disposal kills it.
  */
 async function executeAction(
-  trigger: TriggerDefinition,
+  trigger: HookActionDefinition,
   event: HookEvent,
-  commands: AutomationCommands,
-  options: TriggerExecutionOptions,
-): Promise<TriggerFireResult> {
-  const base: Omit<TriggerFireResult, 'executed'> = {
-    triggerId: trigger.id,
+  manager: HookActionManagerLike,
+  options: HookActionExecutionOptions,
+): Promise<HookActionFireResult> {
+  const base: Omit<HookActionFireResult, 'executed'> = {
+    hookActionId: trigger.id,
     event: trigger.event,
     action: trigger.action,
   };
 
-  // Parse the action string as a shell command (POSIX shellwords tokenizer)
-  // Strict: an intentional empty argument must keep its place, and an
-  // unterminated quote must not silently become part of the last argument.
-  let parts: string[];
+  // HookActionManager.add stores the admitted argv; a definition built elsewhere
+  // is split here the same strict way (an empty argument keeps its place, an
+  // unterminated quote is refused).
+  let parts: readonly string[];
   try {
-    parts = shellSplit(trigger.action, { strict: true });
+    parts = trigger.argv ?? shellSplit(trigger.action, { strict: true });
   } catch (err) {
     return { ...base, executed: false,
-      error: `Action could not be parsed: ${summarizeError(err)}. The action was not run; close the quote in trigger ${trigger.id}'s action and save it again.` };
+      error: `Action could not be parsed: ${summarizeError(err)}. The action was not run; close the quote in hook action ${trigger.id} and add it again.` };
   }
   if (parts.length === 0) {
-    return { ...base, executed: false, error: `Empty action command: trigger ${trigger.id} has no command to run; give it an action or remove it.` };
+    return { ...base, executed: false, error: `Empty action command: hook action ${trigger.id} has no command to run; give it an action or remove it.` };
   }
 
-  const guardCommand = options.guardCommand;
-  const outcome = await commands.start({
-    kind: 'trigger',
+  const outcome = await manager.commands.start({
+    kind: 'hook-action',
     key: trigger.id,
     argv: parts,
-    env: { GV_TRIGGER_ID: trigger.id, GV_TRIGGER_EVENT: event.path, GV_TRIGGER_PHASE: event.phase },
-    maxInFlight: options.maxInFlight ?? TRIGGER_MAX_IN_FLIGHT,
-    timeoutMs: options.timeoutMs ?? TRIGGER_ACTION_TIMEOUT_MS,
-    guard: guardCommand ? () => guardCommand(trigger.action) : undefined,
+    env: { GV_HOOK_ACTION_ID: trigger.id, GV_HOOK_EVENT: event.path, GV_HOOK_PHASE: event.phase },
+    maxInFlight: options.maxInFlight ?? HOOK_ACTION_MAX_IN_FLIGHT,
+    timeoutMs: options.timeoutMs ?? HOOK_ACTION_TIMEOUT_MS,
+    onExit: (exit) => manager.recordExit?.(trigger.id, exit),
     spawn: options.spawn,
     startTimer: options.startTimer,
   });
   if (outcome.started) {
-    logger.debug('TriggerExecutor: action spawned', { triggerId: trigger.id, pid: outcome.pid, action: trigger.action });
+    logger.debug('HookActionExecutor: action spawned', { hookActionId: trigger.id, pid: outcome.pid, action: trigger.action });
     return { ...base, executed: true, pid: outcome.pid };
   }
   switch (outcome.reason) {
     case 'busy':
-      logger.warn('TriggerExecutor: in-flight limit reached', { triggerId: trigger.id, running: outcome.running, maxInFlight: outcome.limit });
-      return { ...base, executed: false, error: `Not started: ${outcome.running} runs of this trigger are still running (limit ${outcome.limit}). Wait for them to finish or narrow the trigger event.` };
-    case 'refused':
-      logger.warn('TriggerExecutor: action refused by command guard', { triggerId: trigger.id });
-      return { ...base, executed: false, error: `Action refused by command policy: ${outcome.message}` };
+      logger.warn('HookActionExecutor: in-flight limit reached', { hookActionId: trigger.id, running: outcome.running, maxInFlight: outcome.limit });
+      return { ...base, executed: false, error: `Not started: ${outcome.running} runs of this hook action are still running (limit ${outcome.limit}). Wait for them to finish or narrow its event.` };
     case 'stopped':
       return { ...base, executed: false, error: `Not started: ${outcome.message}` };
     case 'failed':
-      logger.warn('TriggerExecutor: failed to spawn action', { triggerId: trigger.id, error: outcome.message });
+      logger.warn('HookActionExecutor: failed to spawn action', { hookActionId: trigger.id, error: outcome.message });
       return { ...base, executed: false, error: outcome.message };
   }
 }

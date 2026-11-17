@@ -1,6 +1,5 @@
 import { assertCrossProcessLockCurrent, tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { freezeArtifactRecord, parseArtifactRecord } from './record-snapshot.js';
-import { createHash } from 'node:crypto';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { chmodSync, closeSync, createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile as writeFileDescriptor } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
@@ -383,7 +382,6 @@ export class ArtifactStore {
   private readonly rootDir: string;
   private readonly storageOwner: ArtifactStorageOwner;
   /** Only actual earlier persisted checksum rows enter this pending set. */
-  private readonly savedChecksumPins = new Map<string, string>();
   private readonly recordFiles = new Map<string, { readonly content: string; readonly metadata: string }>();
   private readonly records = new Map<string, ArtifactRecord>();
   private lastPrunedAt = 0;
@@ -529,12 +527,6 @@ export class ArtifactStore {
     const observation = this.captureOriginal(id), assertCurrent = observation.assertCurrent;
     assertCurrent(); const buffer = await readFile(record.contentPath); assertCurrent();
     if (buffer.byteLength !== record.sizeBytes) throw new Error('Artifact original size changed.');
-    const savedChecksum = this.savedChecksumPins.get(id);
-    if (savedChecksum !== undefined) {
-      // Only an actual saved earlier format's published bytes are verified once.
-      if (createHash('sha256').update(buffer).digest('hex') !== savedChecksum) throw new Error('The saved artifact checksum does not match its original content.');
-      assertCurrent(); this.savedChecksumPins.delete(id);
-    }
     return Object.freeze({ record, buffer, assertCurrent });
   }
 
@@ -758,7 +750,6 @@ export class ArtifactStore {
       mimeType: record.mimeType,
       filename: record.filename,
       sizeBytes: record.sizeBytes,
-      ...(record.sha256 === undefined ? {} : { sha256: record.sha256 }),
       createdAt: record.createdAt,
       acquisitionMode: record.acquisitionMode,
       fetchMode: record.fetchMode,
@@ -785,7 +776,6 @@ export class ArtifactStore {
       mimeType: record.mimeType,
       filename: record.filename,
       sizeBytes: record.sizeBytes,
-      ...(record.sha256 === undefined ? {} : { sha256: record.sha256 }),
       createdAt: record.createdAt,
       ...(typeof record.expiresAt === 'number' ? { expiresAt: record.expiresAt } : {}),
       ...(typeof record.sourceUri === 'string' ? { sourceUri: record.sourceUri } : {}),
@@ -810,9 +800,7 @@ export class ArtifactStore {
         }
         if (parsed.id !== entry.slice(0, -5) || resolve(parsed.contentPath) !== join(this.rootDir, `${parsed.id}.data`)
           || typeof parsed.metadataPath !== 'string' || resolve(parsed.metadataPath) !== metadataPath) throw new Error('Artifact metadata does not own this file pair');
-        if (parsed.sha256 !== undefined && !/^[0-9a-f]{64}$/.test(parsed.sha256)) throw new Error('Saved artifact checksum format is invalid');
         const files = Object.freeze({ content: this.storageOwner.importedStamp(parsed.contentPath), metadata: metadataStamp });
-        if (parsed.sha256 !== undefined) this.savedChecksumPins.set(parsed.id, parsed.sha256);
         nativeApply(nativeMapSet, this.recordFiles, [parsed.id, files]);
         if (typeof parsed.expiresAt === 'number' && parsed.expiresAt <= Date.now()) {
           this.#removeRecordFiles(parsed);
@@ -899,7 +887,7 @@ export class ArtifactStore {
       if (metadataPresent) this.storageOwner.assertImported(record.metadataPath, files.metadata);
       if (contentPresent) { this.storageOwner.assertImported(contentPath, files.content); unlinkSync(contentPath); }
       if (metadataPresent) { this.storageOwner.assertImported(metadataPath, files.metadata); unlinkSync(metadataPath); }
-      nativeApply(nativeMapDelete, owner.records, [record.id]); nativeApply(nativeMapDelete, owner.files, [record.id]); nativeApply(nativeMapDelete, this.savedChecksumPins, [record.id]); return true;
+      nativeApply(nativeMapDelete, owner.records, [record.id]); nativeApply(nativeMapDelete, owner.files, [record.id]); return true;
     } catch (error) {
       logger.warn('[artifacts] failed to prune expired artifact files', {
         artifactId: record.id,

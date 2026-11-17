@@ -66,7 +66,7 @@ export const reconnectFailurePlaybook: Playbook = {
         const unsettled = daemon.transportState === 'reconnecting' || daemon.transportState === 'degraded';
         return {
           passed: !failed && !unsettled,
-          summary: `Daemon connection is ${daemon.transportState}${daemon.reconnectAttempts ? ` after ${daemon.reconnectAttempts} reconnect attempt(s)` : ''}${daemon.lastError ? ` (${daemon.lastError})` : ''}.`,
+          summary: `Daemon connection is ${daemon.transportState}${daemon.lastError ? ` (${daemon.lastError})` : ''}.`,
           severity: failed ? 'error' : unsettled ? 'warning' : 'info',
         };
       }),

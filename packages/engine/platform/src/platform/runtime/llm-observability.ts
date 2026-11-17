@@ -18,6 +18,7 @@ import { endLlmSpan } from './telemetry/spans/index.js';
 import { SpanKind } from './telemetry/types.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { recordProviderCallOutcome } from '../providers/provider-health.js';
 
 /** Structured prompt summary emitted in telemetry events (default: redacted). */
 export interface PromptSummary {
@@ -146,6 +147,7 @@ export async function instrumentedLlmCall<T>(
       endLlmSpan(span, { success: true });
       return { result, durationMs: Date.now() - startedAt, retries: attempt };
     }
+    if (opts?.provider) recordProviderCallOutcome(opts.provider);
     // The provider call has succeeded and been billed. Reading usage out of the
     // response must never turn that into a failure or a second request.
     const durationMs = Date.now() - startedAt;
@@ -181,6 +183,7 @@ export async function instrumentedLlmCall<T>(
     return { result, durationMs, retries: attempt };
   }
 
+  if (opts?.provider) recordProviderCallOutcome(opts.provider, lastError);
   // Record error metric on final failure
   if (opts?.provider !== undefined || opts?.model !== undefined) {
     const labels: Record<string, string> = {};

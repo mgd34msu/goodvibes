@@ -5,16 +5,17 @@ import type { RemoteSupervisorSnapshot } from './remote/supervisor.js';
 import type { DistributedPendingWork, DistributedPeerRecord, DistributedRuntimePairRequest } from './remote/distributed-runtime-types.js';
 
 export interface UiRemoteSnapshot {
+  /** The daemon listener this process hosts, if any. */
   readonly daemon: {
     readonly transportState: string;
     readonly isRunning: boolean;
-    readonly reconnectAttempts: number;
-    readonly runningJobCount: number;
     readonly lastError?: string | undefined;
   };
+  /** Automation runs queued or running in this process. */
+  readonly activeAutomationRuns: number;
   readonly acp: {
     readonly transportState: string;
-    readonly totalMessages: number;
+    readonly totalSpawned: number;
     readonly activeConnections: readonly import('./store/domains/acp.js').AcpConnection[];
   };
   readonly pools: ReturnType<RuntimeServices['remoteRunnerRegistry']['listPools']>;
@@ -47,13 +48,12 @@ export function createRemoteReadModels(runtimeServices: RuntimeServices): UiRemo
         daemon: {
           transportState: state.daemon.transportState,
           isRunning: state.daemon.isRunning,
-          reconnectAttempts: state.daemon.reconnectAttempts,
-          runningJobCount: state.daemon.runningJobCount,
           lastError: state.daemon.lastError,
         },
+        activeAutomationRuns: state.automation.activeRunIds.length,
         acp: {
           transportState: state.acp.managerTransportState,
-          totalMessages: state.acp.totalMessages,
+          totalSpawned: state.acp.totalSpawned,
           activeConnections: projectRecords(state.acp.activeConnectionIds, state.acp.connections),
         },
         pools: runtimeServices.remoteRunnerRegistry.listPools(),

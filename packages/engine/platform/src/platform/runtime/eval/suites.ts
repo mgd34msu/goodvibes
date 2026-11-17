@@ -24,7 +24,7 @@
 
 import type { EvalScenario, EvalRawResult } from './types.js';
 import { createPerfMonitor } from '../perf/index.js';
-import { createInitialSurfacePerfState } from '../store/domains/surface-perf.js';
+import { createInitialSurfacePerfState } from '../perf/surface-perf.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

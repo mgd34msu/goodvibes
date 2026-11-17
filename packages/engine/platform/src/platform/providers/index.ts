@@ -78,6 +78,8 @@ export { ProviderNotFoundError } from './provider-not-found-error.js';
 export { CONTEXT_OVERFLOW_RAW_STOP_REASONS, isContextOverflowSignal } from './stop-reason-maps.js';
 export { MAX_CONTEXT_WINDOW_OVERRIDE, isValidContextWindowOverride } from './context-window-overrides.js';
 export { ProviderRegistry } from './registry.js';
+export { readProviderHealth } from './provider-health.js';
+export type { ProviderStatus, ProviderHealthEntry, CompositeHealthStatus } from './provider-health.js';
 export { AnthropicCompatProvider } from './anthropic-compat.js';
 export {
   AUTO_REGISTER_CATALOG,

@@ -341,41 +341,17 @@ SLO metrics are computed over a rolling window of 200 samples. The permission de
 
 ## State management
 
-### Store domain selectors
+### Store domains
 
-The runtime store partitions state into typed domains. Use the provided selector functions to read domain state. Selectors avoid unnecessary recomputation and enforce the read model boundary.
+The runtime store partitions state into typed domains, each with a writer in `createDomainDispatch` and a `revision`/`lastUpdatedAt`. Read a domain from `store.getState()` directly; there is no selector layer. A fact another owner keeps is read from that owner, not copied into the store: provider health from `ProviderRegistry.health()`, code intelligence from `CodeIntelligence.readiness()`, trace export from `readTraceExportState()`, the execution mode from the `permissions.mode` setting.
 
 ```ts
-import {
-  selectSession,
-  selectTelemetry,
-  selectSystemHealth,
-  selectRunningTasks,
-  selectProviderHealth,
-} from '@goodvibes-jev/engine/platform/platform/runtime/state';
-
-// Read a single domain
-const session = selectSession(state);
-const telemetry = selectTelemetry(state);
-
-// Composite health across all health domains
-const health = selectSystemHealth(state);
-// health.status: 'healthy' | 'degraded' | 'critical' | 'unknown'
-// health.hasCritical: boolean
-// health.hasDegraded: boolean
-// health.domains: Record<HealthDomain, CompositeHealthStatus>
+const state = runtimeStore.getState();
+const turnActive = state.conversation.turnState !== 'idle';
+const pendingTasks = state.tasks.queuedIds.length;
 ```
 
-`selectSystemHealth` composes one health status per tracked subsystem, then
-rolls them up into the overall status with critical outranking degraded.
-
-| Health domain | What it tracks |
-| --- | --- |
-| `providerHealth` | LLM provider availability and failover state |
-| `mcp` | Connected MCP servers |
-| `daemon` | The daemon connection itself |
-| `acp` | The ACP editor-agent bridge |
-| `integrations` | Channel and integration adapters |
+The health read model (`models.health` below) composes the overall status from the provider registry, the MCP and integrations domains, the daemon listener, the ACP connections and session recovery.
 
 ### Read model pattern
 

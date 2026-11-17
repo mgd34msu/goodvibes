@@ -138,15 +138,16 @@ export type ContractRuntimeEventBridgeOptions = Pick<HostRuntimeEventBridgeOptio
   'requestRender' | 'agentManager' | 'contractRunner'>;
 
 /**
- * Feed the gate's events into the runtime store: the permissions domain's
- * last decision, counters and in-flight calls (what `approvals.list` serves)
- * are set only from here. Every product composition calls it once per store.
+ * Feed the gate's decisions into the runtime store: the permissions domain's
+ * last decision and counters (what `approvals.list` serves) are set only from
+ * here, one store write per decided call. The gate's intermediate steps are
+ * not forwarded; nothing reads them. Every product composition calls it once per store.
  */
 export function registerGateRuntimeEvents(
   runtimeBus: RuntimeEventBus,
   domainDispatch: Pick<ReturnType<typeof createDomainDispatch>, 'dispatchGateEvent'>,
 ): () => void {
-  return runtimeBus.onDomain('gate', (env) => {
+  return runtimeBus.on<Extract<GateEvent, { type: 'DECISION_EMITTED' }>>('DECISION_EMITTED', (env) => {
     domainDispatch.dispatchGateEvent(env.payload);
   });
 }
@@ -277,12 +278,14 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
   } = options;
   const unsubs: Array<() => void> = [];
 
+  // The conversation domain describes the foreground conversation; the
+  // envelope's session lets the store ignore other sessions' turns on this bus.
   unsubs.push(runtimeBus.onDomain('turn', (env) => {
-    domainDispatch.dispatchTurnEvent(env.payload);
+    domainDispatch.dispatchTurnEvent(env.payload, env.sessionId);
   }));
   // The store's unfinished-tool-call list, read by the stuck-turn diagnostic, is fed only from here.
   unsubs.push(runtimeBus.onDomain('tools', (env) => {
-    domainDispatch.dispatchToolEvent(env.payload);
+    domainDispatch.dispatchToolEvent(env.payload, env.sessionId);
   }));
   unsubs.push(runtimeBus.onDomain('agents', (env) => {
     domainDispatch.dispatchAgentEvent(env.payload);
@@ -300,13 +303,11 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
     domainDispatch.dispatchTransportEvent(env.payload);
   }));
   unsubs.push(registerGateRuntimeEvents(runtimeBus, domainDispatch));
-  // The MCP registry and plugin manager publish their lifecycle on the bus; the
-  // runtime store (health, read models, recommendations) only learns of it here.
+  // The MCP registry publishes its lifecycle on the bus; the runtime store
+  // (health, read models, recommendations) only learns of it here. Plugin
+  // state is read from the plugin manager itself.
   unsubs.push(runtimeBus.onDomain('mcp', (env) => {
     domainDispatch.dispatchMcpEvent(env.payload);
-  }));
-  unsubs.push(runtimeBus.onDomain('plugins', (env) => {
-    domainDispatch.dispatchPluginEvent(env.payload);
   }));
 
   unsubs.push(runtimeBus.on<Extract<ProviderEvent, { type: 'MODEL_FALLBACK' }>>('MODEL_FALLBACK', ({ payload }) => {

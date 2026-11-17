@@ -5,6 +5,7 @@
  */
 import type { Playbook } from '../types.js';
 import { safeCheck } from '../safe-check.js';
+import { readTraceExportState } from '../../telemetry/api.js';
 
 /** Telemetry export recovery playbook. */
 export const exportRecoveryPlaybook: Playbook = {
@@ -21,12 +22,14 @@ export const exportRecoveryPlaybook: Playbook = {
       id: 'export.otlp-endpoint-reachable',
       label: 'Trace export',
       description: 'Whether trace export is on in this app, and where it sends.',
-      run: (ctx) => safeCheck(() => {
-        const trace = ctx.store.getState().telemetry.traceContext;
-        const active = trace?.exportActive === true;
+      run: () => safeCheck(() => {
+        const trace = readTraceExportState();
+        const active = trace.endpoints.length > 0;
         return {
           passed: active,
-          summary: active ? `Trace export is on${trace?.endpoint ? `, sending to ${trace.endpoint}` : ''}.` : 'Trace export is off in this app.',
+          summary: active
+            ? `Trace export is on, sending to ${trace.endpoints.join(', ')}.`
+            : trace.recording ? 'Spans are recorded in this app but not exported: set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT (or OTEL_EXPORTER_OTLP_ENDPOINT).' : 'Trace export is off in this app.',
           severity: active ? 'info' : 'warning',
         };
       }),

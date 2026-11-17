@@ -138,7 +138,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         if (activeConnections.length > 0) {
           lines.push('  connections:');
           for (const connection of activeConnections.slice(0, 12)) {
-            lines.push(`    ${connection.agentId}  ${connection.transportState}  msgs=${connection.messageCount} errs=${connection.errorCount}  ${connection.label}`);
+            lines.push(`    ${connection.agentId}  ${connection.transportState}  errs=${connection.errorCount}  ${connection.label}`);
           }
         }
         if (contracts.length > 0) {
@@ -268,11 +268,9 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `Remote connection ${connection.agentId}`,
           `  label: ${connection.label}`,
           `  transport: ${connection.transportState}`,
-          `  completing: ${connection.completing ? 'yes' : 'no'}`,
           `  connectedAt: ${connection.connectedAt ? new Date(connection.connectedAt).toISOString() : 'n/a'}`,
-          `  messageCount: ${connection.messageCount}`,
           `  errorCount: ${connection.errorCount}`,
-          `  taskId: ${connection.taskId ?? 'n/a'}`,
+          `  taskId: ${contract?.taskId ?? 'n/a'}`,
           `  lastError: ${connection.lastError ?? 'n/a'}`,
           `  contract: ${contract?.id ?? 'n/a'}`,
           `  pool: ${contract?.poolId ?? 'n/a'}`,

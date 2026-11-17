@@ -162,6 +162,15 @@ export class RuntimeTracer {
     return this.config.enabled;
   }
 
+  /** Where recorded spans are sent: each exporter that names an endpoint. */
+  exportEndpoints(): string[] {
+    if (!this.config.enabled) return [];
+    return this.config.exporters.flatMap((exporter) => {
+      const endpoint = (exporter as { readonly endpoint?: unknown }).endpoint;
+      return typeof endpoint === 'string' ? [endpoint] : [];
+    });
+  }
+
   /**
    * Start a new span.
    *

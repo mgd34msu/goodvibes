@@ -17,6 +17,7 @@ import type {
   SpanAttributes,
 } from './types.js';
 import type {
+  SessionMetrics,
   TelemetryAggregates,
   TelemetryFilter,
   TelemetryListResponse,
@@ -439,6 +440,7 @@ export function buildOtlpLogDocumentFromRecords(records: readonly TelemetryRecor
 export function buildOtlpMetricDocumentFromState(
   state: ReturnType<RuntimeStore['getState']>,
   aggregates: TelemetryAggregates,
+  sessionMetrics: Pick<SessionMetrics, 'inputTokens' | 'outputTokens'>,
 ): Record<string, unknown> {
   const now = Date.now();
   const nowUnixNano = String(now * NANOSECONDS_PER_MILLISECOND);
@@ -534,7 +536,7 @@ export function buildOtlpMetricDocumentFromState(
     },
     {
       name: 'goodvibes.session.tokens',
-      description: 'Session token counters tracked in the telemetry domain.',
+      description: 'Tokens the foreground session has used, by direction.',
       unit: '1',
       sum: {
         aggregationTemporality: AGGREGATION_TEMPORALITY_CUMULATIVE,
@@ -543,13 +545,13 @@ export function buildOtlpMetricDocumentFromState(
           {
             startTimeUnixNano: startUnixNano,
             timeUnixNano: nowUnixNano,
-            asInt: String(state.telemetry.sessionMetrics.inputTokens),
+            asInt: String(sessionMetrics.inputTokens),
             attributes: toOtlpAttributes({ direction: 'input' }),
           },
           {
             startTimeUnixNano: startUnixNano,
             timeUnixNano: nowUnixNano,
-            asInt: String(state.telemetry.sessionMetrics.outputTokens),
+            asInt: String(sessionMetrics.outputTokens),
             attributes: toOtlpAttributes({ direction: 'output' }),
           },
         ],

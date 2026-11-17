@@ -16,16 +16,6 @@ export type AgentLifecycleState =
   | 'failed'
   | 'cancelled';
 
-/** Classification of the agent's role. */
-export type AgentRole =
-  | 'orchestrator'
-  | 'engineer'
-  | 'reviewer'
-  | 'integrator'
-  | 'gatekeeper'
-  | 'subagent'
-  | 'background';
-
 /** The contract an agent belongs to, for agent grouping. */
 export interface AgentContractRef {
   /** ID of the contract this agent belongs to. */
@@ -44,22 +34,12 @@ export interface RuntimeAgent {
   id: string;
   /** Human-readable label for display. */
   label: string;
-  /** Agent role classification. */
-  role: AgentRole;
   /** Current lifecycle state. */
   status: AgentLifecycleState;
-
-  // ── Model ────────────────────────────────────────────────────────────────
-  /** Provider the agent is running on. */
-  providerId: string;
-  /** Model ID the agent is using. */
-  modelId: string;
 
   // ── Hierarchy ────────────────────────────────────────────────────────────
   /** ID of the parent agent that spawned this one (undefined = root). */
   parentAgentId?: string | undefined;
-  /** IDs of agents spawned by this agent. */
-  childAgentIds: string[];
 
   // ── Contract membership ──────────────────────────────────────────────────
   /** Contract reference if this agent belongs to a contract. */
@@ -69,11 +49,7 @@ export interface RuntimeAgent {
   /** Task ID this agent is executing (from tasks domain). */
   taskId?: string | undefined;
 
-  // ── Session ──────────────────────────────────────────────────────────────
-  /** Path to the agent's session file. */
-  sessionFile?: string | undefined;
-  /** Number of turns completed by this agent. */
-  turnCount: number;
+  // ── Work ─────────────────────────────────────────────────────────────────
   /** Number of tool calls made by this agent. */
   toolCallCount: number;
   /**
@@ -100,10 +76,6 @@ export interface RuntimeAgent {
   result?: unknown | undefined;
   /** Error message if status === 'failed'. */
   error?: string | undefined;
-
-  // ── Correlation ──────────────────────────────────────────────────────────
-  /** Correlation ID for tracing across agent boundaries. */
-  correlationId?: string | undefined;
 }
 
 /**

@@ -185,6 +185,29 @@ export function uriToPath(uri: string): string {
 type ShellPaths = Pick<ShellPathService, 'workingDirectory' | 'homeDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
 
 /** A hold on a workspace's one code-intelligence facade. */
+/** A diagnostic a running language server published, located by absolute path and zero-based position. */
+export interface CodeIntelligenceDiagnostic {
+  readonly filePath: string;
+  readonly line: number;
+  readonly column: number;
+  readonly severity: 'error' | 'warning' | 'info' | 'hint';
+  readonly message: string;
+  readonly source?: string | undefined;
+}
+
+/**
+ * What code intelligence can do in this process now, read from the facades the
+ * held workspaces share: which language servers are configured and in what
+ * state, and the diagnostics the running ones published.
+ */
+export interface CodeIntelligenceReadiness {
+  /** Language id to its server's state: running, failed to start, or idle (starts on the first lookup). */
+  readonly languageServers: ReadonlyMap<string, 'running' | 'failed' | 'idle'>;
+  readonly diagnostics: ReadonlyMap<string, readonly CodeIntelligenceDiagnostic[]>;
+}
+
+const DIAGNOSTIC_SEVERITY = ['error', 'error', 'warning', 'info', 'hint'] as const;
+
 export interface WorkspaceCodeIntelligenceHold {
   readonly intelligence: CodeIntelligence;
   /** Ends this hold; the last one shuts the workspace's language servers down. A second call does nothing. */
@@ -240,6 +263,46 @@ export class CodeIntelligence {
       if (inside && (!best || root.length > best.workingDirectory.length)) best = entry;
     }
     return best?.intelligence ?? (processFacade ??= new CodeIntelligence({}));
+  }
+
+  /** The readiness of every held workspace facade together; no facade is created and no server started. */
+  static readiness(): CodeIntelligenceReadiness {
+    const languageServers = new Map<string, 'running' | 'failed' | 'idle'>();
+    const diagnostics = new Map<string, readonly CodeIntelligenceDiagnostic[]>();
+    for (const entry of workspaceFacades.values()) {
+      const own = entry.intelligence.readiness();
+      for (const [langId, state] of own.languageServers) {
+        const known = languageServers.get(langId);
+        // Running anywhere wins, then idle (it can still start), then failed.
+        if (known === 'running' || (known === 'idle' && state === 'failed')) continue;
+        languageServers.set(langId, state);
+      }
+      for (const [filePath, list] of own.diagnostics) diagnostics.set(filePath, list);
+    }
+    return { languageServers, diagnostics };
+  }
+
+  /** This facade's readiness: its configured servers' states and their published diagnostics. */
+  readiness(): CodeIntelligenceReadiness {
+    const languageServers = new Map<string, 'running' | 'failed' | 'idle'>();
+    for (const [langId, cfg] of this.languages.configs) if (cfg.lsp) languageServers.set(langId, 'idle');
+    const diagnostics = new Map<string, readonly CodeIntelligenceDiagnostic[]>();
+    if (this.lsp) {
+      for (const [langId, state] of this.lsp.languageStates()) languageServers.set(langId, state);
+      for (const [uri, list] of this.lsp.publishedDiagnostics()) {
+        let filePath: string;
+        try { filePath = uriToPath(uri); } catch { continue; }
+        diagnostics.set(filePath, list.map((diagnostic) => ({
+          filePath,
+          line: diagnostic.range.start.line,
+          column: diagnostic.range.start.character,
+          severity: DIAGNOSTIC_SEVERITY[diagnostic.severity ?? 1],
+          message: diagnostic.message,
+          ...(diagnostic.source !== undefined ? { source: diagnostic.source } : {}),
+        })));
+      }
+    }
+    return { languageServers, diagnostics };
   }
 
   private treeSitter: TreeSitterService;

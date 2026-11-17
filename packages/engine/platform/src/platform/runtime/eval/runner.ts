@@ -160,7 +160,7 @@ export class EvalRunner {
     // evaluation against an empty snapshot to at least populate the field.
     if (!raw.perfReport) {
       const monitor = createPerfMonitor();
-      const { createInitialSurfacePerfState } = await import('../store/domains/surface-perf.js');
+      const { createInitialSurfacePerfState } = await import('../perf/surface-perf.js');
       raw = {
         ...raw,
         perfReport: monitor.evaluate({

@@ -28,6 +28,8 @@ import { inspectInboundTls, inspectOutboundTls } from '../network/index.js';
 import type { ManagedRollbackRecord, SettingsConflictRecord, StagedManagedBundle } from '../settings/control-plane-store.js';
 import type { FeatureFlagManager } from '../feature-flags/index.js';
 import { getSecuritySettingsReport, type SecuritySettingReport } from '../security-settings.js';
+import { readIntelligenceSnapshot } from '../ui-read-models-observability-system.js';
+import { effectivePermissionMode } from '../../gate/presets.js';
 
 /**
  * The HTTP routes the daemon serves, read from the method catalog that serves
@@ -334,11 +336,12 @@ export class IntegrationHelperService {
       // The gate reports a request only after its decision, so the store flag
       // never reads true while a prompt is open; the broker holds it until decided.
       awaitingDecision: countUndecidedApprovals(this.context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER)) > 0,
-      mode: state.permissions.mode,
+      // The setting is the one owner of the mode, read the way the status line reads it.
+      mode: effectivePermissionMode(this.context.configManager?.get('permissions.mode'), this.context.configManager?.get('behavior.autoApprove') === true),
       lastDecision: state.permissions.lastDecision,
       approvalCount: state.permissions.approvalCount,
       denialCount: state.permissions.denialCount,
-      cachedChecks: state.permissions.cachedChecks,
+      promptCount: state.permissions.promptCount,
       totalChecks: state.permissions.totalChecks,
       approvals,
     };
@@ -385,8 +388,8 @@ export class IntegrationHelperService {
       daemon: {
         transportState: state.daemon.transportState,
         isRunning: state.daemon.isRunning,
-        reconnectAttempts: state.daemon.reconnectAttempts,
-        runningJobCount: state.daemon.runningJobCount,
+        // Automation runs queued or running in this process: the live count of jobs at work.
+        runningJobCount: state.automation.activeRunIds.length,
         ...(state.daemon.lastError ? { lastError: state.daemon.lastError } : {}),
       },
       acp: {
@@ -457,9 +460,7 @@ export class IntegrationHelperService {
   getHealthSnapshot(): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
     const degradedDomains: string[] = [];
-    const providerProblems = [...state.providerHealth.providers.values()]
-      .filter((provider) => provider.status !== 'healthy' && provider.status !== 'unknown')
-      .map((provider) => provider.providerId);
+    const providerProblems = [...this.context.providerRegistry.health().keys()];
     const degradedMcpServers = [...state.mcp.servers.values()]
       .filter((server) => server.status === 'degraded' || server.status === 'auth_required' || server.schemaFreshness === 'quarantined')
       .map((server) => server.name);
@@ -558,16 +559,14 @@ export class IntegrationHelperService {
   }
 
   getIntelligenceSnapshot(): Record<string, unknown> {
-    const intelligence = this.context.runtimeStore.getState().intelligence;
+    const intelligence = readIntelligenceSnapshot();
     return {
       diagnosticsStatus: intelligence.diagnosticsStatus,
       symbolSearchStatus: intelligence.symbolSearchStatus,
-      completionsStatus: intelligence.completionsStatus,
       hoverStatus: intelligence.hoverStatus,
+      languageServers: intelligence.languageServers,
       errorCount: intelligence.errorCount,
       warningCount: intelligence.warningCount,
-      totalRequests: intelligence.totalRequests,
-      avgLatencyMs: intelligence.avgLatencyMs,
     };
   }
 

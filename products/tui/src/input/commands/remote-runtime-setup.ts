@@ -23,7 +23,6 @@ function acpAgentCommandExport(command: readonly string[]): string {
 type ActiveConnectionLike = {
   agentId: string;
   transportState: string;
-  messageCount: number;
   errorCount: number;
   label: string;
 };

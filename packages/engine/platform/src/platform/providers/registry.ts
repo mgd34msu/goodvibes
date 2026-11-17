@@ -16,6 +16,7 @@ import { getConfiguredApiKeys, getConfiguredModelId, resolveApiKeys } from '../c
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitProvidersChanged, emitProviderWarning, emitModelChanged } from '../runtime/emitters/index.js';
 import { loadCustomProviders, watchCustomProviders } from './custom-loader.js';
+import { clearProviderHealth, readProviderHealth, type ProviderHealthEntry } from './provider-health.js';
 import {
   buildSyntheticCanonicalModels, getCatalogCachePath, getCatalogModelDefinitionsFrom, getCatalogTmpPath, modelCapabilityFactsFromCatalog,
   getCostFromPricingCatalog, getSyntheticBackendModelIds, getSyntheticModelDefinitions, getSyntheticModelInfo,
@@ -339,6 +340,8 @@ export class ProviderRegistry {
     assertProviderCredentialAuthority(provider);
     const replaced = this.providers.get(provider.name);
     this.providers.set(provider.name, provider);
+    // A new registration (credentials, endpoint) is not judged by the old one's failures.
+    if (replaced !== provider) clearProviderHealth(provider.name);
     recordProviderAdapterKind(provider);
     this.providerNativeModels = options.nativeModels
       ? applyProviderNativeModelBaseline(this.providerNativeModels, provider)
@@ -1140,6 +1143,23 @@ export class ProviderRegistry {
   modelDiscoverySettled(): Promise<void> { return this.startupDiscovery.settled(); }
   /** Providers whose model listing failed in the startup sweep, with the failure (StartupModelDiscovery). */
   unreachableAtStartup(): ReadonlyMap<string, string> { return this.startupDiscovery.unreachable(); }
+
+  /**
+   * Every registered provider that cannot serve, or is limited, now: what its
+   * calls this session showed (provider-health.ts) and, for one not called
+   * since, its failure in the startup sweep. A provider absent is healthy or
+   * not yet known.
+   */
+  health(): ReadonlyMap<string, ProviderHealthEntry> {
+    const health = new Map<string, ProviderHealthEntry>();
+    for (const [providerId, reason] of this.unreachableAtStartup()) {
+      if (this.providers.has(providerId)) health.set(providerId, { status: 'unavailable', since: 0, reason });
+    }
+    for (const [providerId, entry] of readProviderHealth()) {
+      if (this.providers.has(providerId)) health.set(providerId, entry);
+    }
+    return health;
+  }
 
   async refreshCatalog(options: ProviderCatalogOptions = {}): Promise<void> {
     await refreshProviderCatalog(this._catalogLifecycleCtx(options.contextWindowEnrichment ?? 'background'));

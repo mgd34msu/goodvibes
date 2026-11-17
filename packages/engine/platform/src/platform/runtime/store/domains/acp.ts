@@ -1,84 +1,54 @@
 /**
- * ACP domain state, tracks the Agent Client Protocol transport layer,
- * active subagent connections, and inter-session ACP sessions.
+ * ACP domain state: the subagent connections this process runs over the
+ * Agent Client Protocol, kept from the transport events each connection
+ * announces (platform/acp/connection.ts).
  */
 
 import type { DaemonTransportState } from './daemon.js';
 
-/** ACP transport state reuses the daemon transport lifecycle. */
+/** The ACP transport uses the same lifecycle states as the daemon listener. */
 export type AcpTransportState = DaemonTransportState;
 
-/** An active ACP subagent connection. */
+/** One live (or failed, while others are live) ACP subagent connection. */
 export interface AcpConnection {
-  /** Subagent ID. */
+  /** The subagent's id, the same as its agent record's. */
   agentId: string;
-  /** Human-readable label for this connection. */
+  /** The task the subagent was spawned with. */
   label: string;
-  /** ACP transport state for this specific connection. */
   transportState: AcpTransportState;
-  /** Epoch ms when the connection was established. */
+  /** Epoch ms the connection last reached `connected`. */
   connectedAt?: number | undefined;
-  /** Whether the subagent has completed and the connection is being torn down. */
-  completing: boolean;
-  /** Number of messages exchanged on this connection. */
-  messageCount: number;
-  /** Number of protocol errors on this connection. */
+  /** Terminal failures this connection reported. */
   errorCount: number;
-  /** Last protocol error message. */
   lastError?: string | undefined;
-  /** Task associated with this ACP connection. */
-  taskId?: string | undefined;
 }
 
-/**
- * AcpDomainState, ACP protocol transport and connection state.
- */
 export interface AcpDomainState {
   // ── Domain metadata ────────────────────────────────────────────────────────
-  /** Monotonic revision counter; increments on every mutation. */
   revision: number;
-  /** Timestamp of last mutation (Date.now()). */
   lastUpdatedAt: number;
-  /** Subsystem that triggered the last mutation. */
   source: string;
 
   // ── Transport ─────────────────────────────────────────────────────────────
-  /**
-   * Aggregate ACP transport state, derived from {@link transportStates}: a
-   * failed connection beside live ones reads `degraded`, failures alone read
-   * `terminal_failure`, and live connections read `syncing` or `connected`.
-   */
+  /** One state for all connections: failures are reported beside live ones. */
   managerTransportState: AcpTransportState;
-  /**
-   * Transport state per subagent connection, keyed by transport id. A
-   * connection leaves this map when it disconnects; failed connections stay
-   * until no live connection remains, so one finishing agent cannot hide
-   * another's failure or overwrite a running agent's state.
-   */
+  /** Each connection's state, keyed by transport id (`acp:<agentId>`). */
   transportStates: Map<string, AcpTransportState>;
-  /** Whether the ACP subsystem has been initialized. */
   initialized: boolean;
 
-  // ── Active connections ─────────────────────────────────────────────────────
-  /** All ACP connections keyed by agentId. */
+  // ── Connections ───────────────────────────────────────────────────────────
+  /** The connections still open, and failed ones while another is live, keyed by agent id. */
   connections: Map<string, AcpConnection>;
-  /** IDs of active (non-completing) connections. */
+  /** Connections that have not failed. */
   activeConnectionIds: string[];
 
   // ── Statistics ─────────────────────────────────────────────────────────────
-  /** Total subagents spawned via ACP this session. */
+  /** Connections started this session. */
   totalSpawned: number;
-  /** Total ACP connections that completed successfully. */
-  totalCompleted: number;
-  /** Total ACP connections that failed. */
+  /** Connections that ended in a terminal failure this session. */
   totalFailed: number;
-  /** Total messages exchanged across all connections. */
-  totalMessages: number;
 }
 
-/**
- * Returns the default initial state for the ACP domain.
- */
 export function createInitialAcpState(): AcpDomainState {
   return {
     revision: 0,
@@ -90,8 +60,6 @@ export function createInitialAcpState(): AcpDomainState {
     connections: new Map(),
     activeConnectionIds: [],
     totalSpawned: 0,
-    totalCompleted: 0,
     totalFailed: 0,
-    totalMessages: 0,
   };
 }

@@ -1,6 +1,6 @@
 /**
- * Permissions domain state, tracks the permission mode, session approvals,
- * and the most recent permission decision with full audit trail.
+ * Permissions domain state: the gate's decisions this session, with the most
+ * recent one in full.
  */
 
 import type {
@@ -15,8 +15,8 @@ import type { GatePresetName } from '../../../gate/presets.js';
 export type PermissionMode = GatePresetName;
 
 /**
- * Where a call is in the gate, as its gate events report it (see the reducer's
- * permissionMachineStateForEvent). The operator contract's schema is derived from this list.
+ * Where a call is in the gate. A recorded decision is always at
+ * `decision_emitted`; the operator contract's schema is derived from this list.
  */
 export const PERMISSION_DECISION_MACHINE_STATES = [
   'check_boundary',
@@ -70,7 +70,9 @@ export interface PermissionDecision {
 }
 
 /**
- * PermissionDomainState, permission configuration and decision state.
+ * PermissionDomainState, the gate's decisions this session. The execution
+ * mode is not kept here: it is the `permissions.mode` setting, read where it
+ * is shown. Pending owner asks live in the approval broker.
  */
 export interface PermissionDomainState {
   // ── Domain metadata ────────────────────────────────────────────────────────
@@ -81,47 +83,17 @@ export interface PermissionDomainState {
   /** Subsystem that triggered the last mutation. */
   source: string;
 
-  // ── Mode ───────────────────────────────────────────────────────────────────
-  /** Current `permissions.mode` setting value. */
-  mode: PermissionMode;
-  /** The canonical execution mode, or the separate planning posture. */
-  preset: GatePresetName;
-  /**
-   * Set while the gate reports a request without a decision. Gate events are
-   * emitted after the permission check resolves, so this is not a live
-   * "prompt open" signal; read pending approvals from the approval broker
-   * (`listApprovals()` entries that are `pending` or `claimed`) for that.
-   */
-  awaitingDecision: boolean;
-  /**
-   * Calls the gate has reported on without yet emitting their decision. Parallel
-   * tool calls interleave their gate events, so `awaitingDecision` is derived
-   * from this list rather than from whichever event came last.
-   */
-  inFlightCallIds?: readonly string[] | undefined;
-  /** Current state of the decision state machine (while a decision is in flight). */
-  decisionMachineState?: PermissionDecisionMachineState | undefined;
-
-  // ── Session approvals ──────────────────────────────────────────────────────
-  /**
-   * Per-session tool approval cache.
-   * Key format: "<toolName>:<argsHash>" → boolean (approved/denied).
-   */
-  sessionApprovals: Map<string, boolean>;
-  /** Number of approvals granted this session. */
+  // ── Decisions ──────────────────────────────────────────────────────────────
+  /** Calls the gate approved this session. */
   approvalCount: number;
-  /** Number of denials issued this session. */
+  /** Calls the gate denied this session. */
   denialCount: number;
-
-  // ── Last decision ──────────────────────────────────────────────────────────
+  /** Decisions the owner answered (source `user_prompt`). */
+  promptCount: number;
+  /** Every decision the gate emitted this session. */
+  totalChecks: number;
   /** The most recent permission decision record. */
   lastDecision?: PermissionDecision | undefined;
-
-  // ── Statistics ─────────────────────────────────────────────────────────────
-  /** Total permission checks performed this session. */
-  totalChecks: number;
-  /** Total checks that were served from session cache. */
-  cachedChecks: number;
 }
 
 /**
@@ -132,16 +104,10 @@ export function createInitialPermissionsState(): PermissionDomainState {
     revision: 0,
     lastUpdatedAt: 0,
     source: 'init',
-    mode: 'ask-me',
-    preset: 'ask-me',
-    awaitingDecision: false,
-    inFlightCallIds: [],
-    decisionMachineState: undefined,
-    sessionApprovals: new Map(),
     approvalCount: 0,
     denialCount: 0,
-    lastDecision: undefined,
+    promptCount: 0,
     totalChecks: 0,
-    cachedChecks: 0,
+    lastDecision: undefined,
   };
 }

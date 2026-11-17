@@ -22,7 +22,7 @@ import { NONE, type Candidate, type JsonValue, type Selection } from '@goodvibes
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { ModelDefinition } from '../providers/registry-types.js';
 import type { ResolvedModelPricing } from '../providers/model-pricing.js';
-import type { ProviderStatus } from '../runtime/store/domains/provider-health.js';
+import type { ProviderStatus } from '../providers/provider-health.js';
 import { modelChoice } from './batteries/model.js';
 import { modelFactsState, type ModelFacts, type ModelTierStore } from './model-tiers.js';
 import { CHOICE_SHORTLIST, FALLBACK_ROUTES, TIER_READ_ROUNDS, TIER_READ_SHORTLIST } from './policy.js';

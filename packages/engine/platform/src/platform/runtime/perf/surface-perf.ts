@@ -1,6 +1,6 @@
 /**
- * Surface performance domain state, tracks render performance,
- * frame rates, and input responsiveness metrics across host UIs.
+ * Surface performance input to the perf monitor: render performance, frame
+ * rates and input responsiveness of a host UI, as a caller measured them.
  */
 
 /** Render budget status. */

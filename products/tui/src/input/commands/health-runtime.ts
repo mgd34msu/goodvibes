@@ -154,19 +154,16 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
         const issues: string[] = [];
         if (intelligence.diagnosticsStatus !== 'ready') issues.push(`diagnostics=${intelligence.diagnosticsStatus}`);
         if (intelligence.symbolSearchStatus !== 'ready') issues.push(`symbols=${intelligence.symbolSearchStatus}`);
-        if (intelligence.completionsStatus !== 'ready') issues.push(`completions=${intelligence.completionsStatus}`);
         if (intelligence.hoverStatus !== 'ready') issues.push(`hover=${intelligence.hoverStatus}`);
         ctx.print(
           [
             'Health Review: Intelligence',
             `  diagnostics: ${intelligence.diagnosticsStatus}`,
             `  symbols: ${intelligence.symbolSearchStatus}`,
-            `  completions: ${intelligence.completionsStatus}`,
             `  hover: ${intelligence.hoverStatus}`,
+            `  language servers: ${intelligence.languageServers.length > 0 ? intelligence.languageServers.map((server) => `${server.language}=${server.state}`).join(', ') : 'none configured'}`,
             `  errors: ${intelligence.errorCount}`,
             `  warnings: ${intelligence.warningCount}`,
-            `  requests: ${intelligence.totalRequests}`,
-            `  avg latency: ${Math.round(intelligence.avgLatencyMs)}ms`,
             ...(issues.length > 0 ? issues.map((issue) => `  issue: ${issue}`) : ['  no active intelligence readiness issues detected']),
             '  next: /intelligence review',
             '  next: /setup review',
@@ -207,8 +204,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
             `  servers: ${mcp.servers.length}`,
             `  connected: ${mcp.connectedServerNames.length}`,
             `  tools: ${mcp.availableToolCount}`,
-            `  total calls: ${mcp.totalCalls}`,
-            `  total errors: ${mcp.totalErrors}`,
+            `  connection failures: ${mcp.totalErrors}`,
             ...(issues.length > 0 ? issues.map((issue) => `  issue: ${issue}`) : ['  no active MCP lifecycle issues detected']),
             '  next: /mcp review',
             '  next: /mcp auth-review',

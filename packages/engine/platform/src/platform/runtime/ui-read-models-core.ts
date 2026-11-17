@@ -96,9 +96,7 @@ export function createCoreReadModels(
           // The gate reports its request only after the decision, so the
           // store flag never reads true while a prompt is open; the broker
           // holds the request for as long as it is undecided.
-          pendingApproval: approvalBroker
-            ? countUndecidedApprovals(approvalBroker) > 0
-            : state.permissions.awaitingDecision,
+          pendingApproval: approvalBroker ? countUndecidedApprovals(approvalBroker) > 0 : false,
           denialCount: state.permissions.denialCount,
         };
       },

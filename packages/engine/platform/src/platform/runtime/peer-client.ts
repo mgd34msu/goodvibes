@@ -55,7 +55,8 @@ export interface PeerClientRunnersSnapshot {
 
 export interface PeerClientAcpSnapshot {
   readonly transportState: string;
-  readonly totalMessages: number;
+  /** Connections started this session. */
+  readonly totalSpawned: number;
   readonly activeConnections: readonly AcpConnection[];
 }
 
@@ -210,7 +211,7 @@ function buildAcpSnapshot(store: RuntimeStore): PeerClientAcpSnapshot {
   const state = store.getState().acp;
   return {
     transportState: state.managerTransportState,
-    totalMessages: state.totalMessages,
+    totalSpawned: state.totalSpawned,
     activeConnections: state.activeConnectionIds
       .map((id) => state.connections.get(id))
       .filter((connection): connection is AcpConnection => connection !== undefined),

@@ -24,6 +24,8 @@ export type {
 export { DEFAULT_BUDGETS } from './budgets.js';
 export { PerfMonitor } from './monitor.js';
 export type { PerfSnapshot } from './monitor.js';
+export { createInitialSurfacePerfState } from './surface-perf.js';
+export type { SurfacePerfDomainState, RenderBudgetStatus, RenderCycleRecord, InputLatencySample } from './surface-perf.js';
 export { formatReport, exitCode } from './reporter.js';
 export { SloCollector, SLO_METRICS } from './slo-collector.js';
 

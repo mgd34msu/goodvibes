@@ -624,13 +624,14 @@ export const HEALTH_SNAPSHOT_SCHEMA = objectSchema({
 export const INTELLIGENCE_SNAPSHOT_SCHEMA = objectSchema({
   diagnosticsStatus: STRING_SCHEMA,
   symbolSearchStatus: STRING_SCHEMA,
-  completionsStatus: STRING_SCHEMA,
   hoverStatus: STRING_SCHEMA,
+  languageServers: arraySchema(objectSchema({
+    language: STRING_SCHEMA,
+    state: STRING_SCHEMA,
+  }, ['language', 'state'])),
   errorCount: NUMBER_SCHEMA,
   warningCount: NUMBER_SCHEMA,
-  totalRequests: NUMBER_SCHEMA,
-  avgLatencyMs: NUMBER_SCHEMA,
-}, ['diagnosticsStatus', 'symbolSearchStatus', 'completionsStatus', 'hoverStatus', 'errorCount', 'warningCount', 'totalRequests', 'avgLatencyMs']);
+}, ['diagnosticsStatus', 'symbolSearchStatus', 'hoverStatus', 'languageServers', 'errorCount', 'warningCount']);
 
 const MEMORY_EMBEDDING_PROVIDER_STATUS_SCHEMA = objectSchema({
   id: STRING_SCHEMA,

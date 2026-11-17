@@ -10,11 +10,9 @@ import type { StoreApi } from 'zustand';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { ToolEvent } from '../../../events/tools.js';
 import type { GateEvent } from '../../../events/gate.js';
-import type { TaskEvent } from '../../../events/tasks.js';
 import type { AgentEvent } from '../../../events/agents.js';
 import type { ContractEvent } from '../../../events/contract.js';
 import type { CommunicationEvent } from '../../../events/communication.js';
-import type { PluginEvent } from '../../../events/plugins.js';
 import type { McpEvent } from '../../../events/mcp.js';
 import type { TransportEvent } from '../../../events/transport.js';
 import type { CompactionEvent } from '../../../events/compaction.js';
@@ -25,13 +23,10 @@ import type {
   TaskLifecycleState,
   RuntimeTask,
   AgentDomainState,
-  AgentLifecycleState,
-  RuntimeAgent,
   PermissionDomainState,
   PermissionDecision,
   ContractDomainState,
   CommunicationDomainState,
-  PluginDomainState,
   McpDomainState,
   AcpDomainState,
   DaemonDomainState,
@@ -59,7 +54,6 @@ import type { RuntimeState } from './state.js';
 import {
   patchControlPlaneDomain,
   syncSessionStatePatch,
-  transitionAgentDomainRecord,
   transitionTaskDomainRecord,
   updateAgentState,
   updateAutomationDomainFromJob,
@@ -73,14 +67,12 @@ import {
   updateMcpState,
   updateContractsState,
   updatePermissionState,
-  updatePluginState,
   updateRouteFailureState,
   updateRoutesDomainFromBinding,
   removeRoutesDomainBinding,
   updateSessionState,
   updateSurfaceDomainFromRecord,
   updateTaskDomainFromRecord,
-  updateTaskState,
   updateTransportState,
   updateWatcherDomainFromRecord,
   removeWatcherDomainRecord,
@@ -97,17 +89,20 @@ function mutateRuntimeStore(store: RuntimeStore, updater: (state: RuntimeState) 
 }
 
 export interface DomainDispatch {
-  dispatchTurnEvent(event: TurnEvent): void;
-  /** Forwarded from the `tools` bus domain by the host event bridge; it feeds `conversation.activeToolCalls`. */
-  dispatchToolEvent(event: ToolEvent): void;
+  /**
+   * The conversation domain describes the foreground conversation only (one
+   * turn at a time). An event whose envelope names another session (a hosted
+   * or shared session on the same bus) is ignored; with no `sessionId`, or
+   * before the foreground session is known, the event is applied.
+   */
+  dispatchTurnEvent(event: TurnEvent, sessionId?: string): void;
+  /** Forwarded from the `tools` bus domain by the host event bridge; it feeds `conversation.activeToolCalls`. Filtered like {@link dispatchTurnEvent}. */
+  dispatchToolEvent(event: ToolEvent, sessionId?: string): void;
+  /** Forwarded for DECISION_EMITTED only (registerGateRuntimeEvents); other gate events change nothing. */
   dispatchGateEvent(event: GateEvent): void;
-  /** @deprecated No production host calls this; the task domain is driven by `syncRuntimeTask`/`transitionRuntimeTask`. */
-  dispatchTaskEvent(event: TaskEvent): void;
   dispatchAgentEvent(event: AgentEvent): void;
   dispatchContractEvent(event: ContractEvent): void;
   dispatchCommunicationEvent(event: CommunicationEvent): void;
-  /** Forwarded from the `plugins` bus domain by the host event bridge. */
-  dispatchPluginEvent(event: PluginEvent): void;
   /** Forwarded from the `mcp` bus domain by the host event bridge; the MCP domain, and MCP health, are driven from it. */
   dispatchMcpEvent(event: McpEvent): void;
   dispatchTransportEvent(event: TransportEvent): void;
@@ -122,12 +117,6 @@ export interface DomainDispatch {
   ): void;
   /** True when the task exists and its status allows an explicit retry (`canRetry`). */
   canRetryRuntimeTask?(taskId: string): boolean;
-  transitionRuntimeAgent(
-    agentId: string,
-    status: AgentLifecycleState,
-    patch?: Partial<RuntimeAgent>,
-    source?: string,
-  ): void;
   syncIntegration(record: IntegrationRecord, source?: string): void;
   /** The job's source comes with it; sources are kept for the jobs and runs the mirror retains. */
   syncAutomationJob(record: AutomationJob, source?: string): void;
@@ -148,15 +137,23 @@ export interface DomainDispatch {
   removeWatcher(watcherId: string, source?: string): void;
 }
 
+/** False for an event of a session other than the foreground conversation's (one string compare per event). */
+function isForegroundSession(store: RuntimeStore, sessionId: string | undefined): boolean {
+  const foreground = store.getState().session.conversationSessionId;
+  return !sessionId || !foreground || sessionId === foreground;
+}
+
 export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
   return {
-    dispatchTurnEvent(event) {
+    dispatchTurnEvent(event, sessionId) {
+      if (!isForegroundSession(store, sessionId)) return;
       mutateRuntimeStore(store, (state) => ({
         ...state,
         conversation: updateConversationState(state.conversation, event),
       }));
     },
-    dispatchToolEvent(event) {
+    dispatchToolEvent(event, sessionId) {
+      if (!isForegroundSession(store, sessionId)) return;
       mutateRuntimeStore(store, (state) => ({
         ...state,
         conversation: updateConversationState(state.conversation, event),
@@ -166,12 +163,6 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
       mutateRuntimeStore(store, (state) => ({
         ...state,
         permissions: updatePermissionState(state.permissions, event),
-      }));
-    },
-    dispatchTaskEvent(event) {
-      mutateRuntimeStore(store, (state) => ({
-        ...state,
-        tasks: updateTaskState(state.tasks, event),
       }));
     },
     dispatchAgentEvent(event) {
@@ -192,12 +183,6 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
         communication: updateCommunicationState(state.communication, event),
       }));
     },
-    dispatchPluginEvent(event) {
-      mutateRuntimeStore(store, (state) => ({
-        ...state,
-        plugins: updatePluginState(state.plugins, event),
-      }));
-    },
     dispatchMcpEvent(event) {
       mutateRuntimeStore(store, (state) => ({
         ...state,
@@ -207,7 +192,7 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
     dispatchTransportEvent(event) {
       mutateRuntimeStore(store, (state) => ({
         ...state,
-        ...updateTransportState(state.acp, state.daemon, event),
+        ...updateTransportState(state.acp, state.daemon, state.agents, event),
       }));
     },
     dispatchCompactionEvent(event) {
@@ -237,12 +222,6 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
     canRetryRuntimeTask(taskId) {
       const task = store.getState().tasks.tasks.get(taskId);
       return task !== undefined && canRetry(task.status);
-    },
-    transitionRuntimeAgent(agentId, status, patch, source = 'domain-dispatch') {
-      mutateRuntimeStore(store, (state) => ({
-        ...state,
-        agents: transitionAgentDomainRecord(state.agents, agentId, status, patch, source),
-      }));
     },
     syncIntegration(record, source = 'domain-dispatch') {
       mutateRuntimeStore(store, (state) => ({
@@ -327,5 +306,4 @@ export function createDomainDispatch(store: RuntimeStore): DomainDispatch {
 
 export type { RuntimeState } from './state.js';
 export { createInitialRuntimeState } from './state.js';
-export * from './selectors/index.js';
 export * from './domains/index.js';

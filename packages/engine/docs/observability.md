@@ -251,18 +251,11 @@ interface RuntimeEventFeeds<TDomain, TEvent> {
 
 ## Telemetry
 
-### Session telemetry state
+### Session telemetry
 
-The `telemetry` store domain defines session metrics, correlation IDs, a recent-event buffer and a trace context, but nothing in the runtime writes to it yet. It keeps its initial values for the whole session: `sessionMetrics` stays at zero, both correlation IDs stay empty, `recentEvents` stays empty and `traceContext` stays `undefined`, even when an OpenTelemetry exporter is active. Telemetry endpoints that read it report those initial values, so do not build dashboards or alerts on them.
+The telemetry snapshot (`telemetry.snapshot` and the metrics endpoint) computes `sessionMetrics` when it is asked for, from the owners that already count each figure: turns and token usage (`inputTokens`, `outputTokens`, `cacheReadTokens`) from the foreground conversation, tool calls, tool failures and agents spawned from the telemetry service's own event counts, permission answers and denials from the gate's decisions, and errors and warnings from the recorded events. Nothing is kept for it between snapshots, so a request costs nothing until a snapshot is read. The OTLP metric `goodvibes.session.tokens` carries the same token counts.
 
-```ts
-import { selectTelemetry } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-
-const telemetry = selectTelemetry(state);
-console.log(telemetry.sessionMetrics.turns); // 0, always
-```
-
-For live counts, subscribe to the runtime event feeds described above instead: `turn`, `tools`, `agents` and `gate` events carry everything the metrics fields name (turns, tool calls and failures, agents spawned, token usage, permission prompts and denials).
+`runtime.traceExport` says whether this process records spans (`telemetry.otelMode`) and which collectors it sends them to (`endpoints`, empty when spans stay in-process).
 
 ### Tool call telemetry
 
@@ -276,33 +269,9 @@ Token counts arrive on the `turn` domain's `LLM_RESPONSE_RECEIVED` events; the c
 
 ## Health monitoring
 
-### System health selectors
+### System health
 
-```ts
-import {
-  selectSystemHealth,
-  selectDomainHealth,
-  selectProviderHealth,
-} from '@goodvibes-jev/engine/platform/platform/runtime/state';
-
-// Aggregate across all health domains
-const systemHealth = selectSystemHealth(state);
-// {
-//   status: 'healthy' | 'degraded' | 'critical' | 'unknown',
-//   hasCritical: boolean,
-//   hasDegraded: boolean,
-//   domains: {
-//     providerHealth: 'healthy',
-//     mcp: 'healthy',
-//     daemon: 'healthy',
-//     acp: 'healthy',
-//     integrations: 'degraded',
-//   }
-// }
-
-// Single domain
-const providerStatus = selectDomainHealth(state, 'providerHealth');
-```
+The health read model (`createObservabilityReadModels(runtimeServices).health`, and `integrationHelpers.getHealthSnapshot()` for the operator API) lists the degraded domains and their problems: `providerProblems` (providers the registry currently records as unusable or limited), `degradedMcpServers`, `quarantinedMcpServers`, `integrationProblems`, the daemon listener's and the ACP connections' transport state, and session recovery.
 
 ### SLO collector
 
@@ -490,15 +459,14 @@ Runtime state is read from the runtime store itself: `getState()` returns every 
 
 ### Provider health
 
-Provider health is tracked in the `providerHealth` store domain. Read it via selector:
+The provider registry owns provider health. Every provider call goes through `instrumentedLlmCall`, which records the outcome: a failure on credentials marks the provider `auth_error` until a call succeeds or the provider is registered again, a spent account marks it `unavailable` the same way, a rate limit marks it `rate_limited` until its retry-after (60 seconds when none is given), and a network, timeout or server failure marks it `unavailable` for 60 seconds. A successful call clears it. Providers whose model listing failed in the startup sweep are reported `unavailable` until they are called successfully.
 
 ```ts
-import { selectProviderHealth } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-
-const ph = selectProviderHealth(state);
-// ph.status: provider health status
-// ph.providers: per-provider health records
+const health = providerRegistry.health();
+// Map<providerId, { status, since, until?, reason }>; a provider absent is healthy or not yet called.
 ```
+
+The route planner leaves out models on `unavailable` and `auth_error` providers, the provider optimizer does the same in `auto` mode, and the health views list every provider in the map.
 
 ---
 

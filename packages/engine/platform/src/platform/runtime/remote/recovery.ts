@@ -16,7 +16,7 @@ export function deriveRemoteRecoveryActions(
 ): RemoteRecoveryAction[] {
   const actions: RemoteRecoveryAction[] = [];
   const runnerId = contract?.runnerId ?? connection?.agentId ?? 'selected';
-  const taskId = connection?.taskId ?? contract?.taskId;
+  const taskId = contract?.taskId;
 
   if (connection?.lastError || contract?.transport?.lastError) {
     actions.push({

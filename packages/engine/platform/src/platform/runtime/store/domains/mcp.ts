@@ -1,26 +1,12 @@
 /**
- * MCP domain state, tracks all MCP server connections, their lifecycle
- * state, and available tools per server.
+ * MCP domain state, tracks all MCP server connections and their lifecycle
+ * state. The tools themselves are the MCP registry's.
  */
 
 import type { McpServerState } from '../../mcp/types.js';
 
 /** States for the MCP server lifecycle machine. One declaration: an alias of {@link McpServerState}. */
 export type McpServerLifecycleState = McpServerState;
-
-/** A tool registered by an MCP server. */
-export interface McpRegisteredTool {
-  /** Fully qualified tool name ("<serverName>__<toolName>"). */
-  qualifiedName: string;
-  /** MCP server that provides this tool. */
-  serverName: string;
-  /** Tool name on the server. */
-  toolName: string;
-  /** Tool description. */
-  description: string;
-  /** Whether this tool is currently callable (server is connected). */
-  available: boolean;
-}
 
 /** Health and connection record for a single MCP server. */
 export interface McpServerRecord {
@@ -34,16 +20,8 @@ export interface McpServerRecord {
   transport: 'stdio' | 'sse' | 'http';
   /** Number of tools registered by this server. */
   toolCount: number;
-  /** Always empty: the connection event carries a count, not names; the live tool list is the MCP registry's. */
-  toolNames: string[];
-  /** Not maintained by the store (zero); per-server call counts live in the MCP manager. */
-  callCount: number;
-  /** Not maintained by the store (zero); per-server error counts live in the MCP manager. */
-  errorCount: number;
   /** Epoch ms of connection establishment. */
   connectedAt?: number | undefined;
-  /** Epoch ms of last tool call. */
-  lastCallAt?: number | undefined;
   /** Last error message. */
   lastError?: string | undefined;
   /** Number of reconnect attempts. */
@@ -84,16 +62,12 @@ export interface McpDomainState {
   /** Names of servers currently in 'connected' state. */
   connectedServerNames: string[];
 
-  // ── Tool registry ─────────────────────────────────────────────────────────
-  /** Never populated by the store; read the MCP registry for tools. */
-  tools: Map<string, McpRegisteredTool>;
+  // ── Tools ─────────────────────────────────────────────────────────────────
   /** Total number of available (callable) tools. */
   availableToolCount: number;
 
   // ── Aggregate ──────────────────────────────────────────────────────────────
-  /** Total MCP tool calls this session. */
-  totalCalls: number;
-  /** Total MCP tool call failures. */
+  /** Connection failures this session: a server degraded, disconnected or quarantined. */
   totalErrors: number;
 }
 
@@ -107,9 +81,7 @@ export function createInitialMcpState(): McpDomainState {
     source: 'init',
     servers: new Map(),
     connectedServerNames: [],
-    tools: new Map(),
     availableToolCount: 0,
-    totalCalls: 0,
     totalErrors: 0,
   };
 }

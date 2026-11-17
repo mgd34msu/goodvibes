@@ -15,7 +15,7 @@ import {
   type RouteExplanation,
 } from './capabilities.js';
 import type { ModelDefinition, ProviderRegistry } from './registry.js';
-import type { ProviderHealthRecord } from '../runtime/store/domains/provider-health.js';
+import type { ProviderStatus } from './provider-health.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -93,11 +93,11 @@ export class ProviderOptimizer {
   private readonly _fallbackLog: FallbackTransition[] = [];
   private static readonly MAX_LOG_ENTRIES = 200;
   private readonly _clock: () => number;
-  private readonly registry: Pick<ProviderRegistry, 'getCurrentModel' | 'getSelectableModels' | 'explainRoute'>;
+  private readonly registry: Pick<ProviderRegistry, 'getCurrentModel' | 'getSelectableModels' | 'explainRoute'> & Partial<Pick<ProviderRegistry, 'health'>>;
   private readonly capabilityRegistry: ProviderCapabilityRegistry;
 
   constructor(
-    registry: Pick<ProviderRegistry, 'getCurrentModel' | 'getSelectableModels' | 'explainRoute'>,
+    registry: Pick<ProviderRegistry, 'getCurrentModel' | 'getSelectableModels' | 'explainRoute'> & Partial<Pick<ProviderRegistry, 'health'>>,
     capabilityRegistry: ProviderCapabilityRegistry,
     enabled = false,
     clock: () => number = Date.now,
@@ -189,8 +189,8 @@ export class ProviderOptimizer {
    * and fall through to their own provider selection logic.
    *
    * @param profile        - Capability requirements for the request.
-   * @param healthSnapshot - Optional map of provider health records for filtering
-   *                         unhealthy providers in `auto` mode.
+   * @param healthSnapshot - Provider health for filtering unhealthy providers in
+   *                         `auto` mode; the registry's own record when omitted.
    * @returns A `RouteDecision` or `null` when optimizer is off.
    *
    * @remarks
@@ -201,9 +201,10 @@ export class ProviderOptimizer {
    */
   selectRoute(
     profile: RequestProfile,
-    healthSnapshot?: ReadonlyMap<string, ProviderHealthRecord>,
+    healthSnapshot?: ReadonlyMap<string, { readonly status: ProviderStatus }>,
   ): RouteDecision | null {
     if (!this._enabled) return null;
+    const health = healthSnapshot ?? this.registry.health?.() ?? new Map<string, { readonly status: ProviderStatus }>();
 
     const candidates = this.registry.getSelectableModels();
     const allCandidates: RouteExplanation[] = [];
@@ -233,11 +234,9 @@ export class ProviderOptimizer {
 
     for (const model of candidates) {
       // Skip unhealthy providers in auto mode when health data is available
-      if (this._mode === 'auto' && healthSnapshot) {
-        const health = healthSnapshot.get(model.provider);
-        if (health && (health.status === 'unavailable' || health.status === 'auth_error')) {
-          continue;
-        }
+      if (this._mode === 'auto') {
+        const status = health.get(model.provider)?.status;
+        if (status === 'unavailable' || status === 'auth_error') continue;
       }
 
       const explanation = this.capabilityRegistry.getRouteExplanation(

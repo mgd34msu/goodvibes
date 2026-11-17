@@ -660,7 +660,6 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     providerRegistry,
     projectRoot: workingDirectory,
     fleetCapacity,
-    runtimeStore,
     workPlanService: projectPlanningService,
     planManager,
   });

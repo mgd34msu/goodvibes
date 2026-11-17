@@ -190,10 +190,9 @@ export const REMOTE_SNAPSHOT_SCHEMA = objectSchema({
   daemon: objectSchema({
     transportState: STRING_SCHEMA,
     isRunning: BOOLEAN_SCHEMA,
-    reconnectAttempts: NUMBER_SCHEMA,
     runningJobCount: NUMBER_SCHEMA,
     lastError: STRING_SCHEMA,
-  }, ['transportState', 'isRunning', 'reconnectAttempts', 'runningJobCount'], { additionalProperties: true }),
+  }, ['transportState', 'isRunning', 'runningJobCount'], { additionalProperties: true }),
   acp: objectSchema({
     transportState: STRING_SCHEMA,
     activeConnectionIds: STRING_LIST_SCHEMA,

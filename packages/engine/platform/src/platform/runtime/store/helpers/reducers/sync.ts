@@ -1,4 +1,4 @@
-import type { CommunicationEvent, PluginEvent, McpEvent, TransportEvent } from '../events.js';
+import type { CommunicationEvent, McpEvent, TransportEvent } from '../events.js';
 import type { IntegrationDomainState, IntegrationRecord, IntegrationStatus } from '../../domains/integrations.js';
 import type { AutomationDomainState } from '../../domains/automation.js';
 import type { RoutesDomainState } from '../../domains/routes.js';
@@ -7,9 +7,9 @@ import type { DeliveryDomainState } from '../../domains/deliveries.js';
 import type { WatcherDomainState, WatcherRecord } from '../../domains/watchers.js';
 import type { SurfaceDomainState, SurfaceRecord } from '../../domains/surfaces.js';
 import type { CommunicationDomainState, RuntimeCommunicationRecord } from '../../domains/communication.js';
-import type { PluginDomainState, RuntimePlugin, PluginLifecycleState } from '../../domains/plugins.js';
 import type { McpDomainState, McpServerRecord, McpServerLifecycleState } from '../../domains/mcp.js';
-import type { AcpDomainState, AcpTransportState } from '../../domains/acp.js';
+import type { AcpConnection, AcpDomainState, AcpTransportState } from '../../domains/acp.js';
+import type { AgentDomainState } from '../../domains/agents.js';
 import type { DaemonDomainState, DaemonTransportState } from '../../domains/daemon.js';
 import type { AutomationJob } from '../../../../automation/jobs.js';
 import type { AutomationRun } from '../../../../automation/runs.js';
@@ -76,84 +76,6 @@ export function updateCommunicationState(
   };
 }
 
-function pluginStatusForEvent(event: PluginEvent): PluginLifecycleState {
-  switch (event.type) {
-    case 'PLUGIN_DISCOVERED':
-      return 'discovered';
-    case 'PLUGIN_LOADING':
-      return 'loading';
-    case 'PLUGIN_LOADED':
-      return 'loaded';
-    case 'PLUGIN_ACTIVE':
-      return 'active';
-    case 'PLUGIN_DEGRADED':
-      return 'degraded';
-    case 'PLUGIN_ERROR':
-      return 'error';
-    case 'PLUGIN_UNLOADING':
-      return 'unloading';
-    case 'PLUGIN_DISABLED':
-      return 'disabled';
-  }
-}
-
-export function updatePluginState(domain: PluginDomainState, event: PluginEvent): PluginDomainState {
-  const plugins = new Map(domain.plugins);
-  const existing = plugins.get(event.pluginId);
-  const timestamp = now();
-  const plugin: RuntimePlugin =
-    existing ??
-    {
-      name: event.pluginId,
-      displayName: event.pluginId,
-      version: 'version' in event ? event.version : 'unknown',
-      description: 'path' in event ? event.path : '',
-      status: pluginStatusForEvent(event),
-      enabled: true,
-      active: false,
-      toolCount: 'capabilities' in event ? event.capabilities.length : 0,
-      config: {},
-      hookInvocations: 0,
-    };
-  const next: RuntimePlugin = {
-    ...plugin,
-    status: pluginStatusForEvent(event),
-    version: 'version' in event ? event.version : plugin.version,
-    description: 'path' in event ? event.path : plugin.description,
-    // `active` follows the status, so a plugin that moves on to error, degraded or unloading is not also listed as active.
-    active: event.type === 'PLUGIN_ACTIVE',
-    // Any event other than a disable means the plugin is being let run again.
-    enabled: event.type !== 'PLUGIN_DISABLED',
-    toolCount: 'capabilities' in event ? event.capabilities.length : plugin.toolCount,
-    error:
-      event.type === 'PLUGIN_ERROR'
-        ? event.error
-        : event.type === 'PLUGIN_DEGRADED'
-          ? event.reason
-          : event.type === 'PLUGIN_ACTIVE' || event.type === 'PLUGIN_LOADED'
-            ? undefined
-            : plugin.error,
-    loadedAt: event.type === 'PLUGIN_LOADED' || event.type === 'PLUGIN_ACTIVE' ? timestamp : plugin.loadedAt,
-    errorAt: event.type === 'PLUGIN_ERROR' || event.type === 'PLUGIN_DEGRADED' ? timestamp : plugin.errorAt,
-  };
-  plugins.set(event.pluginId, next);
-  const activePluginNames = [...plugins.values()].filter((value) => value.active).map((value) => value.name);
-  const erroredPluginNames = [...plugins.values()]
-    .filter((value) => value.status === 'error' || value.status === 'degraded')
-    .map((value) => value.name);
-  return {
-    ...updateDomainMetadata(domain, event.type),
-    plugins,
-    activePluginNames,
-    erroredPluginNames,
-    totalDiscovered: domain.totalDiscovered + (event.type === 'PLUGIN_DISCOVERED' ? 1 : 0),
-    totalActive: activePluginNames.length,
-    totalToolsContributed: [...plugins.values()].reduce((sum, value) => sum + (value.active ? value.toolCount : 0), 0),
-    initialLoadComplete: domain.initialLoadComplete || event.type === 'PLUGIN_LOADED' || event.type === 'PLUGIN_ACTIVE',
-    reloadInProgress: event.type === 'PLUGIN_LOADING' || event.type === 'PLUGIN_UNLOADING',
-  };
-}
-
 function mcpStatusForEvent(event: McpEvent): McpServerLifecycleState {
   switch (event.type) {
     case 'MCP_CONFIGURED':
@@ -189,9 +111,6 @@ export function updateMcpState(domain: McpDomainState, event: McpEvent): McpDoma
       status: mcpStatusForEvent(event),
       transport: event.type === 'MCP_CONFIGURED' && event.transport === 'http' ? 'http' : 'stdio',
       toolCount: 0,
-      toolNames: [],
-      callCount: 0,
-      errorCount: 0,
       reconnectAttempts: 0,
       trustMode:
         event.type === 'MCP_POLICY_UPDATED'
@@ -372,9 +291,41 @@ function nextAcpTransportStates(
   return next;
 }
 
+/**
+ * One ACP connection's record from its transport events: the connection
+ * announces every step itself (platform/acp/connection.ts), so the record is
+ * kept here with no write beyond the event's own. Its label is the task the
+ * agent was spawned with.
+ */
+function nextAcpConnections(
+  acp: AcpDomainState,
+  agents: AgentDomainState,
+  transportStates: ReadonlyMap<string, AcpTransportState>,
+  transportId: string,
+  state: AcpTransportState,
+  event: TransportEvent,
+): Map<string, AcpConnection> {
+  const agentId = transportId.slice('acp:'.length);
+  const connections = new Map<string, AcpConnection>();
+  // A connection leaves with its transport state (a clean end, or failures cleared once nothing is live).
+  for (const [id, connection] of acp.connections) if (transportStates.has(`acp:${id}`)) connections.set(id, connection);
+  if (!transportStates.has(transportId)) return connections;
+  const existing = acp.connections.get(agentId);
+  connections.set(agentId, {
+    agentId,
+    label: existing?.label ?? agents.agents.get(agentId)?.label ?? agentId,
+    transportState: state,
+    connectedAt: event.type === 'TRANSPORT_CONNECTED' ? now() : existing?.connectedAt,
+    errorCount: (existing?.errorCount ?? 0) + (event.type === 'TRANSPORT_TERMINAL_FAILURE' ? 1 : 0),
+    lastError: event.type === 'TRANSPORT_TERMINAL_FAILURE' ? event.error : existing?.lastError,
+  });
+  return connections;
+}
+
 export function updateTransportState(
   acp: AcpDomainState,
   daemon: DaemonDomainState,
+  agents: AgentDomainState,
   event: TransportEvent,
 ): Pick<import('../../state.js').RuntimeState, 'acp' | 'daemon'> {
   const nextTransportState = transportStateForEvent(event);
@@ -386,17 +337,22 @@ export function updateTransportState(
   const isAcp = transportId.startsWith('acp:');
   const isDaemon = transportId.startsWith('daemon:');
   if (!isAcp && !isDaemon) return { acp, daemon };
-  const transportStates = isAcp
-    ? nextAcpTransportStates(acp.transportStates, transportId, nextTransportState as AcpTransportState)
-    : acp.transportStates;
-  const nextAcp = isAcp
-    ? {
-        ...updateDomainMetadata(acp, event.type),
-        transportStates,
-        managerTransportState: aggregateAcpTransportState(transportStates),
-        initialized: acp.initialized || event.type === 'TRANSPORT_INITIALIZING',
-      }
-    : acp;
+  let nextAcp = acp;
+  if (isAcp) {
+    const state = nextTransportState as AcpTransportState;
+    const transportStates = nextAcpTransportStates(acp.transportStates, transportId, state);
+    const connections = nextAcpConnections(acp, agents, transportStates, transportId, state, event);
+    nextAcp = {
+      ...updateDomainMetadata(acp, event.type),
+      transportStates,
+      managerTransportState: aggregateAcpTransportState(transportStates),
+      initialized: acp.initialized || event.type === 'TRANSPORT_INITIALIZING',
+      connections,
+      activeConnectionIds: [...connections.values()].filter((connection) => connection.transportState !== 'terminal_failure').map((connection) => connection.agentId),
+      totalSpawned: acp.totalSpawned + (event.type === 'TRANSPORT_INITIALIZING' ? 1 : 0),
+      totalFailed: acp.totalFailed + (event.type === 'TRANSPORT_TERMINAL_FAILURE' ? 1 : 0),
+    };
+  }
   const nextDaemon = isDaemon
     ? {
         ...updateDomainMetadata(daemon, event.type),
@@ -407,14 +363,16 @@ export function updateTransportState(
             : event.type === 'TRANSPORT_DISCONNECTED' || event.type === 'TRANSPORT_TERMINAL_FAILURE'
               ? false
               : daemon.isRunning,
-        reconnectAttempts: daemon.reconnectAttempts,
         lastConnectedAt: event.type === 'TRANSPORT_CONNECTED' ? now() : daemon.lastConnectedAt,
+        // A listener that is up again has no current error.
         lastError:
-          event.type === 'TRANSPORT_DISCONNECTED'
-            ? event.reason
-            : event.type === 'TRANSPORT_TERMINAL_FAILURE'
-              ? event.error
-              : daemon.lastError,
+          event.type === 'TRANSPORT_CONNECTED'
+            ? undefined
+            : event.type === 'TRANSPORT_DISCONNECTED'
+              ? event.reason
+              : event.type === 'TRANSPORT_TERMINAL_FAILURE'
+                ? event.error
+                : daemon.lastError,
       }
     : daemon;
   return { acp: nextAcp, daemon: nextDaemon };

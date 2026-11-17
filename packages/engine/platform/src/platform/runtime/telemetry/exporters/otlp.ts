@@ -76,6 +76,11 @@ export class OtlpExporter implements SpanExporter {
     );
   }
 
+  /** The collector this exporter sends to. */
+  get endpoint(): string {
+    return this._config.endpoint;
+  }
+
   /**
    * Accept completed spans.
    *

@@ -12,6 +12,7 @@ import {
   DEFAULT_INSTALL_TIMEOUT_MS,
 } from './binary-downloader.js';
 import type { ShellPathService } from '../../runtime/shell-paths.js';
+import type { Diagnostic } from './protocol.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { readDocument, writeDocument } from '../../utils/atomic-json-store.js';
 
@@ -355,6 +356,30 @@ export class LspService {
     });
     client.capabilities = parseCapabilities(result);
     client.notify('initialized', {});
+  }
+
+  /**
+   * Each configured language and its server's state now: `running`, `failed`
+   * (it could not start; it is not tried again this session) or `idle` (it
+   * starts on the first lookup). Reads only what this service holds.
+   */
+  languageStates(): ReadonlyMap<string, 'running' | 'failed' | 'idle'> {
+    const states = new Map<string, 'running' | 'failed' | 'idle'>();
+    for (const [langId, config] of this.configs) {
+      const key = serverKey(config);
+      states.set(langId, this.clients.get(key)?.isRunning ? 'running' : this.startFailures.has(key) ? 'failed' : 'idle');
+    }
+    return states;
+  }
+
+  /** The running servers' published diagnostics, keyed by document URI. */
+  publishedDiagnostics(): ReadonlyMap<string, readonly Diagnostic[]> {
+    const out = new Map<string, readonly Diagnostic[]>();
+    for (const client of this.clients.values()) {
+      if (!client.isRunning) continue;
+      for (const [uri, diagnostics] of client.publishedDiagnostics()) out.set(uri, diagnostics);
+    }
+    return out;
   }
 
   /** Stop all running servers. */

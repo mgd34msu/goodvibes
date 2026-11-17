@@ -40,7 +40,7 @@ export interface UiMcpSnapshot {
   readonly servers: readonly UiMcpServerSnapshot[];
   readonly connectedServerNames: readonly string[];
   readonly availableToolCount: number;
-  readonly totalCalls: number;
+  /** Connection failures this session: a server degraded, disconnected or quarantined. */
   readonly totalErrors: number;
   readonly recentDecisions: readonly McpDecisionRecord[];
 }
@@ -162,7 +162,6 @@ export function createSecurityObservabilityReadModels(
           servers,
           connectedServerNames: state.connectedServerNames,
           availableToolCount: state.availableToolCount,
-          totalCalls: state.totalCalls,
           totalErrors: state.totalErrors,
           recentDecisions: runtimeServices.mcpRegistry.listRecentSecurityDecisions(8),
         };

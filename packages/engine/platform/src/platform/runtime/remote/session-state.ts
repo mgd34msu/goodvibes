@@ -34,8 +34,8 @@ export function buildRemoteSessionStateSnapshot(input: {
     runnerId: input.runnerId,
     label: input.label,
     transportState: connection?.transportState ?? contract?.transport?.state ?? 'disconnected',
-    ...(connection?.taskId ?? contract?.taskId ? { taskId: connection?.taskId ?? contract?.taskId } : {}),
-    messageCount: connection?.messageCount ?? contract?.transport?.messageCount ?? 0,
+    ...(contract?.taskId ? { taskId: contract.taskId } : {}),
+    messageCount: contract?.transport?.messageCount ?? 0,
     errorCount: connection?.errorCount ?? contract?.transport?.errorCount ?? 0,
     ...(connection?.lastError ?? contract?.transport?.lastError
       ? { lastError: connection?.lastError ?? contract?.transport?.lastError }

@@ -52,8 +52,7 @@ import { logger } from '../utils/logger.js';
 import { buildPricingSeams } from './cost/pricing-seams.js';
 import type { RuntimeEventBus } from './events/index.js';
 import { makeRuntimeFleetProbe } from './orchestration/fleet-count.js';
-import type { RuntimeStore } from './store/index.js';
-import type { ProviderStatus } from './store/domains/provider-health.js';
+import type { ProviderStatus } from '../providers/provider-health.js';
 
 export interface NativeContractCompositionOwner {
   readonly decisions: NativeContractDecisionHost;
@@ -79,8 +78,6 @@ export interface ContractRunnerCompositionOptions {
   readonly projectRoot: string;
   /** The fleet ceiling every contract's units share. */
   readonly fleetCapacity: FleetCapacityFn;
-  /** Live provider health, so the route planner skips providers that are down. */
-  readonly runtimeStore?: Pick<RuntimeStore, 'getState'> | undefined;
   readonly workPlanService?: WorkPlanService | undefined;
   readonly readAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
   /** The `exec` permission check each worktree setup command passes before it runs (orchestration/engine.ts). */
@@ -201,21 +198,15 @@ export function createBenchmarkRoutePlanner(
 }
 
 /**
- * The provider health the route planner filters on: the runtime store's
- * provider health, and every provider whose endpoint did not return its model
- * list in the registry's startup sweep marked unavailable, so no route names
- * a model on a provider nothing is serving (a local proxy that is not running,
- * credentials the provider refused).
+ * The provider health the route planner filters on: the registry's record of
+ * what this session's calls and its startup sweep showed, so no route names a
+ * model on a provider nothing is serving (a local proxy that is not running,
+ * credentials the provider refused, a provider failing right now).
  */
 export function routeProviderHealth(
-  registry: Pick<ProviderRegistry, 'unreachableAtStartup'>,
-  runtimeStore?: Pick<RuntimeStore, 'getState'> | undefined,
+  registry: Pick<ProviderRegistry, 'health'>,
 ): () => ReadonlyMap<string, { readonly status: ProviderStatus }> {
-  return () => {
-    const health = new Map<string, { readonly status: ProviderStatus }>(runtimeStore?.getState().providerHealth.providers ?? []);
-    for (const providerId of registry.unreachableAtStartup().keys()) health.set(providerId, { status: 'unavailable' });
-    return health;
-  };
+  return () => registry.health();
 }
 
 /** The composed runner and its store; `dispose` releases both. */
@@ -291,7 +282,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
   const planner = createBenchmarkRoutePlanner({
     catalog: options.providerRegistry,
     tiers: options.providerRegistry.modelTiers,
-    providerHealth: routeProviderHealth(options.providerRegistry, options.runtimeStore),
+    providerHealth: routeProviderHealth(options.providerRegistry),
   }, options.providerRegistry.benchmarks);
   const runner = createContractRunner({
     judgmentLog: options.judgmentLog,

@@ -67,14 +67,14 @@ class RemoteModalSurface implements ConfigModalSurface {
         tabs: [{ id: 'connections', label: 'Connections', rows: [], emptyText: 'Try /remote setup.' }],
       };
     }
-    const { daemon, acp, contracts, artifacts, supervisor, distributed } = snapshot;
+    const { daemon, acp, contracts, artifacts, supervisor, distributed, activeAutomationRuns } = snapshot;
     const peersConnected = distributed.peers.filter((p) => p.status === 'connected').length;
     const header = [
       postureLine([
         `daemon ${daemon.transportState.toUpperCase()}`,
         kv('running', daemon.isRunning ? 'yes' : 'no'),
-        kv('reconnects', daemon.reconnectAttempts),
-        kv('jobs', daemon.runningJobCount),
+        kv('jobs', activeAutomationRuns),
+        ...(daemon.lastError ? [kv('error', daemon.lastError)] : []),
       ]),
       postureLine([
         `acp ${acp.transportState.toUpperCase()}`,
@@ -88,7 +88,7 @@ class RemoteModalSurface implements ConfigModalSurface {
 
     const connectionRows = acp.activeConnections.map((c) => ({
       id: `${RUNNER_ROW}${c.agentId}`,
-      label: `${statusGlyph(stateTone(c.transportState))} ${pad(c.agentId, 20)} ${pad(c.transportState.toUpperCase(), 14)} msgs=${c.messageCount} errs=${c.errorCount}  ${c.label ?? ''}`,
+      label: `${statusGlyph(stateTone(c.transportState))} ${pad(c.agentId, 20)} ${pad(c.transportState.toUpperCase(), 14)} errs=${c.errorCount}  ${c.label}`,
       style: toneStyle(stateTone(c.transportState)),
     }));
 

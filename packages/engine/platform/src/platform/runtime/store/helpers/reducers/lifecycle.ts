@@ -1,8 +1,7 @@
-import type { CompactionEvent, GateEvent, TaskEvent, AgentEvent } from '../events.js';
+import type { CompactionEvent, GateEvent, AgentEvent } from '../events.js';
 import type { SessionDomainState } from '../../domains/session.js';
 import type {
   PermissionDomainState,
-  PermissionDecisionMachineState,
   PermissionDecision,
 } from '../../domains/permissions.js';
 import {
@@ -16,99 +15,25 @@ import type { AgentDomainState, RuntimeAgent, AgentLifecycleState } from '../../
 import { now, updateDomainMetadata, isTerminalLifecycleState, computeActiveIds, evictOldestEnded } from './shared.js';
 import { logger } from '../../../../utils/logger.js';
 import { canMirror } from '../../../tasks/lifecycle.js';
-import { parsePermissionMode } from '../../../../gate/presets.js';
 
-function permissionMachineStateForEvent(
-  event: Exclude<GateEvent, { type: 'PRESET_CHANGED' }>,
-): PermissionDecisionMachineState {
-  switch (event.type) {
-    case 'GATE_REQUESTED':
-      return 'check_boundary';
-    case 'BOUNDARY_CHECKED':
-      return event.passed ? 'read_stakes' : 'decision_emitted';
-    case 'STAKES_READ':
-      return 'evaluate_preset';
-    case 'PRESET_EVALUATED':
-      return event.result === 'ask' ? 'awaiting_owner' : 'decision_emitted';
-    case 'DECISION_EMITTED':
-      return 'decision_emitted';
-  }
-}
-
-export function updateSessionState(
-  domain: SessionDomainState,
-  event: CompactionEvent,
-): SessionDomainState {
-  const base = updateDomainMetadata(domain, event.type);
-  switch (event.type) {
-    case 'COMPACTION_CHECK':
-      // The manager answers a below-threshold auto check with done -> idle and
-      // emits nothing further, so a check under the threshold must not leave the
-      // mirror reading "running". A manual or prompt-too-long run under the
-      // threshold goes on to emit its strategy event straight away.
-      return { ...base, compactionState: event.tokenCount < event.threshold ? 'idle' : 'checking_threshold' };
-    case 'COMPACTION_MICROCOMPACT':
-      return { ...base, compactionState: 'microcompact' };
-    case 'COMPACTION_COLLAPSE':
-      return { ...base, compactionState: 'collapse', compactionMessageCount: event.messageCount };
-    case 'COMPACTION_AUTOCOMPACT':
-      return { ...base, compactionState: 'autocompact' };
-    case 'COMPACTION_REACTIVE':
-      return { ...base, compactionState: 'reactive_compact' };
-    case 'COMPACTION_BOUNDARY_COMMIT':
-      return { ...base, compactionState: 'boundary_commit' };
-    case 'COMPACTION_DONE':
-      // The manager moves done -> idle in the same breath; the mirror settles
-      // with it. `failed` is deliberately NOT settled: it stays until the next
-      // compaction begins, which is how session-maintenance reports the failure.
-      return { ...base, compactionState: 'idle', lastCompactedAt: now(), compactionError: undefined };
-    case 'COMPACTION_FAILED':
-      return { ...base, compactionState: 'failed', compactionError: event.error };
-    case 'COMPACTION_RECEIPT':
-      // Mandatory receipt: record the completed compaction only when the
-      // compacted context was actually applied; a kept-original/failed receipt
-      // leaves the conversation (and compaction state) untouched.
-      return event.outcome === 'applied'
-        ? { ...base, compactionState: 'idle', lastCompactedAt: now(), compactionError: undefined }
-        : base;
-  }
-}
-
+/**
+ * The decision of one call. The bridge forwards only DECISION_EMITTED: the
+ * gate's intermediate steps carry nothing a reader uses, and the execution
+ * mode is read from the configuration by whoever shows it.
+ */
 export function updatePermissionState(
   domain: PermissionDomainState,
   event: GateEvent,
 ): PermissionDomainState {
-  const base = updateDomainMetadata(domain, event.type);
-  switch (event.type) {
-    case 'PRESET_CHANGED': {
-      // Session-level preset switch, not part of the per-call decision
-      // machine: record the new setting and preset, leave the decision alone.
-      const mode = parsePermissionMode(event.mode);
-      return mode ? { ...base, mode, preset: mode } : base;
-    }
-    case 'GATE_REQUESTED': {
-      const inFlightCallIds = withInFlightCall(domain, event.callId);
-      return { ...base, inFlightCallIds, awaitingDecision: true, decisionMachineState: permissionMachineStateForEvent(event), totalChecks: domain.totalChecks + 1 };
-    }
-    case 'BOUNDARY_CHECKED':
-    case 'STAKES_READ':
-    case 'PRESET_EVALUATED': {
-      const inFlightCallIds = withInFlightCall(domain, event.callId);
-      return { ...base, inFlightCallIds, awaitingDecision: true, decisionMachineState: permissionMachineStateForEvent(event) };
-    }
-    case 'DECISION_EMITTED': {
-      const inFlightCallIds = (domain.inFlightCallIds ?? []).filter((callId) => callId !== event.callId);
-      return {
-        ...base,
-        inFlightCallIds,
-        awaitingDecision: inFlightCallIds.length > 0,
-        decisionMachineState: permissionMachineStateForEvent(event),
-        approvalCount: domain.approvalCount + (event.approved ? 1 : 0),
-        denialCount: domain.denialCount + (event.approved ? 0 : 1),
-        lastDecision: decisionRecord(event),
-      };
-    }
-  }
+  if (event.type !== 'DECISION_EMITTED') return domain;
+  return {
+    ...updateDomainMetadata(domain, event.type),
+    approvalCount: domain.approvalCount + (event.approved ? 1 : 0),
+    denialCount: domain.denialCount + (event.approved ? 0 : 1),
+    promptCount: domain.promptCount + ((event.sourceLayer ?? event.source) === 'user_prompt' ? 1 : 0),
+    totalChecks: domain.totalChecks + 1,
+    lastDecision: decisionRecord(event),
+  };
 }
 
 /**
@@ -134,15 +59,6 @@ function decisionRecord(event: Extract<GateEvent, { type: 'DECISION_EMITTED' }>)
     ...(event.summary !== undefined ? { summary: event.summary } : {}),
     decidedAt: now(),
   };
-}
-
-/** The call ids the gate has started on and not yet decided, bounded so a gate that dies mid-decision cannot grow it without end. */
-const MAX_IN_FLIGHT_GATE_CALLS = 256;
-function withInFlightCall(domain: PermissionDomainState, callId: string): readonly string[] {
-  const current = domain.inFlightCallIds ?? [];
-  if (current.includes(callId)) return current;
-  const next = [...current, callId];
-  return next.length > MAX_IN_FLIGHT_GATE_CALLS ? next.slice(next.length - MAX_IN_FLIGHT_GATE_CALLS) : next;
 }
 
 function updateTaskIndexes(tasks: Map<string, RuntimeTask>) {
@@ -174,67 +90,6 @@ function countTaskTransition(
     else if (task.status === 'cancelled') totalCancelled += 1;
   }
   return { totalCreated, totalCompleted, totalFailed, totalCancelled };
-}
-
-export function updateTaskState(domain: TaskDomainState, event: TaskEvent): TaskDomainState {
-  if (!('taskId' in event)) return domain;
-  const tasks = new Map(domain.tasks);
-  const existing = tasks.get(event.taskId);
-  const timestamp = now();
-  if (!existing && event.type !== 'TASK_CREATED') return domain;
-
-  const task: RuntimeTask = existing ?? {
-    id: event.taskId,
-    kind: 'agentId' in event && event.agentId ? 'agent' : 'exec',
-    title: 'description' in event ? event.description : `task:${event.taskId}`,
-    description: 'description' in event ? event.description : undefined,
-    status: 'queued',
-    owner: event.agentId ?? 'runtime',
-    cancellable: true,
-    childTaskIds: [],
-    queuedAt: timestamp,
-  };
-
-  // A failed task that starts again is a retry; every other event on an ended task is late and ignored.
-  const retried = existing?.status === 'failed' && event.type === 'TASK_STARTED';
-  if (existing && isTerminalTaskStatus(existing.status) && event.type !== 'TASK_CREATED' && !retried) {
-    return domain;
-  }
-
-  switch (event.type) {
-    case 'TASK_CREATED':
-      tasks.set(event.taskId, task);
-      break;
-    case 'TASK_STARTED':
-      // `error` holds a blocked reason; leaving blocked ends it.
-      tasks.set(event.taskId, retried
-        ? { ...task, status: 'running', startedAt: timestamp, endedAt: undefined, result: undefined, error: undefined }
-        : { ...task, status: 'running', startedAt: task.startedAt ?? timestamp, error: undefined });
-      break;
-    case 'TASK_BLOCKED':
-      tasks.set(event.taskId, { ...task, status: 'blocked', error: event.reason });
-      break;
-    case 'TASK_COMPLETED':
-      tasks.set(event.taskId, { ...task, status: 'completed', endedAt: timestamp, error: undefined, result: { durationMs: event.durationMs } });
-      break;
-    case 'TASK_FAILED':
-      tasks.set(event.taskId, { ...task, status: 'failed', endedAt: timestamp, error: event.error });
-      break;
-    case 'TASK_CANCELLED':
-      tasks.set(event.taskId, { ...task, status: 'cancelled', endedAt: timestamp, error: event.reason });
-      break;
-  }
-  const updated = tasks.get(event.taskId);
-  if (!updated) return domain;
-  evictOldestEnded(tasks, (record) => isTerminalTaskStatus(record.status), (record) => record.endedAt ?? record.queuedAt);
-  const indexes = updateTaskIndexes(tasks);
-  const counts = countTaskTransition(domain, existing, updated);
-  return {
-    ...updateDomainMetadata(domain, event.type),
-    tasks,
-    ...indexes,
-    ...counts,
-  };
 }
 
 function updateTaskDomainFromRecord(domain: TaskDomainState, task: RuntimeTask, source: string): TaskDomainState {
@@ -365,13 +220,8 @@ export function updateAgentState(domain: AgentDomainState, event: AgentEvent): A
     {
       id: event.agentId,
       label: 'task' in event ? event.task : event.agentId,
-      role: 'subagent',
       status: nextStatus,
-      providerId: 'unknown',
-      modelId: 'unknown',
-      childAgentIds: [],
       taskId: event.taskId,
-      turnCount: 0,
       toolCallCount: 0,
       latestOutput: '',
       spawnedAt: timestamp,
@@ -435,30 +285,4 @@ export function updateAgentState(domain: AgentDomainState, event: AgentEvent): A
   };
 }
 
-function transitionAgentDomainRecord(
-  domain: AgentDomainState,
-  agentId: string,
-  status: AgentLifecycleState,
-  patch: Partial<RuntimeAgent> | undefined,
-  source: string,
-): AgentDomainState {
-  const existing = domain.agents.get(agentId);
-  if (!existing) return domain;
-  if (isTerminalAgentStatus(existing.status) && status !== existing.status) {
-    // A refused move is logged and leaves the store as it was; it never throws.
-    logger.warn('[agent-store] transition out of a finished agent state refused', { agentId, from: existing.status, to: status, source });
-    return domain;
-  }
-
-  const agents = new Map(domain.agents);
-  agents.set(agentId, { ...existing, ...patch, status });
-  evictOldestEnded(agents, (record) => isTerminalAgentStatus(record.status), (record) => record.endedAt ?? record.spawnedAt);
-
-  return {
-    ...updateDomainMetadata(domain, source),
-    agents,
-    ...applyAgentDomainAggregates(domain, agents, existing.status, status, 0, 0),
-  };
-}
-
-export { updateTaskDomainFromRecord, transitionTaskDomainRecord, transitionAgentDomainRecord };
+export { updateTaskDomainFromRecord, transitionTaskDomainRecord };

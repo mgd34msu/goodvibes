@@ -1,5 +1,5 @@
 import { VERSION } from '../../version.js';
-import { telemetryBufferFill } from '../metrics.js';
+import { platformTracer, telemetryBufferFill } from '../metrics.js';
 import { TelemetryTraceIdentities } from './trace-identities.js';
 import { normalizeError, type NormalizedError } from '../../utils/error-display.js';
 import type {
@@ -9,7 +9,6 @@ import type {
   RuntimeEventEnvelope,
 } from '../events/index.js';
 import type { RuntimeStore } from '../store/index.js';
-import type { TelemetryDomainState } from '../store/domains/telemetry.js';
 import type {
   AttributeValue,
   ReadableSpan,
@@ -111,6 +110,35 @@ export interface TelemetryCapabilities {
   };
 }
 
+/** Counts for the foreground session, read at snapshot time from the owners that count them. */
+export interface SessionMetrics {
+  readonly turns: number;
+  readonly toolCalls: number;
+  readonly toolErrors: number;
+  readonly agentsSpawned: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  /** Gate decisions the owner answered. */
+  readonly permissionPrompts: number;
+  readonly permissionDenials: number;
+  readonly errors: number;
+  readonly warnings: number;
+}
+
+export interface TraceExportState {
+  /** Spans are recorded in this process. */
+  readonly recording: boolean;
+  /** The collectors recorded spans are sent to; empty when they stay in-process. */
+  readonly endpoints: readonly string[];
+}
+
+/** The process tracer's state: what `telemetry.otelMode` installed. */
+export function readTraceExportState(): TraceExportState {
+  const tracer = platformTracer();
+  return { recording: tracer.enabled, endpoints: tracer.exportEndpoints() };
+}
+
 export interface TelemetryAggregates {
   readonly totalEvents: number;
   readonly totalErrors: number;
@@ -124,11 +152,8 @@ export interface TelemetryAggregates {
 export interface TelemetryRuntimeSnapshot {
   readonly sessionId: string;
   readonly sessionStatus: string;
-  readonly traceContext?: TelemetryDomainState['traceContext'] | undefined;
-  readonly sessionCorrelationId: string;
-  readonly currentTurnCorrelationId?: string | undefined;
-  readonly dbAvailable: boolean;
-  readonly dbPath?: string | undefined;
+  /** Whether this process records spans (`telemetry.otelMode`) and where it sends them. */
+  readonly traceExport: TraceExportState;
   readonly tasks: {
     readonly total: number;
     readonly queued: number;
@@ -155,7 +180,7 @@ export interface TelemetrySnapshot {
   };
   readonly capabilities: TelemetryCapabilities;
   readonly runtime: TelemetryRuntimeSnapshot;
-  readonly sessionMetrics: TelemetryDomainState['sessionMetrics'];
+  readonly sessionMetrics: SessionMetrics;
   readonly aggregates: TelemetryAggregates;
   readonly recent: {
     readonly events: TelemetryListResponse<TelemetryRecord>;
@@ -316,7 +341,6 @@ export class TelemetryApiService {
     this.assertViewAvailable(view);
     rawAccessible = rawAccessible && this.isRawEnabled();
     const state = this.runtimeStore.getState();
-    const telemetry = state.telemetry;
     const limit = clampLimit(filter.limit, 20);
     return {
       version: 1,
@@ -331,11 +355,7 @@ export class TelemetryApiService {
       runtime: {
         sessionId: state.session.id,
         sessionStatus: state.session.status,
-        traceContext: telemetry.traceContext,
-        sessionCorrelationId: telemetry.sessionCorrelationId,
-        ...(telemetry.currentTurnCorrelationId ? { currentTurnCorrelationId: telemetry.currentTurnCorrelationId } : {}),
-        dbAvailable: telemetry.dbAvailable,
-        ...(telemetry.dbPath ? { dbPath: telemetry.dbPath } : {}),
+        traceExport: readTraceExportState(),
         tasks: {
           total: state.tasks.tasks.size,
           queued: state.tasks.queuedIds.length,
@@ -349,16 +369,40 @@ export class TelemetryApiService {
         approvals: {
           pending: this.listApprovals
             ? this.listApprovals().filter((approval) => approval.status === 'pending' || approval.status === 'claimed').length
-            : state.permissions.awaitingDecision ? 1 : 0,
+            : 0,
         },
       },
-      sessionMetrics: telemetry.sessionMetrics,
+      sessionMetrics: this.getSessionMetrics(),
       aggregates: this.getAggregates(),
       recent: {
         events: this.listEventPage({ ...filter, limit }, view, rawAccessible),
         errors: this.listErrorPage({ ...filter, limit }, view, rawAccessible),
         spans: this.listSpanPage({ ...filter, limit }, view, rawAccessible),
       },
+    };
+  }
+
+  /**
+   * The session counters, computed now: tokens and turns from the conversation
+   * domain, permission answers from the gate's decisions, the rest from the
+   * lifetime event counts this service already keeps.
+   */
+  getSessionMetrics(): SessionMetrics {
+    const state = this.runtimeStore.getState();
+    const usage = state.conversation.sessionUsage;
+    const count = (type: string): number => this.eventCountsByType.get(type) ?? 0;
+    return {
+      turns: state.conversation.totalTurns,
+      toolCalls: count('TOOL_RECEIVED'),
+      toolErrors: count('TOOL_FAILED'),
+      agentsSpawned: count('AGENT_SPAWNING'),
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      permissionPrompts: state.permissions.promptCount,
+      permissionDenials: state.permissions.denialCount,
+      errors: [...this.errorCountsByCategory.values()].reduce((sum, value) => sum + value, 0),
+      warnings: this.warningsRecorded,
     };
   }
 
@@ -447,7 +491,7 @@ export class TelemetryApiService {
   }
 
   buildOtlpMetricDocument(): Record<string, unknown> {
-    return buildOtlpMetricDocumentFromState(this.runtimeStore.getState(), this.getAggregates());
+    return buildOtlpMetricDocumentFromState(this.runtimeStore.getState(), this.getAggregates(), this.getSessionMetrics());
   }
 
   private subscribeAllDomains(): void {

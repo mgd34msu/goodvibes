@@ -1,9 +1,8 @@
 /**
- * Daemon domain state, tracks the goodvibes daemon process lifecycle
- * and IPC transport health.
- *
- * Note: The daemon is a separate long-running process that manages
- * background tasks, scheduling, and inter-session coordination.
+ * Daemon domain state: the HTTP listener this process hosts for the daemon
+ * facade, as its transport events report it (platform/daemon/transport-events.ts).
+ * A terminal that is a client of a separately running daemon hosts no
+ * listener; its connection to that daemon is not described here.
  */
 
 /**
@@ -20,38 +19,8 @@ export type DaemonTransportState =
   | 'disconnected'
   | 'terminal_failure';
 
-/** Daemon process information (when running). */
-export interface DaemonProcessInfo {
-  /** OS process ID of the daemon. */
-  pid: number;
-  /** Daemon version string. */
-  version: string;
-  /** Epoch ms when the daemon process started. */
-  startedAt: number;
-  /** IPC socket path or named pipe. */
-  socketPath: string;
-}
-
-/** Status of a background job managed by the daemon. */
-export interface DaemonJob {
-  /** Job ID. */
-  id: string;
-  /** Job type identifier. */
-  type: 'scheduled' | 'background_agent' | 'file_watch' | 'index_update' | 'compaction';
-  /** Human-readable job label. */
-  label: string;
-  /** Whether the job is currently running. */
-  running: boolean;
-  /** Epoch ms of next scheduled run (for recurring jobs). */
-  nextRunAt?: number | undefined;
-  /** Epoch ms of last run. */
-  lastRunAt?: number | undefined;
-  /** Last run exit status. */
-  lastStatus?: 'success' | 'failure' | 'skipped' | undefined;
-}
-
 /**
- * DaemonDomainState, daemon process and IPC transport state.
+ * DaemonDomainState, the local daemon listener's transport state.
  */
 export interface DaemonDomainState {
   // ── Domain metadata ────────────────────────────────────────────────────────
@@ -65,24 +34,12 @@ export interface DaemonDomainState {
   // ── Transport ─────────────────────────────────────────────────────────────
   /** Current transport lifecycle state. */
   transportState: DaemonTransportState;
-  /** Whether the daemon process is currently running. */
+  /** Whether the listener is up. */
   isRunning: boolean;
-  /** Daemon process info (undefined if not connected). */
-  processInfo?: DaemonProcessInfo | undefined;
-
-  // ── Connection ──────────────────────────────────────────────────────────
-  /** Number of reconnect attempts since last successful connection. */
-  reconnectAttempts: number;
-  /** Epoch ms of last successful connection. */
+  /** Epoch ms of the last time the listener came up. */
   lastConnectedAt?: number | undefined;
-  /** Last IPC error message. */
+  /** Why the listener last went down; cleared when it is up again. */
   lastError?: string | undefined;
-
-  // ── Jobs ─────────────────────────────────────────────────────────────────
-  /** Background jobs registered with the daemon. */
-  jobs: Map<string, DaemonJob>;
-  /** Count of currently running daemon jobs. */
-  runningJobCount: number;
 }
 
 /**
@@ -95,11 +52,7 @@ export function createInitialDaemonState(): DaemonDomainState {
     source: 'init',
     transportState: 'disconnected',
     isRunning: false,
-    processInfo: undefined,
-    reconnectAttempts: 0,
     lastConnectedAt: undefined,
     lastError: undefined,
-    jobs: new Map(),
-    runningJobCount: 0,
   };
 }

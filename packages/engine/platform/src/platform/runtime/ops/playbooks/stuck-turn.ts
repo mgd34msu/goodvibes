@@ -95,12 +95,7 @@ export const stuckTurnPlaybook: Playbook = {
       run: (ctx) => safeCheck(() => {
         const pending = ctx.pendingApprovals?.();
         if (!pending) {
-          const { permissions } = ctx.store.getState();
-          return {
-            passed: !permissions.awaitingDecision,
-            summary: permissions.awaitingDecision ? 'A permission decision is in progress.' : 'No permission decision is in progress.',
-            severity: permissions.awaitingDecision ? 'warning' : 'info',
-          };
+          return { passed: true, summary: 'This app keeps no approval queue to read; no ask waits here.', severity: 'info' };
         }
         return {
           passed: pending.length === 0,

@@ -6,7 +6,7 @@
  * transient spikes do not trip CI; only sustained regressions fail.
  */
 
-import type { SurfacePerfDomainState } from '../store/domains/surface-perf.js';
+import type { SurfacePerfDomainState } from './surface-perf.js';
 import type {
   PerfBudget,
   PerfMetric,

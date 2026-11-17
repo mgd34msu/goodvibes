@@ -27,7 +27,7 @@ export interface ProviderHealthDomainInputs {
   readonly security: {
     readonly mcpServers: readonly Pick<UiSecuritySnapshot['mcpServers'][number], 'name' | 'connected' | 'schemaFreshness' | 'quarantineReason' | 'trustMode'>[];
   };
-  readonly intelligence: Pick<UiIntelligenceSnapshot, 'diagnosticsStatus' | 'symbolSearchStatus' | 'completionsStatus' | 'hoverStatus' | 'totalRequests' | 'avgLatencyMs'>;
+  readonly intelligence: Pick<UiIntelligenceSnapshot, 'diagnosticsStatus' | 'symbolSearchStatus' | 'hoverStatus' | 'languageServers'>;
   readonly continuity: Pick<UiContinuitySnapshot, 'sessionId' | 'lastSessionPointer' | 'recoveryFilePresent' | 'returnContext'>;
   readonly worktrees: Pick<UiWorktreeSnapshot, 'summary'>;
   readonly session: Pick<UiSessionSnapshot, 'estimatedContextTokens' | 'contextWindow' | 'messageCount'> & { readonly session: Partial<UiSessionSnapshot['session']> };
@@ -135,20 +135,19 @@ export function buildProviderHealthDomainSummaries(
   const intelligenceIssues = [
     intelligence.diagnosticsStatus,
     intelligence.symbolSearchStatus,
-    intelligence.completionsStatus,
     intelligence.hoverStatus,
   ].filter((status) => status !== 'ready').length;
+  const runningServers = intelligence.languageServers.filter((server) => server.state === 'running').length;
   summaries.push({
     name: 'intelligence',
     level: intelligenceIssues > 0 ? 'warn' : 'good',
     summary: intelligenceIssues > 0
       ? `${intelligenceIssues} readiness surface(s) degraded`
-      : `ready (${intelligence.totalRequests} req / ${Math.round(intelligence.avgLatencyMs)}ms avg)`,
+      : `ready (${runningServers} of ${intelligence.languageServers.length} language server(s) running)`,
     next: intelligenceIssues > 0 ? '/intelligence repair' : '/intelligence review',
     details: [
       intelligence.diagnosticsStatus !== 'ready' ? `diagnostics=${intelligence.diagnosticsStatus}` : '',
       intelligence.symbolSearchStatus !== 'ready' ? `symbols=${intelligence.symbolSearchStatus}` : '',
-      intelligence.completionsStatus !== 'ready' ? `completions=${intelligence.completionsStatus}` : '',
       intelligence.hoverStatus !== 'ready' ? `hover=${intelligence.hoverStatus}` : '',
     ].filter(Boolean),
     nextSteps: intelligenceIssues > 0

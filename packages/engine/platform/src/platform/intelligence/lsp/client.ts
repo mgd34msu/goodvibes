@@ -249,6 +249,13 @@ export class LspClient {
     }
   }
 
+  /** The newest diagnostics the server published for each open document, keyed by document URI. */
+  publishedDiagnostics(): ReadonlyMap<string, readonly Diagnostic[]> {
+    const out = new Map<string, readonly Diagnostic[]>();
+    for (const [uri, entry] of this.published) out.set(uri, entry.diagnostics);
+    return out;
+  }
+
   /** Is the server running? */
   get isRunning(): boolean {
     if (!this.proc) return false;

@@ -25,7 +25,6 @@ import type { ConfigManager } from '../config/index.js';
 import type { ProviderRegistry } from '../providers/index.js';
 import { composeContractRunner, nativeAgentFleetCapacity, resumeContracts } from './contract-composition.js';
 import type { RuntimeEventBus } from './events/index.js';
-import type { RuntimeStore } from './store/index.js';
 
 export interface AgentExecutionGraph {
   readonly agentMessageBus: AgentMessageBus;
@@ -57,8 +56,6 @@ export interface ContractedAgentGraphOptions extends AgentExecutionGraphOptions 
   readonly surfaceRoot?: string | undefined;
   readonly readAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
   readonly admitSetupCommand?: import('./worktree/setup.js').WorktreeSetupCommandAdmission | undefined;
-  /** Live provider health for the route planner. */
-  readonly runtimeStore?: Pick<RuntimeStore, 'getState'> | undefined;
 }
 
 /**
@@ -89,7 +86,6 @@ export function createContractedAgentGraph(options: ContractedAgentGraphOptions)
     providerRegistry: options.providerRegistry,
     projectRoot: options.workingDirectory,
     fleetCapacity: nativeAgentFleetCapacity(options.configManager, agentManager),
-    runtimeStore: options.runtimeStore,
   });
   void resumeContracts(composed.runner, options.workingDirectory);
   return {

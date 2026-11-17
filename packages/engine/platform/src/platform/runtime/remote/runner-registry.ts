@@ -107,7 +107,7 @@ function buildCapabilityCeiling(agent: AgentRecord): RemoteRunnerCapabilityCeili
 function buildEvidenceSummary(agent: AgentRecord, connection?: AcpConnection): RemoteRunnerEvidenceSummary {
   return Object.freeze({
     toolCallCount: agent.toolCallCount,
-    messageCount: connection?.messageCount ?? 0,
+    messageCount: 0,
     errorCount: connection?.errorCount ?? 0,
     ...(connection ? { transportState: connection.transportState, connectedAt: connection.connectedAt } : {}),
     lastError: connection?.lastError ?? agent.error,
@@ -126,7 +126,7 @@ function buildContract(agent: AgentRecord, workspaceRoot: string | undefined, co
     id: `runner:${agent.id}`,
     runnerId: agent.id,
     poolId: existing?.poolId,
-    taskId: connection?.taskId,
+    taskId: existing?.taskId,
     label: connection?.label ?? `${agent.template} runner`,
     sourceTransport: connection ? 'acp' : 'daemon',
     trustClass: connection ? 'self-hosted-acp' : 'local-daemon',
@@ -143,7 +143,7 @@ function buildContract(agent: AgentRecord, workspaceRoot: string | undefined, co
           transport: Object.freeze({
             state: connection.transportState,
             connectedAt: connection.connectedAt,
-            messageCount: connection.messageCount,
+            messageCount: existing?.transport?.messageCount ?? 0,
             errorCount: connection.errorCount,
             lastError: connection.lastError,
           }),
@@ -243,7 +243,7 @@ function buildArtifactFromStore(
     }),
     evidence: Object.freeze({
       toolCallCount: 0,
-      messageCount: connection?.messageCount ?? contract.transport?.messageCount ?? 0,
+      messageCount: contract.transport?.messageCount ?? 0,
       errorCount: connection?.errorCount ?? contract.transport?.errorCount ?? 0,
       transportState: connection?.transportState ?? contract.transport?.state,
       connectedAt: connection?.connectedAt ?? contract.transport?.connectedAt,

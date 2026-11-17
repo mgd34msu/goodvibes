@@ -67,8 +67,10 @@ export type {
   TelemetryAggregates,
   TelemetryRuntimeSnapshot,
   TelemetrySnapshot,
+  SessionMetrics,
+  TraceExportState,
 } from './api.js';
-export { TelemetryApiService } from './api.js';
+export { TelemetryApiService, readTraceExportState } from './api.js';
 
 // Re-export span helpers
 export type {

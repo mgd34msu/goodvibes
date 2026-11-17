@@ -629,7 +629,6 @@ function composeClientRuntimeServices(
     providerRegistry: providers.providerRegistry,
     projectRoot: workingDirectory,
     fleetCapacity: nativeAgentFleetCapacity(configManager, agents.agentManager),
-    runtimeStore: options.runtimeStore,
   });
   agents.agentOrchestrator.setDependencies({
     contractRunner: contracts.runner,

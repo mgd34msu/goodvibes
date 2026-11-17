@@ -269,8 +269,8 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
           '  verify: /health intelligence',
           ...(state.diagnosticsStatus !== 'ready' ? ['  /setup review', '  /health intelligence'] : []),
           ...(state.symbolSearchStatus !== 'ready' ? ['  /intelligence symbols <file>', '  /health intelligence'] : []),
-          ...(state.completionsStatus !== 'ready' || state.hoverStatus !== 'ready'
-            ? ['  /intelligence review', '  /intelligence hover <file> <line> <column>', '  /setup onboarding']
+          ...(state.hoverStatus !== 'ready'
+            ? ['  /intelligence install <file|language>', '  /intelligence hover <file> <line> <column>']
             : []),
         ];
         ctx.print(lines.length > 1 ? lines.join('\n') : 'Intelligence Repair\n  No active repair actions suggested.');
@@ -280,19 +280,16 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
       const issues: string[] = [];
       if (state.diagnosticsStatus !== 'ready') issues.push(`diagnostics=${state.diagnosticsStatus}`);
       if (state.symbolSearchStatus !== 'ready') issues.push(`symbols=${state.symbolSearchStatus}`);
-      if (state.completionsStatus !== 'ready') issues.push(`completions=${state.completionsStatus}`);
       if (state.hoverStatus !== 'ready') issues.push(`hover=${state.hoverStatus}`);
 
       ctx.print([
         'Intelligence Review',
         `  diagnostics: ${state.diagnosticsStatus}`,
         `  symbols: ${state.symbolSearchStatus}`,
-        `  completions: ${state.completionsStatus}`,
         `  hover: ${state.hoverStatus}`,
+        `  language servers: ${state.languageServers.length > 0 ? state.languageServers.map((server) => `${server.language}=${server.state}`).join(', ') : 'none configured'}`,
         `  errors: ${state.errorCount}`,
         `  warnings: ${state.warningCount}`,
-        `  requests: ${state.totalRequests}`,
-        `  avg latency: ${Math.round(state.avgLatencyMs)}ms`,
         ...(issues.length > 0 ? [`  issues: ${issues.join(', ')}`] : ['  issues: none']),
         `  diagnostic files: ${state.diagnostics.size}`,
         ...(state.diagnostics.size > 0 ? ['  next: /intelligence diagnostics'] : []),

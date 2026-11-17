@@ -11,15 +11,6 @@ export type {
 export { createInitialSessionState } from './session.js';
 
 export type {
-  ReasoningEffort,
-  ProviderTier,
-  ModelTokenLimits,
-  FallbackChainEntry,
-  ModelDomainState,
-} from './model.js';
-export { createInitialModelState } from './model.js';
-
-export type {
   TurnState,
   ToolExecutionState,
   ActiveToolCall,
@@ -28,21 +19,6 @@ export type {
   ConversationDomainState,
 } from './conversation.js';
 export { createInitialConversationState } from './conversation.js';
-
-export type {
-  OverlayId,
-  OverlayInstance,
-  OverlayDomainState,
-} from './overlays.js';
-export { createInitialOverlaysState } from './overlays.js';
-
-export type {
-  PanelId,
-  PanelPosition,
-  PanelState,
-  PanelDomainState,
-} from './panels.js';
-export { createInitialPanelsState } from './panels.js';
 
 export type {
   PermissionMode,
@@ -66,7 +42,6 @@ export { createInitialTasksState } from './tasks.js';
 
 export type {
   AgentLifecycleState,
-  AgentRole,
   AgentContractRef,
   RuntimeAgent,
   AgentDomainState,
@@ -91,34 +66,14 @@ export type {
 export { createInitialCommunicationState } from './communication.js';
 
 export type {
-  ProviderStatus,
-  CompositeHealthStatus,
-  ProviderCallStats,
-  ProviderCacheMetrics,
-  ProviderHealthRecord,
-  ProviderHealthDomainState,
-} from './provider-health.js';
-export { createInitialProviderHealthState } from './provider-health.js';
-
-export type {
   McpServerLifecycleState,
-  McpRegisteredTool,
   McpServerRecord,
   McpDomainState,
 } from './mcp.js';
 export { createInitialMcpState } from './mcp.js';
 
 export type {
-  PluginLifecycleState,
-  RuntimePlugin,
-  PluginDomainState,
-} from './plugins.js';
-export { createInitialPluginsState } from './plugins.js';
-
-export type {
   DaemonTransportState,
-  DaemonProcessInfo,
-  DaemonJob,
   DaemonDomainState,
 } from './daemon.js';
 export { createInitialDaemonState } from './daemon.js';
@@ -178,57 +133,3 @@ export type {
   IntegrationDomainState,
 } from './integrations.js';
 export { createInitialIntegrationsState } from './integrations.js';
-
-export type {
-  TelemetryEventRecord,
-  SessionMetrics,
-  TraceContext,
-  TelemetryDomainState,
-} from './telemetry.js';
-export { createInitialTelemetryState } from './telemetry.js';
-
-export type {
-  GitFileStatus,
-  GitFileRecord,
-  GitCommitSummary,
-  GitBranchInfo,
-  GitDomainState,
-} from './git.js';
-export { createInitialGitState } from './git.js';
-
-export type {
-  IndexStatus,
-  LanguageServerRecord,
-  FileWatcherStatus,
-  DiscoveryDomainState,
-} from './discovery.js';
-export { createInitialDiscoveryState } from './discovery.js';
-
-export type {
-  IntelligenceFeatureStatus,
-  LspDiagnostic,
-  WorkspaceSymbol,
-  IntelligenceHoverState,
-  IntelligenceDomainState,
-} from './intelligence.js';
-export { createInitialIntelligenceState } from './intelligence.js';
-
-export type {
-  RenderBudgetStatus,
-  RenderCycleRecord,
-  InputLatencySample,
-  UiPerfDomainState,
-} from './ui-perf.js';
-export { createInitialUiPerfState } from './ui-perf.js';
-
-export type {
-  SurfacePerfDomainState,
-} from './surface-perf.js';
-export { createInitialSurfacePerfState } from './surface-perf.js';
-
-// The cross-domain read authorization these slices are governed by. It is the
-// single source of truth a boundary contract test scans against, so it has to
-// be reachable from outside this directory, a rule nothing can import is a
-// rule each surface re-types by hand.
-export type { DomainName } from './domain-read-matrix.js';
-export { DOMAINS, DOMAIN_READ_MATRIX, getAllowedReadsFor } from './domain-read-matrix.js';

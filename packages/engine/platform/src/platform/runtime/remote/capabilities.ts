@@ -69,9 +69,9 @@ export function deriveRemoteCapabilities(
     },
     {
       id: 'resume',
-      supported: Boolean(connection?.taskId ?? contract?.taskId),
-      source: connection?.taskId ? 'connection' : 'contract',
-      detail: connection?.taskId ?? contract?.taskId ?? 'no resumable task bound',
+      supported: Boolean(contract?.taskId),
+      source: 'contract',
+      detail: contract?.taskId ?? 'no resumable task bound',
     },
     {
       id: 'containment',

@@ -170,21 +170,15 @@ const TELEMETRY_CAPABILITIES_SCHEMA = objectSchema({
   }, ['json', 'sse', 'otlpJson']),
 }, ['signals', 'encodings']);
 
-const TELEMETRY_TRACE_CONTEXT_SCHEMA = objectSchema({
-  traceId: STRING_SCHEMA,
-  rootSpanId: STRING_SCHEMA,
-  exportActive: BOOLEAN_SCHEMA,
-  endpoint: STRING_SCHEMA,
-}, ['traceId', 'rootSpanId', 'exportActive']);
+const TELEMETRY_TRACE_EXPORT_SCHEMA = objectSchema({
+  recording: BOOLEAN_SCHEMA,
+  endpoints: arraySchema(STRING_SCHEMA),
+}, ['recording', 'endpoints']);
 
 const TELEMETRY_RUNTIME_SNAPSHOT_SCHEMA = objectSchema({
   sessionId: STRING_SCHEMA,
   sessionStatus: STRING_SCHEMA,
-  traceContext: TELEMETRY_TRACE_CONTEXT_SCHEMA,
-  sessionCorrelationId: STRING_SCHEMA,
-  currentTurnCorrelationId: STRING_SCHEMA,
-  dbAvailable: BOOLEAN_SCHEMA,
-  dbPath: STRING_SCHEMA,
+  traceExport: TELEMETRY_TRACE_EXPORT_SCHEMA,
   tasks: objectSchema({
     total: NUMBER_SCHEMA,
     queued: NUMBER_SCHEMA,
@@ -198,7 +192,7 @@ const TELEMETRY_RUNTIME_SNAPSHOT_SCHEMA = objectSchema({
   approvals: objectSchema({
     pending: NUMBER_SCHEMA,
   }, ['pending']),
-}, ['sessionId', 'sessionStatus', 'sessionCorrelationId', 'dbAvailable', 'tasks', 'agents', 'approvals']);
+}, ['sessionId', 'sessionStatus', 'traceExport', 'tasks', 'agents', 'approvals']);
 
 const TELEMETRY_SESSION_METRICS_SCHEMA = objectSchema({
   turns: NUMBER_SCHEMA,

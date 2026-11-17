@@ -19,21 +19,52 @@ import type {
 import type { SessionReturnContextSummary } from './session-return-context.js';
 import type { ManagedWorktreeMeta } from './worktree/registry.js';
 import type { PluginStatus } from '../plugins/manager.js';
+import { CodeIntelligence, type CodeIntelligenceDiagnostic, type CodeIntelligenceReadiness } from '../intelligence/facade.js';
+
+/** `ready`: it answers now or starts on the first lookup; `degraded`: syntax only, or every configured server failed to start; `unavailable`: nothing can answer. */
+export type IntelligenceFeatureStatus = 'ready' | 'degraded' | 'unavailable';
 
 export interface UiIntelligenceSnapshot {
-  readonly diagnosticsStatus: string;
-  readonly symbolSearchStatus: string;
-  readonly completionsStatus: string;
-  readonly hoverStatus: string;
+  /** Language-server diagnostics; syntax diagnostics from the built-in parser are always there, so this is never `unavailable`. */
+  readonly diagnosticsStatus: IntelligenceFeatureStatus;
+  /** Symbols and outlines come from the built-in parser. */
+  readonly symbolSearchStatus: IntelligenceFeatureStatus;
+  /** Hover, definitions and references need a language server. */
+  readonly hoverStatus: IntelligenceFeatureStatus;
+  readonly languageServers: readonly { readonly language: string; readonly state: 'running' | 'failed' | 'idle' }[];
   readonly errorCount: number;
   readonly warningCount: number;
-  readonly totalRequests: number;
-  readonly avgLatencyMs: number;
-  readonly hover: {
-    readonly active: boolean;
-    readonly filePath?: string | undefined;
+  /** What the running language servers last published, keyed by absolute path. */
+  readonly diagnostics: ReadonlyMap<string, readonly CodeIntelligenceDiagnostic[]>;
+}
+
+/**
+ * Code intelligence readiness from the facades held in this process (no
+ * server is started and nothing is parsed): the language servers' states and
+ * the diagnostics the running ones published.
+ */
+export function readIntelligenceSnapshot(readiness: CodeIntelligenceReadiness = CodeIntelligence.readiness()): UiIntelligenceSnapshot {
+  const states = [...readiness.languageServers.values()];
+  const servers: IntelligenceFeatureStatus = states.some((state) => state !== 'failed')
+    ? 'ready'
+    : states.length > 0 ? 'degraded' : 'unavailable';
+  let errorCount = 0;
+  let warningCount = 0;
+  for (const list of readiness.diagnostics.values()) {
+    for (const diagnostic of list) {
+      if (diagnostic.severity === 'error') errorCount += 1;
+      else if (diagnostic.severity === 'warning') warningCount += 1;
+    }
+  }
+  return {
+    diagnosticsStatus: servers === 'ready' ? 'ready' : 'degraded',
+    symbolSearchStatus: 'ready',
+    hoverStatus: servers,
+    languageServers: [...readiness.languageServers].map(([language, state]) => ({ language, state })).sort((a, b) => a.language.localeCompare(b.language)),
+    errorCount,
+    warningCount,
+    diagnostics: readiness.diagnostics,
   };
-  readonly diagnostics: ReadonlyMap<string, readonly import('./store/domains/intelligence.js').LspDiagnostic[]>;
 }
 
 export interface UiMarketplaceSnapshot {
@@ -195,24 +226,7 @@ export function createSystemObservabilityReadModels(
   const { runtimeStore } = runtimeServices;
 
   return {
-    intelligence: createStoreBackedReadModel(runtimeServices, () => {
-      const state = runtimeStore.getState().intelligence;
-      return {
-        diagnosticsStatus: state.diagnosticsStatus,
-        symbolSearchStatus: state.symbolSearchStatus,
-        completionsStatus: state.completionsStatus,
-        hoverStatus: state.hoverStatus,
-        errorCount: state.errorCount,
-        warningCount: state.warningCount,
-        totalRequests: state.totalRequests,
-        avgLatencyMs: state.avgLatencyMs,
-        hover: {
-          active: state.hover.active,
-          filePath: state.hover.filePath,
-        },
-        diagnostics: state.diagnostics,
-      };
-    }),
+    intelligence: createStoreBackedReadModel(runtimeServices, () => readIntelligenceSnapshot()),
     marketplace: createMarketplaceReadModel(runtimeServices, options.now),
     cockpit: {
       getSnapshot() {
@@ -240,12 +254,10 @@ export function createSystemObservabilityReadModels(
           activeContracts: state.contracts.activeContractIds.length,
           spawnGuardTrips: state.contracts.spawnGuardTrips,
           blockedMessages: state.communication.totalBlocked,
-          // The gate reports its request only after the decision, so the store
-          // flag is never true while a prompt is open; the broker holds the
-          // undecided ones.
+          // The broker holds every owner ask until it is decided.
           pendingPermissions: runtimeServices.approvalBroker
             ? countUndecidedApprovals(runtimeServices.approvalBroker)
-            : state.permissions.awaitingDecision ? 1 : 0,
+            : 0,
           deniedPermissions: state.permissions.denialCount,
           preflightStatus: preflight?.status ?? 'n/a',
           preflightIssueCount: preflight?.issueCount ?? 0,
@@ -286,9 +298,7 @@ export function createSystemObservabilityReadModels(
     },
     health: createStoreBackedReadModel(runtimeServices, () => {
       const state = runtimeStore.getState();
-      const providerProblems = [...state.providerHealth.providers.values()]
-        .filter((provider) => provider.status !== 'healthy' && provider.status !== 'unknown')
-        .map((provider) => provider.providerId);
+      const providerProblems = [...runtimeServices.providerRegistry.health().keys()];
       const degradedMcpServers = [...state.mcp.servers.values()]
         .filter((server) => server.status === 'degraded' || server.status === 'auth_required' || server.schemaFreshness === 'quarantined')
         .map((server) => server.name);

@@ -30,14 +30,7 @@ export const permissionDeadlockPlaybook: Playbook = {
       run: (ctx) => safeCheck(() => {
         const pending = ctx.pendingApprovals?.();
         if (!pending) {
-          const { permissions } = ctx.store.getState();
-          return {
-            passed: !permissions.awaitingDecision,
-            summary: permissions.awaitingDecision
-              ? `A permission decision is in progress (${permissions.decisionMachineState ?? 'deciding'}).`
-              : 'No permission decision is in progress.',
-            severity: permissions.awaitingDecision ? 'warning' : 'info',
-          };
+          return { passed: true, summary: 'This app keeps no approval queue to read; no ask waits here.', severity: 'info' };
         }
         if (pending.length === 0) return { passed: true, summary: 'Nothing is waiting on your answer.', severity: 'info' };
         const oldest = pending[0]!;
@@ -53,15 +46,15 @@ export const permissionDeadlockPlaybook: Playbook = {
     {
       id: 'permission.gate-in-flight',
       label: 'Calls held at the gate',
-      description: 'Tool calls whose permission decision has started and not ended.',
+      description: 'Tool calls of the current turn that passed their hooks and have no permission decision yet.',
       run: (ctx) => safeCheck(() => {
-        const { permissions } = ctx.store.getState();
-        const held = permissions.inFlightCallIds?.length ?? (permissions.awaitingDecision ? 1 : 0);
+        const { conversation } = ctx.store.getState();
+        const held = [...conversation.activeToolCalls.values()].filter((call) => call.state === 'prehooked').length;
         return {
           passed: held === 0,
           summary: held === 0 ? 'No tool call is held at the gate.' : `${held} tool call(s) are held at the gate.`,
           severity: held === 0 ? 'info' : 'warning',
-          context: { heldCalls: held, mode: permissions.mode },
+          context: { heldCalls: held },
         };
       }),
     },

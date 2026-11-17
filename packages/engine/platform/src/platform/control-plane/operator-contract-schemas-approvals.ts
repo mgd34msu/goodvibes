@@ -75,10 +75,10 @@ export const APPROVAL_SNAPSHOT_SCHEMA = objectSchema({
   lastDecision: PERMISSION_RUNTIME_DECISION_SCHEMA,
   approvalCount: NUMBER_SCHEMA,
   denialCount: NUMBER_SCHEMA,
-  cachedChecks: NUMBER_SCHEMA,
+  promptCount: NUMBER_SCHEMA,
   totalChecks: NUMBER_SCHEMA,
   approvals: arraySchema(SHARED_APPROVAL_RECORD_SCHEMA),
-}, ['awaitingDecision', 'mode', 'approvalCount', 'denialCount', 'cachedChecks', 'totalChecks', 'approvals'], { additionalProperties: true });
+}, ['awaitingDecision', 'mode', 'approvalCount', 'denialCount', 'promptCount', 'totalChecks', 'approvals'], { additionalProperties: true });
 
 export const APPROVAL_ACTION_INPUT_SCHEMA = objectSchema({
   approvalId: STRING_SCHEMA,

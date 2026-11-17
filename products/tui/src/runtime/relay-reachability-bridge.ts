@@ -25,11 +25,23 @@ import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/r
  */
 export type RelayReadableStatus = RelayRegistrationStatus | 'disabled' | 'unavailable';
 
+/** Why the relay refused the daemon's registration, as the daemon reports it. */
+export interface RelayRefusal {
+  readonly code: string;
+  readonly message: string;
+  readonly state: string;
+  readonly next: readonly string[];
+  /** False when the daemon has stopped dialling (status `refused`) until the relay settings or identity change. */
+  readonly retryable: boolean;
+}
+
 /** The relay state with, when it could not be read, why. */
 export interface RelayStatusReading {
   readonly status: RelayReadableStatus;
   /** Set only for `'unavailable'`: why the daemon could not be asked. */
   readonly reason?: string;
+  /** Set when the relay refused the registration: what is true and what to do. */
+  readonly refusal?: RelayRefusal;
 }
 
 /** A minted pairing payload, in both the structured and the scannable form. */
@@ -55,10 +67,23 @@ function failureReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const KNOWN_STATUSES: ReadonlySet<string> = new Set(['disabled', 'idle', 'connecting', 'registered', 'reconnecting', 'stopped']);
+const KNOWN_STATUSES: ReadonlySet<string> = new Set(['disabled', 'idle', 'connecting', 'registered', 'reconnecting', 'refused', 'stopped']);
 
 function statusOf(value: unknown): RelayReadableStatus {
   return typeof value === 'string' && KNOWN_STATUSES.has(value) ? value as RelayReadableStatus : 'unavailable';
+}
+
+function refusalOf(value: unknown): RelayRefusal | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.code !== 'string' || typeof record.state !== 'string') return undefined;
+  return {
+    code: record.code,
+    message: typeof record.message === 'string' ? record.message : '',
+    state: record.state,
+    next: Array.isArray(record.next) ? record.next.filter((step): step is string => typeof step === 'string') : [],
+    retryable: record.retryable !== false,
+  };
 }
 
 function isPairingPayload(value: unknown): value is RelayPairingPayload {
@@ -73,8 +98,9 @@ export function createRelayReadAccessors(verbs: DaemonVerbCaller): RelayReadAcce
   return {
     async relayStatus() {
       try {
-        const answer = await verbs.invoke<{ status?: unknown }>('relay.reachability.get', {});
-        return { status: statusOf(answer?.status) };
+        const answer = await verbs.invoke<{ status?: unknown; refusal?: unknown }>('relay.reachability.get', {});
+        const refusal = refusalOf(answer?.refusal);
+        return { status: statusOf(answer?.status), ...(refusal ? { refusal } : {}) };
       } catch (error) {
         return { status: 'unavailable', reason: failureReason(error) };
       }

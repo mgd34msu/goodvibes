@@ -77,8 +77,13 @@ function markRelayTunneledHeaders(clientHeaders: ReadonlyArray<readonly [string,
   return kept;
 }
 
-/** Lifecycle status of the daemon's relay registration. */
-export type RelayRegistrationStatus = 'idle' | 'connecting' | 'registered' | 'reconnecting' | 'stopped';
+/**
+ * Lifecycle status of the daemon's relay registration. `refused` means the
+ * relay refused it for a reason a retry cannot clear (see `lastRefusal`); the
+ * daemon stops dialling until the registration is started again, which a
+ * change to the relay settings or the identity does.
+ */
+export type RelayRegistrationStatus = 'idle' | 'connecting' | 'registered' | 'reconnecting' | 'refused' | 'stopped';
 
 export interface RelayRegistrationLogger {
   info(message: string, fields?: Record<string, unknown>): void;
@@ -173,6 +178,8 @@ export interface RelayRegistrationRefusal {
   readonly message: string;
   readonly state: string;
   readonly next: readonly string[];
+  /** Whether the daemon keeps trying; false means the registration is `refused` until it is started again. */
+  readonly retryable: boolean;
 }
 
 /** A running daemon-side relay registration. */
@@ -542,6 +549,29 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       // ignore: the attempt is already abandoned
     }
     scheduleReconnect();
+  }
+
+  /**
+   * End a connection the relay refused for a reason another attempt cannot
+   * clear: the registration rests at `refused` with the refusal stated, and
+   * the relay is not dialled again until start() runs anew.
+   */
+  function refuseRegistration(ws: RelayClientWebSocket, refusal: RelayRegistrationRefusal): void {
+    if (socket !== ws || stopped) return;
+    logger.warn('relay refused the registration; not reconnecting', { rid, code: refusal.code });
+    clearRegistrationTimer();
+    stopKeepalive();
+    socket = null;
+    abortAllRequests();
+    for (const pipeKey of [...pipeStreams.keys()]) closePipeStreams(pipeKey);
+    channels.clear();
+    try {
+      ws.close();
+    } catch {
+      // ignore: the attempt is already abandoned
+    }
+    stopped = true;
+    setStatus('refused');
   }
 
   function scheduleReconnect(): void {
@@ -927,8 +957,9 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
               // Before `registered`, an unscoped error means the relay refused this registration.
               if (status !== 'registered' && frame.pipe === undefined) {
                 const advice = relayErrorAdvice(frame.code);
-                lastRefusal = { code: frame.code, message: frame.message, state: advice.state, next: advice.next };
-                failRegistration(ws, `relay error ${frame.code}`);
+                lastRefusal = { code: frame.code, message: frame.message, state: advice.state, next: advice.next, retryable: advice.retryable };
+                if (advice.retryable) failRegistration(ws, `relay error ${frame.code}`);
+                else refuseRegistration(ws, lastRefusal);
               }
             }
             return;
@@ -961,6 +992,8 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
   return {
     start(): void {
       if (!stopped && status !== 'idle') return;
+      // A refused registration starts over without the refusal it rested on.
+      if (status === 'refused') lastRefusal = null;
       stopped = false;
       attempt = 0;
       openConnection();

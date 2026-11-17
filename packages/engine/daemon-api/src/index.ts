@@ -265,6 +265,7 @@ export { createRelayDaemonRegistration, RELAY_VIA_HEADER, isRelayTunneledRequest
 export type {
   RelayDaemonRegistration,
   RelayDaemonRegistrationOptions,
+  RelayRegistrationRefusal,
   RelayRegistrationStats,
   RelayRegistrationStatus,
   RelayRegistrationLogger,

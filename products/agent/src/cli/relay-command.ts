@@ -48,10 +48,20 @@ function hostFailure(runtime: CliCommandRuntime, what: string, error: unknown): 
   };
 }
 
+/** Why the relay refused the host's registration, as the host reports it. */
+interface RelayRefusal {
+  readonly code: string;
+  readonly message: string;
+  readonly state: string;
+  readonly next: readonly string[];
+  readonly retryable: boolean;
+}
+
 /** What a relay status means for the person reading it, and what to do. */
 function statusMeaning(status: string, configured: boolean): string {
   if (!configured || status === 'disabled') return 'off: relay.enabled, the relay-connect capability or relay.url is not set on the host';
   if (status === 'registered') return 'registered with the relay; surfaces can reach the host through it';
+  if (status === 'refused') return 'refused by the relay; the host stopped dialling it until its relay settings or identity change';
   if (status === 'connecting' || status === 'reconnecting') return `${status} to the relay`;
   if (status === 'idle') return 'configured, not started yet';
   return status;
@@ -67,9 +77,9 @@ async function handleRelayStatus(runtime: CliCommandRuntime): Promise<CliCommand
     requireStepUpForMutations: config.get('relay.requireStepUpForMutations') === true,
   };
   const flag = relayConnectFlagSummary();
-  let live: { readonly status: string; readonly configured: boolean };
+  let live: { readonly status: string; readonly configured: boolean; readonly refusal?: RelayRefusal };
   try {
-    live = await hostVerbs(runtime).invoke<{ readonly status: string; readonly configured: boolean }>('relay.reachability.get', {});
+    live = await hostVerbs(runtime).invoke<{ readonly status: string; readonly configured: boolean; readonly refusal?: RelayRefusal }>('relay.reachability.get', {});
   } catch (error) {
     return hostFailure(runtime, 'Reading the connected host\'s relay status', error);
   }
@@ -78,6 +88,13 @@ async function handleRelayStatus(runtime: CliCommandRuntime): Promise<CliCommand
     'GoodVibes relay (connected host)',
     `  status: ${live.status} (${statusMeaning(live.status, live.configured)})`,
     `  configured: ${live.configured ? 'yes' : 'no'}`,
+    ...(live.refusal ? [
+      `  refused by the relay (${live.refusal.code}): ${live.refusal.state}${live.refusal.message ? ` (${live.refusal.message})` : ''}`,
+      live.refusal.retryable
+        ? '  the host keeps trying through its reconnect backoff'
+        : '  the host stopped dialling the relay; it tries again when relay.url, relay.rendezvousId or its identity changes, or when it restarts',
+      ...live.refusal.next.map((step) => `  next ${step}`),
+    ] : []),
     '',
     "  this Agent's imported relay settings:",
     `  relay.enabled: ${local.enabled ? 'true' : 'false'}`,

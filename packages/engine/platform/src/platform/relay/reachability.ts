@@ -21,6 +21,7 @@ import {
   type RelayClientWebSocket,
   type RelayDaemonRegistration,
   type RelayRegistrationLogger,
+  type RelayRegistrationRefusal,
   type RelayRegistrationStatus,
 } from '@goodvibes-jev/engine/daemon-api';
 import {
@@ -84,6 +85,11 @@ export interface RelayReachability {
   readonly rendezvousId: string | null;
   /** Current status, or `'disabled'` when the relay path is gated off. */
   readonly status: RelayRegistrationStatus | 'disabled';
+  /**
+   * Why the relay last refused the live registration (what is true, what to
+   * do, and whether the daemon keeps trying), or null when it has not.
+   */
+  readonly lastRefusal: RelayRegistrationRefusal | null;
   /** Mint a pairing payload a surface can scan, or null when disabled. */
   mintPairing(): Promise<RelayPairingPayload | null>;
 }
@@ -201,6 +207,9 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
     },
     get status(): RelayRegistrationStatus | 'disabled' {
       return isEnabled() ? (registration?.status ?? 'idle') : 'disabled';
+    },
+    get lastRefusal(): RelayRegistrationRefusal | null {
+      return isEnabled() ? (registration?.lastRefusal ?? null) : null;
     },
     async mintPairing(): Promise<RelayPairingPayload | null> {
       if (!registration) return null;

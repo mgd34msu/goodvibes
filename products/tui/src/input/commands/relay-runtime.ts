@@ -1,6 +1,7 @@
 import type { CommandContext } from '../command-registry.ts';
 import type { CommandRegistry } from '../command-registry.ts';
 import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing/qr-generator';
+import type { RelayRefusal, RelayStatusReading } from '../../runtime/relay-reachability-bridge.ts';
 
 /**
  * Register the /relay command, the relay's configuration, its reachability
@@ -26,6 +27,18 @@ function relayConfigured(ctx: CommandContext): { enabled: boolean; url: string; 
   };
 }
 
+/** The relay's refusal of the daemon's registration: why, whether the daemon keeps trying, and what to do. */
+function refusalLines(refusal: RelayRefusal | undefined): string[] {
+  if (!refusal) return [];
+  return [
+    `  refused by the relay (${refusal.code}): ${refusal.state}${refusal.message ? ` (${refusal.message})` : ''}`,
+    refusal.retryable
+      ? '  The daemon keeps trying through its reconnect backoff.'
+      : '  The daemon stopped dialling the relay; it tries again when relay.url, relay.rendezvousId or its identity changes, or when the daemon restarts.',
+    ...refusal.next.map((step) => `  next: ${step}`),
+  ];
+}
+
 async function renderStatus(ctx: CommandContext): Promise<void> {
   const cfg = relayConfigured(ctx);
   if (!cfg.enabled || !cfg.flagOn) {
@@ -37,7 +50,7 @@ async function renderStatus(ctx: CommandContext): Promise<void> {
     ].join('\n'));
     return;
   }
-  const reading = ctx.platform.externalServices
+  const reading: RelayStatusReading = ctx.platform.externalServices
     ? await ctx.platform.externalServices.relayStatus()
     : { status: 'unavailable' as const, reason: 'the background service controller is not running in this build' };
   ctx.print([
@@ -50,6 +63,7 @@ async function renderStatus(ctx: CommandContext): Promise<void> {
       : reading.status === 'disabled'
         ? '  The daemon reports a relay gate off: relay.enabled, the relay-connect flag or relay.url on the daemon\'s machine.'
         : `  live connection state (from the daemon): ${reading.status}`,
+    ...refusalLines(reading.refusal),
     '  The relay operator sees only ciphertext and connection metadata; self-host your own relay for full control.',
   ].join('\n'));
 }

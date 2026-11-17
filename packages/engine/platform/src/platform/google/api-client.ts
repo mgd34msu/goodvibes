@@ -8,6 +8,9 @@
  *   - POST https://gmail.googleapis.com/gmail/v1/users/{userId}/messages/send
  *   - GET  https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events
  *          (timeMin, timeMax, singleEvents, orderBy, maxResults, pageToken)
+ *   - PATCH / DELETE https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events/{eventId}
+ *          (sendUpdates; If-Match with the event's etag, answered 412 when it changed)
+ *   - GET  https://www.googleapis.com/calendar/v3/users/me/calendarList (maxResults, pageToken)
  *
  * A list answers with one page and a `nextPageToken` when more exist; every
  * list here returns `more` from that token so a page is never reported as the
@@ -38,6 +41,7 @@ import {
 
 const GMAIL_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const CALENDAR_BASE = 'https://www.googleapis.com/calendar/v3/calendars';
+const CALENDAR_LIST_URL = 'https://www.googleapis.com/calendar/v3/users/me/calendarList';
 
 /**
  * The headers `readMessageMetadata` asks for, and the only ones it asks for.
@@ -291,6 +295,38 @@ export interface CalendarEventRecord {
   readonly attendees?: readonly string[];
   /** Raw `RRULE:`/`EXDATE:` lines of a recurring event's master, when read as a series. */
   readonly recurrence?: readonly string[];
+  /** Google's version tag for the event as read; a write sent with it is refused (412) when the event changed since. */
+  readonly etag?: string;
+  /** For one occurrence of a recurring event (as a list hands them out), the id of its series. */
+  readonly recurringEventId?: string;
+}
+
+/** The fields a patch changes; a field left out keeps its current value. */
+export interface PatchEventInput {
+  readonly summary?: string;
+  /** `start` and `end` are sent together: Google needs both of the same kind (dates or date-times). */
+  readonly start?: string;
+  readonly end?: string;
+  readonly location?: string;
+  readonly description?: string;
+  /** Replaces the guest list. */
+  readonly attendees?: readonly string[];
+  /** IANA zone for a `start`/`end` that carries no offset. */
+  readonly timeZone?: string;
+  /** Raw recurrence lines; replaces the event's recurrence. */
+  readonly recurrence?: readonly string[];
+  /** Ask Google to email the guests about the change. */
+  readonly notifyAttendees?: boolean;
+  /** The etag the event was read with; Google refuses the write with 412 when the event changed since. */
+  readonly ifMatch?: string;
+}
+
+/** One calendar in the account's calendar list. */
+export interface CalendarListEntryRecord {
+  readonly id: string;
+  /** The name the owner sees: their own rename of the calendar when they set one, else its title. */
+  readonly summary: string;
+  readonly primary: boolean;
 }
 
 export interface SendMailInput {
@@ -864,6 +900,83 @@ export class GoogleApiClient {
       ? { ok: false, status: null, problem: 'Google accepted the event but returned no usable record.', fix: 'Check the calendar directly.' }
       : { ok: true, value: event };
   }
+
+  /** Change the named fields of one event (one occurrence when `id` names an occurrence of a series). */
+  async patchEvent(id: string, calendarId: string, input: PatchEventInput): Promise<GoogleApiResult<CalendarEventRecord>> {
+    if (input.summary !== undefined && input.summary.trim().length === 0) {
+      return { ok: false, status: null, problem: 'The event needs a title.', fix: 'Provide a summary for the event.' };
+    }
+    const when = (value: string): Record<string, string> => (
+      value.includes('T')
+        ? { dateTime: value, ...(input.timeZone === undefined ? {} : { timeZone: input.timeZone }) }
+        : { date: value }
+    );
+    const attendees = input.attendees?.map((email) => email.trim()).filter((email) => email.length > 0);
+    const body = {
+      ...(input.summary === undefined ? {} : { summary: input.summary }),
+      ...(input.location === undefined ? {} : { location: input.location }),
+      ...(input.description === undefined ? {} : { description: input.description }),
+      ...(input.start === undefined ? {} : { start: when(input.start) }),
+      ...(input.end === undefined ? {} : { end: when(input.end) }),
+      ...(attendees === undefined ? {} : { attendees: attendees.map((email) => ({ email })) }),
+      ...(input.recurrence === undefined ? {} : { recurrence: input.recurrence }),
+    };
+    const query = input.notifyAttendees === true ? '?sendUpdates=all' : '';
+    const result = await this.request(`${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}${query}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(input.ifMatch === undefined ? {} : { 'If-Match': input.ifMatch }),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!result.ok) return result;
+    const event = toCalendarEvent(result.value);
+    return event === null
+      ? { ok: false, status: null, problem: 'Google accepted the change but returned no usable record.', fix: 'Check the calendar directly.' }
+      : { ok: true, value: event };
+  }
+
+  /**
+   * Remove one event (one occurrence when `id` names an occurrence of a series).
+   * `deleted: false` when Google no longer holds it (404, or 410 for an event already removed).
+   */
+  async deleteEvent(
+    id: string,
+    calendarId: string,
+    options: { readonly ifMatch?: string; readonly notifyAttendees?: boolean } = {},
+  ): Promise<GoogleApiResult<{ readonly deleted: boolean }>> {
+    const query = options.notifyAttendees === true ? '?sendUpdates=all' : '';
+    const result = await this.request(`${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}${query}`, {
+      method: 'DELETE',
+      ...(options.ifMatch === undefined ? {} : { headers: { 'If-Match': options.ifMatch } }),
+    });
+    if (!result.ok) {
+      return result.status === 404 || result.status === 410 ? { ok: true, value: { deleted: false } } : result;
+    }
+    return { ok: true, value: { deleted: true } };
+  }
+
+  /** Every calendar in the account's calendar list, every page of it. */
+  async listCalendars(): Promise<GoogleApiResult<readonly CalendarListEntryRecord[]>> {
+    const params = new URLSearchParams({ maxResults: '250' });
+    const calendars: CalendarListEntryRecord[] = [];
+    for (;;) {
+      const result = await this.request(`${CALENDAR_LIST_URL}?${params.toString()}`);
+      if (!result.ok) return result;
+      const page = isRecord(result.value) ? result.value : {};
+      for (const item of Array.isArray(page.items) ? page.items : []) {
+        if (!isRecord(item)) continue;
+        const id = readString(item.id);
+        if (id.length === 0) continue;
+        const name = readString(item.summaryOverride) || readString(item.summary);
+        calendars.push({ id, summary: name, primary: item.primary === true });
+      }
+      const pageToken = readString(page.nextPageToken);
+      if (pageToken.length === 0) return { ok: true, value: calendars };
+      params.set('pageToken', pageToken);
+    }
+  }
 }
 
 /**
@@ -918,6 +1031,8 @@ function toCalendarEvent(value: unknown): CalendarEventRecord | null {
     ...(Array.isArray(value.recurrence) && value.recurrence.some((line) => typeof line === 'string')
       ? { recurrence: value.recurrence.filter((line): line is string => typeof line === 'string') }
       : {}),
+    ...(readString(value.etag).length > 0 ? { etag: readString(value.etag) } : {}),
+    ...(readString(value.recurringEventId).length > 0 ? { recurringEventId: readString(value.recurringEventId) } : {}),
   };
 }
 

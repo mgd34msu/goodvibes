@@ -7,7 +7,9 @@
  * daemon-reachable implementation existed, the connector lived inside one
  * product. This adapts the hoisted connector onto the service slice the verb
  * handlers are written against, so the daemon serves them for real, with no
- * product process attached.
+ * product process attached. It also serves `calendar.events.update`,
+ * `calendar.events.delete` and `calendar.calendars.list`, so a Google calendar
+ * can be corrected and chosen from the same places a CalDAV one can.
  *
  * Credentials come from the daemon's own tier by the platform-wide derivation
  * (`daemonSecretKeyFor`), which is exactly why `setup-plan.ts` derives its
@@ -24,8 +26,10 @@
 
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import type {
+  CalendarGatewayCalendarSummary,
   CalendarGatewayCreateInput,
   CalendarGatewayCreated,
+  CalendarGatewayDeleted,
   CalendarGatewayEventDetail,
   CalendarGatewayEventSummary,
   CalendarGatewayIcsAttendeesLeftOff,
@@ -33,6 +37,8 @@ import type {
   CalendarGatewayIcsImport,
   CalendarGatewayListInput,
   CalendarGatewayService,
+  CalendarGatewayUpdateInput,
+  CalendarGatewayUpdated,
 } from '../control-plane/routes/calendar.js';
 import { parseIcs } from '../calendar/ics-parser.js';
 import {
@@ -75,6 +81,45 @@ const NOT_CONNECTED = [
   'No Google account is connected on this machine, so there is no calendar to read or write.',
   'Connect one, then retry.',
 ].join(' ');
+
+/**
+ * The id of a recurring event's series names every occurrence, so a change or
+ * removal through it would reach them all. One occurrence, as `events.list`
+ * hands it out, has its own id and is changed or removed alone.
+ */
+function refuseSeries(eventId: string, action: string): GatewayVerbError {
+  return new GatewayVerbError(
+    `Event ${eventId} is a recurring series, so ${action} it here would change every occurrence. Change one occurrence by the id calendar.events.list gives it, or change the series in Google Calendar.`,
+    'CALENDAR_SERIES_NOT_SUPPORTED',
+    409,
+  );
+}
+
+/** A write Google refused (412) because the event changed after it was read. */
+function changedMeanwhile(eventId: string): GatewayVerbError {
+  return new GatewayVerbError(
+    `Event ${eventId} changed on the calendar after it was read, so nothing was written. Read it again and repeat the change.`,
+    'CALENDAR_EVENT_CHANGED',
+    409,
+  );
+}
+
+/** Both dates (an all-day event) or both date-times, and the end not before the start. */
+function validateEventTimes(start: string, end: string): void {
+  if (start.includes('T') !== end.includes('T')) {
+    throw new GatewayVerbError(
+      "Fields 'start' and 'end' must both be dates (an all-day event) or both date-times. Send both to turn an all-day event into a timed one or back.",
+      'INVALID_ARGUMENT',
+      400,
+    );
+  }
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    throw new GatewayVerbError("Fields 'start' and 'end' must be ISO 8601 dates or date-times.", 'INVALID_ARGUMENT', 400);
+  }
+  if (endMs < startMs) throw new GatewayVerbError("Field 'end' must not be before 'start'.", 'INVALID_ARGUMENT', 400);
+}
 
 /**
  * Turn a connector failure into an honest HTTP status.
@@ -340,6 +385,64 @@ export function createGoogleCalendarGatewayService(
     },
 
     /**
+     * Changes the fields sent. The event is read first for its etag, so a
+     * change made elsewhere in the meantime is refused (409
+     * CALENDAR_EVENT_CHANGED) instead of overwritten; guests are told when
+     * the event has any, as the calendar's own application would.
+     */
+    async updateEvent(eventId: string, changes: CalendarGatewayUpdateInput, calendarId?: string | undefined): Promise<CalendarGatewayUpdated> {
+      const connection = await connect();
+      await requireCalendarWrite(connection);
+      const { client } = connection;
+      const calendar = calendarId ?? 'primary';
+      const current = unwrap(await client.getEvent(eventId, calendar));
+      if (current.recurrence !== undefined && current.recurrence.length > 0) throw refuseSeries(eventId, 'changing');
+      const timesChanged = changes.start !== undefined || changes.end !== undefined;
+      const start = changes.start ?? current.start;
+      const end = changes.end ?? current.end;
+      if (timesChanged) validateEventTimes(start, end);
+      const guests = changes.attendees ?? current.attendees ?? [];
+      const patched = await client.patchEvent(eventId, calendar, {
+        ...(changes.title === undefined ? {} : { summary: changes.title }),
+        ...(timesChanged ? { start, end } : {}),
+        ...(changes.location === undefined ? {} : { location: changes.location }),
+        ...(changes.description === undefined ? {} : { description: changes.description }),
+        ...(changes.attendees === undefined ? {} : { attendees: changes.attendees }),
+        ...(guests.length > 0 ? { notifyAttendees: true } : {}),
+        ...(current.etag === undefined ? {} : { ifMatch: current.etag }),
+      });
+      if (!patched.ok && patched.status === 412) throw changedMeanwhile(eventId);
+      return { eventId: unwrap(patched).id, updatedAt: new Date(now()).toISOString() };
+    },
+
+    /** Removes one event (or one occurrence); refused like `updateEvent` when it changed since it was read. */
+    async deleteEvent(eventId: string, calendarId?: string | undefined): Promise<CalendarGatewayDeleted> {
+      const connection = await connect();
+      await requireCalendarWrite(connection);
+      const { client } = connection;
+      const calendar = calendarId ?? 'primary';
+      const read = await client.getEvent(eventId, calendar);
+      if (!read.ok && (read.status === 404 || read.status === 410)) return { eventId, deleted: false };
+      const current = unwrap(read);
+      if (current.recurrence !== undefined && current.recurrence.length > 0) throw refuseSeries(eventId, 'removing');
+      const removed = await client.deleteEvent(eventId, calendar, {
+        ...(current.etag === undefined ? {} : { ifMatch: current.etag }),
+        ...((current.attendees?.length ?? 0) > 0 ? { notifyAttendees: true } : {}),
+      });
+      if (!removed.ok && removed.status === 412) throw changedMeanwhile(eventId);
+      return { eventId, deleted: unwrap(removed).deleted };
+    },
+
+    /** The calendars in the account's calendar list, by the name the owner sees. */
+    async listCalendars(): Promise<readonly CalendarGatewayCalendarSummary[]> {
+      const { client } = await connect();
+      return unwrap(await client.listCalendars()).map((entry) => ({
+        calendarId: entry.id,
+        displayName: entry.summary.length > 0 ? entry.summary : entry.id,
+      }));
+    },
+
+    /**
      * Every event in the window, every page of it, so the file and its
      * `eventCount` are the whole calendar for that window. With a `limit` the
      * export stops at one page of that size and `more` says when it is partial.
@@ -352,7 +455,8 @@ export function createGoogleCalendarGatewayService(
     /**
      * Import is per-event and reports partial success honestly: an .ics with
      * one bad VEVENT imports the rest and names the one it could not, rather
-     * than failing the whole file or silently dropping it.
+     * than failing the whole file or silently dropping it. An entry imported
+     * before is skipped, or overwritten with `replace`.
      *
      * Attendees named in the file are not added. An event inserted with guests
      * appears on every guest's Google calendar organised by the owner, which
@@ -360,7 +464,7 @@ export function createGoogleCalendarGatewayService(
      * owner was never shown. The result lists who was left off, and inviting
      * them is `calendar.events.create`, which confirms with the list in view.
      */
-    async importIcs(icsContent, calendarId): Promise<CalendarGatewayIcsImport> {
+    async importIcs(icsContent, calendarId, importOptions = {}): Promise<CalendarGatewayIcsImport> {
       const connection = await connect();
       await requireCalendarWrite(connection);
       const { client } = connection;
@@ -408,8 +512,28 @@ export function createGoogleCalendarGatewayService(
           errors.push(`${label} was not imported because it could not be checked against events already imported: ${existing.problem} ${existing.fix}`);
           continue;
         }
-        if (existing.value.items.length > 0) {
-          errors.push(`${label} was skipped: an event imported from this .ics entry is already in the calendar.`);
+        const already = existing.value.items[0];
+        if (already !== undefined && importOptions.replace !== true) {
+          errors.push(`${label} was skipped: an event imported from this .ics entry is already in the calendar. Import again with replace: true to overwrite it.`);
+          continue;
+        }
+        if (already !== undefined) {
+          // The file's version replaces the one imported earlier (the whole series when it recurs:
+          // a lookup hands out occurrences); its guests are still not invited.
+          const replaced = await client.patchEvent(already.recurringEventId ?? already.id, calendarId ?? 'primary', {
+            summary: event.summary,
+            start: event.start.value,
+            end: event.end.value,
+            location: event.location ?? '',
+            description: event.description ?? '',
+            ...(zone.timeZone === undefined ? {} : { timeZone: zone.timeZone }),
+            recurrence: event.recurrence === undefined ? [] : [`RRULE:${event.recurrence.rule}`],
+          });
+          if (!replaced.ok) {
+            errors.push(`${label} was not replaced: ${replaced.problem} ${replaced.fix}`);
+            continue;
+          }
+          eventIds.push(replaced.value.id);
           continue;
         }
         const created = await client.createEvent({

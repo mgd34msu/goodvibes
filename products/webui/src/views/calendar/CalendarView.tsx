@@ -184,6 +184,9 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   const [newOpen, setNewOpen] = useState(false);
   // The event the form changes; '' while it creates a new one.
   const [editingId, setEditingId] = useState('');
+  // The start and end the edit form opened with: times are sent only when changed, so editing
+  // the title of an all-day event keeps it all-day.
+  const [editingTimes, setEditingTimes] = useState({ start: '', end: '' });
   const confirm = useConfirm();
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
@@ -243,11 +246,11 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
       if (editingId) {
         // Attendees come back as display names, so the guest list is only sent
         // when addresses were typed; otherwise the invited guests stay.
+        const timesChanged = start !== editingTimes.start || end !== editingTimes.end;
         await platformClient.operator.invoke('calendar.events.update', {
           eventId: editingId,
           title: title.trim(),
-          start: new Date(start).toISOString(),
-          end: new Date(end).toISOString(),
+          ...(timesChanged ? { start: new Date(start).toISOString(), end: new Date(end).toISOString() } : {}),
           location: location.trim(),
           description: description.trim(),
           ...(splitAttendees(attendees) ? { attendees: splitAttendees(attendees) } : {}),
@@ -315,6 +318,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
     setTitle(event.title);
     setStart(localDateTimeValue(event.start));
     setEnd(localDateTimeValue(event.end));
+    setEditingTimes({ start: localDateTimeValue(event.start), end: localDateTimeValue(event.end) });
     setLocation(event.location ?? '');
     setDescription(event.description ?? '');
     setAttendees('');

@@ -119,7 +119,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.update',
     title: 'Update Calendar Event',
-    description: 'Change an event on the configured calendar: only the fields sent change (attendees replaces the guest list). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; a backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.',
+    description: 'Change an event on the configured calendar (Google or CalDAV): only the fields sent change (attendees replaces the guest list; start and end are both dates for an all-day event or both date-times). Requires explicit confirmation (confirm: true). An unknown eventId is a 404; an id that names a whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is changed by the id calendar.events.list gives it); an event that changed on the calendar after it was read is refused with 409 CALENDAR_EVENT_CHANGED and nothing is written. A backend that cannot change events answers 501 CALENDAR_NOT_SUPPORTED.',
     category: 'calendar',
     scopes: ['write:calendar'],
     access: 'admin',
@@ -145,7 +145,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.delete',
     title: 'Delete Calendar Event',
-    description: 'Remove an event from the configured calendar. Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it; a backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.',
+    description: 'Remove an event from the configured calendar (Google or CalDAV). Requires explicit confirmation (confirm: true). `deleted: false` means the calendar no longer held it. A whole recurring series is refused with 409 CALENDAR_SERIES_NOT_SUPPORTED (on Google, one occurrence is removed by the id calendar.events.list gives it); an event that changed after it was read is refused with 409 CALENDAR_EVENT_CHANGED. A backend that cannot delete events answers 501 CALENDAR_NOT_SUPPORTED.',
     category: 'calendar',
     scopes: ['write:calendar'],
     access: 'admin',
@@ -165,7 +165,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.calendars.list',
     title: 'List Calendars',
-    description: 'The calendars the configured account can reach, so a setup flow can offer them for surfaces.calendar.defaultCalendarId. A backend that cannot discover calendars answers 501 CALENDAR_NOT_SUPPORTED.',
+    description: 'The calendars the configured account can reach (the Google calendar list, or the CalDAV collections), so a client can offer them as choices and setup can offer them for surfaces.calendar.defaultCalendarId. A backend that cannot discover calendars answers 501 CALENDAR_NOT_SUPPORTED.',
     category: 'calendar',
     scopes: ['read:calendar'],
     http: { method: 'GET', path: '/api/calendar/calendars' },

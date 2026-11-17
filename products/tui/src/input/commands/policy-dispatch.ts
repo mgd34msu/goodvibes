@@ -7,7 +7,6 @@ export function createPolicyCommandContext(context: CommandContext): PolicyFront
   return {
     print: (text) => context.print(text),
     get policyRuntimeState() { return context.extensions?.policyRuntimeState; },
-    get policyRegistry() { return context.extensions?.policyRegistry; },
     workingDirectory: () => requireShellPaths(context).workingDirectory,
     config: () => context.platform.configManager.getAll(),
     listMcpServerSecurity: () => context.extensions.mcpRegistry.listServerSecurity(),

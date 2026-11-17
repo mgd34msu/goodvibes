@@ -93,10 +93,6 @@ const SERVICES = {
     path: ['ops', 'planManager'],
     label: 'ops.planManager',
   },
-  requireAdaptivePlanner: {
-    path: ['ops', 'adaptivePlanner'],
-    label: 'ops.adaptivePlanner',
-  },
   requireSessionOrchestration: {
     path: ['ops', 'sessionOrchestration'],
     label: 'ops.sessionOrchestration',

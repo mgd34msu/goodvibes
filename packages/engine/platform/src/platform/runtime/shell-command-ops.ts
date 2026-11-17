@@ -120,48 +120,14 @@ export type PlanRuntimeService = (subcommand: string, args: string[]) => {
 };
 
 export interface CommandOpsShellServices {
-  triggerSupervisor?: import('../triggers/operator.js').TriggerOperatorSupervisor | undefined;
-  agentManager?: ShellAgentManagerService | undefined;
-  acpManager?: ShellAcpManagerService | undefined;
-  automationManager?: ShellAutomationManagerRuntimeService | undefined;
-  modeManager?: ShellModeManagerService | undefined;
-  planManager?: ShellPlanManagerService | undefined;
-  adaptivePlanner?: unknown | undefined;
-  sessionOrchestration?: ShellSessionOrchestrationService | undefined;
-  remoteRuntime?: RemoteCommandService | undefined;
-  planRuntime?: PlanRuntimeService | undefined;
-}
-
-export interface CreateShellOpsServicesOptions extends CommandOpsShellServices {}
-
-export function createShellOpsServices(
-  options: CreateShellOpsServicesOptions,
-): CommandOpsShellServices {
-  const {
-    triggerSupervisor,
-    agentManager,
-    acpManager,
-    automationManager,
-    modeManager,
-    planManager,
-    adaptivePlanner,
-    sessionOrchestration,
-    remoteRuntime,
-    planRuntime,
-  } = options;
-
-  return {
-    triggerSupervisor,
-    agentManager,
-    acpManager,
-    automationManager,
-    modeManager,
-    planManager,
-    adaptivePlanner,
-    sessionOrchestration,
-    remoteRuntime,
-    planRuntime,
-  };
+  readonly agentManager?: ShellAgentManagerService | undefined;
+  readonly acpManager?: ShellAcpManagerService | undefined;
+  readonly automationManager?: ShellAutomationManagerRuntimeService | undefined;
+  readonly modeManager?: ShellModeManagerService | undefined;
+  readonly planManager?: ShellPlanManagerService | undefined;
+  readonly sessionOrchestration?: ShellSessionOrchestrationService | undefined;
+  readonly remoteRuntime?: RemoteCommandService | undefined;
+  readonly planRuntime?: PlanRuntimeService | undefined;
 }
 
 export function createShellRemoteCommandService(options: {

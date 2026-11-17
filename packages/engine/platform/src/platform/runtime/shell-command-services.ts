@@ -1,4 +1,3 @@
-import type { AdaptivePlanner } from '../core/adaptive-planner.js';
 import type { ForensicsRegistry } from './forensics/index.js';
 import type { IntegrationHelperService } from './integration/helpers.js';
 import type { HookWorkbench } from '../hooks/workbench.js';
@@ -8,10 +7,10 @@ import type { PolicyRuntimeState } from './permissions/policy-runtime.js';
 import type { ShellPathService } from './shell-paths.js';
 import type { WorktreeRegistry } from './worktree/registry.js';
 import type { SandboxSessionRegistry } from './sandbox/session-registry.js';
-import { createShellExtensionServices, type CommandExtensionShellServices } from './shell-command-extensions.js';
-import { createShellOpsServices, createShellPlanRuntime, createShellRemoteCommandService, type CommandOpsShellServices, type PlanRuntimeService, type RemoteCommandService } from './shell-command-ops.js';
-import { createShellPlatformServices, type CommandPlatformShellServices } from './shell-command-platform.js';
-import { createShellWorkspaceServices, type CommandWorkspaceShellServices } from './shell-command-workspace.js';
+import type { CommandExtensionShellServices } from './shell-command-extensions.js';
+import type { CommandOpsShellServices, PlanRuntimeService, RemoteCommandService } from './shell-command-ops.js';
+import type { CommandPlatformShellServices } from './shell-command-platform.js';
+import type { CommandWorkspaceShellServices } from './shell-command-workspace.js';
 
 export type { CommandWorkspaceShellServices } from './shell-command-workspace.js';
 export type { CommandPlatformShellServices } from './shell-command-platform.js';
@@ -40,7 +39,6 @@ export interface CreateBootstrapCommandShellServicesOptions {
   readonly automationManager?: import('./shell-command-ops.js').ShellAutomationManagerRuntimeService | undefined;
   readonly modeManager?: import('./shell-command-ops.js').ShellModeManagerService | undefined;
   readonly planManager?: import('./shell-command-ops.js').ShellPlanManagerService | undefined;
-  readonly adaptivePlanner?: AdaptivePlanner | undefined;
   readonly sessionOrchestration?: import('./shell-command-ops.js').ShellSessionOrchestrationService | undefined;
   readonly shellPaths: ShellPathService;
   readonly worktreeRegistry: WorktreeRegistry;
@@ -64,76 +62,49 @@ export interface CreateBootstrapCommandShellServicesOptions {
   readonly hookWorkbench?: HookWorkbench | undefined;
 }
 
+/**
+ * The four sections a command context reads. Each is its interface's fields
+ * taken from the options as given: a service is added by naming it in its
+ * section interface and in the options, nowhere else.
+ */
 export function createBootstrapCommandShellServices(
   options: CreateBootstrapCommandShellServicesOptions,
 ): BootstrapCommandShellServices {
-  const {
-    agentManager,
-    acpManager,
-    automationManager,
-    modeManager,
-    planManager,
-    adaptivePlanner,
-    sessionOrchestration,
-    shellPaths,
-    worktreeRegistry,
-    sandboxSessionRegistry,
-    readModels,
-    serviceRegistry,
-    subscriptionManager,
-    secretsManager,
-    localUserAuthManager,
-    tokenAuditor,
-    replayEngine,
-    webhookNotifier,
-    remoteRuntime,
-    planRuntime,
-    forensicsRegistry,
-    policyRuntimeState,
-    memoryRegistry,
-    integrationHelpers,
-    knowledgeService,
-    pluginManager,
-    hookWorkbench,
-  } = options;
-
-  return {
-    workspace: createShellWorkspaceServices({
-      shellPaths,
-      worktreeRegistry,
-      sandboxSessionRegistry,
-    }),
-    platform: createShellPlatformServices({
-      readModels,
-      serviceRegistry,
-      subscriptionManager,
-      secretsManager,
-      localUserAuthManager,
-      tokenAuditor,
-      replayEngine,
-      webhookNotifier,
-    }),
-    ops: createShellOpsServices({
-      agentManager,
-      acpManager,
-      automationManager,
-      modeManager,
-      planManager,
-      adaptivePlanner,
-      sessionOrchestration,
-      remoteRuntime,
-      planRuntime,
-    }),
-    extensions: createShellExtensionServices({
-      forensicsRegistry,
-      policyRuntimeState,
-      memoryRegistry,
-      integrationHelpers,
-      knowledgeService,
-      pluginManager,
-      hookWorkbench,
-    }),
+  const workspace: CommandWorkspaceShellServices = {
+    shellPaths: options.shellPaths,
+    worktreeRegistry: options.worktreeRegistry,
+    sandboxSessionRegistry: options.sandboxSessionRegistry,
   };
+  const platform: CommandPlatformShellServices = {
+    readModels: options.readModels,
+    serviceRegistry: options.serviceRegistry,
+    subscriptionManager: options.subscriptionManager,
+    secretsManager: options.secretsManager,
+    localUserAuthManager: options.localUserAuthManager,
+    tokenAuditor: options.tokenAuditor,
+    replayEngine: options.replayEngine,
+    webhookNotifier: options.webhookNotifier,
+  };
+  const ops: CommandOpsShellServices = {
+    agentManager: options.agentManager,
+    acpManager: options.acpManager,
+    automationManager: options.automationManager,
+    modeManager: options.modeManager,
+    planManager: options.planManager,
+    sessionOrchestration: options.sessionOrchestration,
+    remoteRuntime: options.remoteRuntime,
+    planRuntime: options.planRuntime,
+  };
+  const extensions: CommandExtensionShellServices = {
+    forensicsRegistry: options.forensicsRegistry,
+    policyRuntimeState: options.policyRuntimeState,
+    memoryRegistry: options.memoryRegistry,
+    integrationHelpers: options.integrationHelpers,
+    knowledgeService: options.knowledgeService,
+    pluginManager: options.pluginManager,
+    hookWorkbench: options.hookWorkbench,
+  };
+  return { workspace, platform, ops, extensions };
 }
 
 export { createShellRemoteCommandService, createShellPlanRuntime } from './shell-command-ops.js';

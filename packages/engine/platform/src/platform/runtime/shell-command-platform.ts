@@ -17,31 +17,3 @@ export interface CommandPlatformShellServices {
   readonly replayEngine?: DeterministicReplayEngine | undefined;
   readonly webhookNotifier?: WebhookNotifier | undefined;
 }
-
-export interface CreateShellPlatformServicesOptions extends CommandPlatformShellServices {}
-
-export function createShellPlatformServices(
-  options: CreateShellPlatformServicesOptions,
-): CommandPlatformShellServices {
-  const {
-    readModels,
-    serviceRegistry,
-    subscriptionManager,
-    secretsManager,
-    localUserAuthManager,
-    tokenAuditor,
-    replayEngine,
-    webhookNotifier,
-  } = options;
-
-  return {
-    readModels,
-    serviceRegistry,
-    subscriptionManager,
-    secretsManager,
-    localUserAuthManager,
-    tokenAuditor,
-    replayEngine,
-    webhookNotifier,
-  };
-}

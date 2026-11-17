@@ -28,7 +28,6 @@ export const {
   requireSessionLineageTracker,
   requireSessionChangeTracker,
   requirePlanManager,
-  requireAdaptivePlanner,
   requireSessionOrchestration,
   requireForensicsRegistry,
   requirePluginManager,

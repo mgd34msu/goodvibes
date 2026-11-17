@@ -7,21 +7,3 @@ export interface CommandWorkspaceShellServices {
   readonly worktreeRegistry?: WorktreeRegistry | undefined;
   readonly sandboxSessionRegistry?: SandboxSessionRegistry | undefined;
 }
-
-export interface CreateShellWorkspaceServicesOptions extends CommandWorkspaceShellServices {}
-
-export function createShellWorkspaceServices(
-  options: CreateShellWorkspaceServicesOptions,
-): CommandWorkspaceShellServices {
-  const {
-    shellPaths,
-    worktreeRegistry,
-    sandboxSessionRegistry,
-  } = options;
-
-  return {
-    shellPaths,
-    worktreeRegistry,
-    sandboxSessionRegistry,
-  };
-}

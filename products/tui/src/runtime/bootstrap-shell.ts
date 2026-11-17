@@ -16,6 +16,7 @@ import type { RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runti
 import type { RuntimeServices } from './services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { OpsControlPlane } from '@/runtime/index.ts';
+import type { ShellAcpManagerService } from '@/runtime/index.ts';
 import { CommandRegistry } from '../input/command-registry.ts';
 import { registerBuiltinCommands } from '../input/commands.ts';
 import { InputHistory } from '../input/input-history.ts';
@@ -77,6 +78,8 @@ export interface BootstrapShellOptions {
   readonly uiServices: UiRuntimeServices;
   readonly taskManager: TaskManager;
   readonly opsControlPlane?: OpsControlPlane;
+  /** The ACP subagent manager the `/remote` commands drive; built before the shell so the command context carries it from the start. */
+  readonly acpManager: ShellAcpManagerService;
   readonly completeModelSelectionSideEffect?: () => void;
 }
 
@@ -101,6 +104,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     uiServices,
     taskManager,
     opsControlPlane,
+    acpManager,
     completeModelSelectionSideEffect,
   } = options;
 
@@ -258,6 +262,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     knowledgeService: services.knowledgeService,
     contractRunner: services.contractRunner,
     contractOperator: services.contractOperator,
+    acpManager,
     workstreamDrafts: createWorkstreamDraftService({
       agentManager: services.agentManager,
       configManager,

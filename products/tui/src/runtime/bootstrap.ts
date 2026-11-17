@@ -342,6 +342,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     uiServices,
     taskManager: opsTaskManager,
     opsControlPlane,
+    acpManager,
     completeModelSelectionSideEffect: () => {
       compositor.resetDiff();
     },
@@ -732,7 +733,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
 
   // ── Phase 12b: Operator Control Plane wiring (capability-gated); store and
   // task manager exist unconditionally so pre-gate tasks stay visible. ───────
-  ctx.commandContext.ops.acpManager = acpManager;
   if (opsControlPlane) {
     ctx.commandContext.openOpsView = () => {
       ctx.commandContext.openView?.('ops-control');

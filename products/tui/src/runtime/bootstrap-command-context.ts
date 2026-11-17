@@ -32,6 +32,7 @@ import type { SandboxSessionRegistry } from '@/runtime/index.ts';
 import type { UiReadModels } from './ui-read-models.ts';
 import type { ShellPathService, SessionSurface } from '@/runtime/index.ts';
 import type {
+  ShellAcpManagerService,
   ShellAgentManagerService,
   ShellAutomationManagerRuntimeService,
   ShellModeManagerService,
@@ -97,6 +98,7 @@ export type CreateBootstrapCommandContextOptions = {
   pluginManager?: PluginManager;
   hookWorkbench?: HookWorkbench;
   agentManager?: ShellAgentManagerService;
+  acpManager?: ShellAcpManagerService;
   modeManager?: ShellModeManagerService;
   sessionManager?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager;
   profileManager?: import('@goodvibes-jev/engine/platform/platform/profiles').ProfileManager;

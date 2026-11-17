@@ -51,6 +51,10 @@ export function composeCredentialServices(input: CredentialCompositionInput): {
     // Shared between the ceremony gateway verbs and the relay gate's verifier,
     // so both check a step-up against the same store.
     stepUpService: new StepUpService({ secrets: secretsManager }),
-    pairingTokens: new PairingTokenManager(input.pairingTokenPath, { nativeDataWriter: input.nativeDataWriter }),
+    // The cap is read at each mint, so a device.nodes.maxPaired change applies to the next pairing.
+    pairingTokens: new PairingTokenManager(input.pairingTokenPath, {
+      maxPaired: () => input.configManager?.get('device.nodes.maxPaired'),
+      nativeDataWriter: input.nativeDataWriter,
+    }),
   };
 }

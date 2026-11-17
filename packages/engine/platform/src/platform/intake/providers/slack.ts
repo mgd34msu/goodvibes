@@ -90,6 +90,24 @@ function timestamp(value: unknown): { ts: string; receivedAt: number } {
   if (!Number.isSafeInteger(receivedAt) || receivedAt <= 0) throw new Unreadable();
   return { ts: value, receivedAt };
 }
+/**
+ * Who other than the account reacted to a message: the first such user's id,
+ * `''` when the count shows others but names none, or undefined when nobody else did.
+ */
+function otherReactor(message: Record<string, unknown>, self: string): string | undefined {
+  if (message.reactions === undefined) return undefined;
+  let unnamed = false;
+  for (const entry of rows(message.reactions, 100)) {
+    const reaction = record(entry);
+    const users = reaction.users === undefined ? [] : rows(reaction.users, 1_000).map((user) => identifier(user));
+    const count = reaction.count === undefined ? users.length : reaction.count;
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) throw new Unreadable();
+    const other = users.find((user) => user !== self);
+    if (other !== undefined) return other;
+    if (count > users.filter((user) => user === self).length) unnamed = true;
+  }
+  return unnamed ? '' : undefined;
+}
 function classify(message: Record<string, unknown>, self: string, text: string, ts: string): InboundChannelItem['kind'] {
   const thread = optionalString(message.thread_ts, 40);
   if (text.includes(`<@${self}>`)) return 'mention';
@@ -204,11 +222,16 @@ export function createSlackInboxAdapter(ctx: AdapterContext, ports: SlackInboxPo
               if (receivedAt < oldestMs) { oldestMs = receivedAt; oldestTs = ts; }
               const subtype = optionalString(message.subtype, 200);
               const author = optionalString(message.user, 200);
-              // Bot posts and the account's own messages are not inbound mail to the owner.
-              if (subtype === 'bot_message' || optionalString(message.bot_id, 200) || author === me) continue;
+              // Bot posts are not inbound mail to the owner. The account's own
+              // message is, only as a reaction row, when someone else reacted to it.
+              if (subtype === 'bot_message' || optionalString(message.bot_id, 200)) continue;
+              const reactor = author === me ? otherReactor(message, me) : undefined;
+              if (author === me && reactor === undefined) continue;
               const text = optionalString(message.text, 40_000) ?? '';
-              candidates.push({ key: `${channel}:${ts}`, conversation: channel, senderId: author || known.get(channel) || channel,
-                text, receivedAt, kind: classify(message, me, text, ts) });
+              candidates.push(reactor !== undefined
+                ? { key: `${channel}:${ts}`, conversation: channel, senderId: reactor || known.get(channel) || channel, text, receivedAt, kind: 'reaction' }
+                : { key: `${channel}:${ts}`, conversation: channel, senderId: author || known.get(channel) || channel,
+                  text, receivedAt, kind: classify(message, me, text, ts) });
             }
             if (history.has_more !== undefined && typeof history.has_more !== 'boolean') throw new Unreadable();
             const more = history.has_more === true && oldestTs !== undefined && oldestMs > window.floor;

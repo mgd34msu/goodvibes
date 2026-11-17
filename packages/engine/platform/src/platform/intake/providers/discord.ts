@@ -90,6 +90,16 @@ function snowflake(value: unknown): { id: string; value: bigint; ms: number } {
   if (numeric > MAX_SNOWFLAKE) throw new Unreadable();
   return { id: value, value: numeric, ms: Number(numeric >> 22n) + EPOCH_MS };
 }
+/** Whether anyone other than the account reacted to a message (Discord counts each emoji and says whether the account is among them). */
+function reactedByOthers(message: Record<string, unknown>): boolean {
+  if (message.reactions === undefined) return false;
+  return rows(message.reactions, 100).some((entry) => {
+    const reaction = record(entry);
+    const { count, me } = reaction;
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0 || (me !== undefined && typeof me !== 'boolean')) throw new Unreadable();
+    return count > (me === true ? 1 : 0);
+  });
+}
 function classify(message: Record<string, unknown>, self: string): InboundChannelItem['kind'] {
   const mentions = message.mentions === undefined ? [] : rows(message.mentions, 1_000);
   const reference = message.referenced_message;
@@ -189,7 +199,7 @@ export function createDiscordInboxAdapter(ctx: AdapterContext, ports: DiscordInb
             throw new ScanFailure(`Discord answered the history of channel ${channel} in a shape the inbox does not read; it is skipped this poll`, 'conversation', false);
           }
         };
-        /** One message as a candidate, or undefined for a bot post; throws Unreadable on a shape the inbox does not read. */
+        /** One message as a candidate, or undefined for another bot's post or an own message nobody else reacted to; throws Unreadable on a shape the inbox does not read. */
         const readCandidate = (channel: string, message: Record<string, unknown>, id: { id: string; ms: number }): ScanCandidate | undefined => {
           if (message.channel_id !== undefined && snowflake(message.channel_id).id !== channel) throw new Unreadable();
           const authorValue = message.author;
@@ -197,13 +207,15 @@ export function createDiscordInboxAdapter(ctx: AdapterContext, ports: DiscordInb
           const bot = author?.bot;
           if (bot !== undefined && typeof bot !== 'boolean') throw new Unreadable();
           const authorId = author === undefined ? undefined : snowflake(author.id).id;
-          // Bot posts, the inbox bot's own included, are not inbound mail to the owner.
-          if (bot === true || authorId === me) return undefined;
+          // Other bots' posts are not inbound mail to the owner. The account's own
+          // message is, only as a reaction row, when someone else reacted to it.
+          const own = authorId === me;
+          if (own ? !reactedByOthers(message) : bot === true) return undefined;
           const text = message.content ?? '';
           if (typeof text !== 'string' || text.length > 40_000) throw new Unreadable();
           // One ordering for pagination and the cursor: the id's own time.
-          return { key: `${channel}:${id.id}`, conversation: channel, senderId: authorId ?? channel, text,
-            receivedAt: id.ms, kind: classify(message, me) };
+          return { key: `${channel}:${id.id}`, conversation: channel, senderId: own ? channel : authorId ?? channel, text,
+            receivedAt: id.ms, kind: own ? 'reaction' : classify(message, me) };
         };
         const outcome = await scanConversations({
           conversations: snapshot.channels.map(channel => channel.id).sort(),

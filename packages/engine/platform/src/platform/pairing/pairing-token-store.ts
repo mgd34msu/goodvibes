@@ -66,7 +66,7 @@ import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibilit
 import { describeOwnerLock, reclaimDeadOwnerLock, recordOwnerLockHolder, removeOwnerLockDirectory, waitWhileLockIsBeingTaken } from '../config/durable-policy-epoch.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
-import type { CredentialRefusal } from '../security/http-auth.js';
+import { matchesSharedToken, type CredentialRefusal } from '../security/http-auth.js';
 
 const TOKEN_PREFIX = 'gvp_';
 /** The identity recorded for a pairing file that does not exist. */
@@ -698,6 +698,25 @@ export class PairingTokenManager {
     if (!normalized.startsWith(TOKEN_PREFIX)) return null;
     const record = this.index.get(hashToken(normalized));
     return record ? this.refusalOf(record, Date.now()) : null;
+  }
+
+  /**
+   * Why a presented credential is refused, when this store is what refuses it:
+   * a device token it knows (see {@link describeRefusal}), or the shared
+   * operator token after it was revoked here. `sharedToken` is the daemon's own
+   * copy, null when it has none. Asked only on the 401 path; never grants access.
+   */
+  describePresentedRefusal(token: string, sharedToken: string | null): CredentialRefusal | null {
+    const device = this.describeRefusal(token);
+    if (device) return device;
+    const normalized = token.trim();
+    if (!sharedToken || !normalized || !matchesSharedToken(normalized, sharedToken) || !this.isLegacyRevoked()) return null;
+    return {
+      code: 'SHARED_TOKEN_REVOKED',
+      state: 'the shared operator token was revoked on this daemon and no longer signs in',
+      reason: 'This request presented the shared operator token, which was revoked on this daemon.',
+      next: ['On the daemon\'s machine, run /devices migrate-shared in the GoodVibes terminal to mint this device its own token, then use that token.'],
+    };
   }
 
   /** Take in the last-seen times stamped since the last write; true when a record moved. */

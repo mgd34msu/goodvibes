@@ -701,6 +701,9 @@ export function createDaemonFacadeCollaborators(
   batchManager.start();
   const httpRouter = new DaemonHttpRouter({
     listenerBinding: () => ({ ...options.transportBinding(), scheme: options.tlsState()?.tls ? 'https' : 'http' }),
+    // The 401 names a refused credential the daemon knows: a device token over its
+    // rotation age, an expired offer, or the shared token after it was revoked.
+    describeCredentialRefusal: (token) => runtime.runtimeServices.pairingTokens.describePresentedRefusal(token, options.authToken()),
     settingsAuthority: {
       settingsLifetime: options.settingsLifetime ?? (() => null),
       captureSettingsAdminAuthority: (req) => controlPlaneHelper.captureSettingsAdminAuthority(req),

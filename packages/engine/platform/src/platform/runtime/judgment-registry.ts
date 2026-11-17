@@ -33,11 +33,9 @@ registry.register(compactionRetention);
 registry.register(recommendationFit);
 registry.register(descriptionQuality);
 
-// Runtime: session return, system messages.
+// Runtime: session return.
 import { pendingApproval } from './batteries/pending-approval.js';
-import { systemMessagePriority } from './batteries/system-message-priority.js';
 registry.register(pendingApproval);
-registry.register(systemMessagePriority);
 
 // State: code index.
 import { codeSearchRerank } from '../state/batteries/code-search-rerank.js';

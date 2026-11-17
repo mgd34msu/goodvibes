@@ -6,8 +6,6 @@
  * outside the platform.
  */
 
-import { readSystemMessagePriority } from './batteries/system-message-priority.js';
-
 export type SystemMessagePriorityLevel = 'high' | 'low';
 /**
  * 'contract' is the contract runner's status stream: its `[Contract]`
@@ -15,14 +13,6 @@ export type SystemMessagePriorityLevel = 'high' | 'low';
  */
 export type SystemMessageKind = 'system' | 'operational' | 'contract';
 export type SystemMessageTarget = 'conversation' | 'panel' | 'both';
-
-/**
- * Whether the operator needs to see a system message now. Read by Jev
- * (engine.runtime.system-message-priority); an unsettled reading stays held.
- */
-export function classifySystemMessagePriority(message: string): Promise<SystemMessagePriorityLevel> {
-  return readSystemMessagePriority(message, 'runtime.system-message-policy.priority');
-}
 
 export function defaultSystemMessageTarget(kind: SystemMessageKind): SystemMessageTarget {
   if (kind === 'contract') return 'both';

@@ -405,7 +405,6 @@ export {
   createBootstrapCommandShellServices,
   resolveSurfaceDirectory,
   classifySystemMessageKind,
-  classifySystemMessagePriority,
   defaultSystemMessageTarget,
   resolveSystemMessageDelivery,
   buildProviderAccountSnapshot,

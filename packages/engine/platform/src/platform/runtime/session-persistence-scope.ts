@@ -28,7 +28,7 @@ import type { SessionSurface } from './session-surface.js';
  * `TOOLS_DONE`), after a turn's save failed (`TURN_COMPLETED`), by the minute
  * timer for a change outside a turn (`TIMER`), or on the way out (`EXIT`).
  */
-export type CrashSnapshotTurnMoment = 'TURN_SUBMITTED' | 'TOOLS_DONE' | 'TURN_COMPLETED' | 'TIMER' | 'EXIT';
+export type CrashSnapshotTurnMoment = 'TURN_SUBMITTED' | 'TOOL_EXECUTING' | 'TOOLS_DONE' | 'TURN_COMPLETED' | 'TIMER' | 'EXIT';
 
 /** What a crash snapshot says about the turn it was taken in. */
 export interface CrashSnapshotTurn {

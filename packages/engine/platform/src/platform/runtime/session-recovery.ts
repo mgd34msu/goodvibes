@@ -83,7 +83,7 @@ export type RecoveryFileInfo = {
   turn?: CrashSnapshotTurn | undefined;
 };
 
-const TURN_MOMENTS: ReadonlySet<string> = new Set<CrashSnapshotTurnMoment>(['TURN_SUBMITTED', 'TOOLS_DONE', 'TURN_COMPLETED', 'TIMER', 'EXIT']);
+const TURN_MOMENTS: ReadonlySet<string> = new Set<CrashSnapshotTurnMoment>(['TURN_SUBMITTED', 'TOOL_EXECUTING', 'TOOLS_DONE', 'TURN_COMPLETED', 'TIMER', 'EXIT']);
 
 /** The `turn` a snapshot header recorded, when it is well formed. */
 function readSnapshotTurn(value: unknown): CrashSnapshotTurn | undefined {

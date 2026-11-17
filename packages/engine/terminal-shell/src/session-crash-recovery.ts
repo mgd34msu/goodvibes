@@ -21,7 +21,7 @@
 import type { SessionBranches, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
 import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { TurnEvent } from '@goodvibes-jev/engine/platform/events';
+import type { ToolEvent, TurnEvent } from '@goodvibes-jev/engine/platform/events';
 import {
   applyRecoverySnapshot,
   closeSessionHere,
@@ -330,6 +330,7 @@ export function keepHeadlessSessionRecoverable(input: {
   let pointed: string | undefined;
   const stop = writeCrashSnapshotAtTurnMoments({
     subscribe: (moment, handler) => input.bus.on<TurnEvent>(moment, () => handler()),
+    subscribeToolStart: (handler) => input.bus.on<ToolEvent>('TOOL_EXECUTING', () => handler()),
     write: (moment) => {
       const sessionId = runtime.sessionId;
       // The session lock's backstop: a hold that another process had (a forced resume) is taken once it left.

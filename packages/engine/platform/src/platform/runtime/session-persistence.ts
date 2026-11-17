@@ -50,7 +50,7 @@ export {
  * save at turn end is the durable copy after that, so a crash mid-turn loses
  * at most the tool batches of the last few seconds, never the turn.
  */
-export type CrashSnapshotMoment = 'TURN_SUBMITTED' | 'TOOLS_DONE';
+export type CrashSnapshotMoment = 'TURN_SUBMITTED' | 'TOOL_EXECUTING' | 'TOOLS_DONE';
 
 /**
  * Tool batches written to the crash snapshot at most once in this window; a
@@ -71,7 +71,14 @@ export const CRASH_SNAPSHOT_TOOLS_INTERVAL_MS = 5_000;
  * next moment writes again. Returns the unsubscribe.
  */
 export function writeCrashSnapshotAtTurnMoments(input: {
-  readonly subscribe: (moment: CrashSnapshotMoment | 'TURN_COMPLETED', handler: () => void) => () => void;
+  readonly subscribe: (moment: 'TURN_SUBMITTED' | 'TOOLS_DONE' | 'TURN_COMPLETED', handler: () => void) => () => void;
+  /**
+   * A tool call of the turn starts running (its call is in the conversation by
+   * then). Given, the batch is written before its results too, so a process
+   * killed while a command runs restores that call as interrupted, its effect
+   * unknown, instead of losing that the model made it.
+   */
+  readonly subscribeToolStart?: ((handler: () => void) => () => void) | undefined;
   /** Writes the snapshot; `moment` goes into it (see {@link crashSnapshotTurn}). */
   readonly write: (moment: CrashSnapshotMoment) => void;
 }): () => void {
@@ -88,20 +95,23 @@ export function writeCrashSnapshotAtTurnMoments(input: {
     if (pending !== undefined) clearTimeout(pending);
     pending = undefined;
   };
-  const writeTools = (): void => {
+  const writeTools = (moment: 'TOOL_EXECUTING' | 'TOOLS_DONE'): void => {
     dropPending();
     lastToolsWrite = Date.now();
-    writeNow('TOOLS_DONE');
+    writeNow(moment);
+  };
+  // Both tool moments share one window, so a turn still pays at most one write per window.
+  const toolsMoment = (moment: 'TOOL_EXECUTING' | 'TOOLS_DONE') => (): void => {
+    const wait = lastToolsWrite + CRASH_SNAPSHOT_TOOLS_INTERVAL_MS - Date.now();
+    if (wait <= 0) { writeTools(moment); return; }
+    if (pending !== undefined) return;
+    pending = setTimeout(() => writeTools(moment), wait);
+    (pending as { unref?: () => void }).unref?.();
   };
   const unsubs = [
     input.subscribe('TURN_SUBMITTED', () => { dropPending(); writeNow('TURN_SUBMITTED'); }),
-    input.subscribe('TOOLS_DONE', () => {
-      const wait = lastToolsWrite + CRASH_SNAPSHOT_TOOLS_INTERVAL_MS - Date.now();
-      if (wait <= 0) { writeTools(); return; }
-      if (pending !== undefined) return;
-      pending = setTimeout(writeTools, wait);
-      (pending as { unref?: () => void }).unref?.();
-    }),
+    ...(input.subscribeToolStart ? [input.subscribeToolStart(toolsMoment('TOOL_EXECUTING'))] : []),
+    input.subscribe('TOOLS_DONE', toolsMoment('TOOLS_DONE')),
     input.subscribe('TURN_COMPLETED', dropPending),
   ];
   return () => {
@@ -118,7 +128,7 @@ export function writeCrashSnapshotAtTurnMoments(input: {
  */
 export function crashSnapshotTurn(moment: CrashSnapshotTurnMoment, conversation: { hasPartialReply(): boolean }): CrashSnapshotTurn {
   const partialReply = conversation.hasPartialReply();
-  return { moment, inFlight: partialReply || moment === 'TURN_SUBMITTED' || moment === 'TOOLS_DONE', partialReply };
+  return { moment, inFlight: partialReply || moment === 'TURN_SUBMITTED' || moment === 'TOOL_EXECUTING' || moment === 'TOOLS_DONE', partialReply };
 }
 
 // The crash-recovery API, re-exported so `session-persistence.js` remains the

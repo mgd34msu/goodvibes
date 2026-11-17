@@ -31,6 +31,7 @@ import { acceptedResearchIds } from './accepted-research.js';
 import { currentFileObservationsAsync } from './current-file-observations.js';
 import { assignedReviewPaths, reviewProjectPath, reviewInventoryObservationAsync } from './review-inventory.js';
 import { projectCheckEvidence } from './check-evidence-projection.js';
+import { ownerEvidenceForModel } from './owner-evidence.js';
 export { currentFileObservations } from './current-file-observations.js';
 import { parseCompletionReport } from '../agents/completion-report.js';
 import { readBodyWithHostEvidence, returnedReadRows } from '../tools/read/observation.js';
@@ -541,7 +542,8 @@ export async function collectUnitEvidence(
     sourceReads: observedReads,
     ...(planChecks.length ? { orchestration: { contractId: contract.id, ...(contract.status === undefined ? {} : { status: contract.status }), planChecks,
       requirements,
-      ...(sources.ownerEvidence === undefined ? {} : { ownerPriorReads: sources.ownerEvidence }),
+      // The model view: this unit's files and the quoted reads, no call ids or journal sizes.
+      ...(sources.ownerEvidence === undefined ? {} : { ownerPriorReads: ownerEvidenceForModel(sources.ownerEvidence, unit.files) ?? null }),
       currentFiles,
       ...(contract.reviewInventory && contract.projectRoot && contract.units ? { reviewInventory: await reviewInventoryObservationAsync({ ...contract, projectRoot: contract.projectRoot, units: contract.units }, currentFiles, sources.signal, unit.files) as unknown as JsonValue } : {}),
       ...(privateArtifacts.length ? { privateArtifacts } : {}),

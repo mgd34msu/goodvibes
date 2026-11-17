@@ -43,6 +43,7 @@ import { assertContractInputOwner, assertContractInputObjects, assertContractExe
 import { applyCapturedInputDelta, ContractPublicationConflictError } from './input-apply.js';
 import { admitPublicationInput, type PublicationInputAdmission } from './publication-input.js';
 import { contractSourceScope } from './work-receipts.js';
+import { ownerEvidenceForModel } from './owner-evidence.js';
 
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -387,7 +388,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       contractId: contract.id, createdAt: contract.createdAt, origin: contract.origin, planChecks,
       continuationEvidence: contract.taskEvidence ?? '',
       ...(currentAnswerSource ? { currentAnswerSource } : {}),
-      ownerPriorReads,
+      // The model view: the checked units' files and the quoted reads, no call ids or journal sizes.
+      ownerPriorReads: ownerPriorReads === null ? null : ownerEvidenceForModel(ownerPriorReads, evidenceUnits.flatMap(unit => unit.files)) ?? null,
       referenceOperations: sourceScope.referenceOperations,
       sourceJsonReferenceComparisons: sourceScope.sourceJsonReferenceComparisons,
       sourceReferenceComparisons: sourceScope.sourceReferenceComparisons,

@@ -65,7 +65,11 @@ export interface CrossSurfaceView {
   readonly online: boolean;
   /** True when the served rows are not a confirmed-live union (offline, or aged past the freshness window). */
   readonly stale: boolean;
-  /** Wall-clock ms of the last successful wire refresh, or null if never. */
+  /**
+   * Wall-clock ms of the last successful pull of the served rows, or null if
+   * never. The interval liveness probe does not move it: it confirms the wire,
+   * not the rows.
+   */
   readonly lastSyncAt: number | null;
   /** Honest operator note when the cross-surface view is offline, else null. */
   readonly offlineNote: string | null;
@@ -188,7 +192,11 @@ export class SessionUnionCache implements SessionReadFacade {
   private wireReader: WireSessionReader | null = null;
   private wireCache: readonly SharedSessionRecord[] = [];
   private online = false;
-  private lastSyncAt: number | null = null;
+  /**
+   * When the served wire rows were last pulled; drives `stale` and the view's
+   * lastSyncAt. A liveness probe moves `online` only.
+   */
+  private rowsSyncedAt: number | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   /** Guards against overlapping refresh() calls racing the same wire. */
   private refreshInFlight: Promise<void> | null = null;
@@ -257,7 +265,7 @@ export class SessionUnionCache implements SessionReadFacade {
     this.wireReader = wireReader;
     this.mode = 'adopted';
     this.online = false; // unconfirmed until the first successful refresh
-    this.lastSyncAt = null;
+    this.rowsSyncedAt = null;
     this.wireCache = [];
     this.refreshInFlight = null; // a new adoption starts a fresh probe, not a stale prior reader's
     this.timer = this.scheduler.setInterval(() => void this.probe(), this.refreshIntervalMs);
@@ -302,9 +310,13 @@ export class SessionUnionCache implements SessionReadFacade {
     return this.pull(true);
   }
 
-  /** The interval liveness probe: one row, so the daemon builds and sends almost nothing; the cached rows stay. */
+  /**
+   * The interval liveness probe: one row, so the daemon builds and sends almost
+   * nothing; the cached rows stay. Until a pull has brought rows (the first one
+   * failed) it pulls them, so `online` never vouches for rows nobody fetched.
+   */
   private probe(): Promise<void> {
-    return this.pull(false);
+    return this.pull(this.rowsSyncedAt === null);
   }
 
   private async pull(rows: boolean): Promise<void> {
@@ -348,8 +360,10 @@ export class SessionUnionCache implements SessionReadFacade {
     // through anymore: drop the ENTIRE write-back.
     if (generation !== this.generation) return;
     if (succeeded) {
-      if (pullRows) this.wireCache = rows!;
-      this.lastSyncAt = this.now();
+      if (pullRows) {
+        this.wireCache = rows!;
+        this.rowsSyncedAt = this.now();
+      }
       this.online = true;
     } else {
       // Degrade honestly: keep the last rows but stop serving them as live.
@@ -438,13 +452,13 @@ export class SessionUnionCache implements SessionReadFacade {
     if (this.mode !== 'adopted') {
       return { mode: this.mode, online: false, stale: false, lastSyncAt: null, offlineNote: null };
     }
-    const aged = this.lastSyncAt === null || this.now() - this.lastSyncAt > this.staleAfterMs;
+    const aged = this.rowsSyncedAt === null || this.now() - this.rowsSyncedAt > this.staleAfterMs;
     const stale = !this.online || aged;
     return {
       mode: 'adopted',
       online: this.online,
       stale,
-      lastSyncAt: this.lastSyncAt,
+      lastSyncAt: this.rowsSyncedAt,
       offlineNote: this.online ? null : OFFLINE_NOTE,
     };
   }
@@ -457,7 +471,7 @@ export class SessionUnionCache implements SessionReadFacade {
     this.wireReader = null;
     this.wireCache = [];
     this.online = false;
-    this.lastSyncAt = null;
+    this.rowsSyncedAt = null;
     this.refreshInFlight = null;
   }
 

@@ -112,7 +112,8 @@ export type DaemonEndpoint =
 export type DaemonTokenMode = 'mint' | 'read-only';
 
 /** The `GOODVIBES_DAEMON_TOKEN` override, applied in one place for every caller. */
-function daemonTokenOverride(): string | null {
+/** GOODVIBES_DAEMON_TOKEN: when set it is the bearer for every daemon call, ahead of any stored token or session. */
+export function daemonTokenOverride(): string | null {
   return process.env.GOODVIBES_DAEMON_TOKEN?.trim() || null;
 }
 

@@ -3,6 +3,8 @@ import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/au
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { readDaemonSessionToken, writeDaemonSessionToken } from '../../runtime/client/connected-daemon-credentials.ts';
+import { daemonTokenOverride, resolveControlPlaneBaseUrl } from '../../runtime/client/operator-endpoint.ts';
+import { parseDaemonOrigin } from '@goodvibes-jev/engine/platform/platform/config/control-plane-base-url';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
@@ -98,9 +100,20 @@ async function exchangeServiceLogin(
       // The session is what this terminal presents to that daemon from now on
       // (operator-endpoint.ts), held per address beside its other bearers.
       writeDaemonSessionToken(requireShellPaths(ctx).homeDirectory, input.baseUrl.origin, body.token);
+      // The session is read for the address this terminal dials, compared the way it is stored (one origin form).
+      const signedIn = parseDaemonOrigin(input.baseUrl.origin)?.baseUrl ?? input.baseUrl.origin;
+      const dialled = resolveControlPlaneBaseUrl(ctx.platform.configManager);
+      const dialledOrigin = dialled ? parseDaemonOrigin(dialled)?.baseUrl ?? null : null;
+      const notInUse = daemonTokenOverride()
+        ? 'GOODVIBES_DAEMON_TOKEN is set, and it is the bearer for every daemon call while it is'
+        : dialledOrigin !== signedIn
+          ? `this terminal dials ${dialled ?? 'no daemon address'}, not ${signedIn}; the session is used once this terminal is pointed at that address (connect to it from /setup, Network step)`
+          : null;
       ctx.print([
-        `Signed in to the daemon at ${input.baseUrl.origin} as ${input.username}; this terminal now calls that daemon with the session.`,
-        `  It stays in use until it expires (calls are then refused until you sign in again or sign out) or you run /auth logout daemon ${input.baseUrl.origin}.`,
+        notInUse
+          ? `Signed in to the daemon at ${signedIn} as ${input.username}; the session is stored but not in use: ${notInUse}.`
+          : `Signed in to the daemon at ${signedIn} as ${input.username}; this terminal now calls that daemon with the session.`,
+        `  It stays ${notInUse ? 'stored' : 'in use'} until it expires (calls are then refused until you sign in again or sign out) or you run /auth logout daemon ${signedIn}.`,
         ...(input.secretKey === sessionTokenKey(input.target, undefined) ? [] : [`  A daemon session is kept per daemon address, so the key name ${input.secretKey} is not used.`]),
       ].join('\n'));
       return;

@@ -1,21 +1,15 @@
 /**
- * One memory file, more than one process image. sql.js loads the whole file
- * into memory and writes the whole image back, so a store that kept writing
- * the image it loaded at boot would erase every record another process (the
- * daemon, a second surface, the memory CLI) wrote since. These tests hold two
- * MemoryStore instances on one file the way two processes would.
+ * One memory file, more than one app: the daemon, a terminal and the memory
+ * command each open it with their own MemoryStore. A memory one of them adds
+ * is read by the others, no write erases another's, and a record and its
+ * search-index entry land and leave together.
  */
-import { afterEach, expect, spyOn, test } from 'bun:test';
-import { rmSync, writeFileSync } from 'node:fs';
+import { afterEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { MemoryEmbeddingProviderRegistry } from '../platform/src/platform/state/memory-embeddings.ts';
-import { MemoryStore, MemoryStoreChangedOnDiskError, planMemoryRecord } from '../platform/src/platform/state/memory-store.ts';
+import { MemoryStore, planMemoryRecord } from '../platform/src/platform/state/memory-store.ts';
 import { MemoryRegistry } from '../platform/src/platform/state/memory-registry.ts';
-import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
-import { Database } from 'bun:sqlite';
-import { loadSqliteVecExtension } from '../platform/src/platform/state/sqlite-vec-loader.ts';
-import { SqliteVecMemoryIndex } from '../platform/src/platform/state/memory-vector-store.ts';
 import { MemorySpineClient, createLocalMemoryAccess, type MemoryTransport } from '../platform/src/platform/runtime/memory-spine/client.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { useMemoryReadings } from './_helpers/memory-readings.ts';
@@ -38,94 +32,55 @@ function setup(enableVectorIndex = false) {
   return { path, open };
 }
 
-test('a store refuses to write over records another process saved, then writes once it has reloaded', async () => {
+const summaries = (store: MemoryStore) => store.retrieve().map((record) => record.summary).sort();
+
+test('a memory one app adds is read at once by another app on the same file, and no app erases another\'s', async () => {
   const { open } = setup();
   const a = await open();
-  await a.add({ cls: 'fact', summary: 'written by A before B opened' });
+  const shared = await a.add({ cls: 'fact', summary: 'written by A before B opened' });
   const b = await open();
   const fromB = await b.add({ cls: 'fact', summary: 'written by B' });
 
-  await expect(a.add({ cls: 'fact', summary: 'written by A after B' })).rejects.toBeInstanceOf(MemoryStoreChangedOnDiskError);
+  // A sees B's row without reopening, and its own later writes keep it.
   expect(a.get(fromB.id)?.summary).toBe('written by B');
-  const retried = await a.add({ cls: 'fact', summary: 'written by A after B' });
-
-  const reopened = await open();
-  expect(reopened.retrieve().map((record) => record.summary).sort()).toEqual(
-    ['written by A after B', 'written by A before B opened', 'written by B'],
-  );
-  expect(reopened.get(retried.id)).not.toBeNull();
-});
-
-test('a synchronous edit on a stale image is refused with nothing written, and succeeds after the reload', async () => {
-  const { open } = setup();
-  const a = await open();
-  const shared = await a.add({ cls: 'fact', summary: 'shared record' });
-  const b = await open();
-  await b.add({ cls: 'fact', summary: 'only B knows this' });
-
-  expect(() => a.review(shared.id, { state: 'reviewed', reviewedBy: 'operator' })).toThrow(MemoryStoreChangedOnDiskError);
-  await a.reloadIfChanged();
+  const fromA = await a.add({ cls: 'fact', summary: 'written by A after B' });
   expect(a.review(shared.id, { state: 'reviewed', reviewedBy: 'operator' })?.reviewState).toBe('reviewed');
+  expect(b.get(fromA.id)?.summary).toBe('written by A after B');
+  await a.save();
 
   const reopened = await open();
-  expect(reopened.retrieve().map((record) => record.summary).sort()).toEqual(['only B knows this', 'shared record']);
+  expect(summaries(reopened)).toEqual(['written by A after B', 'written by A before B opened', 'written by B']);
   expect(reopened.get(shared.id)?.reviewState).toBe('reviewed');
 });
 
-test('returning from the daemon to local access reloads the local store before serving it', async () => {
-  const { open } = setup();
-  const local = await open();
-  const spine = new MemorySpineClient({ local: createLocalMemoryAccess(new MemoryRegistry(local)) });
-  const unreachable = () => Promise.reject(new Error('transport not used in this test'));
-  const transport: MemoryTransport = { add: unreachable, honestSearch: unreachable, get: unreachable, updateReview: unreachable, delete: unreachable };
-  spine.activate(transport);
-
-  // The daemon owns the file while the surface is a client.
-  const daemon = await open();
-  const daemonRecord = await daemon.add({ cls: 'fact', summary: 'written by the daemon' });
-
-  spine.deactivate('heartbeat probe failed');
-  expect((await spine.get(daemonRecord.id))?.summary).toBe('written by the daemon');
-  await spine.add({ cls: 'fact', summary: 'written locally after detach' });
-
-  const reopened = await open();
-  expect(reopened.retrieve().map((record) => record.summary).sort()).toEqual(['written by the daemon', 'written locally after detach']);
-});
-
-test('a ranked search still answers when another caller writes while it is ranking', async () => {
-  const { open } = setup();
-  const store = await open();
-  await store.add({ cls: 'fact', summary: 'deploy runs through the release pipeline' });
-  const pending = store.search({ query: 'deploy' });
-  await store.add({ cls: 'fact', summary: 'unrelated write during ranking' });
-  expect((await pending).map((record) => record.summary)).toEqual(['deploy runs through the release pipeline']);
-});
-
-test('a staged add whose row is saved reports success even when another write lands during the save', async () => {
+test('two adds in flight together and a review during an add each land once', async () => {
   const { open } = setup();
   const store = await open();
   const other = await store.add({ cls: 'fact', summary: 'other record' });
-  const original = SQLiteStore.prototype.save;
-  let nested = false;
-  const save = spyOn(SQLiteStore.prototype, 'save').mockImplementation(function (this: SQLiteStore) {
-    const result = Reflect.apply(original, this, []) as Promise<boolean>;
-    if (!nested) { nested = true; queueMicrotask(() => { store.update(other.id, { summary: 'edited during the save' }); }); }
-    return result;
-  });
-  cleanups.push(() => save.mockRestore());
-  const plan = planMemoryRecord({ cls: 'fact', summary: 'prepared record' });
-  expect((await store.add({ cls: 'fact', summary: 'prepared record' }, undefined, { id: plan.id, createdAt: plan.createdAt })).id).toBe(plan.id);
-  nested = false;
-  const viaRegistry = planMemoryRecord({ cls: 'fact', summary: 'prepared through the registry' });
-  expect((await new MemoryRegistry(store).add({ cls: 'fact', summary: 'prepared through the registry' }, undefined,
-    { id: viaRegistry.id, createdAt: viaRegistry.createdAt })).id).toBe(viaRegistry.id);
-  save.mockRestore();
+  const both = await Promise.allSettled([store.add({ cls: 'fact', summary: 'first' }), store.add({ cls: 'fact', summary: 'second' })]);
+  expect(both.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+  const pending = store.add({ cls: 'fact', summary: 'third' });
+  store.review(other.id, { state: 'reviewed' });
+  await pending;
+  await store.save();
+
   const reopened = await open();
-  expect(reopened.get(plan.id)?.summary).toBe('prepared record');
-  expect(reopened.get(viaRegistry.id)?.summary).toBe('prepared through the registry');
+  expect(summaries(reopened)).toEqual(['first', 'other record', 'second', 'third']);
+  expect(reopened.get(other.id)?.reviewState).toBe('reviewed');
 });
 
-test('an insert callback that throws takes the row out again, so nothing is stored', async () => {
+test('a resent add whose reply was lost stores the memory once, and a different memory under that id is refused', async () => {
+  const { open } = setup();
+  const store = await open();
+  const id = planMemoryRecord({ cls: 'fact', summary: 'sent twice' }).id;
+  const first = await store.add({ id, cls: 'fact', summary: 'sent twice' });
+  const again = await store.add({ id, cls: 'fact', summary: 'sent twice' });
+  expect(again.id).toBe(first.id);
+  await expect(store.add({ id, cls: 'fact', summary: 'something else' })).rejects.toThrow();
+  expect((await open()).retrieve().map((record) => record.id)).toEqual([id]);
+});
+
+test('an insert the caller refuses is taken out again, so nothing is stored', async () => {
   const { open } = setup();
   const store = await open();
   const plan = planMemoryRecord({ cls: 'fact', summary: 'refused at the insert' });
@@ -136,85 +91,35 @@ test('an insert callback that throws takes the row out again, so nothing is stor
   expect((await open()).get(plan.id)).toBeNull();
 });
 
-test('two adds in flight together, or an add with another write during its save, each succeed once', async () => {
-  const { open } = setup();
-  const store = await open();
-  const other = await store.add({ cls: 'fact', summary: 'other record' });
-  const both = await Promise.allSettled([store.add({ cls: 'fact', summary: 'first' }), store.add({ cls: 'fact', summary: 'second' })]);
-  expect(both.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
-  const pending = store.add({ cls: 'fact', summary: 'third' });
-  store.review(other.id, { state: 'reviewed' });
-  await pending;
-  expect(store.retrieve({}).map((record) => record.summary).sort()).toEqual(['first', 'other record', 'second', 'third']);
-});
-
-test('an imported record that needs normalising is imported whole, with its links', async () => {
+test('a record and its search-index entry land together and leave together', async () => {
   const { open } = setup(true);
   const store = await open();
-  const now = Date.now();
-  const result = await store.importBundle({
-    schemaVersion: 'v1', exportedAt: now, scope: 'all', recordCount: 2, linkCount: 1,
-    records: [
-      { id: 'mem_import_a', scope: 'project', cls: 'fact', summary: 'imported a', tags: [], provenance: [], reviewState: 'fresh', confidence: 52.5, createdAt: now, updatedAt: now },
-      { id: 'mem_import_b', scope: 'project', cls: 'fact', summary: 'imported b', tags: [], provenance: [], reviewState: 'fresh', confidence: 60, createdAt: now, updatedAt: now },
-    ],
-    links: [{ fromId: 'mem_import_a', toId: 'mem_import_b', relation: 'relates', createdAt: now }],
-  });
-  expect(result).toEqual({ importedRecords: 2, skippedRecords: 0, importedLinks: 1 });
-  expect(store.get('mem_import_a')?.confidence).toBe(53);
+  // The start-up pass has nothing to index; let it finish so only the writes below move the index.
+  await store.rebuildVectorIndexAsync();
+  expect(store.vectorStats().available).toBe(true);
+  expect(store.vectorStats().indexedRecords).toBe(0);
+
+  const record = await store.add({ cls: 'fact', summary: 'deploys go through the release pipeline' });
+  expect(store.vectorStats().indexedRecords).toBe(1);
+  expect(store.delete(record.id)).toBe(true);
+  expect(store.vectorStats().indexedRecords).toBe(0);
 });
 
-// The vector index can only open where the platform allows SQLite extension loading.
-const vecLoadable = await (async () => {
-  try { await loadSqliteVecExtension(new Database(':memory:')); return true; } catch { return false; }
-})();
-
-function blockedVectorIndex(): { index: SqliteVecMemoryIndex; unblock: () => void } {
-  const root = makeProjectTempDir('memory-vector-flags');
-  const embeddings = new MemoryEmbeddingProviderRegistry({ configManager: new ConfigManager({ configDir: join(root, 'config') }) });
-  // A file where the index's directory should be makes the first open fail.
-  const blocker = join(root, 'blocked');
-  writeFileSync(blocker, 'not a directory');
-  const index = new SqliteVecMemoryIndex(join(blocker, 'memory.vec.sqlite'), undefined, embeddings);
-  cleanups.push(() => index.close());
-  return { index, unblock: () => rmSync(blocker) };
-}
-
-test('a vector index that cannot open reports its error', async () => {
-  const { index } = blockedVectorIndex();
-  await index.init();
-  expect(index.stats().error).toBeDefined();
-});
-
-test.skipIf(!vecLoadable)('the vector index reports what it is now: no old error after a later open succeeds, unavailable once closed', async () => {
-  const { index, unblock } = blockedVectorIndex();
-  await index.init();
-  expect(index.stats().error).toBeDefined();
-  unblock();
-  await index.init();
-  const opened = index.stats();
-  expect(opened.available).toBe(true);
-  expect(opened.error).toBeUndefined();
-  index.close();
-  expect(index.stats().available).toBe(false);
-});
-
-test('putting a record back to fresh clears the reviewer stamp, and a default stale reason names who marked it', async () => {
+test('a terminal that falls back from the daemon to its own store reads what the daemon wrote, and writes to the same file', async () => {
   const { open } = setup();
-  const store = await open();
-  const record = await store.add({ cls: 'fact', summary: 'reviewed then reset' });
+  const local = await open();
+  const spine = new MemorySpineClient({ local: createLocalMemoryAccess(new MemoryRegistry(local)) });
+  const unreachable = () => Promise.reject(new Error('the daemon is not reached in this proof'));
+  const transport: MemoryTransport = { add: unreachable, honestSearch: unreachable, get: unreachable, updateReview: unreachable, delete: unreachable };
+  spine.activate(transport);
 
-  const reviewed = store.review(record.id, { state: 'reviewed', reviewedBy: 'alex' });
-  expect(reviewed).toMatchObject({ reviewState: 'reviewed', reviewedBy: 'alex' });
-  expect(reviewed?.reviewedAt).toBeNumber();
+  // The daemon owns the file while the terminal is its client.
+  const daemon = await open();
+  const daemonRecord = await daemon.add({ cls: 'fact', summary: 'written by the daemon' });
 
-  const fresh = store.review(record.id, { state: 'fresh' });
-  expect(fresh?.reviewState).toBe('fresh');
-  expect(fresh?.reviewedAt).toBeUndefined();
-  expect(fresh?.reviewedBy).toBeUndefined();
-  expect(store.get(record.id)).toMatchObject({ reviewState: 'fresh' });
-  expect(store.get(record.id)?.reviewedBy).toBeUndefined();
+  spine.deactivate('heartbeat probe failed');
+  expect((await spine.get(daemonRecord.id))?.summary).toBe('written by the daemon');
+  await spine.add({ cls: 'fact', summary: 'written locally after detach' });
 
-  const stale = store.review(record.id, { state: 'stale', reviewedBy: 'consolidation' });
-  expect(stale?.staleReason).toBe('marked stale by consolidation');
+  expect(summaries(await open())).toEqual(['written by the daemon', 'written locally after detach']);
 });

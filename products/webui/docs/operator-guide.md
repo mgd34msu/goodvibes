@@ -210,6 +210,18 @@ the default list straight away, without a confirmation. They stay readable under
 Show, Archive, which is view-only: this page has no unarchive control yet.
 Workspace checkpoints opens the workspace's snapshots.
 
+Work plan (also `?tab=plan`) opens the project's work plan: the checklist the
+terminal app's `/work-plan`, the Agent's todo list and the model's `work_plan`
+tool keep, one plan per project in every app. It lists the items in order with
+their status and the plan's counts. Add an item with the field at the top;
+change an item's status with its status select; move it up or down; edit its
+title, owner and notes with the pencil; delete it (confirms first); Clear
+finished removes every done and cancelled item (confirms first). The list
+follows edits made anywhere, in this page, the terminal app, the Agent or a
+model's tool call, without refreshing. Done and cancelled items are also
+removed automatically once untouched for 30 days or beyond the 200 most
+recent, by the edit that finishes an item; that edit says so.
+
 What the list brings together:
 
 - sessions from the terminal, the agent and this browser, with daemon-hosted

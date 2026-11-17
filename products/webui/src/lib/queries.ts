@@ -15,6 +15,10 @@ export const queryKeys = {
   contractList: (revision: number, includeTerminal: boolean) => ['contracts', revision, 'list', includeTerminal] as const,
   contractDetail: (revision: number, id: string) => ['contracts', revision, 'detail', id] as const,
   tasks: ['tasks'] as const,
+  // The project work plan, read again only when a planner event or an edit
+  // carries a revision other than the one shown (hooks/useWorkPlan.ts).
+  workPlan: ['work-plan'] as const,
+  workPlanSnapshot: (revision: number) => ['work-plan', revision] as const,
   approvals: ['approvals'] as const,
   // Durable approval rules (permissions.rules.list), remembered decisions at a
   // generalizing tier. Invalidate alongside approvals: a decision can mint a

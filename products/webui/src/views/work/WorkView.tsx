@@ -18,10 +18,12 @@
  * `#fleet-node=…` opens that process.
  * `?tab=checkpoints` (the old Checkpoints page) opens the first session on its
  * Checkpoints tab, or the workspace checkpoints when there is no session.
+ * `?tab=plan` opens the project work plan (WorkPlanPanel), also reachable from
+ * the list footer.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Archive, History, Inbox, RefreshCw, Search } from 'lucide-react';
+import { Archive, History, Inbox, ListChecks, RefreshCw, Search } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
 import type { WorkTab } from '../../lib/router';
@@ -61,6 +63,7 @@ import { ContractDetail } from './ContractDetail';
 import { ProcessDetail } from './ProcessDetail';
 import { SessionDetail, type SessionTab } from './SessionDetail';
 import { TaskDetail } from './TaskDetail';
+import { WorkPlanPanel } from './WorkPlanPanel';
 import { useApprovalActions } from './useApprovalActions';
 import { useWorkData } from './useWorkData';
 import { buildWorkItems, groupWorkItems, workSummary, type WorkItem, type WorkKind } from './work-items';
@@ -69,6 +72,8 @@ import { nonEmpty } from '../../lib/non-empty';
 
 /** The workspace checkpoints detail, for when no session exists. */
 const WORKSPACE_CHECKPOINTS_KEY = 'workspace:checkpoints';
+/** The project work plan detail. */
+const WORK_PLAN_KEY = 'workspace:work-plan';
 
 type ShowScope = 'active' | 'finished' | 'archived';
 
@@ -142,9 +147,9 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     if (initialFocus) stripFleetFocusFragment();
   }, [initialFocus]);
 
-  const [selectedKey, setSelectedKey] = useState<string>(() => (initialFocus ? `fleet:${initialFocus.nodeId}` : ''));
+  const [selectedKey, setSelectedKey] = useState<string>(() => (initialFocus ? `fleet:${initialFocus.nodeId}` : tab === 'plan' ? WORK_PLAN_KEY : ''));
   // After the person closes a detail, the first needs-you item does not reopen by itself.
-  const dismissedRef = useRef(Boolean(initialFocus));
+  const dismissedRef = useRef(Boolean(initialFocus) || tab === 'plan');
   const [sessionTab, setSessionTab] = useState<SessionTab>(tab === 'checkpoints' ? 'checkpoints' : 'transcript');
 
   const data = useWorkData({
@@ -232,6 +237,7 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
   const refreshAll = () => {
     void Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.contracts }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.workPlan }),
       data.snapshot.refetch(),
       data.approvals.refetch(),
       data.sessions.refetch(),
@@ -247,6 +253,13 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
       return (
         <DetailPane title="Workspace checkpoints" meta="Snapshots of the workspace tree" onClose={closeDetail} closeLabel="Close checkpoints">
           <CheckpointsPanel />
+        </DetailPane>
+      );
+    }
+    if (selectedKey === WORK_PLAN_KEY) {
+      return (
+        <DetailPane title="Work plan" meta="The project’s checklist, shared with the terminal app and the Agent" onClose={closeDetail} closeLabel="Close work plan">
+          <WorkPlanPanel lifetime={contractScope} />
         </DetailPane>
       );
     }
@@ -398,6 +411,14 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
 
       {!data.firstLoad && (
         <div className="work-list-footer">
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<ListChecks aria-hidden="true" />}
+            onClick={() => { dismissedRef.current = true; setSelectedKey(WORK_PLAN_KEY); }}
+          >
+            Work plan
+          </Button>
           {kind !== 'agents' && (
             <Button
               size="sm"

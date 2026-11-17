@@ -1827,6 +1827,9 @@ export const client = {
     ) => scopedPlatform.streams.open(pathOrUrl, handlers, options),
   },
   knowledge: scopedPlatform.knowledge,
+  // The project work plan the daemon serves (projectPlanning.workPlan.*): the same
+  // plan the terminal app, the Agent and the daemon's own work_plan tool keep.
+  workPlan: scopedPlatform.workPlan,
 };
 
 export type RawStreamHandlers = Parameters<typeof scopedPlatform.streams.open>[1];

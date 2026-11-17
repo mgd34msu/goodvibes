@@ -272,6 +272,69 @@
   max-width: 240px;
 }
 
+/* Work plan (WorkPlanPanel). */
+.work-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.work-plan__summary {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.work-plan__add {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.work-plan__add .gv-input {
+  flex: 1;
+}
+
+.work-plan__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.work-plan__actions .gv-select__trigger {
+  width: auto;
+  min-width: 120px;
+}
+
+.work-plan__editor {
+  display: block;
+  padding: 12px 0;
+}
+
+.work-plan__edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.work-plan__edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.work-plan__footer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.work-plan__footer .work-prose {
+  margin: 0;
+  color: var(--text-3);
+}
+
 /* CI report. */
 .work-ci-report {
   display: flex;
@@ -344,12 +407,15 @@
   }
 
   .work-steer__form,
-  .work-checkpoints__create {
+  .work-checkpoints__create,
+  .work-plan__add,
+  .work-plan__actions {
     flex-wrap: wrap;
   }
 
   .work-steer__form .gv-input,
-  .work-checkpoints__create .gv-input {
+  .work-checkpoints__create .gv-input,
+  .work-plan__add .gv-input {
     flex-basis: 100%;
   }
 }

@@ -16,6 +16,45 @@ import { now, updateDomainMetadata, isTerminalLifecycleState, computeActiveIds, 
 import { logger } from '../../../../utils/logger.js';
 import { canMirror } from '../../../tasks/lifecycle.js';
 
+export function updateSessionState(
+  domain: SessionDomainState,
+  event: CompactionEvent,
+): SessionDomainState {
+  const base = updateDomainMetadata(domain, event.type);
+  switch (event.type) {
+    case 'COMPACTION_CHECK':
+      // The manager answers a below-threshold auto check with done -> idle and
+      // emits nothing further, so a check under the threshold must not leave the
+      // mirror reading "running". A manual or prompt-too-long run under the
+      // threshold goes on to emit its strategy event straight away.
+      return { ...base, compactionState: event.tokenCount < event.threshold ? 'idle' : 'checking_threshold' };
+    case 'COMPACTION_MICROCOMPACT':
+      return { ...base, compactionState: 'microcompact' };
+    case 'COMPACTION_COLLAPSE':
+      return { ...base, compactionState: 'collapse', compactionMessageCount: event.messageCount };
+    case 'COMPACTION_AUTOCOMPACT':
+      return { ...base, compactionState: 'autocompact' };
+    case 'COMPACTION_REACTIVE':
+      return { ...base, compactionState: 'reactive_compact' };
+    case 'COMPACTION_BOUNDARY_COMMIT':
+      return { ...base, compactionState: 'boundary_commit' };
+    case 'COMPACTION_DONE':
+      // The manager moves done -> idle in the same breath; the mirror settles
+      // with it. `failed` is deliberately NOT settled: it stays until the next
+      // compaction begins, which is how session-maintenance reports the failure.
+      return { ...base, compactionState: 'idle', lastCompactedAt: now(), compactionError: undefined };
+    case 'COMPACTION_FAILED':
+      return { ...base, compactionState: 'failed', compactionError: event.error };
+    case 'COMPACTION_RECEIPT':
+      // Record the completed compaction only when the compacted context was
+      // actually applied; a kept-original/failed receipt leaves the
+      // conversation (and compaction state) untouched.
+      return event.outcome === 'applied'
+        ? { ...base, compactionState: 'idle', lastCompactedAt: now(), compactionError: undefined }
+        : base;
+  }
+}
+
 /**
  * The decision of one call. The bridge forwards only DECISION_EMITTED: the
  * gate's intermediate steps carry nothing a reader uses, and the execution

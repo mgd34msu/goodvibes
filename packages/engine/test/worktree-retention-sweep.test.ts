@@ -1,5 +1,5 @@
-// Proves: The worktree sweep force-removes a worktree this product made, with its uncommitted work.
-// Red when: A worktree the product made reads as unmarked to the retention sweep, so it is removed by force whatever it holds.
+// Proves: The worktree sweep removes a worktree with its uncommitted work, or loses the commits a removed worktree's branch held.
+// Red when: The sweep removes a worktree that holds uncommitted work (made by this product or not), or deletes a branch whose commits its base does not have.
 
 import { afterEach, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';

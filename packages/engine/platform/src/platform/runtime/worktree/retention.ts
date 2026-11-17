@@ -174,7 +174,7 @@ export function worktreeNextSteps(input: {
     return [
       `save it:    ${onBranch}git -C ${at} add -A && git -C ${at} commit -m ${shellWord(`Work kept from ${name}`)}   (branch ${input.branch ?? newBranch} then holds the work, and the directory is cleaned up by the usual rules)`,
       keep,
-      `discard it: git worktree remove --force ${at}   (deletes the uncommitted changes)`,
+      `discard it: git worktree remove --force ${at}   (deletes the uncommitted changes${input.branch === null ? ', and any commit of its detached HEAD that no branch holds' : ''})`,
     ];
   }
   if (input.why === 'detached') {

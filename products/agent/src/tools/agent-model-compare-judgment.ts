@@ -1,6 +1,5 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { randomUUID } from 'node:crypto';
-import { agentRecordNonce } from '../utils/record-nonce.ts';
 import type { AgentModelCompareArtifactStore, AgentModelCompareModelCatalog, AgentModelCompareRouteUpdateResult, AgentModelCompareToolArgs, CompareCandidateResult, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './agent-model-compare-types.ts';
 import { MODEL_REASON_THEME_LABELS } from './agent-model-compare-types.ts';
 import { currentStoredThemes, parseStoredReasonThemes, readComparisonReasonThemes, type ComparisonThemeReading, type JudgmentWithThemes, type StoredReasonThemes } from './agent-model-compare-themes.ts';
@@ -94,7 +93,7 @@ export async function saveComparisonJudgmentArtifact(input: {
   readonly readingOptions?: ModelReadingOptions | undefined;
 }): Promise<SavedComparisonArtifact> {
   if (!input.artifactStore) throw new Error('Cannot save judgment because the artifact store is unavailable.');
-  const judgmentId = `jdg_${agentRecordNonce()}`;
+  const judgmentId = `jdg_${randomUUID()}`;
   const themes = input.readingOptions
     ? await readComparisonReasonThemes({ winnerBlindId: input.winner.blindId, reasons: input.reasons, notes: input.notes }, input.readingOptions)
     : undefined;

@@ -3,7 +3,7 @@ import { readPersonalOpsResultField } from './agent-harness-personal-ops-reading
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import { protectPersonalOpsData, protectPersonalOpsResult } from './agent-harness-personal-ops-source.ts';
-import { agentRecordNonce } from '../utils/record-nonce.ts';
+import { randomUUID } from 'node:crypto';
 import { lstatSync } from 'node:fs';
 import { captureAgentExportPath } from './agent-artifact-effect.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';
@@ -447,10 +447,10 @@ export async function savePersonalOpsReviewArtifact(options: {
     inputFieldKeys: Object.keys(options.inputFields).sort((left, right) => left.localeCompare(right)),
     policy: 'Saved Personal Ops review-card artifacts contain redacted review cards and bounded previews only; full raw connector output and full input values are not stored.',
   };
-  // Filenames become catalog labels: an epoch suffix can accidentally pass the
-  // payment-card guard. Encode only the generated UUID, preserving its entropy;
-  // user titles and existing filenames still face the unchanged source boundary.
-  const nonce = agentRecordNonce();
+  // Filenames become catalog labels: a plain UUID suffix keeps them unique; the
+  // card screen skips UUID-shaped tokens. User titles and existing filenames
+  // still face the unchanged source boundary.
+  const nonce = randomUUID();
   const protectedPayload = await protectPersonalOpsData(payload, reading);
   const protectedMetadata = await protectPersonalOpsData({
     purpose: 'personal-ops-review-cards', laneId: options.lane.id, sourceRecordId: options.sourceRecord.id,

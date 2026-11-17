@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { agentRecordNonce } from '../utils/record-nonce.ts';
+import { randomUUID } from 'node:crypto';
 import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ChatRequest, ChatResponse, LLMProvider } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -687,7 +687,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
         });
         const reveal = readFlag(args.reveal, 'reveal', false);
         const baseComparison: StoredComparison = {
-          comparisonId: `cmp_${agentRecordNonce()}`,
+          comparisonId: `cmp_${randomUUID()}`,
           createdAt: new Date().toISOString(),
           promptPreview: previewText(prompt, 160),
           rubric: readString(args.rubric),

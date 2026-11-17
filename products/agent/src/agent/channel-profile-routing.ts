@@ -24,7 +24,7 @@
  * ShellPathService.
  */
 
-import { agentRecordNonce } from '../utils/record-nonce.ts';
+import { randomUUID } from 'node:crypto';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {
   readJsonStore,
@@ -333,7 +333,7 @@ export async function assignChannelToProfile(
 
   const draft: ChannelProfileRoute = {
     version: ROUTE_VERSION,
-    id: existing?.id ?? `cpr-${agentRecordNonce()}`,
+    id: existing?.id ?? `cpr-${randomUUID()}`,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     surfaceKind,

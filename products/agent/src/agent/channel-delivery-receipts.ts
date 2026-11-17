@@ -1,4 +1,4 @@
-import { agentRecordNonce } from '../utils/record-nonce.ts';
+import { randomUUID } from 'node:crypto';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonStoreSpec } from '@/utils/store-file.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -227,7 +227,7 @@ export function recordAgentChannelDeliveryReceipt(
   const title = previewMessage(input.result.title || 'GoodVibes Agent message');
   const receipt: AgentChannelDeliveryReceipt = {
     version: RECEIPT_VERSION,
-    id: `channel-delivery-${agentRecordNonce()}`,
+    id: `channel-delivery-${randomUUID()}`,
     createdAt: new Date().toISOString(),
     source: input.source,
     status: 'sent',

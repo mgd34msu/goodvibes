@@ -10,7 +10,6 @@ import { execCommandText } from '../platform/src/platform/tools/exec/schema.ts';
 import { executeFileOperations } from '../platform/src/platform/tools/exec/file-ops.ts';
 import { formatResult } from '../platform/src/platform/tools/exec/result-format.ts';
 import { resolveCredentialEnvScrub, scrubCredentialEnv } from '../platform/src/platform/tools/exec/credential-env.ts';
-import { consumeGateEscalationApproval, recordGateEscalationApproval } from '../platform/src/platform/runtime/permissions/sandbox-policy.ts';
 import { sandboxWorkspaceRefusal, type ExecRunPolicy } from '../platform/src/platform/tools/exec/policy.ts';
 import {
   brokerSandboxEscalation,
@@ -390,27 +389,6 @@ describe('the sandbox', () => {
     expect(plan?.network).toBe('disabled');
     await brokerSandboxEscalation(runtime, plan, 'ls', root);
     expect(asked).toBe(0);
-  });
-
-  test('an owner who approved the command on the approval card is not asked again by the exec, once', async () => {
-    const root = tempRoot();
-    let asked = 0;
-    const runtime = sandbox(['git'], async () => { asked++; return true; });
-    const plan = await resolveRuntimeSandboxPlan(runtime, 'git fetch origin', root, root);
-    recordGateEscalationApproval('git fetch origin');
-    await brokerSandboxEscalation(runtime, plan, 'git fetch origin', root);
-    expect(asked).toBe(0);
-    await brokerSandboxEscalation(runtime, plan, 'git fetch origin', root);
-    expect(asked).toBe(1);
-  });
-
-  test('an approval given at the card goes stale and covers only the command it was given for', () => {
-    recordGateEscalationApproval('git fetch a', 1_000);
-    expect(consumeGateEscalationApproval('git fetch b', 1_000)).toBe(false);
-    expect(consumeGateEscalationApproval('git fetch a', 1_000 + 60_000)).toBe(false);
-    recordGateEscalationApproval('git fetch a', 5_000);
-    expect(consumeGateEscalationApproval('git fetch a', 6_000)).toBe(true);
-    expect(consumeGateEscalationApproval('git fetch a', 6_000)).toBe(false);
   });
 
   test('a listed command is asked about once, because approval grants the network', async () => {

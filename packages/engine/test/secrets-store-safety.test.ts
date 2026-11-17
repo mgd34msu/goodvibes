@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { LiteralSecretsManager } from '../platform/src/platform/config/secret-literals.js';
 import { SecretsManager } from '../platform/src/platform/config/secrets.js';
 import { loadOrCreateKeyfile, SecretStoreUnreadableError } from '../platform/src/platform/config/secrets-keyfile.js';
 import { SECRET_CONFIG_KEYS } from '../platform/src/platform/config/secret-backed-config.js';
@@ -97,14 +96,13 @@ describe('references found in a project store', () => {
 describe('a credential that looks like a reference', () => {
   test('reads back as written through every local reader', async () => {
     const f = fixture();
-    const manager = new LiteralSecretsManager(f.options);
+    const manager = f.manager;
     await manager.set('LITERAL_KEY', 'op://vault/item/field', { scope: 'user', medium: 'plaintext' });
     await manager.set('LITERAL_ALIAS', 'goodvibes://secrets/goodvibes/LITERAL_KEY', { scope: 'user', medium: 'plaintext' });
     expect(await manager.get('LITERAL_KEY')).toBe('op://vault/item/field');
     expect(manager.resolveLocalSecretSync('LITERAL_KEY')).toEqual({ state: 'resolved', value: 'op://vault/item/field' });
     const snapshot = manager.resolveLocalCredentialSnapshot('LITERAL_KEY');
     expect(snapshot.state === 'resolved' && snapshot.value).toBe('op://vault/item/field');
-    // The pointer is read by a plain manager over the same files, which has no literal pair installed.
     expect(await f.manager.get('LITERAL_ALIAS')).toBe('op://vault/item/field');
   });
 

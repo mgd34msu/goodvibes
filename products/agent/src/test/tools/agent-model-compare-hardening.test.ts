@@ -114,12 +114,11 @@ describe('judgments and route decisions', () => {
     return f;
   }
 
-  test('applying a judgment saved without reveal names the judge call that produces an applicable one', async () => {
+  test('a blind judgment applies the winner its comparison names, with no second judgment', async () => {
     const f = await judged({}, false);
     const result = await f.tool.execute({ mode: 'apply', artifactId: 'artifact-2' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('mode:"judge" again with reveal:true');
-    expect(f.applied).toEqual([]);
+    expect(result.success, result.error).toBe(true);
+    expect(f.applied).toEqual(['anthropic:claude-sonnet']);
   });
 
   test('the route changes and is reported even when recording model usage fails afterwards', async () => {

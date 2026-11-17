@@ -286,7 +286,7 @@ test('native stat-only source retention rejects invalid reader manifests before 
     expect(bodyFetches).toBe(0);
   }
   manifest = candidate.checksumManifest; replaceDuringManifest = true;
-  await expect(apply()).rejects.toThrow('installation changed during preparation');
+  await expect(apply()).rejects.toThrow('changed while the update was being prepared');
   expect(bodyFetches).toBe(0);
   replaceDuringManifest = false;
   await apply(); expect(bodyFetches).toBeGreaterThan(0);

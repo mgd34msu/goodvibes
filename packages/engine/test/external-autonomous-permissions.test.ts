@@ -313,8 +313,8 @@ import { withExternalOperationSource } from '../platform/src/platform/permission
 function registryMcp() {
   const transport = mcp();
   const registry = new McpRegistry({ hookDispatcher: { fire: async () => ({ ok: true }) }, sandboxSessions: { start() {}, stop() {} } as never });
-  const internal = registry as unknown as { clients: Map<string, unknown>; permissions: { registerServer(name: string, trust: 'trusted'): void } };
-  internal.clients.set('synthetic', transport.client); internal.permissions.registerServer('synthetic', 'trusted');
+  const internal = registry as unknown as { clients: Map<string, unknown>; permissions: { registerServer(name: string, profile: { mode: 'allow-all' }): void } };
+  internal.clients.set('synthetic', transport.client); internal.permissions.registerServer('synthetic', { mode: 'allow-all' });
   return { ...transport, registry };
 }
 test('real registry propagates exact originating scope and supplied arguments to MCP MRTR', async () => {

@@ -5,9 +5,8 @@ import { createMemoryModalSurface } from '../../../views/modals/memory-modal.ts'
 import { createWorkPlanModalSurface } from '../../../views/modals/work-plan-modal.ts';
 import { createKnowledgeModalSurface, type KnowledgeModalDeps } from '../../../views/modals/knowledge-modal.ts';
 import { createPolicyModalSurface } from '../../../views/modals/policy-modal.ts';
-import { hooksModalGoldenSurface } from '../../../views/modals/hooks-modal.ts';
 import { createDevicesModalSurface } from '../../../views/modals/devices-modal.ts';
-import { createPairingModalSurface, type PairingModalConnectionInfo } from '../../../views/modals/pairing-modal.ts';
+import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo } from '../../../views/modals/pairing-modal.ts';
 import { createServicesModalSurface } from '../../../views/modals/services-modal.ts';
 import { createPluginsModalSurface, type PluginsModalManager } from '../../../views/modals/plugins-modal.ts';
 import { createLocalAuthModalSurface } from '../../../views/modals/local-auth-modal.ts';
@@ -17,6 +16,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { MemoryRecord, HonestMemorySearchResult } from '@goodvibes-jev/engine/platform/platform/state';
 import type { PluginStatus } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { actionCtx, open, tabText, viewText } from './modal-surface-test-helpers.ts';
+import { hooksModalGoldenSurface } from '../../helpers/modal-golden-surfaces.ts';
 
 /** Let every already-resolved promise chain run to its end (no timers). */
 async function settle(): Promise<void> {
@@ -231,21 +231,29 @@ describe('pairing modal mints one token per open', () => {
     deepLink: `http://workshop.local:3141/#pair=${token}`, offers: [],
   });
 
-  test('closing and reopening mints a fresh token instead of showing the old one', () => {
+  test('reopening hands the held offer back to be reused or replaced, and a new token asks for a fresh one', () => {
     let mints = 0;
-    const surface = createPairingModalSurface({ getConnectionInfo: () => info(`token-${++mints}`) });
+    const requests: (PairingConnectionRequest | undefined)[] = [];
+    const surface = createPairingModalSurface({ getConnectionInfo: (request) => {
+      requests.push(request);
+      return request?.held && !request.fresh ? request.held : info(`token-${++mints}`);
+    } });
     surface.onOpen?.(() => {});
     surface.onAction?.('toggleReveal', actionCtx(null));
     expect(tabText(surface.buildView(), 'pairing')).toContain('token-1');
     expect(tabText(surface.buildView(), 'pairing')).toContain('token-1');
-    expect(mints).toBe(1);
+    expect(requests).toEqual([undefined]);
 
     surface.onClose?.();
     surface.onOpen?.(() => {});
     surface.onAction?.('toggleReveal', actionCtx(null));
-    const reopened = tabText(surface.buildView(), 'pairing');
-    expect(reopened).toContain('token-2');
-    expect(reopened).not.toContain('token-1');
+    expect(tabText(surface.buildView(), 'pairing')).toContain('token-1');
+    expect(requests[1]?.held?.token).toBe('token-1');
+    expect(mints).toBe(1);
+
+    surface.onAction?.('newToken', actionCtx(null));
+    expect(requests[2]).toMatchObject({ fresh: true });
+    expect(requests[2]?.held?.token).toBe('token-1');
     expect(mints).toBe(2);
   });
 

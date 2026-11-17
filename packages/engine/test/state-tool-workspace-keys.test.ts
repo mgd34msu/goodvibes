@@ -25,14 +25,11 @@ function makeStateTool(
   daemonHomeDir: string,
   swapManager?: { requestSwap(newDir: string): Promise<{ ok: boolean; reason?: string; code?: string; current?: string; previous?: string; restartRequired?: boolean; requiresRestart?: readonly string[]; note?: string }> },
 ) {
-  const memDir = join(tempDir(), 'memory');
-  mkdirSync(memDir, { recursive: true });
   const stateDir = join(tempDir(), 'state');
   mkdirSync(stateDir, { recursive: true });
   const kvState = disposables.add(new KVState({ stateDir }));
   const projectIndex = new ProjectIndex(workingDir);
   return createStateTool(kvState, projectIndex, {
-    memoryDir: memDir,
     workingDir,
     daemonHomeDir,
     ...(swapManager !== undefined ? { swapManager } : {}),

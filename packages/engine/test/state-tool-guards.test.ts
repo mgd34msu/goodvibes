@@ -4,7 +4,7 @@
  * and hooks the model adds can be managed afterwards.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStateTool, type HookChangeGate } from '../platform/src/platform/tools/state/index.ts';
@@ -18,16 +18,14 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 
 function setup(options: { gate?: HookChangeGate; swap?: boolean; telemetry?: TelemetryDB } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'gv-state-guards-')); roots.push(root);
-  const memoryDir = join(root, 'memory');
-  mkdirSync(memoryDir, { recursive: true });
   const dispatcher = createHookDispatcher();
   const swaps: string[] = [];
   const tool = createStateTool(new KVState({ stateDir: join(root, 'state') }), new ProjectIndex(root), {
-    memoryDir, hookDispatcher: dispatcher, ...(options.gate ? { hookGate: options.gate } : {}),
+    hookDispatcher: dispatcher, ...(options.gate ? { hookGate: options.gate } : {}),
     ...(options.telemetry ? { telemetryDB: options.telemetry } : {}),
     ...(options.swap ? { swapManager: { async requestSwap(dir: string) { swaps.push(dir); return { ok: true }; } } } : {}),
   });
-  return { tool, dispatcher, memoryDir, swaps };
+  return { tool, dispatcher, swaps };
 }
 const out = (result: { output?: string | undefined }) => JSON.parse(result.output ?? '{}') as Record<string, unknown>;
 
@@ -68,20 +66,6 @@ describe('mode=list', () => {
     expect(summary.output).not.toContain('VALUE_BODY');
     expect(out(summary).entries as unknown[]).toContainEqual({ key: 'plan', type: 'object' });
     expect((await tool.execute({ mode: 'list', view: 'full' })).output).toContain('VALUE_BODY');
-  });
-});
-
-describe('mode=memory list', () => {
-  test('names only keys that get can read back, skips directories, and reports bytes not UTF-16 units', async () => {
-    const { tool, memoryDir } = setup();
-    writeFileSync(join(memoryDir, 'good.json'), 'é🦊');
-    writeFileSync(join(memoryDir, 'a.b.json'), 'dotted');
-    mkdirSync(join(memoryDir, 'folder.json'));
-    const listed = out(await tool.execute({ mode: 'memory', memoryAction: 'list', view: 'full' }));
-    expect(listed.keys).toEqual(['good']);
-    expect(listed.entries).toEqual([{ key: 'good', bytes: Buffer.byteLength('é🦊') }]);
-    const written = out(await tool.execute({ mode: 'memory', memoryAction: 'set', memoryKey: 'wide', memoryValue: 'é🦊' }));
-    expect(written.bytes_written).toBe(Buffer.byteLength('é🦊'));
   });
 });
 
@@ -146,16 +130,5 @@ describe('mode=hooks add', () => {
     }
     expect(asked).toBe(0);
     expect(dispatcher.listHooks()).toEqual([]);
-  });
-});
-
-describe('mode=memory list with an unreadable entry', () => {
-  test('a dangling link is skipped and the other keys are still listed', async () => {
-    const { tool, memoryDir } = setup();
-    writeFileSync(join(memoryDir, 'good.json'), '"x"');
-    symlinkSync(join(memoryDir, 'missing-target'), join(memoryDir, 'dangling.json'));
-    const listed = await tool.execute({ mode: 'memory', memoryAction: 'list' });
-    expect(listed.success).toBe(true);
-    expect(out(listed).keys).toEqual(['good']);
   });
 });

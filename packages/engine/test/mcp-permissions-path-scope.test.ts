@@ -1,19 +1,13 @@
 // An MCP server's allowedPaths scope is judged by where a path lands, not by
 // how it is spelled: `..` segments, sibling directories that share a prefix
 // and symlinks out of an allowed directory all fall outside the scope. Which
-// argument holds a path or a destination is decided in code from its name and
-// the value's shape.
+// argument holds a path or a destination is decided in code from the tool's
+// input schema, the argument's name and whether the value names a location.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/index.ts';
-import { useGateReadings } from './_helpers/gate-readings.ts';
-
-useGateReadings([
-  ['read_docs', { capability: 'read_fs', mutates: false }],
-]);
-
 let root = '';
 let allowed = '';
 
@@ -32,7 +26,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 async function verdict(path: string): Promise<string | undefined> {
   const manager = new McpPermissionManager();
-  manager.registerServer('docs', 'standard', { role: 'docs', mode: 'constrained', allowedPaths: [allowed] });
+  manager.registerServer('docs', { role: 'docs', mode: 'constrained', allowedPaths: [allowed] });
   return (await manager.evaluateToolCall('docs', 'read_docs', { path })).verdict;
 }
 
@@ -56,35 +50,44 @@ describe('McpPermissionManager path scope', () => {
 
   test('a path under any argument name is held to the scope', async () => {
     const manager = new McpPermissionManager();
-    manager.registerServer('docs', 'standard', { role: 'docs', mode: 'constrained', allowedPaths: [allowed] });
+    manager.registerServer('docs', { role: 'docs', mode: 'constrained', allowedPaths: [allowed] });
     expect((await manager.evaluateToolCall('docs', 'read_docs', { filename: join(root, 'elsewhere', 'secret.md') })).verdict).toBe('deny');
     expect((await manager.evaluateToolCall('docs', 'read_docs', { filename: join(allowed, 'a.md'), query: 'setup' })).verdict).toBe('allow');
   });
 
   test('a destination under any argument name is held to the host scope', async () => {
     const manager = new McpPermissionManager();
-    manager.registerServer('docs', 'standard', { role: 'docs', mode: 'constrained', allowedHosts: ['docs.example.com'] });
+    manager.registerServer('docs', { role: 'docs', mode: 'constrained', allowedHosts: ['docs.example.com'] });
     expect((await manager.evaluateToolCall('docs', 'read_docs', { endpoint: 'https://api.docs.example.com/v1' })).verdict).toBe('allow');
     expect((await manager.evaluateToolCall('docs', 'read_docs', { endpoint: 'https://paste.example.net/x' })).verdict).toBe('deny');
   });
 
   test('prose with a slash and dotted file names are not paths or hosts; a bare name under a path argument is', async () => {
     const manager = new McpPermissionManager();
-    manager.registerServer('docs', 'standard', { role: 'docs', mode: 'constrained', allowedPaths: [allowed], allowedHosts: ['docs.example.com'] });
+    manager.registerServer('docs', { role: 'docs', mode: 'constrained', allowedPaths: [allowed], allowedHosts: ['docs.example.com'] });
     expect((await manager.evaluateToolCall('docs', 'read_docs', { query: 'TCP/IP tuning', name: 'report.pdf' })).verdict).toBe('allow');
     expect((await manager.evaluateToolCall('docs', 'read_docs', { target: 'secrets' }, { workingDirectory: root })).verdict).toBe('deny');
     expect((await manager.evaluateToolCall('docs', 'read_docs', { target: 'a.md' }, { workingDirectory: allowed })).verdict).toBe('allow');
   });
 
-  test('a capability list admits a tool whose class it names and denies one it does not', async () => {
-    const reads = new McpPermissionManager();
-    reads.registerServer('docs', 'standard', { role: 'docs', mode: 'constrained', allowedCapabilities: ['read_fs'] });
-    expect((await reads.evaluateToolCall('docs', 'read_docs', {})).verdict).toBe('allow');
-    const writes = new McpPermissionManager();
-    writes.registerServer('docs', 'standard', { role: 'docs', mode: 'constrained', allowedCapabilities: ['write_fs'] });
-    const denied = await writes.evaluateToolCall('docs', 'read_docs', {});
-    expect(denied.verdict).toBe('deny');
-    expect(denied.causes).toEqual(['capability-out-of-scope']);
-    expect(denied.capability).toBe('read_fs');
+  test('text that holds a slash is not a path; a real path outside the scope names its argument', async () => {
+    const manager = new McpPermissionManager();
+    manager.registerServer('docs', { role: 'docs', mode: 'constrained', allowedPaths: [allowed] });
+    const note = join(allowed, 'a.md');
+    for (const args of [{ path: note, content: 'either/or' }, { path: note, content: 'due 11/14/2026' },
+      { path: note, mimeType: 'text/plain' }, { query: 'what does a/b testing mean?' }]) {
+      expect((await manager.evaluateToolCall('docs', 'write_note', args)).verdict).toBe('allow');
+    }
+    const outside = await manager.evaluateToolCall('docs', 'write_note', { path: join(root, 'elsewhere', 'secret.md') });
+    expect(outside.verdict).toBe('deny');
+    expect(outside.reason).toContain("argument 'path'");
+  });
+
+  test('an argument the tool schema declares a path or URI is held to the scope whatever its name', async () => {
+    const manager = new McpPermissionManager();
+    manager.registerServer('docs', { role: 'docs', mode: 'constrained', allowedPaths: [allowed] });
+    const inputSchema = { type: 'object', properties: { note: { type: 'string', format: 'uri-reference' } } };
+    expect((await manager.evaluateToolCall('docs', 'open', { note: 'sub/a.md' }, { inputSchema, workingDirectory: root })).verdict).toBe('deny');
+    expect((await manager.evaluateToolCall('docs', 'open', { note: 'a.md' }, { inputSchema, workingDirectory: allowed })).verdict).toBe('allow');
   });
 });

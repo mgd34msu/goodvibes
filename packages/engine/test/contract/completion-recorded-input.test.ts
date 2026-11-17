@@ -8,6 +8,7 @@ import { captureJudgmentPort, installJudgmentPort, judgmentPort } from '@goodvib
 import { prepareJudgmentResult } from '../../platform/src/platform/gate/judgment-result.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness, type HarnessOptions } from './runner-support.js';
 import { finishes, terminal } from './steps-support.js';
+import { decisionReceiptText } from '../../platform/src/platform/contract/decision-records.js';
 
 for (const native of [false, true]) for (const copied of [false, true]) test(`split content review binds only native saved proofs (native=${native}, copy=${copied})`, async () => {
   using log = new SqliteDecisionLog(':memory:');
@@ -40,7 +41,7 @@ for (const native of [false, true]) for (const copied of [false, true]) test(`sp
       await waitFor(() => terminal(h, id!), 'actual recorded split-batch acceptance');
       expect(h.store.get(id)?.status).toBe('passed');
       const saved = h.store.get(id)!.decisions.findLast(decision => decision.targetId === `${id}.final-answer-review`)!;
-      const receipt = JSON.parse(saved.reason) as { stateHash?: string; decisionIds: string[] };
+      const receipt = JSON.parse(decisionReceiptText(saved)) as { stateHash?: string; decisionIds: string[] };
       expect(receipt.decisionIds).toHaveLength(2);
       expect(receipt).not.toHaveProperty('evidenceDigest');
       if (native) {
@@ -49,7 +50,7 @@ for (const native of [false, true]) for (const copied of [false, true]) test(`sp
       } else {
         expect(receipt).not.toHaveProperty('stateHash');
         for (const entry of log.query().filter(entry => entry.context.site?.startsWith('contract.check.'))) expect(entry).not.toHaveProperty('stateHash');
-        const coverage = JSON.parse(h.store.get(id)!.decisions.findLast(decision => decision.targetId === `${id}.original-obligations`)!.reason);
+        const coverage = JSON.parse(decisionReceiptText(h.store.get(id)!.decisions.findLast(decision => decision.targetId === `${id}.original-obligations`)!));
         expect(coverage).not.toHaveProperty('stateHash');
         expect(coverage.passed).toBe(true);
       }
@@ -136,7 +137,7 @@ for (const interruption of [false, true]) for (const changed of [false, true]) t
     const refused = current.checks.find(check => check.result !== 'pass')!;
     expect(refused.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
     const negative = current.decisions.filter(decision => decision.targetId === `${id}.final-answer-review`)
-      .map(decision => JSON.parse(decision.reason)).find(receipt => receipt.passed === false);
+      .map(decision => JSON.parse(decisionReceiptText(decision))).find(receipt => receipt.passed === false);
     expect(negative.negativeHold).toBe('native-refusal-check-v1');
     expect(negative).not.toHaveProperty('evidenceDigest');
     expect(log.get(negative.decisionIds[0])?.stateHash).toBe(negative.stateHash);

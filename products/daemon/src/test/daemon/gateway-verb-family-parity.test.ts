@@ -186,9 +186,9 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
     ],
   },
   {
-    family: 'rewind.plan / rewind.apply',
+    family: 'rewind.plan / rewind.apply / rewind.undo',
     reason: 'Always registered (files-only rewind over the workspace checkpoint manager already threaded). The conversation scope is a separate honesty concern; see gateway-rewind-conversation-scope.test.ts.',
-    methodIds: ['rewind.plan', 'rewind.apply'],
+    methodIds: ['rewind.plan', 'rewind.apply', 'rewind.undo'],
   },
   {
     family: 'rewind.conversation.* (host registry)',
@@ -276,10 +276,11 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
     reason: "Always registered: installOccasions runs INSIDE composeOwnerProfile over the same store, with the machine-owned state file resolved from shellPaths. Deeper round-trip: gateway-occasions-verbs.test.ts.",
     methodIds: [
       'occasions.list', 'occasions.pending', 'occasions.state', 'occasions.sweep',
-      'occasions.propose', 'occasions.confirm', 'occasions.remove', 'occasions.answer', 'occasions.acknowledge',
+      'occasions.propose', 'occasions.confirm', 'occasions.update', 'occasions.remove', 'occasions.answer', 'occasions.acknowledge',
       'occasions.interview.get', 'occasions.interview.answer', 'occasions.interview.record',
       'occasions.gifts', 'occasions.conflict.resolve',
       'occasions.plans.list', 'occasions.plans.propose', 'occasions.plans.confirm',
+      'occasions.plans.update', 'occasions.plans.remove',
     ],
   },
   {
@@ -421,8 +422,8 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
       "This repo's own payments surface (daemon/handlers/payments), composed by runtime/payments-composition.ts. "
       + 'budget.status/cards.list/cards.delete attach through the platform\'s own registerPaymentsGatewayMethods '
       + '(published from control-plane/index.ts since platform 2.0.18); cards.create/purchases.list keep local '
-      + 'wrappers for field-shape validation the platform route does not do (see register.ts). checkout.begin/'
-      + 'checkout.fillCard attach through local wrappers too, over the platform 2.0.19 browser-checkout seam '
+      + 'wrappers for field-shape validation the platform route does not do (see register.ts). checkout.begin '
+      + 'attaches through a local wrapper too, over the platform 2.0.19 browser-checkout seam '
       + '(composeDaemonBrowser/onBrowserCheckout/BrowserCheckoutSeam), because context.explicitUserRequest, '
       + "the signal this daemon's owner-approval ruling needs, only reaches a handler attached this way; see "
       + 'register.ts\'s header and gateway-payments-verbs.test.ts, which exercises the ruling over real routes. '
@@ -432,7 +433,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
       'payments.budget.status',
       'payments.cards.list', 'payments.cards.create', 'payments.cards.delete',
       'payments.purchases.list',
-      'payments.checkout.approve', 'payments.checkout.begin', 'payments.checkout.fillCard',
+      'payments.checkout.approve', 'payments.checkout.begin',
       'payments.purchase.status', 'payments.purchase.approve', 'payments.purchase.deny', 'payments.purchase.cancel',
       'payments.purchase.reconcile',
     ],

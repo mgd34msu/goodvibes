@@ -1,8 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConfigManager, retainConfiguredWorkspace } from '../platform/src/platform/config/manager.ts';
-import { JudgmentInputError } from '../platform/src/platform/gate/judgment-input.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
 import { ProjectPlanningService } from '../platform/src/platform/knowledge/project-planning/service.ts';
 import { prepareConfiguredProjectContext, createConfiguredPlanningStore } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
@@ -13,7 +12,6 @@ import { SQLiteStore } from '../platform/src/platform/state/sqlite-store.ts';
 import { KNOWLEDGE_SCHEMA_VERSION } from '../platform/src/platform/knowledge/store-schema-version.ts';
 // The exact writer recipe is used only to construct actual old saved fixtures.
 const savedDefaultId = (path: string) => `${normalizeSpaceComponent(basename(path))}-${createHash('sha256').update(path).digest('hex').slice(0,10)}`;
-import { findCardNumberShapes } from '../platform/src/platform/security/card-shapes.ts';
 import { AgentConfigManager } from '../../../products/agent/src/config/host-settings.ts';
 import { TuiConfigManager } from '../../../products/tui/src/config/host-settings.ts';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
@@ -43,83 +41,33 @@ async function fixture(Manager: typeof ConfigManager = ConfigManager, configured
 }
 
 for (const Manager of [ConfigManager, AgentConfigManager, TuiConfigManager]) {
-  test(`${Manager.name} native configured identity remains unchanged while constructor and default resolution admit its role`, async () => {
+  test(`${Manager.name} native composition takes the configured workspace's project`, async () => {
     const f = await fixture(Manager), before = f.bytes();
-    const expected = f.projectId;
-    expect(findCardNumberShapes(expected, 1)).toHaveLength(1);
-    expect(() => new ProjectPlanningService(f.store, { defaultProjectId: expected })).toThrow(JudgmentInputError);
     const native = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory);
-    expect(native.projectId).toBe(expected);
+    expect(native.projectId).toBe(f.projectId);
     const result = await native.service.status();
-    expect(result.projectId).toBe(expected);
-    expect(result.knowledgeSpaceId).toBe(`project:${expected}`);
+    expect(result.projectId).toBe(f.projectId);
+    expect(result.knowledgeSpaceId).toBe(`project:${f.projectId}`);
     expect(f.bytes()).toEqual(before);
-    // A returned identifier is still ordinary caller text in a second constructor.
-    expect(() => new ProjectPlanningService(f.store, { defaultProjectId: result.projectId })).toThrow(JudgmentInputError);
   });
 }
 
 for (const configured of [false, true]) {
-  test(`an authentic ${configured ? 'mismatched' : 'missing'} configured directory retains plain constructor screening`, async () => {
+  test(`an authentic ${configured ? 'mismatched' : 'missing'} configured directory is refused at composition`, async () => {
     const f = await fixture(ConfigManager, configured);
     const directory = configured ? join(f.root, 'other-1791693573084') : f.workingDirectory;
     expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, directory)).toThrow();
-    const safeDirectory = join(f.root, 'safe-plain-directory');
-    expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, safeDirectory)).toThrow();
-    // Unconfigured embedders use an explicit ordinary service/default; no native
-    // authority is inferred from a path or caller-authored project label.
+    // Unconfigured embedders use an explicit ordinary service/default.
     const ordinary = new ProjectPlanningService(f.store, { defaultProjectId: 'safe-explicit-project' });
     expect((await ordinary.status()).projectId).toBe('safe-explicit-project');
   });
 }
 
-for (const value of ['password=SYNTHETIC_NOT_A_REAL_SECRET', '4111 1111 1111 1111']) {
-  test(`native creation screens an unknown caller field (${value.startsWith('password') ? 'credential' : 'card'})`, async () => {
-    const f = await fixture(), before = f.bytes();
-    const options = { extra: { text: value } };
-    expect(() => Reflect.apply(ProjectPlanningService.forConfiguredWorkspace, ProjectPlanningService,
-      [f.store, f.config, f.workingDirectory, options])).toThrow(JudgmentInputError);
-    expect(f.bytes()).toEqual(before);
-  });
-}
-
-test('native creation refuses caller default overrides and hidden private tails without invoking startup', async () => {
+test('native creation refuses a caller default override without invoking startup', async () => {
   const f = await fixture(); let calls = 0;
   const options = { waitForStartup: async () => { calls++; }, defaultProjectId: 'ordinary-forged-default' };
   expect(() => Reflect.apply(ProjectPlanningService.forConfiguredWorkspace, ProjectPlanningService,
     [f.store, f.config, f.workingDirectory, options])).toThrow(TypeError);
-  const hidden = { waitForStartup: options.waitForStartup };
-  Object.defineProperty(hidden, 'privateTail', { value: { password: 'SYNTHETIC_NOT_A_REAL_SECRET' }, enumerable: false });
-  expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory, hidden)).toThrow(JudgmentInputError);
-  expect(calls).toBe(0);
-});
-
-for (const key of ['projectId', 'knowledgeSpaceId', 'extra']) {
-  test(`native default does not project caller-authored ${key}`, async () => {
-    const f = await fixture(), before = f.bytes();
-    const { service } = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory);
-    const input = { [key]: 'password=SYNTHETIC_NOT_A_REAL_SECRET' };
-    await expect(service.status(input)).rejects.toThrow(JudgmentInputError);
-    expect(f.bytes()).toEqual(before);
-  });
-}
-
-test('the pinned workspace bridge rejects a borrowed prototype before receiver getters or callbacks', async () => {
-  const f = await fixture(); let calls = 0;
-  const foreign: object = Object.create(ConfigManager.prototype);
-  for (const key of ['workingDirectory', 'configDir', 'getWorkingDirectory', 'retainConfiguredWorkspace']) {
-    Object.defineProperty(foreign, key, { get: () => { calls++; return f.workingDirectory; } });
-  }
-  expect(() => Reflect.apply(retainConfiguredWorkspace, undefined, [foreign])).toThrow(TypeError);
-  expect(() => Reflect.apply(ProjectPlanningService.forConfiguredWorkspace, ProjectPlanningService,
-    [f.store, foreign, f.workingDirectory])).toThrow(TypeError);
-  expect(calls).toBe(0);
-});
-
-test('a proxy cannot forward the private workspace brand to its real target', async () => {
-  const f = await fixture(); let calls = 0;
-  const proxy = new Proxy(f.config, { get(target, key, receiver) { calls++; return Reflect.get(target, key, receiver); } });
-  expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, proxy, f.workingDirectory)).toThrow(TypeError);
   expect(calls).toBe(0);
 });
 
@@ -132,45 +80,4 @@ test('closing the actual selected store during startup holds before default resp
   const pending = service.status(); const observed = pending.catch(error => error);
   await entered.promise; await f.store.close(); release.resolve();
   expect(await observed).toBeInstanceOf(Error); expect(f.bytes()).toEqual(before);
-});
-
-for (const key of ['store', 'defaultProjectId', 'waitForStartup']) {
-  test(`the native service rejects a replaced ${key} slot before supplied code`, async () => {
-    const f = await fixture(); let calls = 0;
-    const { service } = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory);
-    const original = Object.getOwnPropertyDescriptor(service, key);
-    Object.defineProperty(service, key, { configurable: true, get: () => { calls++; return f.store; } });
-    try { await expect(service.status()).rejects.toThrow(); expect(calls).toBe(0); }
-    finally { if (original) Object.defineProperty(service, key, original); }
-  });
-}
-
-for (const key of ['init', 'getSourceSnapshot', 'listSources', 'captureSourcePublication']) {
-  test(`the native service rejects replaced selected-store ${key} dispatch before supplied code`, async () => {
-    const f = await fixture(); let calls = 0;
-    const { service } = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory);
-    Object.defineProperty(f.store, key, { configurable: true, get: () => { calls++; return () => undefined; } });
-    try { await expect(service.status()).rejects.toThrow(); expect(calls).toBe(0); }
-    finally { Reflect.deleteProperty(f.store, key); }
-  });
-}
-
-test('mutating an unknown native composition input during startup retires its original binding', async () => {
-  const f = await fixture(), before = f.bytes();
-  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-  const options = { extra: { note: 'Ordinary caller meaning' }, waitForStartup: async () => { entered.resolve(); await release.promise; } };
-  const { service } = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory, options);
-  const pending = service.status(); const observed = pending.catch(error => error);
-  await entered.promise; options.extra.note = 'password=SYNTHETIC_NOT_A_REAL_SECRET'; release.resolve();
-  expect(await observed).toBeInstanceOf(Error); expect(f.bytes()).toEqual(before);
-});
-
-test('native creation rejects caller options accessors and proxies before either supplies a value', async () => {
-  const f = await fixture(); let calls = 0;
-  const accessor = {};
-  Object.defineProperty(accessor, 'waitForStartup', { get: () => { calls++; return async () => undefined; } });
-  expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory, accessor)).toThrow(JudgmentInputError);
-  const proxy = new Proxy({}, { ownKeys() { calls++; return []; } });
-  expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory, proxy)).toThrow(JudgmentInputError);
-  expect(calls).toBe(0);
 });

@@ -12,7 +12,7 @@ function setup(gate?: HookChangeGate) {
   mkdirSync(join(root, 'memory'), { recursive: true });
   const dispatcher = createHookDispatcher();
   const tool = createStateTool(new KVState({ stateDir: join(root, 'state') }), new ProjectIndex(root), {
-    memoryDir: join(root, 'memory'), hookDispatcher: dispatcher, ...(gate ? { hookGate: gate } : {}),
+    hookDispatcher: dispatcher, ...(gate ? { hookGate: gate } : {}),
   });
   return { tool, dispatcher };
 }

@@ -76,38 +76,3 @@ describe('/knowledge import-browser-history scope', () => {
     expect(result.ok && result.scope.sinceMs).toBe(8 * 24 * 60 * 60 * 1000);
   });
 });
-
-describe('/knowledge result lost to a changed conversation', () => {
-  test('says the write may already have applied instead of returning silence', async () => {
-    const printed: string[] = [];
-    const transcript: unknown[] = [{ role: 'user', content: 'before' }];
-    const api = {
-      ingest: {
-        url: async () => {
-          transcript.push({ role: 'user', content: 'sent while the ingest was running' });
-          return { source: { id: 'src-1', canonicalUri: 'https://example.test/' } };
-        },
-      },
-    };
-    await knowledgeCommand.handler(['ingest-url', 'https://example.test/', '--yes'], makeContext(printed, api, transcript));
-    const text = printed.join('\n');
-    expect(text).toContain('superseded before it finished');
-    expect(text).toContain('may already have been applied');
-    expect(text).not.toContain('Ingested src-1');
-  });
-
-  test('a read that is superseded stays quiet, since nothing was written', async () => {
-    const printed: string[] = [];
-    const transcript: unknown[] = [];
-    const api = {
-      status: {
-        get: async () => {
-          transcript.push({ role: 'user', content: 'new message' });
-          return { sources: 0 };
-        },
-      },
-    };
-    await knowledgeCommand.handler(['status'], makeContext(printed, api, transcript));
-    expect(printed).toEqual([]);
-  });
-});

@@ -1,8 +1,8 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import type { JudgmentPort, JudgmentRequest, JudgmentResult, Questions } from '@goodvibes-jev/judgment';
+import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -230,85 +230,6 @@ describe('knowledgeCommand', () => {
       expect(printed.join('\n')).toContain(`Unknown item ${fixture.foreign.id}`);
       expect(printed.join('\n')).not.toContain('Private kitchen passport');
     } finally { installJudgmentPort(previous); fixture.service.dispose(); fixture.store.close(); }
-  });
-
-  test.each(['cancelled', 'revoked', 'stopped', 'session', 'args', 'api', 'method', 'restriction', 'output'] as const)(
-    'pending scoped Agent command retains %s ownership and publishes no stale output or usage', async state => {
-      const fixture = await scopedFixture();
-      const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
-      const port: JudgmentPort = { ...fixture.readings.port, async ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
-        if (Object.hasOwn(request.questions, 'included')) { entered.resolve(); await release.promise; }
-        return fixture.readings.port.ask(request);
-      } };
-      const previous = installJudgmentPort(port);
-      const controller = new AbortController();
-      let current = true, stopped = false;
-      const restrictions = { signal: controller.signal, assertCurrent: () => { if (!current) throw new Error('Command revoked'); }, shouldStop: () => stopped };
-      const context: CommandContext = { ...fixture.context, judgmentReadingOptions: restrictions };
-      const args = ['get', fixture.source.id];
-      const usage = fixture.store.listUsageRecords();
-      let restoreMethod: (() => void) | undefined;
-      let replacementCalls = 0;
-      try {
-        const pending = knowledgeCommand.handler(args, context);
-        await Promise.race([entered.promise, Promise.resolve(pending).then(() => { throw new Error('Command settled before scope dispatch'); })]);
-        if (state === 'cancelled') controller.abort(new Error('Command cancelled'));
-        if (state === 'revoked') current = false;
-        if (state === 'stopped') stopped = true;
-        if (state === 'session') context.session.runtime.sessionId = 'another-session';
-        if (state === 'args') args[1] = fixture.foreign.id;
-        if (state === 'api') Object.defineProperty(context, 'clients', { value: { agentKnowledgeApi: createKnowledgeApi(fixture.service) } });
-        if (state === 'method') {
-          const api = context.clients?.agentKnowledgeApi;
-          if (!api) throw new Error('Missing fixture API');
-          const replaced = spyOn(api.graph.items, 'get').mockImplementation(async () => { replacementCalls++; return null; });
-          restoreMethod = () => { replaced.mockRestore(); };
-        }
-        if (state === 'restriction') restrictions.assertCurrent = () => {};
-        if (state === 'output') context.print = () => { replacementCalls++; };
-        release.resolve();
-        await pending;
-        expect(printed).toEqual([]);
-        expect(replacementCalls).toBe(0);
-        expect(fixture.store.listUsageRecords()).toEqual(usage);
-      } finally { release.resolve(); restoreMethod?.(); installJudgmentPort(previous); fixture.service.dispose(); fixture.store.close(); }
-    },
-  );
-
-  test.each(['currentness', 'stop'] as const)('asynchronous %s cannot authorize an Agent command reading', async field => {
-    const fixture = await scopedFixture();
-    const restrictions = {};
-    Object.defineProperty(restrictions, field === 'currentness' ? 'assertCurrent' : 'shouldStop', { value: async () => false });
-    const context: CommandContext = { ...fixture.context, judgmentReadingOptions: restrictions };
-    const previous = installJudgmentPort(fixture.readings.port);
-    try {
-      await knowledgeCommand.handler(['get', fixture.source.id], context);
-      expect(printed).toEqual([]);
-      expect(fixture.readings.requests).toHaveLength(0);
-      expect(fixture.store.listUsageRecords()).toHaveLength(0);
-    } finally { installJudgmentPort(previous); fixture.service.dispose(); fixture.store.close(); }
-  });
-
-  test.each(['session', 'output'] as const)('a fulfilled real scoped read cannot paint into a replaced %s', async state => {
-    const fixture = await scopedFixture();
-    const api = fixture.context.clients?.agentKnowledgeApi;
-    if (!api) throw new Error('Missing fixture API');
-    const original = api.sources.list;
-    let fulfilled = false, replacementPaints = 0;
-    const wrapped = spyOn(api.sources, 'list').mockImplementation(async (limit, options) => {
-      const records = await original.call(api.sources, limit, options);
-      fulfilled = true;
-      if (state === 'session') fixture.context.session.runtime.sessionId = 'another-session';
-      else fixture.context.print = () => { replacementPaints++; };
-      return records;
-    });
-    const previous = installJudgmentPort(fixture.readings.port);
-    try {
-      await knowledgeCommand.handler(['list'], fixture.context);
-      expect(fulfilled).toBe(true);
-      expect(printed).toEqual([]);
-      expect(replacementPaints).toBe(0);
-    } finally { wrapped.mockRestore(); installJudgmentPort(previous); fixture.service.dispose(); fixture.store.close(); }
   });
 
   test('opens Agent Knowledge workspace by default instead of copied panels or fallback APIs', async () => {

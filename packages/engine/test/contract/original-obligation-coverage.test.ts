@@ -10,6 +10,7 @@ import { junitCompletion } from '../../platform/src/platform/contract/gate-recei
 import { nativeSourcePlan } from '../../platform/src/platform/contract/native-source.js';
 import { makeHarness, makeRepo, oneUnitPlan, runnerPort, startContract, waitFor, type Harness } from './runner-support.js';
 import { contractOf, finishes, terminal } from './steps-support.js';
+import { decisionReceiptText } from '../../platform/src/platform/contract/decision-records.js';
 
 let harness: Harness | undefined;
 afterEach(async () => { const finished = harness; harness = undefined; await finished?.dispose(); });
@@ -91,7 +92,7 @@ test.each([0.98, 0.5])('a passed assigned goal and content cannot publish an uns
   expect(check.result).toBe('stall');
   expect(check.problems).toContain(probability === 0.5 ? 'unshown' : 'unmet');
   const coverage = current.decisions.find(decision => decision.targetId === `${contract.id}.original-obligations`)!;
-  expect(JSON.parse(coverage.reason)).toMatchObject({ passed: false, reading: { probability,
+  expect(JSON.parse(decisionReceiptText(coverage))).toMatchObject({ passed: false, reading: { probability,
     verdict: probability === 0.5 ? 'uncertain' : 'yes' } });
   expect(coverage.decisionIds).toHaveLength(1);
   expect(check.decisionIds).toContain(coverage.decisionIds[0]!);
@@ -114,7 +115,7 @@ test.each([false, true])('original coverage records the actual source, output an
   expect(captured).toHaveLength(1);
   expect(captured[0]!.hostStages).toEqual(['native-acceptance', 'artifact-application', 'answer-delivery']);
   const coverage = current.decisions.find(decision => decision.targetId === `${contract.id}.original-obligations`)!;
-  const receipt = JSON.parse(coverage.reason);
+  const receipt = JSON.parse(decisionReceiptText(coverage));
   expect(receipt).toMatchObject({ schemaVersion: 2, passed: true, sourceDigest: hashState(originalObligationSource(contract)),
     outputDigest: hashState(captured[0]!.output as string), decisionIds: coverage.decisionIds });
   expect(receipt).not.toHaveProperty('evidenceDigest');

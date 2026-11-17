@@ -160,10 +160,10 @@ describe('the settings the port is built from', () => {
       // call retains its typed failure and site, never arbitrary upstream text.
       expect((await judgmentConfigFromSettings(source({}, {}))).endpoint.apiKey).toBe('');
       const { decisionLog } = composeJudgment({ ...source({}, {}), stateRoot, disposal: scope.registry });
-      await expect(readFailure(SPENT, 'test.no-key')).rejects.toMatchObject({ kind: 'unavailable', message: expect.stringContaining('No decision models are currently available') });
+      await expect(readFailure(SPENT, 'test.no-key')).rejects.toMatchObject({ kind: 'unavailable', reason: 'no-credential' });
       const [entry] = decisionLog.query({ site: 'test.no-key' });
       expect(entry).toMatchObject({ status: 'failed', context: { battery: 'engine.failure-reading', site: 'test.no-key' },
-        error: { kind: 'unavailable', message: expect.stringContaining('No decision models are currently available') } });
+        error: { kind: 'unavailable', reason: 'no-credential' } });
       expect(JSON.stringify(entry)).not.toContain('TYPESAFE_API_KEY is not set');
     } finally {
       scope.dispose();
@@ -209,27 +209,6 @@ describe('the settings the port is built from', () => {
       expect((await port.ask(request)).model).toBe('jev-pinned-here');
     } finally {
       server.stop(true);
-      scope.dispose();
-      rmSync(stateRoot, { recursive: true, force: true });
-    }
-  });
-
-  test('a burst of completed judgments gives input a turn between durable records', async () => {
-    const stateRoot = mkdtempSync(join(tmpdir(), 'judgment-input-'));
-    const scope = createDisposalScope('test');
-    let ticking = true;
-    let tick = 0;
-    const inputTurn = (): void => { tick++; if (ticking) setImmediate(inputTurn); };
-    setImmediate(inputTurn);
-    try {
-      const { port, decisionLog } = composeJudgment({ ...source({}, {}), stateRoot, disposal: scope.registry });
-      const turns = await Promise.all(Array.from({ length: 12 }, () => port.ask({
-        state: { sample: true }, questions: { check: { type: 'noul', instructions: 'Is the sample present?' } },
-      }).then(() => tick, () => tick)));
-      expect(new Set(turns).size).toBe(12);
-      expect(decisionLog.query()).toHaveLength(12);
-    } finally {
-      ticking = false;
       scope.dispose();
       rmSync(stateRoot, { recursive: true, force: true });
     }

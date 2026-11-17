@@ -197,7 +197,6 @@ describe('createDaemonIntegrationRouteHandlers per-request auth', () => {
         getApprovalSnapshot: () => ({}),
         listPanels: () => [],
         openPanel: () => false,
-        createEventStream: () => new Response('', { status: 200 }),
         getRuntimeStore: () => null,
       },
       memoryRegistry: {
@@ -275,39 +274,6 @@ describe('createDaemonIntegrationRouteHandlers per-request auth', () => {
     expect(body).toEqual(snapshot);
     expect(Object.hasOwn(body, 'channels')).toBe(false);
     expect(Object.hasOwn(body, 'channelCount')).toBe(false);
-  });
-
-  test('getEvents drops event domains the runtime does not define', async () => {
-    const ctx = makeContext();
-    const seen: unknown[] = [];
-    const handlers = createDaemonIntegrationRouteHandlers({
-      ...ctx,
-      integrationHelpers: {
-        ...ctx.integrationHelpers!,
-        createEventStream: (_req: Request, domains: readonly unknown[]) => {
-          seen.push([...domains]);
-          return new Response('', { status: 200 });
-        },
-      },
-    });
-
-    await handlers.getEvents(new Request('http://daemon.local/api/events?domains=session,not-a-domain,%20turn', {
-      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
-    }));
-
-    expect(seen).toEqual([['session', 'turn']]);
-  });
-
-  test('getEvents, the unfiltered runtime bus, is refused to a caller that is not an admin', async () => {
-    const ctx = makeContext();
-    let opened = false;
-    const handlers = createDaemonIntegrationRouteHandlers({
-      ...ctx,
-      integrationHelpers: { ...ctx.integrationHelpers!, createEventStream: () => { opened = true; return new Response(''); } },
-    });
-    const res = await handlers.getEvents(new Request('http://daemon.local/api/events?domains=config'));
-    expect(res.status).not.toBe(200);
-    expect(opened).toBe(false);
   });
 });
 

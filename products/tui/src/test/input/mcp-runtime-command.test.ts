@@ -148,7 +148,7 @@ describe('/mcp runtime config commands', () => {
       const ctx = makeContext(root, out);
 
       await registry.get('mcp')!.handler(['add', 'docs', 'node', 'server.js'], ctx);
-      await registry.get('mcp')!.handler(['remove', 'docs'], ctx);
+      await registry.get('mcp')!.handler(['remove', 'docs', '--yes'], ctx);
 
       const config = JSON.parse(readFileSync(join(root, '.goodvibes', 'mcp.json'), 'utf-8')) as { servers: unknown[] };
       expect(config.servers).toEqual([]);

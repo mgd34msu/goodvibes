@@ -90,27 +90,27 @@ describe('session picker load', () => {
     return modal;
   }
 
-  test('does not clear the live conversation for a session it cannot read', () => {
+  test('does not clear the live conversation for a session it cannot read', async () => {
     const f = fixture({ generating: false });
     const before = texts(f.conversation);
-    expect(picker(f, 'broken').loadSelected(f.ctx)).toBe(false);
+    expect(await picker(f, 'broken').loadSelected(f.ctx)).toBe(false);
     expect(texts(f.conversation)).toBe(before);
   });
 
-  test('refuses while a turn runs, and says so', () => {
+  test('refuses while a turn runs, and says so', async () => {
     const f = fixture({ generating: true });
     const before = texts(f.conversation);
     const modal = picker(f, 'alpha');
-    expect(modal.loadSelected(f.ctx)).toBe(false);
+    expect(await modal.loadSelected(f.ctx)).toBe(false);
     expect(modal.statusMessage).toContain('A turn is still running');
     expect(texts(f.conversation)).toBe(before);
     expect(f.loads).toEqual([]);
   });
 
-  test('loads and moves the session identity when idle', () => {
+  test('loads and moves the session identity when idle', async () => {
     const f = fixture({ generating: false });
     const modal = picker(f, 'alpha');
-    expect(modal.loadSelected(f.ctx)).toBe(true);
+    expect(await modal.loadSelected(f.ctx)).toBe(true);
     expect(f.runtime.sessionId).toBe('alpha');
     expect(texts(f.conversation)).toContain('from alpha');
   });

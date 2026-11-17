@@ -1,30 +1,24 @@
 /**
- * A refused installed-image admission explains itself: it names what was wrong
- * and the way forward, instead of a bare internal message at import time.
+ * A refused installed-image admission is returned with its reason and the way
+ * forward, so the entry point can still answer metadata commands and then stop
+ * with one line instead of a stack trace at import time.
  */
 import { describe, expect, test } from 'bun:test';
 import { admitInstalledDataWriterOrExplain } from '../../runtime/native-data-writer.ts';
 
-const OPTIONS = { moduleUrl: 'file:///x', execPath: '/opt/gv/goodvibes-agent', compiledVersion: '3.3.0', platform: 'linux' };
+const OPTIONS = { moduleUrl: 'file:///x', execPath: '/opt/gv/goodvibes', compiledVersion: '3.3.0', platform: 'linux' };
 
 describe('installed data writer admission', () => {
-  test('a refusal keeps its cause and names the next step', () => {
-    const refusal = new Error('Installed data publisher image is unavailable');
-    let thrown: unknown;
-    try {
-      admitInstalledDataWriterOrExplain(OPTIONS, () => { throw refusal; });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(Error);
-    const message = (thrown as Error).message;
-    expect(message).toContain('Installed data publisher image is unavailable');
-    expect(message).toContain('official installer');
-    expect((thrown as Error).cause).toBe(refusal);
+  test('a refusal is returned, not thrown, and names the cause and the next step', () => {
+    const admission = admitInstalledDataWriterOrExplain(OPTIONS, () => { throw new Error('Installed data publisher image is unavailable'); });
+    expect(admission.ok).toBe(false);
+    if (admission.ok) return;
+    expect(admission.message).toContain('Installed data publisher image is unavailable');
+    expect(admission.message).toContain('official installer');
   });
 
-  test('an admitted install passes through unchanged', () => {
+  test('an admitted install passes its publisher through unchanged', () => {
     const owner = { admitted: true } as never;
-    expect(admitInstalledDataWriterOrExplain(OPTIONS, () => owner)).toBe(owner);
+    expect(admitInstalledDataWriterOrExplain(OPTIONS, () => owner)).toEqual({ ok: true, writer: owner });
   });
 });

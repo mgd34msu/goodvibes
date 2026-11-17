@@ -62,7 +62,7 @@ function commitCount(cwd: string): number {
 // ---------------------------------------------------------------------------
 
 describe('dirty-guard: snapshotDirtyTree', () => {
-  test('captures dirty tracked + untracked paths with private original bytes, excluding .goodvibes', async () => {
+  test('captures dirty tracked + untracked paths as git object ids, excluding .goodvibes', async () => {
     const root = tempRoot('dirty-guard-snapshot-');
     initRepo(root);
     writeFileSync(join(root, 'tracked.ts'), 'export const a = 1;\n');
@@ -74,18 +74,21 @@ describe('dirty-guard: snapshotDirtyTree', () => {
     writeFileSync(join(root, '.goodvibes', 'state.json'), '{}\n');
 
     const snapshot = snapshotDirtyTree(root);
+    const launch = await snapshot.ready;
 
-    expect(snapshot.has('tracked.ts')).toBe(true);
-    expect(snapshot.has('untracked.ts')).toBe(true);
-    expect([...snapshot.keys()].some((path) => path.startsWith('.goodvibes'))).toBe(false);
-    expect(snapshot.get('tracked.ts')).toEqual({ kind: 'file' });
+    expect(launch.ids.has('tracked.ts')).toBe(true);
+    expect(launch.ids.has('untracked.ts')).toBe(true);
+    expect([...launch.ids.keys()].some((path) => path.startsWith('.goodvibes'))).toBe(false);
+    expect(launch.ids.get('tracked.ts')).toMatch(/^file:[a-f0-9]{40}/);
   });
 
   test('retains an unavailable snapshot without authorizing a later commit outside Git', async () => {
     const root = tempRoot('dirty-guard-nogit-');
     const snapshot = snapshotDirtyTree(root);
-    expect(snapshot.size).toBe(0);
-    expect(() => excludeUntouchedLaunchResidue(root, ['owner-file'], snapshot)).toThrow('snapshot is unavailable');
+    const launch = await snapshot.ready;
+    expect(launch.ids.size).toBe(0);
+    expect(launch.available).toBe(false);
+    await expect(excludeUntouchedLaunchResidue(root, ['owner-file'], snapshot)).rejects.toThrow('could not be listed');
   });
 
   test('keys non-ASCII paths by their RAW name (via `-z`), not git\'s C-quoted form, so native reads select the real file', async () => {
@@ -99,18 +102,19 @@ describe('dirty-guard: snapshotDirtyTree', () => {
     writeFileSync(join(root, '普通话.txt'), 'cjk\n');
 
     const snapshot = snapshotDirtyTree(root);
+    const launch = await snapshot.ready;
 
     // Raw paths are the keys, never the quoted "caf\303\251.txt" form.
-    expect(snapshot.has('café.txt')).toBe(true);
-    expect(snapshot.has('普通话.txt')).toBe(true);
-    expect([...snapshot.keys()].some((key) => key.includes('\\') || key.startsWith('"'))).toBe(false);
-    // Only source kinds are public; the original raw-name bytes stay private.
-    expect(snapshot.get('café.txt')).toEqual({ kind: 'file' });
-    expect(snapshot.get('普通话.txt')).toEqual({ kind: 'file' });
+    expect(launch.ids.has('café.txt')).toBe(true);
+    expect(launch.ids.has('普通话.txt')).toBe(true);
+    expect([...launch.ids.keys()].some((key) => key.includes('\\') || key.startsWith('"'))).toBe(false);
+    // Each path is named by its git object id; no file bytes are kept.
+    expect(launch.ids.get('café.txt')).toMatch(/^file:[a-f0-9]{40}/);
+    expect(launch.ids.get('普通话.txt')).toMatch(/^file:[a-f0-9]{40}/);
 
     // End to end: untouched non-ASCII residue is excluded from a scoped commit
     // (the whole point of the guard) instead of leaking through on a key mismatch.
-    const { included, excluded } = excludeUntouchedLaunchResidue(root, ['café.txt', '普通话.txt'], snapshot);
+    const { included, excluded } = await excludeUntouchedLaunchResidue(root, ['café.txt', '普通话.txt'], snapshot);
     expect([...excluded].sort()).toEqual(['café.txt', '普通话.txt'].sort());
     expect(included).toEqual([]);
   });
@@ -125,12 +129,13 @@ describe('dirty-guard: snapshotDirtyTree', () => {
     runGit(root, ['mv', 'café.txt', 'renamed.txt']);
 
     const snapshot = snapshotDirtyTree(root);
+    const launch = await snapshot.ready;
 
     // The destination is captured; the following NUL-separated origin field is
     // consumed, never mis-parsed as its own standalone dirty path.
-    expect(snapshot.has('renamed.txt')).toBe(true);
-    expect(snapshot.has('café.txt')).toBe(false);
-    expect(snapshot.get('renamed.txt')).toEqual({ kind: 'file' });
+    expect(launch.ids.has('renamed.txt')).toBe(true);
+    expect(launch.ids.has('café.txt')).toBe(false);
+    expect(launch.ids.get('renamed.txt')).toMatch(/^file:[a-f0-9]{40}/);
   });
 });
 
@@ -140,12 +145,13 @@ describe('dirty-guard: excludeUntouchedLaunchResidue', () => {
     initRepo(root);
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 1;\n');
     const launchSnapshot = snapshotDirtyTree(root);
-    expect(launchSnapshot.has('residue.ts')).toBe(true);
+    await launchSnapshot.ready;
+    expect((await launchSnapshot.ready).ids.has('residue.ts')).toBe(true);
 
     // This run creates a brand-new file; residue.ts is left byte-for-byte untouched.
     writeFileSync(join(root, 'feature.ts'), 'export const feature = 1;\n');
 
-    const { included, excluded } = excludeUntouchedLaunchResidue(root, ['residue.ts', 'feature.ts'], launchSnapshot);
+    const { included, excluded } = await excludeUntouchedLaunchResidue(root, ['residue.ts', 'feature.ts'], launchSnapshot);
     expect(excluded).toEqual(['residue.ts']);
     expect(included).toEqual(['feature.ts']);
   });
@@ -155,10 +161,11 @@ describe('dirty-guard: excludeUntouchedLaunchResidue', () => {
     initRepo(root);
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 1;\n');
     const launchSnapshot = snapshotDirtyTree(root);
+    await launchSnapshot.ready;
 
     writeFileSync(join(root, 'residue.ts'), 'export const residue = 2;\n');
 
-    const { included, excluded } = excludeUntouchedLaunchResidue(root, ['residue.ts'], launchSnapshot);
+    const { included, excluded } = await excludeUntouchedLaunchResidue(root, ['residue.ts'], launchSnapshot);
     expect(included).toEqual(['residue.ts']);
     expect(excluded).toEqual([]);
   });
@@ -167,10 +174,11 @@ describe('dirty-guard: excludeUntouchedLaunchResidue', () => {
     const root = tempRoot('dirty-guard-fresh-');
     initRepo(root);
     const launchSnapshot = snapshotDirtyTree(root); // nothing dirty yet
+    await launchSnapshot.ready;
 
     writeFileSync(join(root, 'new.ts'), 'export const isNew = true;\n');
 
-    const { included, excluded } = excludeUntouchedLaunchResidue(root, ['new.ts'], launchSnapshot);
+    const { included, excluded } = await excludeUntouchedLaunchResidue(root, ['new.ts'], launchSnapshot);
     expect(included).toEqual(['new.ts']);
     expect(excluded).toEqual([]);
   });
@@ -181,8 +189,9 @@ describe('dirty-guard: excludeUntouchedLaunchResidue', () => {
     writeFileSync(join(root, 'residue-a.ts'), 'export const a = 1;\n');
     writeFileSync(join(root, 'residue-b.ts'), 'export const b = 1;\n');
     const launchSnapshot = snapshotDirtyTree(root);
+    await launchSnapshot.ready;
 
-    const { included, excluded } = excludeUntouchedLaunchResidue(root, ['residue-a.ts', 'residue-b.ts'], launchSnapshot);
+    const { included, excluded } = await excludeUntouchedLaunchResidue(root, ['residue-a.ts', 'residue-b.ts'], launchSnapshot);
     expect(included).toEqual([]);
     expect([...excluded].sort()).toEqual(['residue-a.ts', 'residue-b.ts']);
   });

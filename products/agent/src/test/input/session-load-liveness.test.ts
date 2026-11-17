@@ -28,18 +28,18 @@ function fixture() {
 }
 
 describe('loading a saved session and another running terminal', () => {
-  test('refuses a session another live process holds, names the explicit way, and changes nothing', () => {
+  test('refuses a session another live process holds, names the explicit way, and changes nothing', async () => {
     const f = fixture();
     // The parent process is alive and is not this one.
     writeLivenessMarker(f.surface, 'shared', process.ppid);
-    expect(() => loadSavedSessionIntoLive(f.ctx, f.sm, 'shared')).toThrow(/another terminal.*--force/s);
+    await expect(loadSavedSessionIntoLive(f.ctx, f.sm, 'shared')).rejects.toThrow(/another terminal.*--force/s);
     expect(f.runtime.sessionId).toBe('mine');
   });
 
-  test('a load that goes ahead marks the new session as open here and clears the one it left', () => {
+  test('a load that goes ahead marks the new session as open here and clears the one it left', async () => {
     const f = fixture();
     writeLivenessMarker(f.surface, 'mine');
-    loadSavedSessionIntoLive(f.ctx, f.sm, 'shared');
+    await loadSavedSessionIntoLive(f.ctx, f.sm, 'shared');
     expect(f.runtime.sessionId).toBe('shared');
     expect(checkSessionLiveness(f.surface, 'shared')).toEqual({ live: true, pid: process.pid });
     expect(checkSessionLiveness(f.surface, 'mine').live).toBe(false);

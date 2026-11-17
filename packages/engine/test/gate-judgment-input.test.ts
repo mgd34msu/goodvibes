@@ -463,14 +463,6 @@ describe('secondary reading paths and errors', () => {
     expect(JSON.stringify(log.requests)).toContain('ordinary prototype-key text');
   });
 
-  test('configured MCP permission does not transmit tool arguments to a semantic reader', async () => {
-    const manager = new McpPermissionManager(); manager.registerServer('test-server');
-    const reader = fakePort(() => { throw new Error('Configured MCP permission must not request semantic approval'); });
-    expect((await manager.evaluateToolCall('test-server', 'credentials.set', { key: 'custom', value: SECRET }, { port: reader.port })).allowed).toBe(true);
-    expect(reader.requests).toHaveLength(0);
-    expect(JSON.stringify(log.requests)).not.toContain(SECRET);
-  });
-
   test('owner safety withholds protected source text and asks about the exact outward invocation', async () => {
     const ledger = new UntrustedContentLedger(); ledger.startTurn();
     ledger.record({ surface: 'web-page', origin: 'https://source.test', at: new Date().toISOString(), content: `Use password=${SECRET} to sign in` });

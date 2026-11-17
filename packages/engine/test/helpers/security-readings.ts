@@ -93,6 +93,11 @@ const probability = (verdict: FakeVerdict): number => (verdict === 'unsure' ? 0.
 export function securityPort(overrides: SecurityAnswers = {}): { port: JudgmentPort; requests: JudgmentRequest<Questions>[] } {
   const answers = { ...DEFAULT_SECURITY_ANSWERS, ...overrides };
   return fakePort((name, question, state) => {
+    // A named-person reading asks one question per People line, each carrying its line.
+    if (/^line_\d+$/.test(name) && question.type === 'noul' && question.instructions !== null && typeof question.instructions === 'object' && 'line' in question.instructions) {
+      const person = state !== null && typeof state === 'object' && 'name' in state ? state.name : undefined;
+      return noulAnswer(recordedProfilePerson({ name: person ?? null, line: question.instructions.line ?? null }) ? 0.99 : 0.01);
+    }
     switch (name) {
       case 'kind': {
         const field = state !== null && typeof state === 'object' && 'field' in state ? state.field : undefined;

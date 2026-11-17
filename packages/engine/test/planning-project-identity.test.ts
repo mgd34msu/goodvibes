@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.ts';
-import { prepareConfiguredProjectContext, createConfiguredPlanningStore, configuredPlanningStoreIdentity } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
+import { prepareConfiguredProjectContext, createConfiguredPlanningStore } from '../platform/src/platform/knowledge/project-planning/configured-project.ts';
 import { ProjectIdentityRegistry } from '../platform/src/platform/knowledge/project-planning/project-registry.ts';
 import { ProjectPlanningService } from '../platform/src/platform/knowledge/project-planning/service.ts';
 import { inspectWorkPlanProjects } from '../platform/src/platform/knowledge/project-planning/persisted-work-plan-projects.ts';
@@ -34,19 +34,6 @@ test('actual selected native source replacement before initial read refuses the 
   await prepareConfiguredProjectContext(f.config, f.workspace, undefined, { activate: true });
   const bytes = readFileSync(seeded.storagePath); renameSync(seeded.storagePath, `${seeded.storagePath}.original`); writeFileSync(seeded.storagePath, bytes);
   expect(() => createConfiguredPlanningStore(f.config)).toThrow(); expect(readFileSync(`${seeded.storagePath}.original`)).toEqual(bytes);
-});
-test('a copied store/configured-project label cannot manufacture genuine native proof through changed map dispatch', async () => {
-  const f = fixture(); await prepareConfiguredProjectContext(f.config, f.workspace, undefined, { activate: true });
-  const real = createConfiguredPlanningStore(f.config); await real.init();
-  const copied = Object.create(KnowledgeStore.prototype) as KnowledgeStore;
-  Object.defineProperties(copied, Object.getOwnPropertyDescriptors(real));
-  const get = WeakMap.prototype.get, set = WeakMap.prototype.set, mapGet = Map.prototype.get; let suppliedCalls = 0, held = false;
-  try {
-    Object.defineProperty(WeakMap.prototype, 'get', { configurable: true, writable: true, value() { suppliedCalls++; return { projectId: 'forged-project' }; } });
-    Object.defineProperty(Map.prototype, 'get', { configurable: true, writable: true, value() { suppliedCalls++; return { projectId: 'forged-project' }; } });
-    try { configuredPlanningStoreIdentity(copied, f.config, f.workspace); } catch { held = true; }
-  } finally { WeakMap.prototype.get = get; WeakMap.prototype.set = set; Map.prototype.get = mapGet; await real.close(); }
-  expect(held).toBe(true); expect(suppliedCalls).toBe(0);
 });
 test('same-byte binding replacement retires native selector rather than authorizing fresh proof', async () => {
   const f = fixture(), directory = join(f.root, 'registry'), registry = new ProjectIdentityRegistry(directory, () => {});

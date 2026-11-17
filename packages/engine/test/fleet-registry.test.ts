@@ -395,7 +395,7 @@ describe('fleet registry: adapter mapping', () => {
     expect(wfNode.currentActivity?.text).toBe('reviewing');
     expect(nodeById(registry, 'wf-2').state).toBe('killed');
     const trgNode = nodeById(registry, 'trg-1');
-    expect(trgNode.kind).toBe('trigger');
+    expect(trgNode.kind).toBe('hook-action');
     expect(trgNode.state).toBe('idle');
     expect(trgNode.capabilities.pausable).toBe(true);
     expect(trgNode.capabilities.resumable).toBe(false); // already armed, nothing to resume
@@ -1285,7 +1285,7 @@ describe('fleet registry: steer', () => {
 
     const triggerResult = registry.steer('trg-steer', 'x');
     expect(triggerResult.queued).toBe(false);
-    if (!triggerResult.queued) expect(triggerResult.reason).toContain('trigger');
+    if (!triggerResult.queued) expect(triggerResult.reason).toContain('hook-action');
 
     registry.dispose();
   });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   reapMissingRoutineScheduleReceipts,
@@ -94,19 +94,7 @@ describe('routine schedule receipt store housekeeping', () => {
       const store = new RoutineScheduleReceiptStore(storePath);
       expect(() => store.snapshot()).not.toThrow();
       expect(store.snapshot().receipts).toHaveLength(0);
-      expect(store.lastMaintenance()?.recovered).toBe('empty-file');
-    });
-  });
-
-  test('degrades a crash-truncated store to no receipts, preserving the bad file aside', () => {
-    withStorePath((storePath) => {
-      writeFileSync(storePath, '{"version":1,"receipts":[{"id":"routine-a","createdAt":"2026-07-0');
-      const store = new RoutineScheduleReceiptStore(storePath);
-
-      expect(store.snapshot().receipts).toHaveLength(0);
-      expect(store.lastMaintenance()?.recovered).toBe('quarantined');
-      expect(existsSync(`${storePath}.corrupt`)).toBe(true);
-      expect(existsSync(storePath)).toBe(false);
+      expect(store.lastMaintenance()?.recovered).toBe('unreadable');
     });
   });
 

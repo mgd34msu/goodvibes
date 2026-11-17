@@ -124,11 +124,12 @@ test('correction proposal identity ignores bookkeeping but changes when actual o
   archiveCheck.durationMs = 89;
   const owner = later.ownerPriorReads;
   if (!owner || typeof owner !== 'object' || Array.isArray(owner)
-    || !Array.isArray(owner['sources']) || !Array.isArray(owner['sourceReads'])) throw new Error('Missing actual owner observations');
-  const source = owner['sources'][0], read = owner['sourceReads'][0];
-  if (!source || typeof source !== 'object' || Array.isArray(source) || typeof source['bytes'] !== 'number'
-    || !read || typeof read !== 'object' || Array.isArray(read)) throw new Error('Incomplete actual owner observations');
-  source['bytes'] += 100;
+    || !Array.isArray(owner['sourceReads'])) throw new Error('Missing actual owner observations');
+  // The receipt is the model's view: no call ids, no journal paths or sizes.
+  expect(owner['sources']).toBeUndefined();
+  expect(owner['callIds']).toBeUndefined();
+  const read = owner['sourceReads'][0];
+  if (!read || typeof read !== 'object' || Array.isArray(read)) throw new Error('Incomplete actual owner observations');
   expect(JSON.stringify(workReceiptIdentity(later))).toBe(first);
   read['returnedRanges'] = ['1-2'];
   expect(JSON.stringify(workReceiptIdentity(later))).not.toBe(first);

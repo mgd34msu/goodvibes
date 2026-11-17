@@ -28,10 +28,10 @@ describe('schema freshness: a failure while quarantined', () => {
   });
 });
 
-describe('permission decisions and the trust level/mode pair', () => {
+describe('permission decisions and the trust mode', () => {
   test('evaluating a tool call records a decision', async () => {
     const manager = new McpPermissionManager();
-    manager.registerServer('docs', 'standard', { role: 'docs', mode: 'constrained', allowedPaths: ['/work'] });
+    manager.registerServer('docs', { role: 'docs', mode: 'constrained', allowedPaths: ['/work'] });
 
     await manager.evaluateToolCall('docs', 'read', { path: '/elsewhere/x' });
 
@@ -40,27 +40,20 @@ describe('permission decisions and the trust level/mode pair', () => {
     expect(decision).toMatchObject({ serverName: 'docs', toolName: 'read', verdict: 'deny', profileMode: 'constrained', incoherent: true });
   });
 
-  test('a block applied through the trust level is enforced on a live call', async () => {
-    const manager = new McpPermissionManager();
-    manager.registerServer('s');
-    manager.setTrustLevel('s', 'blocked');
-    expect((await manager.evaluateToolCall('s', 't', {})).verdict).toBe('deny');
-  });
-
-  test('a block applied through the trust mode is enforced by the level check too', () => {
+  test('a block applied through the trust mode is enforced on a live call, and lifting it allows again', async () => {
     const manager = new McpPermissionManager();
     manager.registerServer('s');
     manager.setTrustMode('s', 'blocked');
-    expect(manager.isToolAllowed('s', 't').allowed).toBe(false);
+    expect((await manager.evaluateToolCall('s', 't', {})).verdict).toBe('deny');
 
     manager.setTrustMode('s', 'ask-on-risk');
-    expect(manager.isToolAllowed('s', 't').allowed).toBe(true);
+    expect((await manager.evaluateToolCall('s', 't', {})).verdict).toBe('allow');
   });
 
-  test('a server registered with a blocked profile mode is blocked at the level check', () => {
+  test('a server registered with a blocked profile mode is blocked', async () => {
     const manager = new McpPermissionManager();
-    manager.registerServer('s', 'standard', { mode: 'blocked' });
-    expect(manager.isToolAllowed('s', 't').allowed).toBe(false);
+    manager.registerServer('s', { mode: 'blocked' });
+    expect((await manager.evaluateToolCall('s', 't', {})).verdict).toBe('deny');
   });
 
   test('the posture review does not claim an approval step the call path never takes', () => {
@@ -79,7 +72,7 @@ describe('permission decisions and the trust level/mode pair', () => {
 describe('scope enforcement on arguments with unlisted names', () => {
   const guarded = (): McpPermissionManager => {
     const manager = new McpPermissionManager();
-    manager.registerServer('files', 'standard', {
+    manager.registerServer('files', {
       role: 'filesystem', mode: 'constrained', allowedPaths: ['/work'], allowedHosts: ['Example.com'],
     });
     return manager;
@@ -107,7 +100,7 @@ describe('scope enforcement on arguments with unlisted names', () => {
 
   test('an allowed host is compared case-insensitively and without a scheme or port', async () => {
     const manager = new McpPermissionManager();
-    manager.registerServer('net', 'standard', { role: 'general', mode: 'constrained', allowedHosts: ['Example.com', 'https://api.other.test:8443'] });
+    manager.registerServer('net', { role: 'general', mode: 'constrained', allowedHosts: ['Example.com', 'https://api.other.test:8443'] });
     expect((await manager.evaluateToolCall('net', 't', { url: 'https://www.example.com/a' })).verdict).toBe('allow');
     expect((await manager.evaluateToolCall('net', 't', { url: 'https://api.other.test/a' })).verdict).toBe('allow');
     expect((await manager.evaluateToolCall('net', 't', { url: 'https://evil.test/a' })).verdict).toBe('deny');

@@ -207,47 +207,47 @@ describe('McpLifecycleManager: quarantine execution block', () => {
     const events: McpEvent[] = [];
     mgr.onEvent((e) => events.push(e));
     // Seed permissions so the server is registered
-    mgr['permissions'].registerServer('my-server', 'standard');
+    mgr['permissions'].registerServer('my-server');
     mgr['freshness'].registerServer('my-server');
     return { mgr, events };
   }
 
-  describe('isToolAllowed blocks quarantined schema', () => {
-    test('tool call denied when schema is quarantined', () => {
+  describe('evaluateToolCall blocks quarantined schema', () => {
+    test('tool call denied when schema is quarantined', async () => {
       const { mgr } = makeManager();
       mgr.quarantineSchema('my-server', 'incompatible', 'v2 schema required');
-      const result = mgr.isToolAllowed('my-server', 'any-tool');
+      const result = (await mgr.evaluateToolCall('my-server', 'any-tool', {}));
       expect(result.allowed).toBe(false);
     });
 
-    test('denial reason mentions quarantine', () => {
+    test('denial reason mentions quarantine', async () => {
       const { mgr } = makeManager();
       mgr.quarantineSchema('my-server', 'incompatible');
-      const result = mgr.isToolAllowed('my-server', 'any-tool');
+      const result = (await mgr.evaluateToolCall('my-server', 'any-tool', {}));
       expect(result.reason).toMatch(/quarantined/i);
     });
 
-    test('trusted server is also blocked when schema is quarantined', () => {
+    test('an allow-all server is also blocked when schema is quarantined', async () => {
       const { mgr } = makeManager();
-      mgr.setTrustLevel('my-server', 'trusted');
+      mgr.setTrustMode('my-server', 'allow-all');
       mgr.quarantineSchema('my-server', 'stale_threshold');
-      const result = mgr.isToolAllowed('my-server', 'trusted-tool');
+      const result = (await mgr.evaluateToolCall('my-server', 'trusted-tool', {}));
       expect(result.allowed).toBe(false);
     });
 
-    test('tool call allowed after operator approves quarantine', () => {
+    test('tool call allowed after operator approves quarantine', async () => {
       const { mgr } = makeManager();
       mgr.quarantineSchema('my-server', 'operator_flagged');
-      expect(mgr.isToolAllowed('my-server', 'some-tool').allowed).toBe(false);
+      expect((await mgr.evaluateToolCall('my-server', 'some-tool', {})).allowed).toBe(false);
 
       mgr.approveSchemaQuarantine('my-server', 'operator-frank');
-      const result = mgr.isToolAllowed('my-server', 'some-tool');
+      const result = (await mgr.evaluateToolCall('my-server', 'some-tool', {}));
       expect(result.allowed).toBe(true);
     });
 
-    test('non-quarantined server is not blocked', () => {
+    test('non-quarantined server is not blocked', async () => {
       const { mgr } = makeManager();
-      const result = mgr.isToolAllowed('my-server', 'read-file');
+      const result = (await mgr.evaluateToolCall('my-server', 'read-file', {}));
       expect(result.allowed).toBe(true);
     });
   });

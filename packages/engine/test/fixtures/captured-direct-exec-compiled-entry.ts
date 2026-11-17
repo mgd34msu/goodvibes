@@ -51,6 +51,7 @@ export const captured = { value, configuredType, configValue: DIRECT_EXEC_CONFIG
   writeFileSync(join(root, 'direct-exec.test.ts'), `import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { captured, parse } from './src/csv.ts';
+import { decisionReceiptText } from '../../platform/src/platform/contract/decision-records.js';
 test('direct compiled-parent build uses captured config and authorized bytes', async () => {
   expect(parse('a,b')).toEqual(['a', 'b']);
   expect(captured).toEqual({ value: ${JSON.stringify(DIRECT_EXEC_CAPTURED_VALUE)}, configuredType: 'PROJECT_LOADER_OK', configValue: 'PROJECT_CONFIG_OK' });
@@ -218,7 +219,7 @@ test('direct compiled-parent build uses captured config and authorized bytes', a
       originalInputUnchanged: originalInputReceipt === JSON.stringify(result.inputSnapshot),
       ownerIndexUnchanged: ownerIndex?.equals(readFileSync(join(root, '.git/index'))),
       ownerHeadUnchanged: ownerHead === spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim(),
-      publicationOwnerChecks: result.decisions.filter(decision => decision.targetId === `${id}.publication-owner`).map(decision => JSON.parse(decision.reason)),
+      publicationOwnerChecks: result.decisions.filter(decision => decision.targetId === `${id}.publication-owner`).map(decision => JSON.parse(decisionReceiptText(decision))),
     };
   } finally {
     if (id) runner.cancel(id, 'fixture cleanup');

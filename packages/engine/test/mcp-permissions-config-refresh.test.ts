@@ -15,9 +15,9 @@ import { McpPermissionManager } from '../platform/src/platform/runtime/mcp/permi
 
 function register(
   manager: McpPermissionManager,
-  profile: Partial<Parameters<McpPermissionManager['registerServer']>[2]>,
+  profile: Partial<Parameters<McpPermissionManager['registerServer']>[1]>,
 ): void {
-  manager.registerServer('files', 'standard', profile as never);
+  manager.registerServer('files', profile as never);
 }
 
 describe('McpPermissionManager.registerServer: config refresh', () => {
@@ -57,25 +57,14 @@ describe('McpPermissionManager.registerServer: config refresh', () => {
     expect(profile?.mode).toBe('allow-all');
   });
 
-  test('a runtime trust level survives a config refresh', () => {
-    const manager = new McpPermissionManager();
-    register(manager, { allowedPaths: [] });
-    manager.setTrustLevel('files', 'trusted');
-
-    register(manager, { allowedPaths: ['/tmp'] });
-
-    expect(manager.getTrustLevel('files')).toBe('trusted');
-    expect(manager.getServerPermissions('files')?.profile.allowedPaths).toEqual(['/tmp']);
-  });
-
-  test('per-tool overrides survive a config refresh', () => {
+  test('per-tool overrides survive a config refresh', async () => {
     const manager = new McpPermissionManager();
     register(manager, { allowedPaths: [] });
     manager.denyTool('files', 'delete_file');
 
     register(manager, { allowedPaths: ['/tmp'] });
 
-    expect(manager.isToolAllowed('files', 'delete_file').allowed).toBe(false);
+    expect((await manager.evaluateToolCall('files', 'delete_file', {})).allowed).toBe(false);
     expect(manager.getServerPermissions('files')?.profile.allowedPaths).toEqual(['/tmp']);
   });
 
@@ -83,7 +72,7 @@ describe('McpPermissionManager.registerServer: config refresh', () => {
     const manager = new McpPermissionManager();
     register(manager, { allowedPaths: ['/tmp'], allowedHosts: ['a.example'] });
 
-    manager.registerServer('files', 'standard');
+    manager.registerServer('files');
 
     const profile = manager.getServerPermissions('files')?.profile;
     expect(profile?.allowedPaths).toEqual(['/tmp']);

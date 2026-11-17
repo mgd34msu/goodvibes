@@ -22,6 +22,14 @@ describe('notification dispatch: canonical runtime facts', () => {
     expect(feed.list()).toMatchObject([{ title: 'Agent finished', domain: 'agents' }]);
   });
 
+  test('a warning routed to the conversation is kept in the feed, not dropped', () => {
+    const feed = new NotificationFeed();
+    const dispatcher = createNotificationDispatcher(fakeConfig, feed);
+    const decision = dispatcher.dispatch({ id: 'fixture-warning', domain: 'deliveries', level: 'warning', title: 'Message delivery failed', timestamp: 1000 });
+    expect(decision.target).toBe('conversation');
+    expect(feed.list()).toMatchObject([{ title: 'Message delivery failed', level: 'warning' }]);
+  });
+
   test('canonical contract terminal events flow through the actual bus into the feed', async () => {
     const feed = new NotificationFeed();
     const dispatcher = createNotificationDispatcher(fakeConfig, feed);

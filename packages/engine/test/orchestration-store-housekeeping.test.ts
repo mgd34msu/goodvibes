@@ -737,7 +737,7 @@ describe('worktree register housekeeping', () => {
       return original.call(this);
     });
     spies.push(spy);
-    const refresh = registry.list();
+    const refresh = registry.reconcile();
     registry.attach(root, { sessionId: 'current-session' });
     registry.attach(join(root, 'new-worktree'), { taskId: 'new-task' });
     finish();
@@ -765,7 +765,7 @@ describe('worktree register housekeeping', () => {
     writeFileSync(storePath(root), original, 'utf-8');
     const warn = spyWarn();
 
-    await new WorktreeRegistry(root).list();
+    await new WorktreeRegistry(root).reconcile();
 
     const preserved = preservedFiles(root);
     expect(preserved).toHaveLength(1);
@@ -778,7 +778,7 @@ describe('worktree register housekeeping', () => {
     mkdirSync(join(root, '.goodvibes'), { recursive: true });
     writeFileSync(storePath(root), '', 'utf-8');
 
-    await new WorktreeRegistry(root).list();
+    await new WorktreeRegistry(root).reconcile();
 
     expect(preservedFiles(root)).toHaveLength(1);
   });
@@ -787,7 +787,7 @@ describe('worktree register housekeeping', () => {
     const root = makeRepo('wt-missing-');
     const warn = spyWarn();
 
-    await new WorktreeRegistry(root).list();
+    await new WorktreeRegistry(root).reconcile();
 
     expect(preservedFiles(root)).toEqual([]);
     expect(messages(warn).some((message) => message.includes('worktree registry'))).toBe(false);
@@ -803,7 +803,7 @@ describe('worktree register housekeeping', () => {
     const info = spyInfo();
 
     const registry = new WorktreeRegistry(root);
-    await registry.list();
+    await registry.reconcile();
 
     const stored = readRegisterRecords(root);
     expect(Object.keys(stored)).toContain('/vanished/kept');
@@ -814,8 +814,8 @@ describe('worktree register housekeeping', () => {
     expect(disclosed?.['vanished']).toBe(2);
     expect(disclosed?.['tombstonesExpired']).toBe(0);
 
-    // Idempotent: a second list reclaims nothing and discloses nothing more.
-    await registry.list();
+    // Idempotent: a second reconcile reclaims nothing and discloses nothing more.
+    await registry.reconcile();
     expect(messages(info).filter((message) => message.includes('reclaimed stale register records'))).toHaveLength(1);
   });
 
@@ -829,7 +829,7 @@ describe('worktree register housekeeping', () => {
     });
     const info = spyInfo();
 
-    await new WorktreeRegistry(root).list();
+    await new WorktreeRegistry(root).reconcile();
 
     expect(Object.keys(readRegisterRecords(root)).sort()).toEqual([root, '/vanished/recent'].sort());
     expect(dataFor(info, 'reclaimed stale register records')?.['tombstonesExpired']).toBe(1);
@@ -843,7 +843,7 @@ describe('worktree register housekeeping', () => {
       '/vanished/bad2': { kind: 'agent', state: 'kept', updatedAt: Date.now() },
     });
 
-    await new WorktreeRegistry(root).list();
+    await new WorktreeRegistry(root).reconcile();
 
     // The repo root is itself a live worktree, so it is (re)recorded; the two
     // records that failed validation are gone and the good tombstone survives.
@@ -858,7 +858,7 @@ describe('worktree register housekeeping', () => {
     const root = makeRepo('wt-future-');
     writeRegister(root, { '/vanished/kept': { path: '/vanished/kept', kind: 'agent', state: 'kept', updatedAt: Date.now() } }, 99);
 
-    await new WorktreeRegistry(root).list();
+    await new WorktreeRegistry(root).reconcile();
 
     const preserved = preservedFiles(root);
     expect(preserved).toHaveLength(1);
@@ -874,7 +874,7 @@ describe('worktree register housekeeping', () => {
     const staleSeconds = (Date.now() - 60 * DAY_MS) / 1000;
     utimesSync(stale, staleSeconds, staleSeconds);
 
-    await new WorktreeRegistry(root).list();
+    await new WorktreeRegistry(root).reconcile();
 
     expect(existsSync(stale)).toBe(false);
     expect(readdirSync(join(root, '.goodvibes')).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);

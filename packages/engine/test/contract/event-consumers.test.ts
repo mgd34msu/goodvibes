@@ -34,8 +34,8 @@ const delivered = async (): Promise<void> => {
   for (let index = 0; index < 4; index += 1) await Promise.resolve();
 };
 
-describe('the notifier posts contract outcomes', () => {
-  test('passed, failed and cancelled each post one plain line; other contract events post nothing', async () => {
+describe('the notifiers post contract outcomes', () => {
+  test('passed, failed and cancelled each post one line naming the work and the outcome; other contract events post nothing', async () => {
     resetWorkstreamLabelsForTests();
     const posted: string[] = [];
     const slack = { postWebhook: async (text: string) => { posted.push(text); } };
@@ -43,28 +43,32 @@ describe('the notifier posts contract outcomes', () => {
     const bus = new RuntimeEventBus();
     notifier.attachToRuntimeBus(bus);
     try {
-      emitContractEvent(bus, 's1', SAMPLES.CONTRACT_CREATED);
-      emitContractEvent(bus, 's1', SAMPLES.CONTRACT_NUDGED);
-      emitContractEvent(bus, 's1', SAMPLES.CONTRACT_PASSED);
-      emitContractEvent(bus, 's1', { ...SAMPLES.CONTRACT_FAILED, contractId: 'ctr-00000002' });
-      emitContractEvent(bus, 's1', { ...SAMPLES.CONTRACT_CANCELLED, contractId: 'ctr-00000003' });
+      for (const [id, ending] of [
+        [CTR, SAMPLES.CONTRACT_PASSED],
+        ['ctr-00000002', SAMPLES.CONTRACT_FAILED],
+        ['ctr-00000003', SAMPLES.CONTRACT_CANCELLED],
+      ] as const) {
+        emitContractEvent(bus, 's1', { ...SAMPLES.CONTRACT_CREATED, contractId: id });
+        emitContractEvent(bus, 's1', { ...SAMPLES.CONTRACT_NUDGED, contractId: id });
+        emitContractEvent(bus, 's1', { ...ending, contractId: id });
+      }
       await waitFor(() => posted.length >= 3);
       await delivered();
-      expect(posted).toEqual([
-        'The workstream is done: 4 of 4 requirements met',
-        'The workstream could not be finished: unit u1 spent its turn budget',
-        'The workstream was cancelled: stopped by the owner',
-      ]);
+      expect(posted).toHaveLength(3);
+      expect(posted.every((line) => line.startsWith('Add a parser'))).toBe(true);
+      expect(posted[0]).toContain('Done in');
+      expect(posted[1]).toContain('Failed after');
+      expect(posted[1]).toContain('turn budget of 40 turns');
+      expect(posted[2]).toContain('Cancelled after');
+      expect(posted[2]).toContain('stopped by the owner');
       // Never the contract id: the notification is read outside the machine.
       expect(posted.join('\n')).not.toContain('ctr-');
     } finally {
       notifier.detach();
     }
   });
-});
 
-describe('the webhook notifier', () => {
-  test('a cancelled contract is reported as cancelled, not as a failure', async () => {
+  test('the webhook notifier says the same thing for a cancelled contract', async () => {
     const sent: string[] = [];
     const bus = new RuntimeEventBus();
     const notifier = new WebhookNotifier(['https://example.com/webhook'], { force: true, metadataOnly: () => false });
@@ -74,12 +78,15 @@ describe('the webhook notifier', () => {
     }, { preconnect() {} }));
     try {
       notifier.attachToRuntimeBus(bus);
+      emitContractEvent(bus, 's1', SAMPLES.CONTRACT_CREATED);
       emitContractEvent(bus, 's1', SAMPLES.CONTRACT_CANCELLED);
       await waitFor(() => sent.length >= 1);
-      expect(sent).toEqual(['The workstream was cancelled: stopped by the owner']);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toContain('Cancelled after');
+      expect(sent[0]).toContain('stopped by the owner');
     } finally {
       sendSpy.mockRestore();
-      notifier.detach();
+      await notifier.close();
     }
   });
 });

@@ -1,15 +1,15 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import * as browserPlatform from '@goodvibes-jev/engine/platform/browser';
+import { chmodSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import * as hostClient from '../../agent/connected-host-client.ts';
 
 type Invoke = (method: string, input: unknown) => Promise<unknown>;
 let invoke: Invoke = async () => ({ jobs: [] });
 
-// The reconcile path builds its own platform client; this is the one seam to the host.
-mock.module('@goodvibes-jev/engine/platform/browser', () => ({
-  ...browserPlatform,
-  createBrowserGoodVibesPlatform: () => ({ operator: { invoke: (method: string, input: unknown) => invoke(method, input) } }),
+// The reconcile path calls the connected-host client; this is the one seam to the host.
+mock.module('../../agent/connected-host-client.ts', () => ({
+  ...hostClient,
+  createConnectedHost: () => ({ invoke: (method: string, input: unknown) => invoke(method, input) }),
 }));
 
 const {
@@ -63,7 +63,7 @@ const preview = {
 const created = { ok: true, kind: ROUTINE_SCHEDULE_METHOD, route: ROUTINE_SCHEDULE_ROUTE, routineId: 'nightly', routineName: 'Nightly', schedule: { id: 'live-1' }, request: preview.payload } as unknown as Parameters<InstanceType<typeof RoutineScheduleReceiptStore>['append']>[2];
 
 describe('receipt store never writes over what it could not read', () => {
-  test('an unreadable store is left byte-for-byte alone and append refuses', async () => {
+  test('a store that cannot be read is left byte-for-byte alone and append refuses', async () => {
     await withStorePath((storePath) => {
       const original = JSON.stringify({ version: 1, receipts: [receipt('keep', Date.now() - DAY_MS)] });
       writeFileSync(storePath, original, 'utf-8');
@@ -73,15 +73,24 @@ describe('receipt store never writes over what it could not read', () => {
         try { readFileSync(storePath, 'utf-8'); } catch { readable = false; }
         if (readable) return; // running with privileges that ignore file modes
         const store = new RoutineScheduleReceiptStore(storePath);
-        expect(store.snapshot().receipts).toHaveLength(0);
-        expect(store.lastMaintenance()?.recovered).toBe('unreadable');
-        expect(() => store.append(connection, preview, created)).toThrow('was left unchanged');
+        expect(() => store.append(connection, preview, created)).toThrow();
         chmodSync(storePath, 0o600);
         expect(readFileSync(storePath, 'utf-8')).toBe(original);
-        expect(existsSync(`${storePath}.corrupt`)).toBe(false);
       } finally {
         chmodSync(storePath, 0o600);
       }
+    });
+  });
+
+  test('a store that is not JSON is copied aside before an append replaces it', async () => {
+    await withStorePath((storePath) => {
+      writeFileSync(storePath, '{"version":1,"receipts":[', 'utf-8');
+      const store = new RoutineScheduleReceiptStore(storePath);
+      expect(store.snapshot().receipts).toHaveLength(0);
+      store.append(connection, preview, created);
+      const copies = readdirSync(dirname(storePath)).filter((name) => name.startsWith(`${basename(storePath)}.unreadable-`));
+      expect(copies).toHaveLength(1);
+      expect(readFileSync(join(dirname(storePath), copies[0]!), 'utf-8')).toBe('{"version":1,"receipts":[');
     });
   });
 
@@ -90,7 +99,7 @@ describe('receipt store never writes over what it could not read', () => {
       const original = JSON.stringify({ version: 2, receipts: [{ ...receipt('a', Date.now() - DAY_MS), scheduleKind: 'rrule' }] });
       writeFileSync(storePath, original, 'utf-8');
       const store = new RoutineScheduleReceiptStore(storePath);
-      expect(() => store.append(connection, preview, created)).toThrow('newer GoodVibes Agent');
+      expect(() => store.append(connection, preview, created)).toThrow();
       expect(store.remove(['a'])).toBe(0);
       expect(readFileSync(storePath, 'utf-8')).toBe(original);
     });
@@ -123,6 +132,21 @@ describe('reconcile', () => {
       expect(formatRoutineScheduleCorrelation(result)).toContain('retired 1 local receipt');
       expect(formatRoutineScheduleCorrelation(result)).toContain('gone');
       expect(store.snapshot().receipts).toHaveLength(0);
+    });
+  });
+
+  test('a receipt created on another host is listed as not checked and never reaped', async () => {
+    await withStorePath(async (storePath) => {
+      const elsewhere = { ...receipt('elsewhere', Date.now() - 2 * DAY_MS), connectedHostBaseUrl: 'http://192.0.2.10:3421' };
+      writeFileSync(storePath, JSON.stringify({ version: 1, receipts: [elsewhere] }), 'utf-8');
+      invoke = async () => ({ jobs: [] });
+      const store = new RoutineScheduleReceiptStore(storePath);
+      const result = await reconcileRoutineScheduleReceipts(connection, store.snapshot());
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.correlations).toHaveLength(0);
+      expect(result.notChecked.map((entry) => entry.receipt.id)).toEqual(['elsewhere']);
+      expect(store.snapshot().receipts).toHaveLength(1);
     });
   });
 

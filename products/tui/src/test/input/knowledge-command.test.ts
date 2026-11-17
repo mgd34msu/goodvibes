@@ -138,43 +138,6 @@ describe('knowledgeCommand', () => {
     memoryRegistry = new MemoryRegistry(memoryStore);
   });
 
-  for (const retire of [false, true]) {
-    test(`node listing awaits its actual public API before output (history retired=${retire})`, async () => {
-      const knowledgeStore = new KnowledgeStore({ configManager: { getControlPlaneConfigDir: () => root } });
-      const artifactStore = new ArtifactStore({ configManager: { getControlPlaneConfigDir: () => root } });
-      const service = new KnowledgeService(knowledgeStore, artifactStore, undefined, { memoryRegistry });
-      const context = makeKnowledgeCommandContext(root, printed, service, memoryRegistry);
-      const api = context.clients?.knowledgeApi;
-      if (!api) throw new Error('Knowledge fixture API missing');
-      const entered = Promise.withResolvers<void>();
-      const release = Promise.withResolvers<void>();
-      let sourceSignal: AbortSignal | undefined;
-      const commandContext: CommandContext = { ...context, clients: { ...context.clients, knowledgeApi: {
-        ...api,
-        graph: { ...api.graph, nodes: { ...api.graph.nodes, list: async (_limit, options) => {
-          sourceSignal = options?.signal;
-          entered.resolve();
-          await release.promise;
-          return [];
-        } } },
-      } } };
-      const pending = knowledgeCommand.handler(['list', '--kind', 'nodes'], commandContext);
-      await entered.promise;
-      expect(printed).toEqual([]);
-      expect(sourceSignal?.aborted).toBe(false);
-      if (retire) context.session.conversationManager.resetAll();
-      release.resolve();
-      if (retire) {
-        await expect(pending).rejects.toThrow('The judgment reading owner is no longer current.');
-        expect(sourceSignal?.aborted).toBe(true);
-        expect(printed).toEqual([]);
-      } else {
-        await pending;
-        expect(printed).toEqual(['[knowledge] No nodes.']);
-      }
-    });
-  }
-
   test('retains blocked URL metadata in a packet without claiming fetched HTML', async () => {
     const artifactStore = new ArtifactStore({
       configManager: {

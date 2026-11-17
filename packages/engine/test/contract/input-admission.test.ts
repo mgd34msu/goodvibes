@@ -7,6 +7,7 @@ import { contractInputPath } from '../../platform/src/platform/contract/input-sn
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { plannerOutput } from './plan-support.js';
 import { finishes, git, terminal } from './steps-support.js';
+import { decisionReceiptText } from '../../platform/src/platform/contract/decision-records.js';
 
 const extraRoots: string[] = [];
 let harness: Harness | undefined;
@@ -37,7 +38,7 @@ for (const stale of [false, true]) {
     if (stale) {
       const publication = done.decisions.find(decision => decision.targetId === `${done.id}.publication-owner`)!;
       expect(publication).toBeDefined();
-      expect(JSON.parse(publication.reason)).not.toHaveProperty('stateHash');
+      expect(JSON.parse(decisionReceiptText(publication))).not.toHaveProperty('stateHash');
       expect(publication.decisionIds).not.toHaveLength(0);
       for (const id of publication.decisionIds) {
         expect(log.get(id)).toMatchObject({ status: 'answered', context: { site: 'contract.publication-owner' } });

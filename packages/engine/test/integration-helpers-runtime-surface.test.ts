@@ -15,6 +15,7 @@ function service(options: { tasks?: Map<string, unknown>; onDomain?: (domain: st
     },
     runtimeBus: { onDomain: options.onDomain ?? (() => () => {}) },
     approvalBroker: { listApprovals: () => [] },
+    sessionBroker: { listSessions: () => [] },
     remoteRunnerRegistry: { listContracts: () => [] },
     panelManager: { getTopPane: () => ({ panels: [] }), getBottomPane: () => ({ panels: [] }), getRegisteredTypes: () => [] },
   } as never);
@@ -34,67 +35,12 @@ describe('GET /api/tasks rows', () => {
 describe('the review route list', () => {
   const normalise = (route: string): string => route.split('?')[0]!.replace(/(:|\{)[A-Za-z]+\}?/g, ':p');
 
-  test('names only routes the method catalog serves, apart from the event stream it does not describe', () => {
+  test('is the method catalog\'s HTTP routes, every one of them', () => {
     const served = new Set(new GatewayMethodCatalog().list()
       .filter((method) => method.http)
       .map((method) => normalise(`${method.http!.method} ${method.http!.path}`)));
-    const missing = service().buildReview().routes.filter((route) => !served.has(normalise(route)));
-    expect(missing).toEqual(['GET /api/events?domains=session,tasks']);
-  });
-});
-
-describe('createEventStream', () => {
-  test('a request aborted before the stream starts releases its subscriptions', () => {
-    let subscribed = 0;
-    let unsubscribed = 0;
-    const helper = service({
-      onDomain: () => { subscribed += 1; return () => { unsubscribed += 1; }; },
-    });
-    const controller = new AbortController();
-    controller.abort();
-
-    helper.createEventStream(new Request('http://x/api/events', { signal: controller.signal }), ['session', 'tasks']);
-
-    expect(subscribed).toBe(2);
-    expect(unsubscribed).toBe(2);
-  });
-
-  test('cancelling the stream and then aborting the request does not throw', async () => {
-    let unsubscribed = 0;
-    const helper = service({ onDomain: () => () => { unsubscribed += 1; } });
-    const controller = new AbortController();
-    const response = helper.createEventStream(new Request('http://x/api/events', { signal: controller.signal }), ['session']);
-
-    await response.body!.cancel();
-    expect(() => controller.abort()).not.toThrow();
-    expect(unsubscribed).toBe(1);
-  });
-
-  test('events dropped for a full buffer are announced once the stream has room again', async () => {
-    const listeners: Listener[] = [];
-    const helper = service({ onDomain: (_domain, listener) => { listeners.push(listener); return () => {}; } });
-    const controller = new AbortController();
-    const response = helper.createEventStream(new Request('http://x/api/events', { signal: controller.signal }), ['session']);
-    const envelope = { type: 'SESSION_X', ts: 1, traceId: 't', sessionId: 's', source: 'x', payload: {} };
-
-    // Nothing reads, so the 256-chunk buffer (holding `ready` already) fills and further events drop.
-    for (let i = 0; i < 300; i++) listeners[0]!(envelope);
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let text = '';
-    for (let i = 0; i < 256 && !text.includes('event: dropped'); i++) {
-      const { value } = await reader.read();
-      text += decoder.decode(value);
-    }
-    listeners[0]!(envelope);
-    for (let i = 0; i < 4 && !text.includes('event: dropped'); i++) {
-      const { value } = await reader.read();
-      text += decoder.decode(value);
-    }
-    controller.abort();
-
-    expect(text).toContain('event: dropped');
-    expect(text).toMatch(/event: dropped\ndata: \{"count":\d+\}/);
+    const listed = new Set(service().buildReview().routes.map(normalise));
+    expect([...served].filter((route) => !listed.has(route))).toEqual([]);
+    expect([...listed].filter((route) => !served.has(route))).toEqual([]);
   });
 });

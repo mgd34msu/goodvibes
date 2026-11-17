@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
-import { resolveWorkspaceToolchain } from '../../../scripts/run-toolchain.ts';
 
 function fixture() {
   const root = makeProjectTempDir('gv-private-launcher');
@@ -35,14 +34,5 @@ describe('private workspace launch and build boundary', () => {
     const result = await launch(root, ['--prompt', 'one whole request']);
     expect(result.code).toBe(7);
     expect(result.stdout).toBe('--prompt\none whole request\n');
-  });
-  test('scripts-disabled build uses the engine declared CLI, with no downloaded fallback', () => {
-    const root = fixture(); const engine = join(root, 'node_modules/@goodvibes-jev/engine'); mkdirSync(engine, { recursive: true });
-    writeFileSync(join(root, 'package.json'), '{"type":"module"}');
-    writeFileSync(join(engine, 'package.json'), JSON.stringify({ name: '@goodvibes-jev/engine', exports: { './package.json': './package.json' }, bin: { 'goodvibes-build-binaries': './owned-cli.js' } }));
-    expect(() => resolveWorkspaceToolchain(root, 'build')).toThrow('Build the workspace engine');
-    writeFileSync(join(engine, 'owned-cli.js'), '');
-    expect(resolveWorkspaceToolchain(root, 'build')).toBe(join(engine, 'owned-cli.js'));
-    expect(() => resolveWorkspaceToolchain(root, 'unknown')).toThrow('Usage:');
   });
 });

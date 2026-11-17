@@ -145,13 +145,14 @@ describe('the hosted adapter', () => {
 });
 
 describe('the operator adapter', () => {
-  test('dispatches through contracts.start, polls and fetches through contracts.get, cancels through contracts.cancel', async () => {
+  test('dispatches through contracts.start, polls through contracts.status, fetches through contracts.get, cancels through contracts.cancel', async () => {
     const h = harness();
     const { adapter, calls } = operatorAdapter(h.service);
     const id = await exerciseLifecycle(adapter, h.daemon, { workspaceRoot: `${WORKDIR}/partner`, isolation: 'shared' });
     expect(h.daemon.started[0]).toMatchObject({ ask: 'Add a --json flag to export.', origin: 'external', projectRoot: `${WORKDIR}/partner`, isolation: 'shared' });
     expect(calls[0]).toBe('contracts.start');
-    expect(calls.slice(1).every((methodId) => methodId === 'contracts.get')).toBe(true);
+    expect(calls.slice(1).every((methodId) => methodId === 'contracts.status' || methodId === 'contracts.get')).toBe(true);
+    expect(calls).toContain('contracts.status');
 
     const second = await adapter.dispatch({ task: 'Other work.', metadata: { sessionId: 'hosted-1' } });
     expect(h.floor.started[0]).toMatchObject({ sessionId: 'hosted-1', origin: 'hosted' });

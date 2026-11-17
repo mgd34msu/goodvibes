@@ -55,7 +55,6 @@ function controlPlaneStubs(): HandlerStubs {
     deleteBootstrapFile: jsonStub({ ok: true }),
     getPanels: jsonStub({ panels: [] }),
     postPanelOpen: jsonStub({ ok: true }),
-    getEvents: jsonStub({ events: [] }),
     getConfig: jsonStub({ config: {} }),
     postConfig: jsonStub({ ok: true }),
     postConfigReset: jsonStub({ ok: true }),

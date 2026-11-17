@@ -28,10 +28,7 @@ import {
   TriggerManager,
   type TriggerRetentionPolicy,
 } from '../platform/src/platform/triggers/index.ts';
-import {
-  adaptWatcherTrigger,
-  isWatcherTriggerRaw,
-} from '../platform/src/platform/runtime/fleet/adapters/watcher-trigger.ts';
+import { adaptWatcherTrigger } from '../platform/src/platform/runtime/fleet/adapters/watcher-trigger.ts';
 import { adaptTrigger } from '../platform/src/platform/runtime/fleet/adapters/trigger.ts';
 
 const roots: string[] = [];
@@ -303,13 +300,11 @@ describe('trigger-family records surface in the fleet without colliding with wor
     expect(adaptWatcherTrigger(record({ state: 'cancelled' }), 5_000).capabilities.killable).toBe(false);
   });
 
-  test('the raw payload distinguishes it from a workflow trigger sharing the same kind', () => {
+  test('the kind alone tells it from a workflow hook action', () => {
     const familyNode = adaptWatcherTrigger(record(), 5_000);
-    const workflowNode = adaptTrigger({ id: 'wf', event: 'push', action: 'build', enabled: true } as never);
+    const workflowNode = adaptTrigger({ id: 'wf', event: 'push', action: 'build', enabled: true });
     expect(familyNode.kind).toBe('trigger');
-    expect(workflowNode.kind).toBe('trigger');
-    expect(isWatcherTriggerRaw(familyNode.raw)).toBe(true);
-    expect(isWatcherTriggerRaw(workflowNode.raw)).toBe(false);
+    expect(workflowNode.kind).toBe('hook-action');
   });
 
   test('the label names which watcher kind it is', () => {

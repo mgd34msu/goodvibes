@@ -128,7 +128,14 @@ describe('fold/migration into the canonical store (migration honesty)', () => {
     const missing = report.sources.find((s) => s.label === 'missing-surface');
     expect(missing?.existed).toBe(false);
 
-    // Idempotent: a second fold imports nothing new (all ids already present, none dropped).
+    // A folded source is kept on disk under a new name and is no longer a source.
+    expect(existsSync(agentPath)).toBe(false);
+    expect(existsSync(tuiPath)).toBe(false);
+    expect(existsSync(`${agentPath}.folded`)).toBe(true);
+    expect(existsSync(`${tuiPath}.folded`)).toBe(true);
+
+    // A memory the owner deletes after the fold is not imported again by the next boot.
+    canonical.delete(t1.id);
     const report2 = await foldMemoryStores(
       canonical,
       [
@@ -138,12 +145,9 @@ describe('fold/migration into the canonical store (migration honesty)', () => {
       { embeddingRegistry: registry },
     );
     expect(report2.totalImported).toBe(0);
-    expect(report2.totalSkipped).toBe(3);
-    expect((await canonical.search({})).length).toBe(3);
-
-    // Legacy stores are never deleted by migration.
-    expect(existsSync(agentPath)).toBe(true);
-    expect(existsSync(tuiPath)).toBe(true);
+    expect(report2.missingSources).toEqual(['agent-global', 'tui:/repo']);
+    expect(canonical.get(t1.id)).toBeNull();
+    expect((await canonical.search({})).length).toBe(2);
     canonical.close();
   });
 

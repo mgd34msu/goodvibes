@@ -107,7 +107,7 @@ test('source ownership is required but a Jev recorder is not a permission prereq
 });
 test('Jev uncertainty cannot override configured path scope', async () => {
   const f = fixture(); uncertainty = true; outward = false;
-  f.internal.permissions.registerServer('synthetic', 'standard', { allowedPaths: ['/synthetic'] });
+  f.internal.permissions.registerServer('synthetic', { allowedPaths: ['/synthetic'] });
   const permission = await f.internal.permissions.evaluateToolCall('synthetic', 'write', { path: '/synthetic/file' });
   expect(permission.causes).toEqual([]); await f.call({ name: '/synthetic/file' }); expect(f.wire).toHaveLength(1);
 });
@@ -150,12 +150,11 @@ for (const question of ['capability', 'family', 'outward', 'cardDetails']) test(
   uncertainQuestion = question; const f = fixture(); await f.call();
   expect(states).toHaveLength(0); expect(f.wire).toHaveLength(1);
 });
-for (const mode of ['blocked', 'capability', 'path', 'host']) test(`${mode} restriction never reaches autonomous disposition`, async () => {
+for (const mode of ['blocked', 'path', 'host']) test(`${mode} restriction never reaches autonomous disposition`, async () => {
   const f = fixture();
   if (mode === 'blocked') f.registry.setServerTrustMode('synthetic', 'blocked');
-  if (mode === 'capability') f.internal.permissions.registerServer('synthetic', 'standard', { allowedCapabilities: ['read_fs'] });
-  if (mode === 'path') { pathValue = true; f.internal.permissions.registerServer('synthetic', 'standard', { allowedPaths: ['/elsewhere'] }); }
-  if (mode === 'host') { hostValue = true; f.internal.permissions.registerServer('synthetic', 'standard', { allowedHosts: ['allowed.invalid'] }); }
+  if (mode === 'path') { pathValue = true; f.internal.permissions.registerServer('synthetic', { allowedPaths: ['/elsewhere'] }); }
+  if (mode === 'host') { hostValue = true; f.internal.permissions.registerServer('synthetic', { allowedHosts: ['allowed.invalid'] }); }
   await expect(f.call({ name: mode === 'host' ? 'https://outside.invalid/file' : '/synthetic/file' })).rejects.toThrow(); expect(states).toHaveLength(0); expect(f.wire).toHaveLength(0);
 });
 for (const change of ['cancel', 'reconnect', 'quarantine']) test(`${change} during delayed schema loading prevents tools/call`, async () => {

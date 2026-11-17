@@ -141,37 +141,37 @@ describe('chaos: MCP reconnect flapping', () => {
   });
 
   describe('MCP permission manager: trust enforcement during flap', () => {
-    test('unregistered server denies all tool calls', () => {
+    test('unregistered server denies all tool calls', async () => {
       const mgr = new McpPermissionManager();
-      const result = mgr.isToolAllowed('ghost-server', 'dangerous-tool');
+      const result = (await mgr.evaluateToolCall('ghost-server', 'dangerous-tool', {}));
       expect(result.allowed).toBe(false);
     });
 
-    test('registered server with standard trust allows tools by default', () => {
+    test('a registered server allows tools inside its scope by default', async () => {
       const mgr = new McpPermissionManager();
-      mgr.registerServer('my-server', 'standard');
-      const result = mgr.isToolAllowed('my-server', 'read-file');
+      mgr.registerServer('my-server');
+      const result = (await mgr.evaluateToolCall('my-server', 'read-file', {}));
       expect(result.allowed).toBe(true);
     });
 
-    test('explicitly denied tool is blocked even if server is registered', () => {
+    test('explicitly denied tool is blocked even if server is registered', async () => {
       const mgr = new McpPermissionManager();
-      mgr.registerServer('my-server', 'standard');
+      mgr.registerServer('my-server');
       mgr.denyTool('my-server', 'drop-database');
-      const result = mgr.isToolAllowed('my-server', 'drop-database');
+      const result = (await mgr.evaluateToolCall('my-server', 'drop-database', {}));
       expect(result.allowed).toBe(false);
     });
 
-    test('reconnect does not grant new permissions (server deny persists after re-register)', () => {
+    test('reconnect does not grant new permissions (server deny persists after re-register)', async () => {
       const mgr = new McpPermissionManager();
-      mgr.registerServer('my-server', 'standard');
+      mgr.registerServer('my-server');
       mgr.denyTool('my-server', 'write-fs');
 
       // Simulate reconnect: re-register the server (idempotent)
-      mgr.registerServer('my-server', 'standard');
+      mgr.registerServer('my-server');
 
       // Deny should still hold (no permission escalation on reconnect)
-      const result = mgr.isToolAllowed('my-server', 'write-fs');
+      const result = (await mgr.evaluateToolCall('my-server', 'write-fs', {}));
       expect(result.allowed).toBe(false);
     });
   });

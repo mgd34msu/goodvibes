@@ -84,10 +84,9 @@ describe('Agent direct tool caller lifetime', () => {
     try {
       await Promise.race([entered.promise, pending.then(() => { throw new Error('Profile returned before native owner entry.'); })]);
       controller.abort(); release.resolve();
-      const result = await pending;
-      expect(result.success).toBe(false);
-      expect(result.output).not.toContain('Profile: loaded');
-    } finally { release.resolve(); await pending; }
+      // A cancelled call is a cancellation for the tool runtime to report, never a published result.
+      await expect(pending).rejects.toBeDefined();
+    } finally { release.resolve(); await pending.catch(() => undefined); }
   });
 
   test('replacing a profile backend while its read is pending cannot publish its result', async () => {
@@ -100,8 +99,8 @@ describe('Agent direct tool caller lifetime', () => {
       await Promise.race([entered.promise, pending.then(() => { throw new Error('Profile returned before native owner entry.'); })]);
       deps.invoke = async () => ({ ok: true, data: profileStatus(), route: 'in-process' });
       release.resolve();
-      expect((await pending).success).toBe(false);
-    } finally { release.resolve(); await pending; }
+      await expect(pending).rejects.toBeDefined();
+    } finally { release.resolve(); await pending.catch(() => undefined); }
   });
 
   test('an already-cancelled Knowledge caller dispatches no request', async () => {

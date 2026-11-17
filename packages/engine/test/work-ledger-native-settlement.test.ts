@@ -10,7 +10,7 @@ import * as atomicStore from '../platform/src/platform/utils/atomic-json-store.j
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalJson, SqliteDecisionLog, withDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort, type StateHash } from '@goodvibes-jev/judgment';
+import { canonicalJson, SqliteDecisionLog, withDecisionLog, createSystemOnePort, DEFAULT_MODEL, type JudgmentPort, type JsonValue, type StateHash } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
@@ -23,6 +23,7 @@ import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../pla
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.js';
 import { makeRepo, makeHarness, oneUnitPlan, runnerPort, waitFor, type Harness, type HarnessOptions } from './contract/runner-support.js';
 import { finishes } from './contract/steps-support.js';
+import { decisionReceiptText } from '../platform/src/platform/contract/decision-records.js';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -234,13 +235,13 @@ test('original-coverage v2 verifies without an unused digest, actual v1 stays re
   const f = await fixture(), started = await f.host.start(f.target, f.authority);
   const contract = await completed(f.harness, started.admission.contractId);
   const targetId = `${contract.id}.original-obligations`, decision = contract.decisions.findLast(value => value.targetId === targetId)!;
-  const original = JSON.parse(decision.reason) as Record<string, unknown>;
+  const original = JSON.parse(decisionReceiptText(decision)) as Record<string, unknown>;
   expect(original['schemaVersion']).toBe(2); expect(original).not.toHaveProperty('evidenceDigest');
   for (const format of ['current-v2', 'historical-v1', 'future-v3', 'mixed-v2'] as const) {
     const receipt = format === 'historical-v1' ? { ...original, schemaVersion: 1, evidenceDigest: 'a'.repeat(64) }
       : format === 'future-v3' ? { ...original, schemaVersion: 3 }
       : format === 'mixed-v2' ? { ...original, evidenceDigest: 'unused-field-from-a-different-version' } : original;
-    const image = { ...contract, decisions: contract.decisions.map(value => value === decision ? { ...value, reason: JSON.stringify(receipt) } : value) };
+    const image = { ...contract, decisions: contract.decisions.map(value => value === decision ? { ...value, record: { kind: 'receipt' as const, value: receipt as JsonValue } } : value) };
     const operation = verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!,
       runner: { get: id => id === contract.id ? image : f.harness.runner.get(id), join: id => f.harness.runner.join(id) },
       port: f.hostOptions.port, decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
@@ -255,7 +256,7 @@ test('native claim verification hashes the complete immutable answer once, rathe
   const f = await fixture({ harness: { scripts: { u1: finishes(output) }, port: context => context.name === 'unsupported'
     ? noulAnswer(context.state['claimScope'] === undefined ? 0.61 : 0.01) : undefined } });
   const started = await f.host.start(f.target, f.authority), contract = await completed(f.harness, started.admission.contractId);
-  const review = JSON.parse(contract.decisions.findLast(value => value.targetId === `${contract.id}.final-answer-review`)!.reason) as { claimReviews: unknown[] };
+  const review = JSON.parse(decisionReceiptText(contract.decisions.findLast(value => value.targetId === `${contract.id}.final-answer-review`)!)) as { claimReviews: unknown[] };
   expect(review.claimReviews.length).toBeGreaterThan(1);
   const completeAnswer = canonicalJson(contract.answer ?? ''), hashes = spyOn(Bun.CryptoHasher, 'hash');
   try {

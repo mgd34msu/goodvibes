@@ -44,23 +44,39 @@ describe('secret refs', () => {
 
   test('normalizes first-class provider refs', () => {
     expect(normalizeSecretRef('goodvibes://secrets/1password?vault=Private&item=GoodVibes&field=API%20Key')?.source).toBe('1password');
-    expect(normalizeSecretRef('goodvibes://secrets/bitwarden?item=GoodVibes%20Slack&field=password&sessionEnv=BW_SESSION')).toMatchObject({
+    expect(normalizeSecretRef('goodvibes://secrets/bitwarden?item=GoodVibes%20Slack&field=password')).toMatchObject({
       source: 'bitwarden',
       item: 'GoodVibes Slack',
       field: 'password',
-      sessionEnv: 'BW_SESSION',
     });
     expect(normalizeSecretRef('goodvibes://secrets/vaultwarden?item=GoodVibes%20Slack&field=password&server=https%3A%2F%2Fvault.example.test')).toMatchObject({
       source: 'vaultwarden',
       item: 'GoodVibes Slack',
       server: 'https://vault.example.test',
     });
-    expect(normalizeSecretRef('goodvibes://secrets/bws/secret-id?field=value&accessTokenEnv=GV_BWS_TOKEN')).toMatchObject({
+    expect(normalizeSecretRef('goodvibes://secrets/bws/secret-id?field=value')).toMatchObject({
       source: 'bws',
       id: 'secret-id',
       field: 'value',
-      accessTokenEnv: 'GV_BWS_TOKEN',
     });
+  });
+
+  test('a reference cannot name the program, data directory, server or token variable', async () => {
+    const ref = normalizeSecretRef('goodvibes://secrets/bws/id?cli=./run.sh&serverUrl=https%3A%2F%2Fcollector.example&accessTokenEnv=ANTHROPIC_API_KEY&configFile=%2Ftmp%2Fx');
+    expect(ref).not.toHaveProperty('cli');
+    expect(ref).not.toHaveProperty('serverUrl');
+    expect(ref).not.toHaveProperty('accessTokenEnv');
+    const calls: Array<{ command: string; args: readonly string[]; env?: Record<string, string> }> = [];
+    const runner: SecretCommandRunner = async (command, args, options) => {
+      calls.push({ command, args, env: options?.env });
+      return { exitCode: 0, stdout: JSON.stringify({ value: 'v' }), stderr: '' };
+    };
+    await resolveSecretRef('goodvibes://secrets/bws/id?cli=./run.sh&serverUrl=https%3A%2F%2Fcollector.example&accessTokenEnv=ANTHROPIC_API_KEY', { runCommand: runner, providers: {} });
+    expect(calls[0]!.command).toBe('bws');
+    expect(calls[0]!.args).not.toContain('--server-url');
+    expect(calls[0]!.env?.BWS_ACCESS_TOKEN).toBeUndefined();
+    await resolveSecretRef('op://v/i/f?cli=./run.sh', { runCommand: runner, providers: {} });
+    expect(calls[1]!.command).toBe('op');
   });
 
   test('resolves env, file, and exec refs without leaking values into descriptions', async () => {
@@ -105,9 +121,7 @@ describe('secret refs', () => {
       source: 'bitwarden',
       item: 'GoodVibes Slack',
       field: 'password',
-      sessionEnv: 'GV_BW_SESSION',
-      appDataDir: '~/bitwarden-cli-goodvibes',
-    }, { runCommand: runner, homeDirectory: tmpDir });
+    }, { runCommand: runner, homeDirectory: tmpDir, providers: { bitwarden: { sessionEnv: 'GV_BW_SESSION', appDataDir: '~/bitwarden-cli-goodvibes' } } });
 
     expect(result.value).toBe('bw-password');
     expect(calls).toHaveLength(1);
@@ -174,10 +188,8 @@ describe('secret refs', () => {
     const result = await resolveSecretRef({
       source: 'bitwarden-secrets-manager',
       id: 'secret-id',
-      accessTokenEnv: 'GV_BWS_TOKEN',
       profile: 'dev',
-      serverUrl: 'https://vault.bitwarden.example',
-    }, { runCommand: runner });
+    }, { runCommand: runner, providers: { bitwardenSecretsManager: { accessTokenEnv: 'GV_BWS_TOKEN', serverUrl: 'https://vault.bitwarden.example' } } });
 
     expect(result.value).toBe('bws-secret');
     expect(calls[0].command).toBe('bws');

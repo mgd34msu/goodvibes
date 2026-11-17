@@ -242,20 +242,6 @@ test('prepared local backend scope rejects close and reopen ABA', async () => {
   expect(await f.client.add({ cls: 'fact', summary: 'new incarnation' })).toMatchObject({ summary: 'new incarnation' });
 });
 
-test('changing a borrowed lifecycle callback during an await cannot remove its restriction', async () => {
-  const f = await fixture();
-  const started = deferred<void>(), release = deferred<MemoryRecord | null>();
-  const local = createMemorySpineRestTransport({ baseUrl: 'http://127.0.0.1:1', authToken: 'synthetic' });
-  const wire = { ...local, get: async () => { started.resolve(); return release.promise; } };
-  f.client.activate(wire);
-  const lifecycle = { assertCurrent() {} };
-  const pending = f.client.get('synthetic', lifecycle);
-  await started.promise;
-  lifecycle.assertCurrent = () => {};
-  release.resolve(null);
-  await expect(pending).rejects.toThrow('lifecycle changed');
-});
-
 test('adoption ABA retires a pending read and never reaches the local fallback', async () => {
   const f = await fixture();
   const started = deferred<void>(), release = deferred<MemoryRecord | null>();

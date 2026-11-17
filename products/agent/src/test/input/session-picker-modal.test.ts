@@ -108,7 +108,7 @@ describe('SessionPickerModal', () => {
     expect(sel).toEqual(expect.objectContaining({ name: 'b' }));
   });
 
-  test('loading restores the saved side branches', () => {
+  test('loading restores the saved side branches', async () => {
     sm.save('branched', [{ role: 'user', content: 'main work' }], META, undefined, undefined, {
       branches: { alt: [{ role: 'user', content: 'branch work' }] },
       currentBranch: 'main',
@@ -119,7 +119,7 @@ describe('SessionPickerModal', () => {
     const conversation = new ConversationManager(() => 80);
 
     const ctx = { session: { conversationManager: conversation, runtime: { sessionId: 'live', model: 'm', provider: 'p' } } } as unknown as CommandContext;
-    expect(modal.loadSelected(ctx)).toBe(true);
+    expect(await modal.loadSelected(ctx)).toBe(true);
 
     expect(conversation.branchState().branches.alt).toHaveLength(1);
   });

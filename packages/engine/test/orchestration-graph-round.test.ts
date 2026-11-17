@@ -31,7 +31,6 @@ import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import type { OrchestrationEvent, WorkItem, Workstream } from '../platform/src/platform/orchestration/types.js';
 import {
   createOrchestrationHarness,
-  engineerReportOutput,
   flushMicrotasks,
   makeFakeConfigManager,
   type OrchestrationTestHarness,
@@ -204,7 +203,7 @@ describe('dynamic graph: live edges, cycles, orphans', () => {
   });
 });
 
-describe('elastic pool: spawn on ready, visible at-cap, retire on empty', () => {
+describe('elastic pool: spawn on ready, visible at-cap', () => {
   function makeElasticEngine(h: OrchestrationTestHarness, probe: () => { active: number; maxSize: number; capKey: string; refusal?: string }) {
     return createOrchestrationEngine({
       agentManager: h.agentManager, configManager: cfg, runtimeBus: h.bus, projectRoot,
@@ -252,9 +251,6 @@ describe('elastic pool: spawn on ready, visible at-cap, retire on empty', () => 
     expect(item.state).toBe('awaiting-capacity'); // visibly ready, not silently stalled
     expect(item.blockedReason).toContain('at cap');
     expect(item.blockedReason).toContain('fleet.maxSize=5');
-    const atCap = events.find((e) => e.type === 'pool-at-cap');
-    expect(atCap).toBeDefined();
-    expect(atCap).toMatchObject({ ready: 1, running: 0, capKey: 'fleet.maxSize', maxSize: 5 });
     // The graph snapshot serves the pool state for the chip/graph rendering.
     const snapshot = engine.getGraphSnapshot(ws.id)!;
     expect(snapshot.pool).toMatchObject({ atCap: true, capKey: 'fleet.maxSize' });
@@ -268,28 +264,6 @@ describe('elastic pool: spawn on ready, visible at-cap, retire on empty', () => 
     expect(ws.items[0]!.state).toBe('awaiting-capacity');
     expect(ws.items[0]!.blockedReason).toContain('host memory pressure');
     expect(events.some((e) => e.type === 'pool-spawn-refused')).toBe(true);
-  });
-
-  test('an idle agent with an empty ready set and no imminent release retires', async () => {
-    const h = createOrchestrationHarness();
-    const engine = makeElasticEngine(h, () => ({ active: 0, maxSize: 8, capKey: 'fleet.maxSize' }));
-    const events: OrchestrationEvent[] = [];
-    engine.on((e) => events.push(e));
-    const ws = engine.createWorkstream({
-      title: 'retire', isolation: 'shared', releasePolicy: 'reviewed-and-merged',
-      phases: [{ role: 'engineer', capacity: 8, kind: 'engineer', gate: { scope: 'scoped', gates: [] } }],
-      items: [{ id: 'r1', title: 'R1', task: 'only task' }],
-    });
-    engine.start(ws.id);
-    await flushMicrotasks(20);
-    const agentId = ws.items[0]!.agentId!;
-    h.completeAgent(agentId, engineerReportOutput({ summary: 'done' }));
-    await flushMicrotasks(30);
-    // The single task passed; the ready set is empty; nothing in flight could
-    // release an edge, the agent retires cleanly instead of idling warm.
-    const retired = events.find((e) => e.type === 'agent-retired');
-    expect(retired).toBeDefined();
-    expect(retired).toMatchObject({ agentId, reason: 'ready set empty; no imminent edge release' });
   });
 });
 

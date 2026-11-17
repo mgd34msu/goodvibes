@@ -20,6 +20,7 @@ import { ProjectIndex } from '../../platform/src/platform/state/project-index.js
 import { contractWorkReceipts } from '../../platform/src/platform/contract/work-receipts.js';
 import { answerClaimScopes, completeAnswerClaimCoverage } from '../../platform/src/platform/contract/final-answer-claims.js';
 import { judgmentExecutionEvidence } from '../../platform/src/platform/contract/judgment-execution-evidence.js';
+import { decisionReceiptText } from '../../platform/src/platform/contract/decision-records.js';
 
 let harness: Harness | undefined;
 afterEach(async () => {
@@ -60,7 +61,7 @@ test.each(['covered', 'omitted', 'failed-criterion', 'confident-goal'])('an unce
   expect(proofs).toBe(scenario === 'covered' || scenario === 'omitted' ? 1 : 0);
   if (scenario === 'covered') {
     expect(current.status).toBe('passed'); expect(check.goal.probabilityUnmet).toBe(0.03);
-    const proof = JSON.parse(current.decisions.findLast(decision => decision.targetId === `${contract.id}.goal-obligations`)!.reason);
+    const proof = JSON.parse(decisionReceiptText(current.decisions.findLast(decision => decision.targetId === `${contract.id}.goal-obligations`)!));
     expect(proof.sourceGoal.probability).toBe(0.61); expect(proof.passed).toBe(true);
     expect(proof).not.toHaveProperty('stateHash');
     expect(log.get(proof.decisionIds[0])).not.toHaveProperty('stateHash');
@@ -93,7 +94,7 @@ test('an uncertain overall factual objection is resolved by exact complete answe
   } }));
   const id = await run(h), current = contractOf(h, id);
   expect(current.status).toBe('passed'); expect(workers).toBe(1); expect(scoped).toBeGreaterThan(1);
-  const receipt = JSON.parse(current.decisions.findLast(decision => decision.targetId === `${id}.final-answer-review`)!.reason);
+  const receipt = JSON.parse(decisionReceiptText(current.decisions.findLast(decision => decision.targetId === `${id}.final-answer-review`)!));
   expect(receipt.overviewUnsupported.probability).toBe(0.61);
   expect(receipt.readings.unsupported.probability).toBe(0.03);
   expect(completeAnswerClaimCoverage(current.answer!, receipt.claimReviews)).toBe(true);
@@ -128,7 +129,7 @@ test.each([0.61, 0.98])('a held exact factual claim stays private and carries it
   await waitForHeld(h, contract.id, 'exact claim rejection');
   const current = contractOf(h, contract.id);
   expect(current.status).not.toBe('passed'); expect(current.commit).toBeUndefined(); expect(workers).toBe(1);
-  const receipt = JSON.parse(current.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`)!.reason);
+  const receipt = JSON.parse(decisionReceiptText(current.decisions.findLast(decision => decision.targetId === `${contract.id}.final-answer-review`)!));
   expect(receipt.passed).toBe(false);
   expect(receipt.findings[0]).toMatchObject({ assessment: probability === 0.98 ? 'confirmed' : 'unresolved', passage: { quote: output } });
   expect(receipt.findings[0].remaining[0]).toContain('Do not redraft the whole answer');
@@ -307,7 +308,7 @@ test('group and final checks receive actual plan-validation and unit-acceptance 
       expect(assessment.decisionIds).toHaveLength(1);
       expect(log.get(assessment.decisionIds[0]!)).toMatchObject({ status: 'answered', context: { site: 'contract.check.deliverable-judge' } });
       const recorded = done.decisions.find(decision => decision.targetId === `${id}.final-answer-review`)!;
-      const review = JSON.parse(recorded.reason);
+      const review = JSON.parse(decisionReceiptText(recorded));
       expect(review.passed).toBe(true);
       expect(review.outputDigest).toBe(hashState(checkedOutputs.get(evidence)!));
       expect(recorded.decisionIds).toEqual(review.decisionIds);
@@ -469,7 +470,7 @@ test('a rejected native answer review holds publication even when fulfillment re
   expect(current.criteria[0]!.status).toBe('met');
   expect(current.checks[0]!.result).toBe('stall');
   expect(order).toEqual(['original-requirements', 'final-answer-content']);
-  const review = JSON.parse(current.decisions.find(decision => decision.targetId === `${contract.id}.final-answer-review`)!.reason);
+  const review = JSON.parse(decisionReceiptText(current.decisions.find(decision => decision.targetId === `${contract.id}.final-answer-review`)!));
   expect(review.passed).toBe(false);
   expect(review.readings.unfinished.probability).toBe(0.98);
 });
@@ -511,7 +512,7 @@ test.each([false, true])('a long finding uses complete shared evidence and halts
     expect(decision).toBeUndefined();
     expect(current.error).toContain('No decision models are currently available.');
   } else {
-    const receipt = JSON.parse(decision!.reason);
+    const receipt = JSON.parse(decisionReceiptText(decision!));
     expect(receipt.passed).toBe(false);
     expect(receipt.findings[0]).toMatchObject({ localization: 'established', passage: { quote: output } });
   }
@@ -599,7 +600,7 @@ test('current primary evidence never bypasses an unmet original root after answe
   expect(current.status).not.toBe('passed');
   expect(current.criteria[0]!.status).toBe('unmet');
   expect(current.checks[0]!.result).not.toBe('pass');
-  const review = JSON.parse(current.decisions.find(decision => decision.targetId === `${contract.id}.final-answer-review`)!.reason);
+  const review = JSON.parse(decisionReceiptText(current.decisions.find(decision => decision.targetId === `${contract.id}.final-answer-review`)!));
   expect(review.passed).toBe(true);
 });
 

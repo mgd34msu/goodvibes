@@ -18,7 +18,7 @@ import {
 import { copyContractFields } from '../platform/src/platform/orchestration/contract-binding.js';
 import { createOrchestrationEngine, type OrchestrationEngineDeps } from '../platform/src/platform/orchestration/engine.js';
 import { deserializeWorkstreamSnapshot, serializeWorkstreamSnapshot } from '../platform/src/platform/orchestration/persistence.js';
-import { excludeUntouchedLaunchResidue, nativeDirtySnapshotEntries, snapshotDirtyTreeWithin } from '../platform/src/platform/orchestration/dirty-guard.js';
+import { excludeUntouchedLaunchResidue, snapshotDirtyTree } from '../platform/src/platform/orchestration/dirty-guard.js';
 import type { PhaseRunnerAgentManagerLike, WorktreeOps } from '../platform/src/platform/orchestration/phase-runner.js';
 import type { PhaseSpec } from '../platform/src/platform/orchestration/types.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
@@ -147,7 +147,7 @@ describe('a winner whose merge fails', () => {
     });
     for (const sibling of siblings) h.coordinator.onItemPassedTerminal(h.workstream(), sibling);
     const winner = siblings[1]!;
-    await h.coordinator.pickWinner(groupId, winner.id);
+    await expect(h.coordinator.pickWinner(groupId, winner.id)).rejects.toMatchObject({ outcome: 'not-merged' });
     await h.coordinator.join();
 
     expect(h.cleaned).toEqual([]);
@@ -175,7 +175,7 @@ describe('a winner whose merge the lane records as failed', () => {
     });
     for (const sibling of siblings) h.coordinator.onItemPassedTerminal(h.workstream(), sibling);
     const winner = siblings[1]!;
-    await h.coordinator.pickWinner(groupId, winner.id);
+    await expect(h.coordinator.pickWinner(groupId, winner.id)).rejects.toMatchObject({ outcome: 'not-merged' });
     await h.coordinator.join();
 
     expect(h.cleaned).toEqual([]);
@@ -185,15 +185,16 @@ describe('a winner whose merge the lane records as failed', () => {
     expect(await h.coordinator.listGroups()).toHaveLength(1);
   });
 
-  test('a real conflict with files is the winner merge having run, so the losers are cleaned', async () => {
+  test('a conflict names its files, discards nothing and leaves the group pickable', async () => {
     const { h, siblings, groupId } = coordinatorHarness({
       attempts: 3,
       enqueue: (item) => { item.mergeState = 'conflict'; item.conflictFiles = ['a.ts']; },
     });
     for (const sibling of siblings) h.coordinator.onItemPassedTerminal(h.workstream(), sibling);
-    await h.coordinator.pickWinner(groupId, siblings[1]!.id);
+    await expect(h.coordinator.pickWinner(groupId, siblings[1]!.id)).rejects.toMatchObject({ outcome: 'conflict', files: ['a.ts'] });
     await h.coordinator.join();
-    expect(h.cleaned.sort()).toEqual([siblings[0]!.id, siblings[2]!.id].sort());
+    expect(h.cleaned).toEqual([]);
+    expect(await h.coordinator.listGroups()).toHaveLength(1);
   });
 });
 
@@ -317,16 +318,16 @@ describe('a refused spawn', () => {
 });
 
 describe('a repository that was dirty at launch', () => {
-  test('tells a listener that subscribes after construction', () => {
+  test('tells a listener that subscribes after construction', async () => {
     writeFileSync(join(projectRoot, 'residue.txt'), 'left over from an earlier run');
     const harness = engineHarness(projectRoot);
     const engine = harness.makeEngine();
     try {
-      const seen: OrchestrationEvent[] = [];
-      engine.on((event) => seen.push(event));
-      const notices = seen.filter((event) => event.type === 'dirty-tree-at-launch');
-      expect(notices).toHaveLength(1);
-      expect(notices[0]?.type === 'dirty-tree-at-launch' && notices[0].paths).toContain('residue.txt');
+      // The launch capture runs in git processes; its notice reaches a listener whenever it subscribed.
+      const notice = await new Promise<OrchestrationEvent>((resolve) => {
+        engine.on((event) => { if (event.type === 'dirty-tree-at-launch') resolve(event); });
+      });
+      expect(notice.type === 'dirty-tree-at-launch' && notice.paths).toContain('residue.txt');
     } finally { engine.dispose(); }
   });
 
@@ -345,38 +346,19 @@ describe('a repository that was dirty at launch', () => {
   });
 });
 
-describe('a dirty file too large to keep in memory', () => {
-  const launch = (): ReturnType<typeof snapshotDirtyTreeWithin> => snapshotDirtyTreeWithin(projectRoot, { perFileBytes: 10 });
-
-  test('is excluded as launch residue while its content is unchanged', () => {
+describe('a dirty file of any size', () => {
+  test('is excluded as launch residue while its content is unchanged', async () => {
     writeFileSync(join(projectRoot, 'big.bin'), 'x'.repeat(100));
-    const snapshot = launch();
-    expect(excludeUntouchedLaunchResidue(projectRoot, ['big.bin'], snapshot)).toEqual({ included: [], excluded: ['big.bin'], uncertain: [] });
+    const snapshot = snapshotDirtyTree(projectRoot);
+    expect(await excludeUntouchedLaunchResidue(projectRoot, ['big.bin'], snapshot)).toEqual({ included: [], excluded: ['big.bin'], uncertain: [] });
   });
 
-  test('is claimed once a phase changes its content', () => {
+  test('is claimed once a phase changes its content', async () => {
     writeFileSync(join(projectRoot, 'big.bin'), 'x'.repeat(100));
-    const snapshot = launch();
+    const snapshot = snapshotDirtyTree(projectRoot);
+    await snapshot.ready;
     writeFileSync(join(projectRoot, 'big.bin'), 'y'.repeat(100));
-    expect(excludeUntouchedLaunchResidue(projectRoot, ['big.bin'], snapshot)).toEqual({ included: ['big.bin'], excluded: [], uncertain: [] });
+    expect(await excludeUntouchedLaunchResidue(projectRoot, ['big.bin'], snapshot)).toEqual({ included: ['big.bin'], excluded: [], uncertain: [] });
   });
 });
 
-describe('the dirty snapshot is bounded in memory', () => {
-  test('a file past the per-file bound is left unread, the rest are held', () => {
-    writeFileSync(join(projectRoot, 'big.bin'), 'x'.repeat(100));
-    writeFileSync(join(projectRoot, 'small.txt'), 'tiny');
-    const snapshot = snapshotDirtyTreeWithin(projectRoot, { perFileBytes: 10 });
-    const entries = nativeDirtySnapshotEntries(snapshot, projectRoot);
-    expect(entries.get('big.bin')?.kind).toBe('unavailable');
-    expect(entries.get('small.txt')?.kind).toBe('file');
-  });
-
-  test('files past the total bound are left unread once it is used up', () => {
-    writeFileSync(join(projectRoot, 'a.txt'), '12345678');
-    writeFileSync(join(projectRoot, 'b.txt'), '12345678');
-    const snapshot = snapshotDirtyTreeWithin(projectRoot, { totalBytes: 10 });
-    const entries = nativeDirtySnapshotEntries(snapshot, projectRoot);
-    expect([entries.get('a.txt')?.kind, entries.get('b.txt')?.kind].sort()).toEqual(['file', 'unavailable']);
-  });
-});

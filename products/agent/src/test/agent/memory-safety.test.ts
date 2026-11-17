@@ -103,7 +103,7 @@ describe('Agent memory issuer protection', () => {
         for (const credential of ISSUERS) {
           const refused = tools.projectCall(`unsafe-create-${ISSUERS.indexOf(credential)}`, 'agent_local_registry', { domain: 'memory', action: 'create', cls: 'fact', summary: credential });
           await expect(refused).rejects.toBeInstanceOf(ToolInputProjectionError);
-          await expect(refused).rejects.toMatchObject({ problem: 'invalid', message: 'Tool input projection invalid.' });
+          await expect(refused).rejects.toMatchObject({ problem: 'invalid', detail: expect.stringContaining('local records do not store secrets') });
           expect(JSON.stringify(readings.admissionRequests)).not.toContain(credential);
           expect(readings.admissionRequests).toHaveLength(0);
           expect(registry.getAll()).toHaveLength(0);
@@ -115,7 +115,7 @@ describe('Agent memory issuer protection', () => {
         for (const credential of ISSUERS) {
           const beforeAsks = readings.admissionRequests.length;
           const refused = tools.projectCall(`unsafe-update-${ISSUERS.indexOf(credential)}`, 'agent_local_registry', { domain: 'memory', action: 'update', id: original!.id, detail: credential });
-          await expect(refused).rejects.toMatchObject({ problem: 'invalid', message: 'Tool input projection invalid.' });
+          await expect(refused).rejects.toMatchObject({ problem: 'invalid', detail: expect.stringContaining('local records do not store secrets') });
           expect(readings.admissionRequests).toHaveLength(beforeAsks);
           expect(registry.getAll()).toEqual([original!]);
         }
@@ -161,7 +161,7 @@ describe('Agent memory issuer protection', () => {
       });
       const args = { domain: 'memory', action: 'create', cls: 'fact', summary: ISSUERS[3]! };
       const refused = toolRegistry.execute('issuer-memory', 'agent_local_registry', args);
-      await expect(refused).rejects.toMatchObject({ problem: 'invalid', message: 'Tool input projection invalid.' });
+      await expect(refused).rejects.toMatchObject({ problem: 'invalid', detail: expect.stringContaining('local records do not store secrets') });
       expect(services.memoryRegistry.getAll()).toHaveLength(0);
       const controller = new AbortController();
       controller.abort();

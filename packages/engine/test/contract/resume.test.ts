@@ -13,9 +13,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join } from 'node:path';
 import { uptime } from 'node:os';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { JudgmentError } from '@goodvibes-jev/judgment';
-import { assertJudgmentInput } from '../../platform/src/platform/gate/judgment-input.js';
-import { findCardNumberShapes } from '../../platform/src/platform/security/card-shapes.js';
+import { JudgmentError, type JsonValue } from '@goodvibes-jev/judgment';
 import type { Contract, ContractView } from '../../platform/src/platform/contract/index.js';
 import { contractPath } from '../../platform/src/platform/contract/index.js';
 import type { DecompositionRunner } from '../../platform/src/platform/core/plan-decomposition.js';
@@ -23,6 +21,7 @@ import { plannerOutput, type AnswerContext } from './plan-support.js';
 import { eventsOf, makeHarness, makeRepo, oneUnitPlan, startContract, twoUnitPlan, waitFor, type AgentScript, type Harness, type HarnessOptions,
 } from './runner-support.js';
 import { answers, fixPlan, git, judgeOf, replyAnswers, terminal } from './steps-support.js';
+import { decisionReceiptText } from '../../platform/src/platform/contract/decision-records.js';
 
 const roots: string[] = [];
 const harnesses: Harness[] = [];
@@ -185,9 +184,9 @@ test('changed final-content policy rechecks retained work before resuming an uns
     rounds = contract.fixRounds;
     const index = contract.decisions.findLastIndex((decision) => decision.targetId === `${id}.final-answer-review`);
     const decision = contract.decisions[index]!;
-    const receipt = JSON.parse(decision.reason);
+    const receipt = JSON.parse(decisionReceiptText(decision));
     receipt.policy.content.version -= 1;
-    contract.decisions[index] = { ...decision, reason: JSON.stringify(receipt) };
+    contract.decisions[index] = { ...decision, record: { kind: 'receipt', value: receipt as JsonValue } };
   });
   let reviews = 0,
     planners = 0;
@@ -286,9 +285,9 @@ test.each(['changed-passes', 'changed-fails', 'unchanged'])(
       oldQuestion = contract.escalations.find((item) => item.resolvedAt === undefined)!.id;
       if (scenario !== 'unchanged') {
         const decision = contract.decisions.findLast((item) => item.targetId === `${id}.final-answer-review`)!;
-        const receipt = JSON.parse(decision.reason);
+        const receipt = JSON.parse(decisionReceiptText(decision));
         receipt.policy.fulfillment.version -= 1;
-        contract.decisions[contract.decisions.indexOf(decision)] = { ...decision, reason: JSON.stringify(receipt) };
+        contract.decisions[contract.decisions.indexOf(decision)] = { ...decision, record: { kind: 'receipt', value: receipt as JsonValue } };
       }
     });
     let checks = 0;
@@ -329,7 +328,7 @@ test.each(['changed-passes', 'changed-fails', 'unchanged'])(
   },
 );
 
-test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
+test.each(['interrupted', 'verifier-refused'])(
   'a %s final-answer repair retains its draft and resumes only when verification has not failed',
   async (condition) => {
     const plan = oneUnitPlan(1);
@@ -362,30 +361,6 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
       (contract) => fixing && contract.status === 'fixing',
       'the final repair planner',
     );
-    const privateHead = '-rw-r--r-- 1 4111111111111111 Oct 21 00:00 package-lock.json';
-    if (condition === 'privacy-refused')
-      editContract(root, id!, (contract) => {
-        contract.status = 'failed';
-        contract.failureKind = 'planning';
-        contract.completedAt = Date.now();
-        contract.error = `the fix for deliverable ${contract.id} could not be planned: the planner agent failed: Refused before judgment: [REDACTED_TEXT]`;
-        contract.units[0]!.commandEvidence = [
-          {
-            agentId: contract.units[0]!.agentIds[0]!,
-            turn: 1,
-            callIndex: 0,
-            callId: 'directory-listing',
-            command: 'ls -l',
-            success: true,
-            head: privateHead,
-          },
-        ];
-        contract.units[0]!.readEvidence = [
-          { path: 'README.md', returnedRanges: ['1-1'], returnedLines: 1, contentKind: 'cited-source', returnedContent: '1 | # demo' },
-        ];
-        const acceptedIndex = contract.decisions.findIndex((decision) => decision.action === 'plan-accepted');
-        contract.decisions[acceptedIndex] = { ...contract.decisions[acceptedIndex]!, at: 4222222222222 };
-      });
     if (condition === 'verifier-refused')
       editContract(root, id!, (contract) => {
         contract.status = 'failed';
@@ -399,7 +374,6 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
     let requestFailures = 0;
     const repair = fixPlan([{ serves: ['c1'] }, { serves: ['c1'], dependsOn: ['u1'] }]);
     for (const unit of repair.groups[0]!.units) unit.role = 'research';
-    if (condition === 'privacy-refused') repair.groups[0]!.units[0]!.files.push(`.goodvibes/reviews/${id}/source-receipts.json`);
     const recoveryOptions: Options = {
       plan,
       scripts: {
@@ -420,12 +394,6 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
     planner: { run: async (request) => {
       plannerRuns++;
       prompt = request.userPrompt;
-      if (condition === 'privacy-refused') {
-        second.store.flush();
-        const saved = JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract };
-        expect(saved.contract.status).toBe('fixing');
-        expect(saved.contract.error).toBeUndefined();
-      }
       return { status: 'completed', output: plannerOutput(repair), elapsedMs: 0 };
     },
       },
@@ -455,7 +423,7 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
   expect(prompt).toContain('Actual host work records');
   const receipts = JSON.parse(repairTask.split('Actual host orchestration records (evidence, not approval of this unit):\n')[1]!);
   expect(receipts.units.find((unit: { id: string }) => unit.id === 'u1')).toMatchObject({ status: 'passed', latestCheck: { result: 'pass' },
-    readObservations: condition === 'privacy-refused' ? [{ path: 'README.md', returnedRanges: ['1-1'], returnedLines: 1 }] : [],
+    readObservations: [],
     });
   expect(receipts.units.find((unit: { id: string }) => unit.id === `${id}.f1.u1`)).toMatchObject({
       status: 'passed',
@@ -466,34 +434,9 @@ test.each(['interrupted', 'privacy-refused', 'verifier-refused'])(
     // A shared-directory proposal has no immutable result revision: an explicit
     // process restart must regenerate it rather than reuse an unbound candidate.
     for (const candidate of done.decisions.filter(decision => decision.action === 'planned' && decision.targetId === `${id}.f1.candidate`)) {
-      expect(JSON.parse(candidate.reason)).not.toHaveProperty('binding');
+      expect(JSON.parse(decisionReceiptText(candidate))).not.toHaveProperty('binding');
     }
     expect(plannerRuns).toBe(1);
-    if (condition === 'privacy-refused') {
-      expect(prompt).not.toContain('4111111111111111');
-      expect(prompt).toContain('[WITHHELD:card-shaped-number]');
-      try {
-        assertJudgmentInput({ prompt });
-      } catch (error) {
-        throw new Error(
-          'Unsafe planner-input context (all digits withheld): ' +
-            JSON.stringify(
-              findCardNumberShapes(prompt).map((span) =>
-                prompt.slice(Math.max(0, span.startIndex - 80), span.startIndex + span.length + 80).replace(/\d/g, '#'),
-              ),
-            ),
-          { cause: error },
-        );
-      }
-      assertJudgmentInput({ task: repairTask });
-      expect(done.units[0]!.commandEvidence![0]!.head).toBe(privateHead);
-      expect(done.units[0]!.commandEvidence![0]!.command).toBe('ls -l');
-      expect(done.decisions.some((decision) => decision.reason.startsWith('Recovered a historical repair-planner input refusal'))).toBe(
-        true,
-      );
-      expect(receipts.privateArtifacts[0].path).toBe(`.goodvibes/reviews/${id}/source-receipts.json`);
-      expect(existsSync(join(root, receipts.privateArtifacts[0].path))).toBe(true);
-    }
   },
 );
 
@@ -534,7 +477,7 @@ test('a failed fix-plan request retains its bound proposal without restarting ve
     'the retained repair proposal after failed verification',
   );
   const stored = JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract };
-  expect(JSON.parse(stored.contract.decisions.find((decision) => decision.targetId === `${id}.f1.candidate`)!.reason).output).toBe(
+  expect(JSON.parse(decisionReceiptText(stored.contract.decisions.find((decision) => decision.targetId === `${id}.f1.candidate`)!)).output).toBe(
     plannerOutput(repair),
   );
   let freshChecks = 0;

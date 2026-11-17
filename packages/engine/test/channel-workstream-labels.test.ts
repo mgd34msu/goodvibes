@@ -336,16 +336,19 @@ describe('the other places a workstream line reaches a person', () => {
     try {
       notifier.attachToRuntimeBus(bus);
       rememberWorkstreamLabel(CONTRACT_ID, TASK);
-      bus.emit('contracts', contractEnvelopes(CONTRACT_ID, TASK).at(-2)! as ContractsEnvelope);
-      bus.emit('contracts', contractEnvelopes(OTHER_CONTRACT_ID, TASK).at(-1)! as ContractsEnvelope);
+      for (const [id, ending] of [[CONTRACT_ID, -2], [OTHER_CONTRACT_ID, -1]] as const) {
+        const envelopes = contractEnvelopes(id, TASK);
+        bus.emit('contracts', envelopes[0]! as ContractsEnvelope);
+        bus.emit('contracts', envelopes.at(ending)! as ContractsEnvelope);
+      }
       await waitFor(() => sent.length >= 2);
       const body = sent.join('\n');
       expect(body).not.toContain(CONTRACT_ID);
       expect(body).not.toContain(CONTRACT_ID_SHORT);
       expect(body).not.toContain('Contract ');
       // Still says what happened, to both outcomes.
-      expect(body).toContain('passed all its checks');
-      expect(body).toContain('could not be finished');
+      expect(body).toContain('Done in');
+      expect(body).toContain('Failed after');
     } finally {
       sendSpy.mockRestore();
       notifier.detach();

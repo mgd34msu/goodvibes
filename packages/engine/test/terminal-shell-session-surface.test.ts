@@ -17,7 +17,6 @@ import { createHostedSessionRegistry } from '../terminal-shell/src/hosted-sessio
 import { InputHistory } from '../terminal-shell/src/input-history.ts';
 import { createInteractionModeCommand } from '../terminal-shell/src/interaction-mode-command.ts';
 import { handleKnowledgeMutationCommand } from '../terminal-shell/src/knowledge-mutation-command.ts';
-import { handleKnowledgeReadCommand, type KnowledgeReadPorts } from '../terminal-shell/src/knowledge-read-command.ts';
 import { KeybindingsManager } from '../terminal-shell/src/keybindings.ts';
 
 function scratchDir(): string {
@@ -344,25 +343,6 @@ describe('keybinding and mode feedback', () => {
 });
 
 describe('knowledge commands behave the same for every verb', () => {
-  const staleError = new Error('session changed');
-  const readPorts = (): KnowledgeReadPorts => ({
-    status: async () => ({ ready: true, storagePath: '/s', sourceCount: 1, nodeCount: 1, edgeCount: 1, issueCount: 1 }),
-    lint: async () => [{ id: 'i', severity: 'warn', code: 'C', message: 'm' }],
-    candidates: () => [{ id: 'c', status: 's', score: 1, title: 't', candidateType: 'x' }],
-    reports: () => [{ id: 'r', kind: 'k', title: 't', summary: 's' }],
-    schedules: () => [{ id: 'sc', enabled: true, jobId: 'j', label: 'l' }],
-    packet: async () => 'packet text',
-    nodes: async () => [], issues: async () => [], sources: async () => [], search: async () => [], get: async () => null,
-    assertCurrent: () => { throw staleError; },
-  } as unknown as KnowledgeReadPorts);
-  const presentation = { statusTitle: 'T', headingSuffix: ':', fieldSeparator: ': ', scoreSeparator: '=', nodeKind: 'kind' };
-
-  test.each(['status', 'lint', 'candidates', 'reports', 'schedules', 'packet', 'explain'])('%s prints nothing once the session has changed', async (sub) => {
-    const printed: string[] = [];
-    await expect(handleKnowledgeReadCommand(sub, ['task'], (text) => printed.push(text), readPorts(), presentation)).rejects.toThrow('session changed');
-    expect(printed).toEqual([]);
-  });
-
   const mutationPorts = {
     reindex: async () => { throw new Error('index locked'); },
     run: async () => ({ id: 'run', status: 'ok' }),

@@ -230,35 +230,34 @@ test('a primary semantic refusal is returned without asking a fallback for a dif
   } finally { primary.stop(); next.stop(); }
 });
 
-test('an all-target outage exhausts once without advertising a retry after the final fallback', async () => {
-  const primary = endpoint(503), next = endpoint(503); const controller = new AbortController();
+test('an all-target outage gives the last target one bounded retry, then fails once with one log entry', async () => {
+  const primary = endpoint(503), next = endpoint(503);
   using log = new SqliteDecisionLog(':memory:');
   try {
     let settled = false;
-    const retries: number[] = [];
+    const retries: { index: number; waitMs: number }[] = [];
     const attempts = [
       { attempt: 1, endpointIndex: 0, outcome: 'unavailable', status: 503 },
       { attempt: 2, endpointIndex: 1, outcome: 'unavailable', status: 503 },
+      { attempt: 3, endpointIndex: 1, outcome: 'unavailable', status: 503 },
     ];
     const port = withDecisionLog(createSettingsJudgmentPort(source({ 'judgment.endpoint': primary.url,
       'judgment.fallbacks': [fallback(next.url)] })), log);
-    const pending = port.ask({ ...request, signal: controller.signal, onRetry: event => {
+    const pending = port.ask({ ...request, onRetry: event => {
       expect(settled).toBe(false); expect(log.query()).toHaveLength(0);
-      retries.push(event.attempt.endpointIndex);
-      if (event.attempt.endpointIndex === 1) controller.abort();
+      retries.push({ index: event.attempt.endpointIndex, waitMs: event.nextDelayMs });
     } });
     void pending.then(() => { settled = true; }, () => { settled = true; });
-    await expect(pending).rejects.toMatchObject({ kind: 'unavailable', status: 503, lineage: { attempts } });
-    expect(retries).toEqual([0]);
-    expect(controller.signal.aborted).toBe(false);
-    expect(primary.calls).toHaveLength(1); expect(next.calls).toHaveLength(1);
+    await expect(pending).rejects.toMatchObject({ kind: 'unavailable', status: 503, reason: 'endpoint-status', lineage: { attempts } });
+    // Failing over to the backup waits for nothing; the retry reports the wait it takes.
+    expect(retries.map(retry => retry.index)).toEqual([0, 1]);
+    expect(retries[0]!.waitMs).toBe(0); expect(retries[1]!.waitMs).toBeGreaterThan(0);
+    expect(primary.calls).toHaveLength(1); expect(next.calls).toHaveLength(2);
     expect(primary.calls).toEqual([{ authorization: 'Bearer synthetic-primary', model: 'jev-latest' }]);
-    expect(next.calls).toEqual([{ authorization: 'Bearer synthetic-fallback', model: 'jev-latest' }]);
     expect(log.query()).toHaveLength(1);
-    expect(log.query()).toMatchObject([{ status: 'failed', error: { kind: 'unavailable' }, lineage: { attempts } }]);
-    expect(log.query()[0]?.lineage?.attempts).toHaveLength(2);
+    expect(log.query()).toMatchObject([{ status: 'failed', error: { kind: 'unavailable', reason: 'endpoint-status' }, lineage: { attempts } }]);
     expect(JSON.stringify(log.query())).not.toContain('synthetic-');
-  } finally { controller.abort(); primary.stop(); next.stop(); }
+  } finally { primary.stop(); next.stop(); }
 });
 
 test('fallback environment changes and config ABA revoke a captured composed source before another dispatch', () => {

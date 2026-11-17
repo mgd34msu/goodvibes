@@ -48,7 +48,7 @@ async function fixture() {
     picker.open();
     picker.selectedIndex = picker.sessions.findIndex((session) => session.name === id);
     const ctx = { session: { conversationManager: conversation, runtime } } as unknown as CommandContext;
-    expect(picker.loadSelected(ctx)).toBe(true);
+    expect(await picker.loadSelected(ctx)).toBe(true);
   };
   const footer = () => buildShellFooter({
     width: 180, promptText: '', promptLineCount: 1, usage: { available: isConversationUsageAvailable(orchestrator.usage), up: orchestrator.usage.input, down: orchestrator.usage.output },

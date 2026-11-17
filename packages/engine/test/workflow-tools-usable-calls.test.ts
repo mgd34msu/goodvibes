@@ -1,13 +1,11 @@
 /**
- * Schema-valid calls to the team, worklist, state and task tools either work
- * or are refused with the current state and the allowed next step.
+ * Schema-valid calls to the state and task tools either work or are refused
+ * with the current state and the allowed next step.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createTeamTool } from '../platform/src/platform/tools/team/index.js';
-import { createWorklistTool } from '../platform/src/platform/tools/worklist/index.js';
 import { createStateTool } from '../platform/src/platform/tools/state/index.js';
 import { createTaskTool } from '../platform/src/platform/tools/task/index.js';
 import { KVState } from '../platform/src/platform/state/kv-state.js';
@@ -22,31 +20,11 @@ function tempRoot(): string {
   return root;
 }
 
-describe('team and worklist store under the host working directory', () => {
-  test('a schema-valid team create succeeds without a storageRoot argument', async () => {
-    const tool = createTeamTool({ workingDirectory: tempRoot() });
-    const result = await tool.execute({ mode: 'create', teamId: 't', name: 'Team', summary: 'S' });
-    expect(result.success).toBe(true);
-    expect((await tool.execute({ mode: 'list' })).output).toContain('"t"');
-  });
-
-  test('a schema-valid worklist list succeeds without a storageRoot argument', async () => {
-    const tool = createWorklistTool({ workingDirectory: tempRoot() });
-    expect((await tool.execute({ mode: 'list' })).success).toBe(true);
-  });
-
-  test('without any root the refusal says not to retry', async () => {
-    const result = await createTeamTool().execute({ mode: 'list' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('do not retry');
-  });
-});
-
 describe('state modes that need missing services', () => {
   function stateTool() {
     const root = tempRoot();
     mkdirSync(join(root, 'state'));
-    return createStateTool(new KVState({ stateDir: join(root, 'state') }), new ProjectIndex(root), { memoryDir: join(root, 'memory') });
+    return createStateTool(new KVState({ stateDir: join(root, 'state') }), new ProjectIndex(root), {});
   }
 
   test('hooks and analytics are not advertised and are refused with the available modes', async () => {
@@ -54,6 +32,7 @@ describe('state modes that need missing services', () => {
     const modes = ((tool.definition.parameters as { properties: { mode: { enum: string[] } } }).properties.mode.enum);
     expect(modes).not.toContain('hooks');
     expect(modes).not.toContain('analytics');
+    expect(modes).not.toContain('memory');
     expect(tool.definition.description).not.toContain('mode=hooks');
     const result = await tool.execute({ mode: 'hooks', hookAction: 'add', hookDefinition: { eventPattern: 'x', type: 'command', match: 'y' } });
     expect(result.success).toBe(false);

@@ -166,9 +166,9 @@ describe('/principals verbs over the operator wire', () => {
 
   test('delete sends principals.delete and reports whether anything was removed', async () => {
     respond = () => ({ deleted: true });
-    expect(await run(['delete', 'p1'])).toBe('[principals delete] deleted p1.');
+    expect(await run(['delete', 'p1', '--yes'])).toBe('[principals delete] deleted p1.');
     respond = () => ({ deleted: false });
-    expect(await run(['delete', 'p9'])).toBe('[principals delete] no principal found with id p9.');
+    expect(await run(['delete', 'p9', '--yes'])).toBe('[principals delete] no principal found with id p9.');
     expect(invocations).toEqual([
       { methodId: 'principals.delete', input: { principalId: 'p1' } },
       { methodId: 'principals.delete', input: { principalId: 'p9' } },

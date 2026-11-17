@@ -1,6 +1,5 @@
 import { McpPermissionManager, captureMcpDecisionHistoryReadSource } from '../platform/src/platform/runtime/mcp/permissions.js';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { gateReadingsPort } from './_helpers/gate-readings.ts';
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -191,10 +190,8 @@ describe('native read receipts retain original publishers and clocks', () => {
     const copied: object = Object.assign(Object.create(Object.getPrototypeOf(manager)), manager);
     expect(() => Reflect.apply(captureMcpDecisionHistoryReadSource, undefined, [copied])).toThrow(SecurityReadSourceRetiredError);
     manager.registerServer('fixture');
-    expect(manager.isToolAllowed('fixture', 'list').allowed).toBe(true);
     expect(manager.listRecentDecisions()).toEqual([]); expect(current).not.toThrow();
-    const { port } = gateReadingsPort([['', { capability: 'metadata', family: 'generic', mutates: false, kind: 'read' }]]);
-    const permission = await manager.evaluateToolCall('fixture', 'list', {}, { port });
+    const permission = await manager.evaluateToolCall('fixture', 'list', {});
     expect(permission).toMatchObject({ allowed: true, verdict: 'allow', profileMode: 'ask-on-risk' });
     expect(manager.listRecentDecisions()).toHaveLength(1);
     // The evaluation recorded a decision, so a receipt taken before it no longer covers the history.

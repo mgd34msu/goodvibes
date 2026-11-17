@@ -49,7 +49,8 @@ class LocalAuthModalSurface implements ConfigModalSurface {
   readonly actions: ConfigModalAction[] = [
     { key: 'a', id: 'add-user', label: 'add user' },
     { key: 'p', id: 'rotate-pw', label: 'rotate password', enabledFor: (row) => usernameOf(row) !== null },
-    { key: 'd', id: 'delete', label: 'delete user', confirm: true, enabledFor: (row) => usernameOf(row) !== null },
+    // /local-auth delete-user asks in its own dialog, naming the user and what is lost; a second press here would ask twice.
+    { key: 'd', id: 'delete', label: 'delete user', enabledFor: (row) => usernameOf(row) !== null },
     { key: 'b', id: 'clear-bootstrap', label: 'clear bootstrap', enabledFor: () => this.bootstrapPresent },
   ];
 

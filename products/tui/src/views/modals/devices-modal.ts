@@ -1,5 +1,6 @@
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow } from './modal-surface-helpers.ts';
+import { actionKeyText } from '../../input/config-modal-keys.ts';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
@@ -107,7 +108,7 @@ class DevicesModalSurface implements ConfigModalSurface {
     }
 
     if (this.minted) {
-      rows.push(infoRow('minted', `One-time token for "${this.minted.name}": ${this.mintedRevealed ? this.minted.token : SECRET_MASK}  (v ${this.mintedRevealed ? 'hide' : 'reveal'})`, { fg: MODAL_TONES.reasoning }));
+      rows.push(infoRow('minted', `One-time token for "${this.minted.name}": ${this.mintedRevealed ? this.minted.token : SECRET_MASK}  (${actionKeyText('v')} ${this.mintedRevealed ? 'hide' : 'reveal'})`, { fg: MODAL_TONES.reasoning }));
     }
 
     const legacyRevoked = this.deps.pairingTokens.isLegacyRevoked();
@@ -160,8 +161,8 @@ class DevicesModalSurface implements ConfigModalSurface {
       if (!this.minted || !this.deps.copyToClipboard) return;
       const written = this.deps.copyToClipboard(this.minted.token);
       ctx.setStatus(written === false
-        ? 'Could not write to the terminal clipboard; press Ctrl+V to reveal the token instead.'
-        : 'Sent the token to the terminal clipboard, if your terminal supports it (OSC 52); press Ctrl+V to reveal it if the paste is empty.');
+        ? `Could not write to the terminal clipboard; press ${actionKeyText('v')} to reveal the token instead.`
+        : `Sent the token to the terminal clipboard, if your terminal supports it (OSC 52); press ${actionKeyText('v')} to reveal it if the paste is empty.`);
       return;
     }
 

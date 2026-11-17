@@ -1,5 +1,6 @@
 import { MODAL_TONES } from './modal-theme.ts';
 import { infoRow } from './modal-surface-helpers.ts';
+import { actionKeyText } from '../../input/config-modal-keys.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type {
   ConfigModalActionContext,
@@ -273,11 +274,11 @@ class PairingModalSurface implements ConfigModalSurface {
     // encrypted access only while a serve is actually on.
     const servedUrl = this.activeServe?.url;
     if (servedUrl) {
-      rows.push(infoRow('ts-h', 'Encrypted access (Tailscale), press x to stop serving:', { fg: MODAL_TONES.dim }));
+      rows.push(infoRow('ts-h', `Encrypted access (Tailscale), press ${actionKeyText('x')} to stop serving:`, { fg: MODAL_TONES.dim }));
       rows.push(infoRow('ts-url', `  ${servedUrl}`, { fg: MODAL_TONES.good }));
     } else {
       const target = ts.httpsUrl ? ` at ${ts.httpsUrl}` : ' (MagicDNS)';
-      rows.push(infoRow('ts-h', `Tailscale detected: press t to serve this app over https${target}.`, { fg: MODAL_TONES.reasoning }));
+      rows.push(infoRow('ts-h', `Tailscale detected: press ${actionKeyText('t')} to serve this app over https${target}.`, { fg: MODAL_TONES.reasoning }));
     }
     const receipt = this.serveReceipt ?? ts.lastServe;
     if (receipt) {
@@ -296,11 +297,11 @@ class PairingModalSurface implements ConfigModalSurface {
     if (id === 'tailscaleServe') { this.runTailscaleServe(ctx); return; }
     if (id === 'tailscaleStop') { this.stopTailscaleServe(ctx); return; }
     if (id === 'copyLink') {
-      if (!this.deps.copyToClipboard || !info) { ctx.setStatus('No pairing link to copy; press v to reveal it instead.'); return; }
+      if (!this.deps.copyToClipboard || !info) { ctx.setStatus(`No pairing link to copy; press ${actionKeyText('v')} to reveal it instead.`); return; }
       const written = this.deps.copyToClipboard(info.deepLink);
       ctx.setStatus(written === false
-        ? 'Could not write to the terminal clipboard; press v to reveal the link instead.'
-        : 'Sent the pairing link to the terminal clipboard, if your terminal supports it (OSC 52); press v to reveal it if the paste is empty.');
+        ? `Could not write to the terminal clipboard; press ${actionKeyText('v')} to reveal the link instead.`
+        : `Sent the pairing link to the terminal clipboard, if your terminal supports it (OSC 52); press ${actionKeyText('v')} to reveal it if the paste is empty.`);
       return;
     }
     if (id === 'newToken') {

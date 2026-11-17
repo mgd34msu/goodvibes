@@ -89,7 +89,7 @@ export function createHerdrSessionReporter(options: HerdrSessionReporterOptions 
   let draining: Promise<void> | undefined;
   let active: AbortController | undefined;
   let closing: Promise<void> | undefined;
-  let closed = false, legacyReleased = false, detected = false, resumeSupported = false;
+  let closed = false, detected = false, resumeSupported = false;
   let lastReported = '', sequence = 0;
   const nextSequence = () => String(sequence = Math.max(sequence + 1, Date.now()));
   const notifyFailure = () => { try { options.onError?.(new Error('Herdr session reporting failed')); } catch { /* Terminal execution does not depend on reporting. */ } };
@@ -114,12 +114,6 @@ export function createHerdrSessionReporter(options: HerdrSessionReporterOptions 
       }).then(value => finish(false, value), () => finish(true));
     });
   };
-  const releaseLegacy = async (timeoutMs: number, signal?: AbortSignal) => {
-    if (legacyReleased || !pane) return;
-    // Herdr's release handler returns success even if this source does not hold the pane.
-    await command(['pane', 'release-agent', pane, '--source', 'herdr:goodvibes', '--agent', AGENT], timeoutMs, signal);
-    legacyReleased = true;
-  };
   const flush = (): Promise<void> => {
     if (draining) return draining;
     const controller = new AbortController(); active = controller;
@@ -134,7 +128,6 @@ export function createHerdrSessionReporter(options: HerdrSessionReporterOptions 
         } catch { if (closed) return; detected = true; }
       }
       if (closed) return;
-      await releaseLegacy(3_000, controller.signal);
       while (!closed && desired) {
         const report = desired; desired = undefined;
         const resumeArgv = resumeSupported ? report.resumeArgv : undefined;

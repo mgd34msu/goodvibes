@@ -391,12 +391,12 @@ export class DurableContractAdmissions {
   }
 
   lock(key: DurableContractKey): Promise<() => void> {
-    return acquireCrossProcessLock(`${this.path(key)}.lock`, { strictOwnership: true });
+    return acquireCrossProcessLock(`${this.path(key)}.lock`);
   }
 
   /** Held until real executor drainage, not just status change/disposal. A dead process's lease can be reclaimed. */
   lease(key: DurableContractKey): Promise<() => void> {
-    return acquireCrossProcessLock(`${this.path(key)}.execution`, { strictOwnership: true, totalTimeoutMs: 100 });
+    return acquireCrossProcessLock(`${this.path(key)}.execution`, { totalTimeoutMs: 100 });
   }
 
   private envelope(key: DurableContractKey): { admission: DurableContractAdmission; checkpoint: string; indexed: boolean } | null {

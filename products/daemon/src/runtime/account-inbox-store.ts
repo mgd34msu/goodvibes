@@ -89,7 +89,7 @@ export async function ownAccountInboxStore<T extends InboxSurfaceRegistration, O
     const storeFileName = `inbox-${provider}-${owner.scopeId}.sqlite`;
     stage = 'lock';
     release = await acquireCrossProcessLock(accountInboxLockPath(input.workingDirectory, storeFileName), {
-      strictOwnership: true, totalTimeoutMs: STORE_LEASE_WAIT_MS,
+      totalTimeoutMs: STORE_LEASE_WAIT_MS,
     });
     input.assertCurrent();
     stage = 'store';

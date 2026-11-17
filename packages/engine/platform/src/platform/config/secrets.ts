@@ -1408,7 +1408,7 @@ export class SecretsManager {
         assertCurrent?.();
         try {
           mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-          releases.push(await acquireCrossProcessLock(`${path}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 }));
+          releases.push(await acquireCrossProcessLock(`${path}.mutation.lock`, { totalTimeoutMs: 10_000 }));
           assertCurrent?.();
           owned.push(path);
         } catch (error) {

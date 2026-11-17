@@ -124,7 +124,7 @@ async function createTriagedSource(
     ...(legacyOwned ? [`inbox-triage-${legacyOwned[1]!}.sqlite.owner.lock`] : [])];
   try {
     for (const name of lockNames) releases.push(await acquireCrossProcessLock(join(ctx.workingDirectory, '.goodvibes', 'tui', 'operator', name),
-      { strictOwnership: true, totalTimeoutMs: 100 }));
+      { totalTimeoutMs: 100 }));
   } catch (error) { releaseLock(); throw error; }
   const state = (): InboxTriageState => {
     if (closed || owner.signal.aborted) return OFF.closed;

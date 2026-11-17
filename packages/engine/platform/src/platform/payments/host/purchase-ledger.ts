@@ -150,7 +150,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
     if (!row) throw new PaymentPurchaseLedgerError('invalid-record');
     let release: (() => void) | undefined;
     try {
-      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
       const previous = this.read();
       const rows = Object.freeze([...previous.rows, row]);
       const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows };
@@ -185,7 +185,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       merchantDomain: original.merchantDomain, totalMinorUnits: original.totalMinorUnits, currency: original.currency });
     let release: (() => void) | undefined;
     try {
-      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
       current();
       const previous = this.read(), events = readReconciliations(previous.envelope['purchaseReconciliations']);
       const prior = events.find(row => row.operationId === event.operationId);
@@ -218,7 +218,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
     if (!Number.isFinite(Date.parse(refundedAt))) throw new PaymentPurchaseLedgerError('invalid-record');
     let release: (() => void) | undefined;
     try {
-      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
       const previous = this.read();
       const current = previous.byId.get(purchaseId);
       if (!current || current.refundedAt !== null) return false;
@@ -255,7 +255,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
   async recordConfirmed(purchaseId: string, merchantOrderId: string | null): Promise<boolean> {
     let release: (() => void) | undefined;
     try {
-      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
       const previous = this.read();
       const current = previous.byId.get(purchaseId);
       if (!current || current.outcome !== 'submitted-unverified' || current.refundedAt !== null) return false;
@@ -298,7 +298,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
     if (!(ORDER_MAIL_KINDS as readonly string[]).includes(kind)) throw new PaymentPurchaseLedgerError('invalid-record');
     let release: (() => void) | undefined;
     try {
-      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { strictOwnership: true, totalTimeoutMs: 10_000 });
+      release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
       const previous = this.read();
       if (!previous.byId.has(purchaseId)) return false;
       const reports = readMailReports(previous.envelope['mailReported']);

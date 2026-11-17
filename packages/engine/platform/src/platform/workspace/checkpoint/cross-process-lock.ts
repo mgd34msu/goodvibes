@@ -30,11 +30,6 @@ import {
 } from '../../utils/process-lock.js';
 
 export interface CrossProcessLockOptions {
-  /**
-   * Accepted for existing callers and ignored: every lock is owned by its live
-   * process and released by the kernel when that process exits.
-   */
-  readonly strictOwnership?: boolean | undefined;
   /** Give up and throw after waiting this long in total. Default 15s. */
   readonly totalTimeoutMs?: number | undefined;
   /** Stops the wait (not the locked work). */

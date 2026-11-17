@@ -5,7 +5,7 @@ import { confirmFileDurable as confirmDurable, writeJsonFileAtomic as writeJson 
 /**
  * Node-only persistence primitives for product-owned request journals, and
  * `BoundedJsonFile`, the one small durable JSON file built on them. Journals requiring durable publication must pass `durable: true`
- * and `strictOwnership: true` explicitly. A published-indeterminate error
+ * explicitly. A published-indeterminate error
  * never proves rollback; inspect/confirm the visible file before proceeding.
  */
 export { writeFileAtomic, writeJsonFileAtomic, confirmFileDurable, AtomicWriteDurabilityError } from '../utils/atomic-json-store.js';
@@ -109,7 +109,7 @@ export class BoundedJsonFile<T> {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
       this.ancestorsChecked = true;
     }
-    const release = await this.io.acquireCrossProcessLock(`${this.path}.lock`, { strictOwnership: true });
+    const release = await this.io.acquireCrossProcessLock(`${this.path}.lock`);
     try { return operation(); } finally { release(); }
   }
 

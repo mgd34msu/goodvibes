@@ -162,7 +162,7 @@ test('supported unknown envelope/row fields survive appending and invalid incomi
 
 test('record detaches the actual receipt before waiting for another writer', async () => {
   const ledger = new DaemonPurchaseLedger({ filePath }), original = purchase();
-  const release = await acquireCrossProcessLock(`${filePath}.mutation.lock`, { strictOwnership: true });
+  const release = await acquireCrossProcessLock(`${filePath}.mutation.lock`);
   const pending = ledger.record(original); const handled = pending.catch(error => error);
   try { Reflect.set(original, 'totalMinorUnits', 999); Reflect.set(original, 'purchaseId', 'replacement'); }
   finally { release(); }

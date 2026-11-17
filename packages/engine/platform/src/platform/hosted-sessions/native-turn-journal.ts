@@ -261,7 +261,7 @@ export class NativeHostedTurnJournal {
       regularFile(`${this.path}.lock`);
       this.directoryReady = true;
     }
-    const release = await this.io.acquireCrossProcessLock(`${this.path}.lock`, { strictOwnership: true });
+    const release = await this.io.acquireCrossProcessLock(`${this.path}.lock`);
     try { return operation(); } finally { release(); }
   }
 

@@ -9,7 +9,7 @@ export function buildPreparationLockPath(root: string): string {
 
 export async function withBuildPreparationLock<T>(root: string, operation: () => T | Promise<T>, timeoutMs = 30 * 60 * 1000): Promise<T> {
   const release = await acquireCrossProcessLock(buildPreparationLockPath(root), {
-    strictOwnership: true, totalTimeoutMs: timeoutMs,
+    totalTimeoutMs: timeoutMs,
   });
   try { return await operation(); }
   finally { release(); }

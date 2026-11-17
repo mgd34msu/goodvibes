@@ -1,13 +1,10 @@
 /**
  * `update.*`, launch-time self-update behavior.
  *
- * The platform owns settings.json's typed schema and already defines an `update`
- * namespace (auto, intervalMinutes, firstCheckSeconds, …). Its loader
- * deep-merges user JSON over the defaults and keeps keys it does not know
- * through `getRaw()` (the same passthrough contract checkpoint-settings.ts
- * documents), so the agent's own additions to that namespace,
- * `autoUpdateAtLaunch` and `launchCheckTimeoutMs`, live in the same file and
- * are read back here.
+ * Every key read here is a platform schema row (schema-domain-update.ts),
+ * including `autoUpdateAtLaunch` and `launchCheckTimeoutMs`: the loader
+ * validates them, and settings search, the settings screen and `settings set`
+ * all reach them. This reader applies the Agent's clamps and defaults.
  *
  * Both config scopes reach this reader identically: the user-level file at
  * `<home>/.goodvibes/agent/settings.json` loads first and a working-directory

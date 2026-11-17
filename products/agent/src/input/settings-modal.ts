@@ -45,7 +45,6 @@ import {
   type SettingsModalOpenOptions,
   type SubscriptionEntry,
 } from './settings-modal-types.ts';
-import { isAgentHiddenSettingKey } from './settings-modal-agent-policy.ts';
 import { searchSettingEntries } from './settings-modal-search.ts';
 import { getSettingLabel } from '../renderer/settings-modal-helpers.ts';
 
@@ -63,7 +62,6 @@ export {
   type SettingsModalOpenOptions,
   type SubscriptionEntry,
 } from './settings-modal-types.ts';
-export { isAgentHiddenSettingKey } from './settings-modal-agent-policy.ts';
 
 const MCP_TRUST_MODES: readonly McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
 
@@ -740,7 +738,6 @@ export class SettingsModal extends TerminalSettingsModalState<
     }
 
     for (const setting of getAgentSettingsSchema(configManager)) {
-      if (isAgentHiddenSettingKey(setting.key)) continue;
       const rawCat = setting.key.split('.')[0] as string;
       const cat = rawCat as SettingsCategory;
       const display = readConfigSettingForDisplay(() =>

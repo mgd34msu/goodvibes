@@ -15,9 +15,6 @@ import {
   isSecretReferenceValue,
   persistSecretBackedConfigValue,
 } from '../config/secret-config.ts';
-import {
-  isAgentHiddenSettingKey,
-} from '../config/agent-settings-policy.ts';
 import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from '../tools/agent-harness-catalog-ranking.ts';
 import { settingDomainForPhrase } from '../config/settings-search-vocabulary.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -219,7 +216,7 @@ function settingCandidate(setting: AgentConfigSetting): HarnessSettingCandidate 
     // recorded admission for its exact effect, and a routed write reports the
     // store it landed in.
     writable: true,
-    visibleInWorkspace: !isAgentHiddenSettingKey(setting.key),
+    visibleInWorkspace: true,
     modelRoute: settingModelRoute(setting),
     description: setting.description,
   };
@@ -302,7 +299,7 @@ export function describeHarnessSetting(
     default: redactHarnessSettingValue(setting.key, setting.default),
     configured: !resolved.unavailable && !valuesEqual(resolved.value, setting.default),
     writable: resolved.writable ?? true,
-    visibleInWorkspace: !isAgentHiddenSettingKey(setting.key),
+    visibleInWorkspace: true,
     modelRoute: settingModelRoute(setting),
     description: setting.description,
     scope: configKeyScope(setting.key),
@@ -328,7 +325,7 @@ export function describeHarnessSettingSummary(
     value: redactHarnessSettingValue(setting.key, resolved.value),
     configured: !resolved.unavailable && !valuesEqual(resolved.value, setting.default),
     writable: resolved.writable ?? true,
-    visibleInWorkspace: !isAgentHiddenSettingKey(setting.key),
+    visibleInWorkspace: true,
     modelRoute: settingModelRoute(setting),
     summary: previewText(setting.description),
     scope: configKeyScope(setting.key),
@@ -360,7 +357,6 @@ function filterSettingCatalog(schema: readonly AgentConfigSetting[], filters: Ha
       if (key && setting.key !== key) return false;
       if (category && setting.key.split('.')[0] !== category) return false;
       if (prefix && !setting.key.startsWith(prefix)) return false;
-      if (!filters.includeHidden && isAgentHiddenSettingKey(setting.key)) return false;
       return true;
     });
 }

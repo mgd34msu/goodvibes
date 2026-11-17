@@ -15,6 +15,8 @@ export interface CheckpointsConfig {
   allowLargeFirstSnapshot: boolean;
   maxFirstSnapshotFiles: number;
   autoRetention: boolean;
+  /** Whether a workspace that is not registered gets checkpoints (Agent and daemon). */
+  unregisteredWorkspaces: 'off' | 'guarded';
 }
 
 
@@ -25,6 +27,7 @@ export const checkpointsConfigDefaults = {
     allowLargeFirstSnapshot: false,
     maxFirstSnapshotFiles: DEFAULT_MAX_FIRST_SNAPSHOT_FILES,
     autoRetention: true,
+    unregisteredWorkspaces: 'off',
   },
 } as const;
 
@@ -59,5 +62,12 @@ export const checkpointsConfigSettings: ConfigSettingDefinition[] = [
     type: 'boolean',
     default: true,
     description: 'Prune old checkpoints automatically after each new one and once at start. Off, old checkpoints are pruned only when asked',
+  },
+  {
+    key: 'checkpoints.unregisteredWorkspaces',
+    type: 'enum',
+    default: 'off',
+    enumValues: ['off', 'guarded'],
+    description: 'Checkpoints in a workspace that is not registered (Agent and daemon; the terminal app checkpoints any workspace). off: automatic and explicit checkpoints are refused there until it is registered (`goodvibes-agent workspaces register`). guarded: they are taken there too, under the root and size guards above. A project settings file cannot change it',
   },
 ];

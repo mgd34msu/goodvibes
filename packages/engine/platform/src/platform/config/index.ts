@@ -19,6 +19,7 @@ export type { HostBooleanSetting, HostBooleanSettingHandle, HostBooleanSettingRe
 export type { DeepReadonly, ConfigKeyTier, ConfigKeySource, DaemonConfigPatch } from './manager.js';
 export type { ConfigChange, SetResult, WriteOrigin } from './manager.js';
 export { configKeyFacts, isProtectedConfigValue, isProjectRestrictedKey } from './config-key-facts.js';
+export { readCheckpointGuardSettings, readCheckpointRegistrationSetting, type CheckpointGuardSettings } from './checkpoint-settings.js';
 export type { ConfigKeyFacts } from './config-key-facts.js';
 export { SHARED_CONFIG_KEYS, isSharedConfigKey } from './shared-config-tier.js';
 export {

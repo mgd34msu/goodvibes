@@ -8,6 +8,7 @@ import type { GoodVibesCliOutputFormat } from './types.ts';
 import type { CliServicePosture } from './service-posture.ts';
 import type { CliExternalRuntimeSnapshot } from './external-runtime.ts';
 import type { CliConnectedHostMetricsSnapshot } from './connected-host-metrics.ts';
+import type { CredentialAvailability } from '../config/credential-status.ts';
 import { getProviderIdFromModel } from '../config/provider-model.ts';
 import { formatAgentRecordSource } from '../agent/record-labels.ts';
 import { formatAgentKnowledgeFailureKind } from './agent-knowledge-format.ts';
@@ -36,6 +37,8 @@ export interface CliStatusOptions {
   readonly service?: CliServicePosture;
   readonly externalRuntime?: CliExternalRuntimeSnapshot;
   readonly connectedHostMetrics?: CliConnectedHostMetricsSnapshot;
+  /** Secret-free credential status from the connected host (credentials.get); absent when the host was not reachable. */
+  readonly connectedHostCredentials?: CredentialAvailability;
   readonly checkpoints?: CliCheckpointsStatus;
   readonly doctor?: boolean;
   readonly outputFormat?: GoodVibesCliOutputFormat;
@@ -103,6 +106,7 @@ export interface CliStatusSnapshot {
   };
   readonly externalRuntime: CliExternalRuntimeSnapshot | null;
   readonly connectedHostMetrics: CliConnectedHostMetricsSnapshot | null;
+  readonly connectedHostCredentials: CredentialAvailability | null;
   readonly relay: {
     readonly enabled: boolean;
     readonly url: string;
@@ -142,6 +146,18 @@ function checkpointsStatusLine(checkpoints: CliCheckpointsStatus): { active: boo
     return { active: true, line: 'checkpoints on: unregistered workspace allowed via checkpoints.unregisteredWorkspaces="guarded"' };
   }
   return { active: false, line: 'checkpoints off: workspace not registered' };
+}
+
+/** The connected host's credential status: how many are stored and usable, or why it is not known. */
+function connectedHostCredentialLines(credentials: CredentialAvailability | null): string[] {
+  if (credentials === null) return ['  not shown: the connected host was not reachable.'];
+  if (!credentials.available) return [`  not shown: ${credentials.reason}`];
+  const configured = credentials.credentials.filter((entry) => entry.configured);
+  const unusable = configured.filter((entry) => !entry.usable).map((entry) => entry.key);
+  return [
+    `  stored: ${configured.length} of ${credentials.credentials.length}`,
+    ...(unusable.length > 0 ? [`  stored but not usable: ${unusable.join(', ')}`] : []),
+  ];
 }
 
 /**
@@ -362,6 +378,7 @@ export function buildCliStatusSnapshot(options: CliStatusOptions): CliStatusSnap
     runtimeConnection: common.service,
     externalRuntime: options.externalRuntime ?? null,
     connectedHostMetrics: options.connectedHostMetrics ?? null,
+    connectedHostCredentials: options.connectedHostCredentials ?? null,
     relay: {
       enabled: config.get('relay.enabled') === true,
       url: String(config.get('relay.url') ?? ''),
@@ -430,6 +447,9 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     'Connected host metrics (runtime.metrics.get; read:telemetry):',
     ...connectedHostMetricsLines(snapshot.connectedHostMetrics),
     '',
+    'Connected host credentials (credentials.get; status only, never values):',
+    ...connectedHostCredentialLines(snapshot.connectedHostCredentials),
+    '',
     "Relay (connected host's imported config; not live-verified, see goodvibes-agent relay status):",
     `  relay.enabled: ${yesNo(snapshot.relay.enabled)}`,
     `  relay.url: ${snapshot.relay.url || '(empty)'}`,
@@ -453,7 +473,12 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
           `  ${snapshot.checkpoints.statusLine}`,
           `  unregisteredWorkspaces mode: ${snapshot.checkpoints.unregisteredWorkspaceMode}`,
           '  next goodvibes-agent workspaces list',
-          ...(snapshot.checkpoints.workspaceRegistered ? [] : ['  next goodvibes-agent workspaces register --yes']),
+          ...(snapshot.checkpoints.workspaceRegistered ? [] : [
+            '  next goodvibes-agent workspaces register --yes',
+            ...(snapshot.checkpoints.unregisteredWorkspaceMode === 'off'
+              ? ['  or set checkpoints.unregisteredWorkspaces to "guarded" in Settings (or settings action:"set") to checkpoint unregistered workspaces']
+              : []),
+          ]),
         ]
       : ['  checkpoint posture unknown']),
   ];

@@ -15,7 +15,8 @@ import { extractNativeHeadlessOptions } from './native-headless-options.ts';
 import { headlessRunFlagErrors } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync } from 'node:fs';
-import { connectedHostOperatorTokenPath } from '../runtime/connected-host-auth.ts';
+import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { fetchDaemonCredentialAvailability } from '../config/credential-status.ts';
 import { join } from 'node:path';
 import { AgentConfigManager, type ConfigManager } from '../config/index.ts';
 import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '../config/provider-model.ts';
@@ -218,6 +219,13 @@ export async function prepareShellCliRuntime(
           homeDirectory: bootstrapHomeDirectory,
         })
       : undefined;
+    // One bounded, secret-free read of what the host's store holds, beside the metrics.
+    const connectedHostCredentials = externalRuntime.reachable
+      ? await fetchDaemonCredentialAvailability({
+          baseUrl: externalRuntime.baseUrl,
+          token: readConnectedHostOperatorToken(bootstrapHomeDirectory, externalRuntime.baseUrl).token,
+        })
+      : undefined;
     const effectiveOperatorTokenPath = externalRuntime.operatorToken.present ? externalRuntime.operatorToken.path : operatorTokenPath;
     const checkpoints = {
       // Honest to the checkpoint boundary: a workspace is "registered" for
@@ -243,6 +251,7 @@ export async function prepareShellCliRuntime(
       service,
       externalRuntime,
       connectedHostMetrics,
+      ...(connectedHostCredentials ? { connectedHostCredentials } : {}),
       doctor: cli.command === 'doctor',
       outputFormat: cli.flags.outputFormat,
     };

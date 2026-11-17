@@ -284,7 +284,7 @@ Secret-backed setting writes through `settings action:"set"` store raw values th
 
 `import_goodvibes_settings action:"preview|apply"`, `setup action:"import_settings"` (preview) with `setup action:"import"` (apply), and `workspace action:"run" actionId:"import-goodvibes-tui-settings"` remain available for compatibility or visible form parity; lower-level `agent_harness mode:"run_workspace_action"` remains a detailed compatibility route. Connected-host lifecycle/listener settings are read-only in Agent.
 
-Workspace-checkpoint root and retention guards are configured through a manual `checkpoints` block in `settings.json`. These keys are passed straight through to the platform's workspace checkpoint manager and are not part of the discoverable settings catalog, so `settings action:"list"` does not surface them. The recognized keys are:
+Workspace-checkpoint root and retention guards are ordinary settings: they appear in the settings screen and `settings action:"list" prefix:"checkpoints."`, are changed with `settings action:"set"`, and a wrong value is reported at start (the default then applies). They are passed to the platform's workspace checkpoint manager:
 
 | Key | Default | What it does |
 | --- | --- | --- |
@@ -293,6 +293,7 @@ Workspace-checkpoint root and retention guards are configured through a manual `
 | `checkpoints.allowLargeFirstSnapshot` | off | Opt in to a first snapshot whose full sweep exceeds the file ceiling |
 | `checkpoints.maxFirstSnapshotFiles` | platform default | The ceiling for the first-ever snapshot's file sweep |
 | `checkpoints.autoRetention` | on | Run a retention sweep automatically after each successful checkpoint and once at init |
+| `checkpoints.unregisteredWorkspaces` | `off` | `guarded` takes checkpoints in a workspace that is not registered (see below) |
 
 Any key you omit falls back to the manager's own default. These guards are defense in depth; even a registered workspace can still be refused as too broad or too large.
 

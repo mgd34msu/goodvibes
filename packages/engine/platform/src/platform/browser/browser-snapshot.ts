@@ -283,38 +283,6 @@ function collectElements(options: number | { readonly limit: number; readonly id
 }
 
 
-/** Native method ownership, checked without evaluating replacement accessors. */
-export function retainBrowserMethods(subject: object, keys: readonly string[]) {
-  const chain: object[] = [];
-  let parent: object | null = subject;
-  while (parent) {
-    if (nodeTypes.isProxy(parent) || chain.length === 64) throw new StaleElementError('Browser page ownership is unavailable.', 'Read the page again.');
-    chain.push(parent); parent = Object.getPrototypeOf(parent);
-  }
-  const locate = (key: string) => {
-    for (const owner of chain) {
-      const descriptor = Object.getOwnPropertyDescriptor(owner, key);
-      if (descriptor) {
-        if (!('value' in descriptor)) throw new StaleElementError('Browser page ownership is unavailable.', 'Read the page again.');
-        return { owner, descriptor };
-      }
-    }
-    return { owner: undefined, descriptor: undefined };
-  };
-  const slots = keys.map(key => ({ key, ...locate(key) }));
-  const assertCurrent = () => {
-    for (let index = 0; index < chain.length; index++) {
-      if (Object.getPrototypeOf(chain[index]) !== (chain[index + 1] ?? null)) throw new StaleElementError('Browser page ownership changed.', 'Read the page again.');
-    }
-    for (const slot of slots) {
-      const next = locate(slot.key), before = slot.descriptor, after = next.descriptor;
-      if (next.owner !== slot.owner || before?.value !== after?.value || before?.enumerable !== after?.enumerable
-        || before?.writable !== after?.writable || before?.configurable !== after?.configurable) throw new StaleElementError('Browser page ownership changed.', 'Read the page again.');
-    }
-  };
-  return { assertCurrent, value: (key: string): unknown => slots.find(slot => slot.key === key)?.descriptor?.value };
-}
-
 function plainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

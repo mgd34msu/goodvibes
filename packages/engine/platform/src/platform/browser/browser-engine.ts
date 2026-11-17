@@ -16,7 +16,7 @@ import type { BrowserPageConnection } from './browser-page-connection-data.js';
 import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from './browser-checkout-recovery-data.js';
 import { BrowserControlSnapshotError } from './browser-control-snapshot-data.js';
 import { describeProvisionWork } from './browser-provisioning.js';
-import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSnapshot, retainBrowserMethods, resolveRef, snapshotCredentialEvidence, snapshotHasPasswordInput, snapshotWithheldFrames, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
+import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSnapshot, resolveRef, snapshotCredentialEvidence, snapshotHasPasswordInput, snapshotWithheldFrames, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
 import { containsIssuerCredential } from '../utils/redaction.js';
 import { assertCaptureAllowed, assertPageTextAllowed, fillSecretsIntoPage, type SecretFillKind } from './browser-secret-fill.js';
 import type {
@@ -682,16 +682,9 @@ export class BrowserEngine {
     const work = new BrowserControlIdentityWork({ ...ownership });
     const guard = this.cardGuard;
     if (!guard) throw new BrowserSessionError('Checkout evidence requires the payment redactor.');
-    const methods = retainBrowserMethods(guard, ['redact']);
-    const redact = methods.value('redact');
-    if (typeof redact !== 'function') throw new BrowserSessionError('Checkout redaction is unavailable.');
     const scrub = (text: string): string => {
       if (this.cardGuard !== guard) throw new BrowserSessionError('The original checkout redactor was replaced.');
-      methods.assertCurrent(); work.assertCurrent();
-      const result: unknown = Reflect.apply(redact, guard, [sessionId, pageId, text]);
-      methods.assertCurrent(); work.assertCurrent();
-      if (typeof result !== 'string') throw new BrowserSessionError('Checkout redaction is unavailable.');
-      return result;
+      return guard.redact(sessionId, pageId, text);
     };
     const fail = (error: unknown): never => {
       work.assertCurrent();
@@ -703,7 +696,7 @@ export class BrowserEngine {
       work.bindPage(currentPage, signal);
       const scope = submitTarget ? this.refScope(sessionId, pageId, page, work, ownership, undefined, undefined, true) : undefined;
       const current = (): void => {
-        currentPage(); work.assertCurrent(); methods.assertCurrent();
+        currentPage(); work.assertCurrent();
         scope?.current();
         if (this.cardGuard !== guard) throw new BrowserSessionError('The original checkout redactor was replaced.');
       };
@@ -878,10 +871,9 @@ export class BrowserEngine {
   private refScope(sessionId: string, pageId: string, page: Page, work: BrowserControlIdentityWork, ownership?: BrowserActionLifetime,
     action?: string, args?: Readonly<Record<string, unknown>>, observationOnly = false) {
     const snapshot = this.currentSnapshot(sessionId, pageId), expected = ownership?.snapshotId;
-    const pageMethods = retainBrowserMethods(page, ['url']);
     const current = () => {
-      pageMethods.assertCurrent(); work.assertCurrent(); pageMethods.assertCurrent();
-      const currentUrl = page.url(); pageMethods.assertCurrent(); work.assertCurrent(); pageMethods.assertCurrent();
+      work.assertCurrent();
+      const currentUrl = page.url();
       if (snapshot !== this.currentSnapshot(sessionId, pageId) || !snapshot || currentUrl !== snapshot.url
         || (expected !== undefined && snapshot.snapshotId !== expected)) {
         throw new StaleElementError('The selected browser snapshot is no longer current.', 'Read the page again before acting.');

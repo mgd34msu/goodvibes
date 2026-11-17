@@ -1,8 +1,9 @@
 import { assertCapturedToolReadAccess, assertCapturedToolAccessCurrent, assertCapturedToolInvocationCurrent } from '../shared/captured-input-tools.js';
 import { existsSync, statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { dirname, extname, join, relative, resolve } from 'node:path';
+import { dirname, extname, join, resolve } from 'node:path';
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
+import { isPathWithinRoot } from '../../runtime/shell-paths.js';
 import { walkDir, type WalkDirOptions } from '../../utils/walk-dir.js';
 import type { AnalyzeInput, JsonObject, DiffStatFile } from './types.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -70,11 +71,11 @@ export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** A path resolved against the root, or the refusal when it leaves the root, through a link included (the workspace's one containment rule). */
 export function validatePath(inputPath: string, root: string): string | { error: string } {
   try {
     const resolved = resolve(root, inputPath);
-    const rel = relative(root, resolved);
-    if (rel.startsWith('..') || rel.includes('/..')) {
+    if (!isPathWithinRoot(root, resolved)) {
       return { error: `Path '${inputPath}' is outside the project root` };
     }
     return resolved;

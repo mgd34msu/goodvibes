@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, type BigIntStats } from 'node:fs';
+import { existsSync, readFileSync, statSync, type BigIntStats } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { sourceReadsFromFolded, type SourceReadEvidence } from '../contract/evidence.js';
 import { readBodyWithHostEvidence, returnedReadRows } from '../tools/read/observation.js';
@@ -16,8 +16,9 @@ function none(reason: string, sessionId?: string): undefined {
   return undefined;
 }
 
-const sameFile = (before: BigIntStats, after: BigIntStats): boolean => after.dev === before.dev && after.ino === before.ino && after.mode === before.mode
-  && after.nlink === 1n && after.size === before.size && after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs;
+/** The journal was not replaced or written while it was read (a torn read, not a question of who wrote it). */
+const sameFile = (before: BigIntStats, after: BigIntStats): boolean => after.dev === before.dev && after.ino === before.ino
+  && after.size === before.size && after.mtimeNs === before.mtimeNs && after.ctimeNs === before.ctimeNs;
 
 /**
  * A journal's identity without reading it. Both journals are replaced by
@@ -77,19 +78,18 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
       if (!surfaceDirectory) return none('session not loaded here and no surface directory', sessionId);
       const within = relative(contract.projectRoot, surfaceDirectory);
       if (isAbsolute(within) || within.split('/').includes('..') || !within.startsWith('.goodvibes/')) return none('surface directory is outside the project .goodvibes directory', sessionId);
-      let directory = contract.projectRoot;
-      for (const part of within.split('/')) {
-        directory = join(directory, part);
-        if (existsSync(directory) && (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())) return none('surface directory path is not a plain directory', sessionId);
-      }
-      // The names the session store and the recovery writer give these files.
+      // What makes these journals the owner's is that only the runtime writes
+      // under `.goodvibes/<surface>/`; a file-type check adds nothing to that
+      // (whoever can plant a link there can plant a file). The recovery copy is
+      // found through the recovery writer's own resolver, which takes a file as
+      // this session's only when its header names the session.
       const sessionFile = join(surfaceDirectory, 'sessions', `${sanitizeSessionName(contract.sessionId)}.jsonl`);
       let recoveryFile: string | undefined;
-      try { recoveryFile = recoveryFilePath(join(surfaceDirectory, 'recovery'), contract.sessionId); } catch { /* no recovery name for this id */ }
+      try { recoveryFile = recoveryFilePath(join(surfaceDirectory, 'recovery'), contract.sessionId); } catch { /* no recovery file for this id */ }
       for (const path of [sessionFile, ...(recoveryFile ? [recoveryFile] : [])]) {
         if (!existsSync(path)) continue;
-        const info = lstatSync(path, { bigint: true });
-        if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || lstatSync(join(path, '..')).isSymbolicLink()) return none('session journal is not a single-link regular file', sessionId);
+        const info = statSync(path, { bigint: true });
+        if (!info.isFile()) return none('session journal is not a file', sessionId);
         journals.push({ path, info });
       }
       // The recovery file is a copy of the same conversation written between
@@ -116,9 +116,9 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
           let bytes: Buffer | undefined;
           // A session save can land between the two stats; one more read then sees the saved file.
           for (let attempt = 0; attempt < 2 && bytes === undefined; attempt++) {
-            const before = attempt === 0 ? info : lstatSync(path, { bigint: true });
+            const before = attempt === 0 ? info : statSync(path, { bigint: true });
             const read = readFileSync(path);
-            if (sameFile(before, lstatSync(path, { bigint: true }))) bytes = read;
+            if (sameFile(before, statSync(path, { bigint: true }))) bytes = read;
           }
           if (bytes === undefined) return none('session journal changed while it was read, twice', sessionId);
           sources.push({ path, bytes: bytes.length });
@@ -240,12 +240,12 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
       hostValidation: { operation: 'verify-recorded-owner-reads', source: 'native-host', success: true,
         ownerSessionId: contract.sessionId, inputTree: contract.inputSnapshot.inputTree,
         qualifiedFiles: reads.length, returnedLines: reads.reduce((total, read) => total + read.returnedLines, 0),
-        meaning: 'Actual original-owner tool returns matched the immutable source line by line. This establishes returned scope and cited text, not semantic review quality, tests or native acceptance.' },
+        meaning: 'Read results stored in the owner session (its live conversation, or its saved journal when the session is not loaded here) whose returned lines match the immutable source line by line. This establishes which source text the owner was shown and cites it; the match is checked against file content, not against a host record of the read, and it is not semantic review quality, tests or native acceptance.' },
       sources: !saved.sources.length
         ? [{ operation: 'read-owner-session', success: true, path: `conversation:${contract.sessionId}`, bytes: 0 }]
         : saved.sources.map(({ path, bytes }) => ({ operation: 'read-owner-session', success: true, path, bytes })),
       sourceReads: reads.map(read => ({ ...read, returnedRanges: [...read.returnedRanges] })),
-      meaning: 'Actual recorded original-owner successful read results, qualified line by line against this immutable contract input. Only complete returned source lines with matching host offsets and original text count; requests, declared totals, searches and previews do not. Line labels may be normalized from host-bound plain returns. Quoted contents are limited to cited source ranges. These are earlier owner observations, not worker actions, executed tests, semantic review approval or acceptance of this answer.',
+      meaning: 'Successful read results stored in the owner session, qualified line by line against this immutable contract input. Only complete returned source lines with matching host offsets and original text count; requests, declared totals, searches and previews do not. Line labels may be normalized from host-bound plain returns. Quoted contents are limited to cited source ranges. These are earlier owner observations, not worker actions, executed tests, semantic review approval or acceptance of this answer.',
     };
   };
 }

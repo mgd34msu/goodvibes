@@ -7,12 +7,6 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { activeTokens } from './renderer/theme.js';
 import { describeBlockForReceipt } from './block-description.js';
 export function createBlockContentActions(policy: {
-  /**
-   * Product choice: whether Ctrl+S writes the block to a file. The Agent keeps
-   * block files off and points at copy and `/export`; `saveDisabled` is what it says.
-   */
-  readonly allowSave: boolean;
-  readonly saveDisabled: string;
   readonly noteTouch: (conversation: TerminalConversationManager, key: string) => void;
   readonly bookmarkTarget: (block: BlockMeta) => string;
 }) {
@@ -83,17 +77,6 @@ export function createBlockContentActions(policy: {
     bookmarkManager: BookmarkManager,
   ): void {
     if (!conversationManager) return;
-    if (!policy.allowSave) {
-      const content = conversationManager.getBlockContentAtLine(getAnchorLine());
-      if (!content) {
-        conversationManager.log('[Ctrl+S: No block found nearby]', { fg: activeTokens().textFaint });
-        requestRender();
-        return;
-      }
-      conversationManager.log(policy.saveDisabled, { fg: activeTokens().warning });
-      requestRender();
-      return;
-    }
     const lineIndex = getAnchorLine();
     const nearest = conversationManager.findNearestBlock(lineIndex);
     if (!nearest) {

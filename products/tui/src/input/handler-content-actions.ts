@@ -81,8 +81,6 @@ export function handleDiffApply(
 }
 
 export const { handleCopy, handleBlockCopy, handleBookmark, handleBlockSave, handleBlockToggle } = createBlockContentActions({
-  allowSave: true,
-  saveDisabled: '',
   noteTouch: (conversation, key) => conversation.searchExpansion.noteUserTouch(key),
   bookmarkTarget: describeBlockForReceipt,
 });

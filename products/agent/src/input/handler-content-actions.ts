@@ -12,8 +12,6 @@ import '../utils/clipboard.ts';
 
 
 export const { handleCopy, handleBlockCopy, handleBookmark, handleBlockSave, handleBlockToggle } = createBlockContentActions({
-  allowSave: true,
-  saveDisabled: '',
   noteTouch: (conversation, key) => conversation.noteUserTouch(key),
   bookmarkTarget: (block) => block.collapseKey,
 });

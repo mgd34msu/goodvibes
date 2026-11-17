@@ -24,7 +24,10 @@
  * A minted token is an offer until its first use: it is not listed as a
  * device and does not count toward `device.nodes.maxPaired`, and when nobody
  * uses it within {@link PAIRING_OFFER_LIFETIME_MS} it stops authenticating and
- * is dropped at the next write. The first authentication claims it (one write
+ * is dropped at the next write. A pairing screen that mints again replaces its
+ * own earlier unused offer, and a client that repeats a pairing attempt whose
+ * reply it lost gets that attempt's offer re-issued, so neither adds a second
+ * live credential. The first authentication claims it (one write
  * per device). After that, last-seen is stamped in memory and written with the
  * next write or by a timer, never inside a request. With managed token rotation
  * on ({@link PairingTokenManager.setRotationLimit}), a device token older than
@@ -79,6 +82,12 @@ interface StoredPairingToken {
   offeredUntil?: number | undefined;
   /** The pairing that minted this one, when a paired device (not the owner's own machine) asked. */
   mintedBy?: string | undefined;
+  /**
+   * The client's pairing attempt this offer answers. The same attempt asked
+   * again (its reply was lost) gets this offer with a new secret instead of a
+   * second offer. Cleared by the first use.
+   */
+  attemptId?: string | undefined;
   /** Issued once per exact credential incarnation; never derived by hashing
    * another hash. Kept private alongside its original verifier, not listable. */
   nativeContinuationRevision?: { readonly id: string; readonly createdAt: number; readonly tokenHash: string };
@@ -163,6 +172,26 @@ export interface MintedPairingToken {
   readonly createdAt: number;
 }
 
+export interface MintPairingInput {
+  readonly name: string;
+  /** The pairing id of the paired device asking; absent when the owner's own machine or the shared token mints. */
+  readonly mintedBy?: string | undefined;
+  /**
+   * The offer this producer showed before (a pairing screen's previous QR).
+   * If nobody has used it, it is removed in the same write, so one screen
+   * holds one live offer however often it is opened or refreshed. A device
+   * that already used it is untouched.
+   */
+  readonly replacesOffer?: string | undefined;
+  /**
+   * The client's id for this pairing attempt, sent again when it repeats a
+   * request whose reply it lost. While the offer that attempt produced is
+   * unused, the repeat re-issues that offer (same id, new secret; the lost
+   * secret stops working) instead of adding a second one.
+   */
+  readonly attemptId?: string | undefined;
+}
+
 /** Private native authority identity. It never carries the token or its hash. */
 export interface AuthenticatedNativePairingToken {
   readonly kind: 'pairing-token';
@@ -196,6 +225,13 @@ export class PairingTokenStoreBusyError extends Error {
 }
 
 const PAIRING_ID_PATTERN = /^pair-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** A client's pairing attempt id: opaque, short, printable. */
+const PAIRING_ATTEMPT_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+
+/** Whether `value` can name a pairing attempt (see {@link MintPairingInput.attemptId}). */
+export function isPairingAttemptId(value: unknown): value is string {
+  return typeof value === 'string' && PAIRING_ATTEMPT_ID_PATTERN.test(value);
+}
 
 function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -220,6 +256,7 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
       || (record.offeredUntil !== undefined && (typeof record.offeredUntil !== 'number' || !Number.isFinite(record.offeredUntil)))
       || (record.lastSeenAt !== undefined && (typeof record.lastSeenAt !== 'number' || !Number.isFinite(record.lastSeenAt)))
       || (record.mintedBy !== undefined && (typeof record.mintedBy !== 'string' || !PAIRING_ID_PATTERN.test(record.mintedBy)))
+      || (record.attemptId !== undefined && (typeof record.attemptId !== 'string' || !PAIRING_ATTEMPT_ID_PATTERN.test(record.attemptId)))
       || ids.has(record.id) || hashes.has(record.tokenHash)) {
       throw new Error('pairing token store has an invalid or duplicate record');
     }
@@ -1170,22 +1207,39 @@ export class PairingTokenManager {
    * `mintedBy` is the pairing id of the paired device asking (from its
    * principal); absent when the owner's own machine or shared token mints.
    */
-  mint(input: { readonly name: string; readonly mintedBy?: string | undefined }): MintedPairingToken {
+  mint(input: MintPairingInput): MintedPairingToken {
     return this.mintInternal(input, { enforceCap: true });
   }
 
-  private mintInternal(
-    input: { readonly name: string; readonly mintedBy?: string | undefined },
-    options: { readonly enforceCap: boolean },
-  ): MintedPairingToken {
+  private mintInternal(input: MintPairingInput, options: { readonly enforceCap: boolean }): MintedPairingToken {
     let replaced = false;
     return this.mutate((snapshot) => {
+      replaced = false;
       if (input.mintedBy !== undefined && !snapshot.tokens.some(record => record.id === input.mintedBy)) {
         throw new PairingMinterRevokedError();
       }
       let replacedId: string | undefined;
       const now = Date.now();
       dropExpiredOffers(snapshot, now);
+      if (input.replacesOffer !== undefined) {
+        const before = snapshot.tokens.length;
+        snapshot.tokens = snapshot.tokens.filter(record => record.id !== input.replacesOffer || record.offeredUntil === undefined);
+        if (snapshot.tokens.length !== before) replaced = true;
+      }
+      const attemptId = input.attemptId;
+      const repeated = attemptId === undefined ? undefined
+        : snapshot.tokens.find(record => record.offeredUntil !== undefined && record.attemptId === attemptId && record.mintedBy === input.mintedBy);
+      if (repeated) {
+        // The reply to this attempt was lost: the same offer goes out again under a
+        // new secret, so nothing is added and the secret nobody received never works.
+        // A new secret is a new credential incarnation, so no earlier one is carried over.
+        const token = generateTokenValue();
+        const reissued: StoredPairingToken = { ...repeated, tokenHash: hashToken(token), offeredUntil: now + PAIRING_OFFER_LIFETIME_MS };
+        delete reissued.nativeContinuationRevision;
+        snapshot.tokens = snapshot.tokens.map(record => record === repeated ? reissued : record);
+        replaced = true;
+        return { value: { id: reissued.id, name: reissued.name, token, createdAt: reissued.createdAt }, changed: true };
+      }
       const cap = options.enforceCap ? this.currentCap() : null;
       // An offer nobody has used yet is not a paired device and does not count toward the cap.
       const paired = snapshot.tokens.filter(record => record.offeredUntil === undefined);
@@ -1205,6 +1259,7 @@ export class PairingTokenManager {
         id: `pair-${randomUUID()}`, name: input.name.trim() || 'Unnamed device',
         tokenHash: hashToken(token), createdAt: now, offeredUntil: now + PAIRING_OFFER_LIFETIME_MS,
         ...(input.mintedBy !== undefined && input.mintedBy !== replacedId ? { mintedBy: input.mintedBy } : {}),
+        ...(attemptId !== undefined ? { attemptId } : {}),
       };
       // A device paired again keeps answering for what its old pairing minted.
       if (replacedId !== undefined) for (const item of snapshot.tokens) if (item.mintedBy === replacedId) item.mintedBy = record.id;
@@ -1224,8 +1279,15 @@ export class PairingTokenManager {
    * outcome than being one over a cap that no longer describes reality. A new
    * device pairing for the first time is still bounded.
    */
-  mintForMigration(input: { readonly name: string; readonly mintedBy?: string | undefined }): MintedPairingToken {
+  mintForMigration(input: MintPairingInput): MintedPairingToken {
     return this.mintInternal(input, { enforceCap: false });
+  }
+
+  /** Whether `id` is an offer nobody has used yet and that has not expired. */
+  isOpenOffer(id: string): boolean {
+    this.refreshIfChanged();
+    const offeredUntil = this.snapshot.tokens.find(item => item.id === id)?.offeredUntil;
+    return offeredUntil !== undefined && offeredUntil > Date.now();
   }
 
   /**
@@ -1259,6 +1321,7 @@ export class PairingTokenManager {
           const found = current.tokens.find(item => item.tokenHash === hash);
           if (!found || isExpiredOffer(found, now)) return { value: undefined, changed: false };
           found.offeredUntil = undefined;
+          found.attemptId = undefined;
           found.lastSeenAt = now;
           return { value: found, changed: true };
         }, true, () => true);

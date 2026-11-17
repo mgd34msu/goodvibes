@@ -88,7 +88,7 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
   if (hostUrl !== undefined) {
     const pairing = readPairing(homeDirectory, hostUrl);
     if (pairing.status === 'paired') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: pairing.token, expectedPrincipalId: `pairing:${pairing.tokenId}` }, pairing);
-    if (pairing.status === 'unknown') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'A prior pairing outcome is unknown; no credential fallback or remint is allowed.' }, pairing);
+    if (pairing.status === 'unknown') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The reply to this Agent\'s pairing request was lost. Run goodvibes-agent setup pair to repeat the same request; the host answers it with the credential it made, or makes it now.' }, pairing);
     if (pairing.status === 'unavailable') return selected({ path: 'Agent host-bound pairing store', source: 'pairing', present: true, token: null, error: 'The Agent host-bound pairing store could not be read safely.' }, pairing);
   }
   const path = connectedHostOperatorTokenPath(homeDirectory);

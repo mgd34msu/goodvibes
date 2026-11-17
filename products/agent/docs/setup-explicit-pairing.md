@@ -35,19 +35,23 @@ visible draft, the abandoned pairing line is drained through Enter/Escape
 before that surface can accept an answer. Cancellation suppresses late preview and success
 messages. The durable pairing state remains authoritative: an unknown migration
 outcome remains unknown, and a stored credential survives interrupted verification.
-Run `/setup pair` or `goodvibes-agent setup status` to inspect/reverify rather than
-retrying or revoking. Pairing success does not establish provider, workspace,
+Run `/setup pair` or `goodvibes-agent setup status` to settle or reverify it rather
+than starting a new pairing or revoking. Pairing success does not establish provider, workspace,
 Jev or execution readiness.
 
 Two outcomes are the exception to "remains unknown". When the host answers the
 migration request with a definite refusal (a 4xx other than a timeout or a
 conflict) or is not listening at all, nothing was created: the attempt is
-cleared, the result says `rejected`, and the next preview pairs normally. An
-unknown outcome that stays after a lost reply is cleared only by the owner:
-`/setup pair --apply` (or `goodvibes-agent setup pair --apply`) on an unknown
-host offers a `CLEAR ...` phrase that forgets the local marker. Do that only
-after checking on the host that no pairing token exists for the attempt; a
-token that does exist stays valid until you revoke it there.
+cleared, the result says `rejected`, and the next preview pairs normally. The
+migration request carries the attempt's id, so an unknown outcome after a lost
+reply is settled by the next `/setup pair` (or `goodvibes-agent setup pair`):
+it sends the same request again under the same id, and the host answers it with
+the credential that attempt produced (same token id, new secret) while nobody
+has used it, or mints the first one if the earlier request never arrived. The
+result is stored and verified as usual; a second credential is never created.
+If the repeat cannot be made, `--apply` offers a `CLEAR ...` phrase that
+forgets the local marker; a credential the host made for the attempt was never
+received, so it cannot sign in and lapses unused within 15 minutes.
 
 When the host no longer accepts the stored device credential (it was revoked
 there, or the daemon was reset), `setup pair` says `credential-rejected`, and

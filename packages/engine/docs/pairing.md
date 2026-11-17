@@ -303,6 +303,11 @@ a name) to mint its own per-device token without disrupting any other client sti
 token. This does **not** revoke the shared token; that is the separate, explicit
 `pairing.tokens.revokeShared` call, which an operator makes once every client has migrated.
 
+The client also sends an `attemptId` and sends the same one again if the reply is lost (a
+timeout, a dropped connection, a daemon restart). While the token that attempt produced is
+unused, the repeat returns that token (same id) under a new secret, so the lost secret never
+works and no second token is created.
+
 ---
 
 ## Companion connects
@@ -501,10 +506,13 @@ a QR of the `#pair=<token>` deep link plus the offer set.
 /qrcode
 ```
 
-Each open mints its own named per-device token, so `/qrcode regenerate` no longer rotates a
-shared token the way it once did; it simply re-opens the modal, which mints a fresh token and QR
-in place. The token shown by a previous open stays valid until it is explicitly revoked in the
-device management surface (`/settings` → security → devices, or `pairing.tokens.delete`).
+The token the modal shows is an offer: no device is added until one uses it, and an unused
+offer stops working after 15 minutes. Reopening the modal shows the same offer while it is
+unused and unexpired, so looking at the QR again adds nothing. Pressing `r` shows a new offer in
+its place; the one it replaces stops working unless a device already paired with it. A device
+that paired stays until it is revoked in the device management surface (`/settings` → security
+→ devices, or `pairing.tokens.delete`). `device.nodes.maxPaired` applies to the TUI's own
+pairings as it does to the daemon's: an unused offer does not count toward it.
 
 ### Daemon CLI `pair` command
 

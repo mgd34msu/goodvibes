@@ -44,6 +44,10 @@ function metadataText(binding: AutomationRouteBinding, key: string): string | un
  */
 export function isOwnerConversation(binding: AutomationRouteBinding, owner: string | undefined): boolean {
   if (binding.surfaceKind === 'ntfy') return true;
+  // A webhook route describes itself: its user id and conversation kind are
+  // whatever the caller sent, and its answer goes to a callback the caller
+  // chose. Nothing on it can prove a private conversation with the owner.
+  if (binding.surfaceKind === 'webhook') return false;
   if (owner === undefined) return false;
   const sender = metadataText(binding, 'userId') ?? metadataText(binding, 'fromId')
     ?? metadataText(binding, 'senderId') ?? metadataText(binding, 'from');

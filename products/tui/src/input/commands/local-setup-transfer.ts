@@ -272,6 +272,41 @@ export function applySetupTransferChanges(
   }
 }
 
+/** A setting the daemon refused, with its answer. */
+export interface RefusedSetupTransferChange {
+  readonly key: string;
+  readonly error: unknown;
+}
+
+/**
+ * Wait for the daemon's answer to the daemon-owned settings the import sent
+ * (each is forwarded and answered after the write loop). When it refused any,
+ * every other written setting is put back, so the import stays all-or-nothing.
+ * `notRestored` names a setting whose restore the daemon refused in turn.
+ */
+export async function settleSetupTransferChanges(
+  configManager: CommandContext['platform']['configManager'],
+  changes: readonly SetupTransferChange[],
+): Promise<{ readonly refused: readonly RefusedSetupTransferChange[]; readonly notRestored: readonly string[] }> {
+  const keys = new Set<string>(changes.map((change) => change.key));
+  const refused = (await configManager.settleDaemonWrites()).filter((entry) => keys.has(entry.key));
+  if (refused.length === 0) return { refused, notRestored: [] };
+  // The manager already put each refused key back in this process's view.
+  const refusedKeys = new Set(refused.map((entry) => entry.key));
+  const notRestored = await restoreSetupTransferChanges(configManager, changes.filter((change) => !refusedKeys.has(change.key)));
+  return { refused, notRestored };
+}
+
+/** Put every given change back and wait for the daemon's answers; returns the settings it would not take back. */
+export async function restoreSetupTransferChanges(
+  configManager: CommandContext['platform']['configManager'],
+  changes: readonly SetupTransferChange[],
+): Promise<readonly string[]> {
+  revertSetupTransferChanges(configManager, changes);
+  const keys = new Set<string>(changes.map((change) => change.key));
+  return (await configManager.settleDaemonWrites()).filter((entry) => keys.has(entry.key)).map((entry) => entry.key);
+}
+
 /** Put the previous value back for every given change, newest first. Best effort: a failed restore never hides the original error. */
 export function revertSetupTransferChanges(
   configManager: CommandContext['platform']['configManager'],

@@ -11,7 +11,8 @@ import {
   exportSetupTransferBundle,
   inspectSetupTransferBundle,
   planSetupTransferImport,
-  revertSetupTransferChanges,
+  restoreSetupTransferChanges,
+  settleSetupTransferChanges,
 } from './local-setup-transfer.ts';
 import { buildSetupReviewSnapshot, exportSetupSupportBundle, renderSetupSandboxReview } from './local-setup-review.ts';
 import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
@@ -255,6 +256,17 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
             const { bundle, changes, ignoredKeys, skippedParts } = plan;
             const replacedFiles = setupTransferReplacedFiles(bundle);
             applySetupTransferChanges(ctx.platform.configManager, changes);
+            // A daemon setting is answered by the daemon after the loop: a refusal undoes the whole import before any file is replaced.
+            const settled = await settleSetupTransferChanges(ctx.platform.configManager, changes);
+            if (settled.refused.length > 0) {
+              ctx.print([
+                `Setup transfer bundle not imported: the daemon refused ${settled.refused.length} setting(s), so ${settled.notRestored.length > 0 ? 'the other settings were put back where it allowed' : 'every setting was put back'} and no file was replaced.`,
+                ...settled.refused.map((entry) => `  ${entry.key}: ${summarizeError(entry.error)}`),
+                ...(settled.notRestored.length > 0 ? [`  these settings could not be put back and still hold the imported value: ${settled.notRestored.join(', ')}`] : []),
+                'Change or remove those settings in the bundle (or set them on the daemon machine) and import again.',
+              ].join('\n'));
+              return;
+            }
             const fileWrites: Array<{ path: string; body: unknown }> = [];
             if (bundle.services) fileWrites.push({ path: getShellPaths().resolveUserPath('tui', 'services.json'), body: bundle.services });
             if (bundle.ecosystem?.plugins) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'ecosystem', 'plugins.json'), body: bundle.ecosystem.plugins });
@@ -268,7 +280,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
                 replaced.push({ path: write.path, previous });
               }
             } catch (error) {
-              revertSetupTransferChanges(ctx.platform.configManager, changes);
+              const settingsNotRestored = await restoreSetupTransferChanges(ctx.platform.configManager, changes);
               const notRestored: string[] = [];
               for (const entry of replaced.reverse()) {
                 try {
@@ -278,7 +290,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
                   notRestored.push(entry.path);
                 }
               }
-              ctx.print(`Failed to import setup transfer bundle: ${summarizeError(error)}. Settings were restored${notRestored.length > 0 ? `; these files could not be put back and still hold the imported contents: ${notRestored.join(', ')}` : ' and any files already replaced were put back'}.`);
+              ctx.print(`Failed to import setup transfer bundle: ${summarizeError(error)}. ${settingsNotRestored.length > 0 ? `Settings were restored except ${settingsNotRestored.join(', ')}, which the daemon would not take back` : 'Settings were restored'}${notRestored.length > 0 ? `; these files could not be put back and still hold the imported contents: ${notRestored.join(', ')}` : ' and any files already replaced were put back'}.`);
               return;
             }
             ctx.print(`Imported setup transfer bundle from ${targetPath}: ${changes.length} setting(s) changed, ${replacedFiles.length} file(s) replaced${skippedParts.length > 0 ? `, ${skippedParts.join(' and ')} kept as they are here (the bundle masked credentials in them; move those credentials into the secret store with /secrets link on the exporting machine and export again)` : ''}${ignoredKeys.length > 0 ? `, ${ignoredKeys.length} unknown setting(s) skipped (${ignoredKeys.join(', ')})` : ''}.`);

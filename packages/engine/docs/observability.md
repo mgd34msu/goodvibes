@@ -317,15 +317,17 @@ const providerStatus = selectDomainHealth(state, 'providerHealth');
 
 ### SLO collector
 
-`SloCollector` measures three end-to-end SLO metrics from the runtime event stream:
+`SloCollector` measures three end-to-end SLO metrics from the runtime event stream (one listener on the `turn` domain, one on `gate`):
 
-| SLO Metric | Key |
-|---|---|
-| Turn start latency | `slo.turn_start.p95` |
-| Cancel latency | `slo.cancel.p95` |
-| Permission decision | `slo.permission_decision.p95` |
+| SLO Metric | Key | Measured from |
+|---|---|---|
+| Turn start latency | `slo.turn_start.p95` | `TURN_SUBMITTED` to the turn's first `STREAM_DELTA` |
+| Cancel latency | `slo.cancel.p95` | the cancel request (`TURN_CANCEL.requestedAt`) to `TURN_CANCEL` |
+| Permission decision | `slo.permission_decision.p95` | `GATE_REQUESTED` to `DECISION_EMITTED` for the same call |
 
 Metrics are computed as p95 over a rolling 200-sample window.
+
+Every process that answers `/doctor <symptom>` (both terminal apps) or `ops.doctor` (the daemon) builds one collector with its check context. The stuck-turn runbook reports time to first output and time to stop after cancel; the permission-deadlock runbook reports time to a permission decision. Each reads `ok` within the budget in `DEFAULT_BUDGETS`, a warning above it, and "no measurement yet" before the first sample.
 
 ```ts
 const collector = new SloCollector(eventBus);
@@ -340,12 +342,6 @@ const counts = collector.getSampleCounts();
 
 collector.dispose();
 ```
-
-SLO status classification for dashboard rows:
-- `ok`: p95 within target
-- `warn`: p95 > target / 1.2 (within 20% of target)
-- `violated`: p95 > target
-- `no_data`: no samples collected yet
 
 ---
 

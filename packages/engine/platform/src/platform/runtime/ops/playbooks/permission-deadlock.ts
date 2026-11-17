@@ -5,6 +5,8 @@
  */
 import type { Playbook } from '../types.js';
 import { safeCheck } from '../safe-check.js';
+import { latencyCheckResult } from '../latency-check.js';
+import { SLO_METRICS } from '../../perf/slo-collector.js';
 
 /** An approval older than this has been waiting long enough to hold up work. */
 const LONG_WAIT_MS = 30_000;
@@ -62,6 +64,12 @@ export const permissionDeadlockPlaybook: Playbook = {
           context: { heldCalls: held, mode: permissions.mode },
         };
       }),
+    },
+    {
+      id: 'permission.decision-latency',
+      label: 'Time to a permission decision',
+      description: 'The p95 time from a call reaching the gate to the gate\'s decision (allow, ask or deny) in this process.',
+      run: (ctx) => safeCheck(() => latencyCheckResult(ctx, SLO_METRICS.PERMISSION_DECISION, 'Time to a permission decision')),
     },
   ],
   steps: [

@@ -84,7 +84,7 @@ export const DEFAULT_BUDGETS: PerfBudget[] = [
     unit: 'ms',
     tolerance: 3,
     description:
-      'p95 duration from TURN_CANCEL to confirmed turn stop must be under 500ms. ' +
+      'p95 duration from the cancel request to the turn\'s TURN_CANCEL must be under 500ms. ' +
       'Sustained violations indicate the cancellation path is blocked or too slow.',
   },
   {

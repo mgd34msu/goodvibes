@@ -178,8 +178,12 @@ export type TurnEvent =
     /** Machine code of the failure (a connection errno such as ECONNREFUSED), when it had one. */
     code?: string | undefined;
   }
-  /** Turn was cancelled by the user or system. */
-  | { type: 'TURN_CANCEL'; turnId: string; reason?: string; stopReason: Extract<TurnStopReason, 'cancelled'> };
+  /**
+   * Turn was cancelled by the user or system. `requestedAt` (epoch ms) is when
+   * the cancel was asked for, so the time the turn took to stop is the
+   * envelope's `ts` minus it.
+   */
+  | { type: 'TURN_CANCEL'; turnId: string; reason?: string; stopReason: Extract<TurnStopReason, 'cancelled'>; requestedAt?: number | undefined };
 
 /**
  * Optional provenance metadata on TURN_COMPLETED. The `memory.recordIds` path

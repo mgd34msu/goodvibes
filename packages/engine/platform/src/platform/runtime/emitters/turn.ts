@@ -218,7 +218,7 @@ export function emitTurnError(
 export function emitTurnCancel(
   bus: RuntimeEventBus,
   ctx: EmitterContext,
-  data: { turnId: string; reason?: string; stopReason: 'cancelled' }
+  data: { turnId: string; reason?: string; stopReason: 'cancelled'; requestedAt?: number | undefined }
 ): void {
   bus.emit('turn', createEventEnvelope('TURN_CANCEL', { type: 'TURN_CANCEL', ...data }, ctx));
 }

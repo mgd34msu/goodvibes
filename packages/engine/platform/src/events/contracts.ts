@@ -86,7 +86,7 @@ const EVENT_RULES: ReadonlyArray<readonly [EventTypeName, readonly FieldSpec[]]>
   rules('STREAM_DELTA', { turnId: str, content: str, accumulated: str, reasoning: optStr }),
   rules('TURN_COMPLETED', { turnId: str, response: str, stopReason: str, metadata: optObj }),
   rules('TURN_ERROR', { turnId: str, error: str, stopReason: str, status: optNum, code: optStr }),
-  rules('TURN_CANCEL', { turnId: str, stopReason: str, reason: optStr }),
+  rules('TURN_CANCEL', { turnId: str, stopReason: str, reason: optStr, requestedAt: optNum }),
   rules('TOOL_RECEIVED', { callId: str, turnId: str, tool: str, args: obj }),
   rules('TOOL_SUCCEEDED', { callId: str, turnId: str, tool: str, durationMs: num }),
   rules('TOOL_FAILED', { callId: str, turnId: str, tool: str, error: str, durationMs: num }),

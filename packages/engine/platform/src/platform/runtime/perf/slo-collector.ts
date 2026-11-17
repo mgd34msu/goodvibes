@@ -1,16 +1,17 @@
 /**
  * SloCollector, collects SLO duration measurements from runtime events.
  *
- * Listens to the RuntimeEventBus and tracks three critical path latencies:
+ * Two domain listeners on the RuntimeEventBus track three critical path latencies:
  * - turn_start_ms: TURN_SUBMITTED → first STREAM_DELTA
- * - cancel_ms: TURN_CANCEL → TURN_COMPLETED or TURN_ERROR
+ * - cancel_ms: the cancel request → TURN_CANCEL (the event carries `requestedAt`)
  * - permission_decision_ms: GATE_REQUESTED → DECISION_EMITTED
  *
  * Maintains a capped rolling window of measurements per SLO and exposes
- * p95 values for PerfMonitor integration via `getMetrics()`.
+ * p95 values through `getMetrics()`. The doctor's check context builds one
+ * per process, so `/doctor` and `ops.doctor` report the measured latency.
  */
 
-import type { RuntimeEventBus, RuntimeEventEnvelope, AnyRuntimeEvent } from '../events/index.js';
+import type { RuntimeEventBus } from '../events/index.js';
 import type { PerfMetric } from './types.js';
 
 /** Metric key constants for each SLO measurement. */
@@ -25,9 +26,9 @@ const WINDOW_SIZE = 200;
 
 /**
  * Maximum age for a pending map entry before it is swept as stale.
- * Entries that never receive a follow-up event (e.g. TURN_CANCEL without
- * TURN_COMPLETED due to a connection drop) are evicted after this duration
- * to prevent unbounded memory growth.
+ * Entries that never receive a follow-up event (a turn that ends without
+ * output, a gate request whose decision is never published) are evicted after
+ * this duration so the maps stay bounded.
  */
 const PENDING_TTL_MS = 60_000;
 
@@ -56,59 +57,28 @@ function appendSample(window: number[], sample: number): void {
   }
 }
 
-/** Minimal shape for an untyped envelope used for payload extraction. */
-type RawEnvelope = RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>;
-
 /**
- * Coerce a strongly-typed bus callback argument to the raw envelope shape.
- *
- * The RuntimeEventBus `on()` callback receives a per-event typed envelope,
- * but SloCollector reads only generic fields (`.ts`, `.payload.*`). The
- * double-cast is intentional: we lose specificity to gain a uniform access
- * pattern, isolated to this single conversion site.
- */
-function toRaw(env: unknown): RawEnvelope {
-  return env as unknown as RawEnvelope;
-}
-
-/**
- * Safely extract a named field from an envelope payload.
- * Returns `undefined` when the field does not exist on the payload.
- */
-function getField<T>(envelope: RawEnvelope, key: string): T | undefined {
-  const payload = envelope.payload as Record<string, unknown>;
-  return payload[key] as T | undefined;
-}
-
-/**
- * SloCollector subscribes to RuntimeEventBus events and tracks per-SLO
- * duration samples in rolling windows. Call `getMetrics()` to retrieve
- * current p95 values for ComponentHealthMonitor extra metrics.
+ * SloCollector subscribes to the turn and gate domains and tracks per-SLO
+ * duration samples in rolling windows. Call `getMetrics()` to read the
+ * current p95 values.
  *
  * @example
  * ```ts
  * const collector = new SloCollector(bus);
  * const metrics = collector.getMetrics();
- * const report = monitor.evaluate({ uiPerf, extraMetrics: Object.fromEntries(
- *   metrics.map(m => [m.name, m.value])
- * )});
  * collector.dispose();
  * ```
  */
 export class SloCollector {
   /** Rolling window of turn_start_ms samples (TURN_SUBMITTED → first STREAM_DELTA). */
   private readonly _turnStartSamples: number[] = [];
-  /** Rolling window of cancel_ms samples (TURN_CANCEL → TURN_COMPLETED/ERROR). */
+  /** Rolling window of cancel_ms samples (cancel request → TURN_CANCEL). */
   private readonly _cancelSamples: number[] = [];
   /** Rolling window of permission_decision_ms samples (GATE_REQUESTED → DECISION_EMITTED). */
   private readonly _permissionSamples: number[] = [];
 
-  /** Pending turn start timestamps keyed by turnId. */
+  /** Pending turn start timestamps keyed by turnId, removed at the first delta or the turn's end. */
   private readonly _pendingTurnStart = new Map<string, number>();
-  /** Turns that have received their first STREAM_DELTA, with that delta's time so the sweep can age them out. */
-  private readonly _seenFirstDelta = new Map<string, number>();
-  /** Pending cancel timestamps keyed by turnId (set on TURN_CANCEL). */
-  private readonly _pendingCancel = new Map<string, number>();
   /** Pending permission request timestamps keyed by callId. */
   private readonly _pendingPermission = new Map<string, number>();
 
@@ -118,150 +88,70 @@ export class SloCollector {
   /** Timer handle for the periodic stale-entry sweep. */
   private _sweepTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(bus: RuntimeEventBus) {
+  constructor(bus: Pick<RuntimeEventBus, 'onDomain'>) {
     this._subscribe(bus);
     this._sweepTimer = setInterval(() => this._sweepPending(), SWEEP_INTERVAL_MS);
     // Don't block clean process exit.
-    (this._sweepTimer as unknown as { unref?: () => void }).unref?.();
+    this._sweepTimer.unref?.();
   }
 
   /**
-   * Attach all event listeners to the bus.
+   * Attach the two domain listeners. Each event costs one switch and at most
+   * one map write.
    */
-  private _subscribe(bus: RuntimeEventBus): void {
-    // ── turn_start_ms ───────────────────────────────────────────────────────
-    this._unsubs.push(
-      bus.on('TURN_SUBMITTED', (env) => {
-        const e = toRaw(env);
-        const turnId = getField<string>(e, 'turnId');
-        if (turnId !== undefined) {
-          this._pendingTurnStart.set(turnId, e.ts);
-          this._seenFirstDelta.delete(turnId);
+  private _subscribe(bus: Pick<RuntimeEventBus, 'onDomain'>): void {
+    this._unsubs.push(bus.onDomain('turn', (envelope) => {
+      const event = envelope.payload;
+      switch (event.type) {
+        case 'TURN_SUBMITTED':
+          this._pendingTurnStart.set(event.turnId, envelope.ts);
+          return;
+        case 'STREAM_DELTA': {
+          // Only the first delta of a turn finds its start; later deltas find nothing.
+          const startAt = this._pendingTurnStart.get(event.turnId);
+          if (startAt === undefined) return;
+          appendSample(this._turnStartSamples, envelope.ts - startAt);
+          this._pendingTurnStart.delete(event.turnId);
+          return;
         }
-      })
-    );
-
-    this._unsubs.push(
-      bus.on('STREAM_DELTA', (env) => {
-        const e = toRaw(env);
-        const turnId = getField<string>(e, 'turnId');
-        if (turnId === undefined) return;
-        if (this._seenFirstDelta.has(turnId)) return;
-        this._seenFirstDelta.set(turnId, e.ts);
-        const startAt = this._pendingTurnStart.get(turnId);
-        if (startAt !== undefined) {
-          appendSample(this._turnStartSamples, e.ts - startAt);
-          this._pendingTurnStart.delete(turnId);
-        }
-      })
-    );
-
-    // Clean up stale pending turn starts when a turn ends without streaming
-    this._unsubs.push(
-      bus.on('PREFLIGHT_FAIL', (env) => {
-        const e = toRaw(env);
-        const turnId = getField<string>(e, 'turnId');
-        if (turnId !== undefined) {
-          this._pendingTurnStart.delete(turnId);
-          this._seenFirstDelta.delete(turnId);
-          this._pendingCancel.delete(turnId);
-        }
-      })
-    );
-
-    this._unsubs.push(
-      bus.on('TURN_ERROR', (env) => {
-        const e = toRaw(env);
-        const turnId = getField<string>(e, 'turnId');
-        if (turnId !== undefined) {
-          this._pendingTurnStart.delete(turnId);
-          this._seenFirstDelta.delete(turnId);
-          // Resolve cancel if pending
-          const cancelAt = this._pendingCancel.get(turnId);
-          if (cancelAt !== undefined) {
-            appendSample(this._cancelSamples, e.ts - cancelAt);
-            this._pendingCancel.delete(turnId);
+        case 'TURN_CANCEL':
+          this._pendingTurnStart.delete(event.turnId);
+          if (event.requestedAt !== undefined && envelope.ts >= event.requestedAt) {
+            appendSample(this._cancelSamples, envelope.ts - event.requestedAt);
           }
-        }
-      })
-    );
+          return;
+        case 'PREFLIGHT_FAIL':
+        case 'TURN_ERROR':
+        case 'TURN_COMPLETED':
+          this._pendingTurnStart.delete(event.turnId);
+          return;
+        default:
+          return;
+      }
+    }));
 
-    this._unsubs.push(
-      bus.on('TURN_COMPLETED', (env) => {
-        const e = toRaw(env);
-        const turnId = getField<string>(e, 'turnId');
-        if (turnId !== undefined) {
-          this._pendingTurnStart.delete(turnId);
-          this._seenFirstDelta.delete(turnId);
-          // Resolve cancel if pending
-          const cancelAt = this._pendingCancel.get(turnId);
-          if (cancelAt !== undefined) {
-            appendSample(this._cancelSamples, e.ts - cancelAt);
-            this._pendingCancel.delete(turnId);
-          }
-        }
-      })
-    );
-
-    // ── cancel_ms ───────────────────────────────────────────────────────────
-    this._unsubs.push(
-      bus.on('TURN_CANCEL', (env) => {
-        const e = toRaw(env);
-        const turnId = getField<string>(e, 'turnId');
-        if (turnId !== undefined) {
-          this._pendingCancel.set(turnId, e.ts);
-        }
-      })
-    );
-
-    // ── permission_decision_ms ──────────────────────────────────────────────
-    this._unsubs.push(
-      bus.on('GATE_REQUESTED', (env) => {
-        const e = toRaw(env);
-        const callId = getField<string>(e, 'callId');
-        if (callId !== undefined) {
-          this._pendingPermission.set(callId, e.ts);
-        }
-      })
-    );
-
-    this._unsubs.push(
-      bus.on('DECISION_EMITTED', (env) => {
-        const e = toRaw(env);
-        const callId = getField<string>(e, 'callId');
-        if (callId !== undefined) {
-          const startAt = this._pendingPermission.get(callId);
-          if (startAt !== undefined) {
-            appendSample(this._permissionSamples, e.ts - startAt);
-            this._pendingPermission.delete(callId);
-          }
-        }
-      })
-    );
+    this._unsubs.push(bus.onDomain('gate', (envelope) => {
+      const event = envelope.payload;
+      if (event.type === 'GATE_REQUESTED') {
+        this._pendingPermission.set(event.callId, envelope.ts);
+        return;
+      }
+      if (event.type === 'DECISION_EMITTED') {
+        const startAt = this._pendingPermission.get(event.callId);
+        if (startAt === undefined) return;
+        appendSample(this._permissionSamples, envelope.ts - startAt);
+        this._pendingPermission.delete(event.callId);
+      }
+    }));
   }
 
   /**
-   * Sweep all pending maps and evict entries older than PENDING_TTL_MS.
-   *
-   * Called periodically by the sweep timer to prevent unbounded memory growth
-   * when expected follow-up events (e.g. TURN_COMPLETED after TURN_CANCEL)
-   * never arrive due to connection drops or unexpected process termination.
+   * Sweep the pending maps and evict entries older than PENDING_TTL_MS.
    */
   private _sweepPending(): void {
     const cutoff = Date.now() - PENDING_TTL_MS;
     for (const [key, ts] of this._pendingTurnStart) {
-      if (ts < cutoff) {
-        this._pendingTurnStart.delete(key);
-        this._seenFirstDelta.delete(key);
-      }
-    }
-    // A turn that streamed leaves _pendingTurnStart at its first delta, so only
-    // this pass reaps it when no terminal event ever arrives.
-    for (const [key, ts] of this._seenFirstDelta) {
-      if (ts < cutoff) this._seenFirstDelta.delete(key);
-    }
-    for (const [key, ts] of this._pendingCancel) {
-      if (ts < cutoff) this._pendingCancel.delete(key);
+      if (ts < cutoff) this._pendingTurnStart.delete(key);
     }
     for (const [key, ts] of this._pendingPermission) {
       if (ts < cutoff) this._pendingPermission.delete(key);
@@ -272,12 +162,6 @@ export class SloCollector {
    * Returns current p95 values as PerfMetric entries for the SLO metrics that have samples.
    * A metric with no samples is left out, so a budget check reads "no data" rather than a
    * 0 ms p95 that would pass any threshold; `getSampleCounts()` reports the empty ones.
-   *
-   * Intended for use with `PerfMonitor.evaluate()` via the `extraMetrics` field:
-   * ```ts
-   * const extras = Object.fromEntries(collector.getMetrics().map(m => [m.name, m.value]));
-   * monitor.evaluate({ uiPerf, extraMetrics: extras });
-   * ```
    */
   public getMetrics(): PerfMetric[] {
     const now = Date.now();
@@ -317,8 +201,6 @@ export class SloCollector {
     }
     this._unsubs.length = 0;
     this._pendingTurnStart.clear();
-    this._seenFirstDelta.clear();
-    this._pendingCancel.clear();
     this._pendingPermission.clear();
   }
 }

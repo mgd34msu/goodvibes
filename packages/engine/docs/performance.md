@@ -327,12 +327,12 @@ Tool executor overhead measures scheduling, dispatch, and teardown phases only, 
 
 ### SLO gates
 
-Three end-to-end SLO latency gates are enforced at runtime via `SloCollector`:
+Three end-to-end SLO latencies are measured at runtime by `SloCollector` and reported by `/doctor` and `ops.doctor` against these budgets:
 
 | SLO | Target (p95) |
 |---|---|
 | Turn start (TURN_SUBMITTED → first STREAM_DELTA) | 2,000 ms |
-| Cancel latency (TURN_CANCEL → TURN_COMPLETED or TURN_ERROR) | 500 ms |
+| Cancel latency (cancel request → TURN_CANCEL) | 500 ms |
 | Permission decision (GATE_REQUESTED → DECISION_EMITTED) | 2,500 ms |
 
 SLO metrics are computed over a rolling window of 200 samples. The permission decision target is wider than the others because the span includes one Jev stakes reading for a side-effecting call. A measurement still waiting for its end event after 60 seconds is dropped by a sweep that runs every 30 seconds, so stale correlation entries cannot distort p95 values. An SLO with no samples yet reads as no data, not as 0 ms.

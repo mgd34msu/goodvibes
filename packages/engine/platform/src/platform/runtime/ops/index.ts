@@ -35,6 +35,7 @@ export {
   createOpsEventObserver,
   type OpsCheckContext,
   type OpsCheckContextOptions,
+  type OpsLatencyReading,
   type OpsPendingApproval,
 } from './runtime-context.js';
 

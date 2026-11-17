@@ -7,6 +7,8 @@
  */
 import type { Playbook } from '../types.js';
 import { safeCheck } from '../safe-check.js';
+import { latencyCheckResult } from '../latency-check.js';
+import { SLO_METRICS } from '../../perf/slo-collector.js';
 import type { TurnState, ToolExecutionState } from '../../store/domains/conversation.js';
 
 /** Turn states in which a turn is still in flight. A finished turn keeps its id and start time. */
@@ -107,6 +109,18 @@ export const stuckTurnPlaybook: Playbook = {
           context: { pendingApprovals: pending.length },
         };
       }),
+    },
+    {
+      id: 'turn.start-latency',
+      label: 'Time to first output',
+      description: 'The p95 time from a submitted turn to its first streamed output in this process.',
+      run: (ctx) => safeCheck(() => latencyCheckResult(ctx, SLO_METRICS.TURN_START, 'Time to first output')),
+    },
+    {
+      id: 'turn.cancel-latency',
+      label: 'Time to stop after cancel',
+      description: 'The p95 time from a cancel request to the turn reporting itself cancelled in this process.',
+      run: (ctx) => safeCheck(() => latencyCheckResult(ctx, SLO_METRICS.CANCEL, 'Time to stop after cancel')),
     },
   ],
   steps: [

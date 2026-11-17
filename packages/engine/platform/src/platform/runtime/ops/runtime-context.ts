@@ -1,6 +1,7 @@
 /**
  * The live state a playbook's diagnostic checks read: the runtime store, the
- * time of the last runtime event (kept by one long-lived observer), the
+ * time of the last runtime event (kept by one long-lived observer), the p95
+ * turn-start, cancel and permission-decision latency (one SloCollector), the
  * approvals waiting on the owner, and the session recovery files when this
  * process has them. A source this process does not have is absent, and a
  * check that needs it reports itself as not evaluated.
@@ -9,6 +10,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { RuntimeEventBus } from '../events/index.js';
 import type { RuntimeStore } from '../store/index.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { SloCollector } from '../perf/slo-collector.js';
+
+/** One measured latency: its p95 over the recent window and how many samples it rests on. */
+export interface OpsLatencyReading {
+  readonly p95Ms: number;
+  readonly samples: number;
+}
 
 /** An approval waiting on the owner, as a check sees it. */
 export interface OpsPendingApproval {
@@ -22,6 +30,12 @@ export interface OpsCheckContext {
   readonly now: () => number;
   /** When the last runtime event was seen; undefined before the first. */
   readonly lastEventAt: () => number | undefined;
+  /**
+   * The measured p95 latency of an SLO metric (`slo.turn_start.p95`,
+   * `slo.cancel.p95`, `slo.permission_decision.p95`); undefined while it has
+   * no sample, or when this process does not measure it.
+   */
+  readonly latency?: ((metric: string) => OpsLatencyReading | undefined) | undefined;
   /** Approvals waiting on the owner, when this process holds the approval broker. */
   readonly pendingApprovals?: (() => readonly OpsPendingApproval[]) | undefined;
   /** The crash-recovery file of the open session, when this surface keeps one. */
@@ -62,14 +76,23 @@ export interface OpsCheckContextOptions {
   readonly now?: (() => number) | undefined;
 }
 
-/** Build the check context once per process; checks read it on demand, so it costs nothing until one runs. */
+/**
+ * Build the check context once per process. Reading costs nothing until a
+ * check runs; per event the context writes one number (the last event time)
+ * and, for turn and gate events, at most one map entry and one sample.
+ */
 export function createOpsCheckContext(options: OpsCheckContextOptions): OpsCheckContext & { readonly dispose: () => void } {
   const observer = createOpsEventObserver(options.runtimeBus);
+  const slo = new SloCollector(options.runtimeBus);
   const listApprovals = options.listApprovals;
   return {
     store: options.store,
     now: options.now ?? Date.now,
     lastEventAt: observer.lastEventAt,
+    latency: (metric) => {
+      const reading = slo.getMetrics().find((entry) => entry.name === metric);
+      return reading ? { p95Ms: reading.value, samples: slo.getSampleCounts()[metric] ?? 0 } : undefined;
+    },
     ...(listApprovals ? {
       pendingApprovals: () => listApprovals(Number.MAX_SAFE_INTEGER)
         .filter((approval) => approval.status === 'pending' || approval.status === 'claimed')
@@ -78,7 +101,7 @@ export function createOpsCheckContext(options: OpsCheckContextOptions): OpsCheck
     } : {}),
     ...(options.recoveryFilePath ? { recoveryFilePath: options.recoveryFilePath } : {}),
     ...(options.lastSessionPointerPath ? { lastSessionPointerPath: options.lastSessionPointerPath } : {}),
-    dispose: observer.dispose,
+    dispose: () => { observer.dispose(); slo.dispose(); },
   };
 }
 

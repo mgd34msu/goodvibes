@@ -255,6 +255,7 @@ export {
 export {
   checkDaemonGoogleAtBoot,
   daemonGoogleConnectionOwner,
+  type DaemonGoogleBootCheckDeps,
   type DaemonGoogleConnectionDeps,
 } from './daemon-connection.js';
 

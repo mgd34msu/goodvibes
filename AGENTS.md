@@ -25,11 +25,39 @@ bun packages/engine/scripts/test.ts test/<name>.test.ts -t '<test name>'
 # judgment, installer, and the folders outside the default suite
 bun run test:judgment
 bun run test:installer
-bun run test:live   # files under test/live/ (the sandbox proofs)
+bun run test:live   # files under test/live/ (the sandbox and real-browser proofs)
 bun run test:e2e    # files under src/test/e2e/ (the built binaries)
 ```
 
-The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Measured 2026-11-17 on 12 cores (11 workers) with other work running (load average 9 to 28): the default suite, 131 files, took 22.6 to 30.2 s and 200 to 264 file-seconds over ten runs in a row; `test:live`, 4 files, 0.8 s and 2.6 file-seconds; `test:e2e`, 2 files, 7.4 s and 13.3 file-seconds. Before anything runs, the runner parses every selected file and refuses the whole run, naming file and line, on `Bun.sleep`, a promise resolved by `setTimeout`, a snapshot, `mock.module`, `.skip`/`.todo`/`.skipIf`, or a timeout or retry argument. A file that runs no test, skips one, tries the network or leaves a process running fails. The run ends with the ten slowest files, the file-seconds per group, and a line of files run, passed, failed and refused.
+The limits are fixed: 5 seconds per test, 10 seconds per file (30 under `test/live/` and `src/test/e2e/`), 600 file-seconds for the default suite. A file past its limit is killed and fails. Measured 2026-11-17 on 12 cores (11 workers) with other work running (load average 17 to 24) and the runs' temporary files on disk rather than tmpfs: the default suite, 100 files, took 16.2 to 18.4 s and 135 to 156 file-seconds over ten runs in a row, its slowest file 5.2 to 6.3 s; `test:live`, 5 files, 2.1 s and 4.5 file-seconds; `test:e2e`, 2 files, 7.4 s and 13.3 file-seconds (measured before the cut; its files are unchanged).
+
+Before anything runs, the runner parses every selected file and refuses the whole run, naming file, line and rule, on:
+
+- a wait on the clock: `Bun.sleep` or `Bun.sleepSync`, a promise resolved by `setTimeout`, or `setTimeout`/`scheduler` imported from `timers/promises`;
+- a snapshot matcher, `mock.module`, `jest.mock` or `vi.mock`;
+- a skipped test: `.skip`, `.todo`, `.skipIf`, `.todoIf`, `xit`, `xtest`, `xdescribe`;
+- a raised limit or a retry: a timeout or retry argument on a test or a hook, `setDefaultTimeout`, `jest.setTimeout`, or `timeout`, `retry` or `rerunEach` under `[test]` in the package's `bunfig.toml` (a limit flag on the command line is an error);
+- a missing or malformed header: the file does not open (after a `#!` line) with its `// Proves: ` / `// Red when: ` pairs, or another `//` comment follows the last pair without a blank line between;
+- an empty header line (fewer than six words, or ending in an ellipsis), a `Red when` that repeats its `Proves`, or two identical `Proves` lines in one file;
+- a file that disagrees with `packages/engine/docs/test-risks.md`: a `Proves` line that is not the risk of its rows, a row whose risk is not one of the file's `Proves` lines, a case (each `test`/`it` title, a template's `${...}` as written) with no row, or a row naming a case the file does not have;
+- on a whole-suite run (no file or folder named), a row naming a file that does not exist.
+
+`bun run validate` applies the same scan to the test files the runner does not start (the web UI's Playwright journeys) with `bun packages/engine/scripts/test-scan.ts`. A file that runs no test, skips one, has a test over 5 seconds, tries the network or leaves a process running fails. The run ends with the ten slowest files, the file-seconds per group, and a line of files run, passed, failed and refused.
+
+## Tests
+
+1. A test exists to prove one risk. Its failure must mean lost data, money or messages; a broken security or permission boundary; or a broken contract other code or clients depend on.
+2. Add one only when you can state the breakage, who loses what, why a later change could cause it unnoticed, and that nothing already turns red for it: no kept case, gate script, type check, measurement budget, smoke run or run-through journey.
+3. Never a reason for a test: a fix you just made, coverage, a second level of a proof that exists, another input of the same kind, a control on its own, a test of a test or of a stand-in.
+4. Five questions, asked of every proposed case: (1) would its failure mean one of the three losses; (2) can it fail for a reason other than the product being wrong; (3) does it contain a timing assertion, a wait, a snapshot, a mock that checks itself or a copy of the code under test; (4) does it take more than 5 seconds, or its file more than 10; (5) have you broken the guarded line and watched it go red. A no on 1 or 5, or a yes on 2 to 4, and it is not written.
+5. One proof per risk, at the lowest level where the real components that hold the risk all run. Several inputs to one component are rows of one case. A control that stops a proof passing on a blanket failure goes inside that case.
+6. Stand-ins only for what is outside the product: the model at the HTTP wire, a remote server on loopback that records what arrived, the clock, the decision model. Never stores, locks, the gate, settings, the tool registry, the daemon router or the session broker.
+7. The runner refuses the whole run, naming file and line, on `Bun.sleep`, a promise resolved by `setTimeout`, a snapshot, `mock.module`, `.skip`/`.todo`/`.skipIf`, a retry or a timeout argument, a missing or empty header, and a case with no row in the risk table.
+8. Every test file begins with its header: for each risk the file proves, `// Proves: <the risk in one sentence>` followed by `// Red when: <the breakage that turns it red>`. A header whose Red when repeats its Proves, or two identical Proves lines in one file, is refused.
+9. `packages/engine/docs/test-risks.md` is the record: one row per case (area, risk, file, case, red when). A new proof adds its rows in the same change, and the row's risk is the file's `Proves` line word for word.
+10. A real browser, sandbox or built binary is used only where the risk lives in it; those files go under `test/live/` or `src/test/e2e/` (30 seconds a file). What only a whole product run can show is a step in a journey under `packages/engine/scripts/runthrough/`, not a test.
+11. Speed and request counts are measured by `bun run measure`, never asserted in a test.
+12. When the code a risk lives in is removed, its cases and rows go in the same change.
 
 ## Typecheck
 

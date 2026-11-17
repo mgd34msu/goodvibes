@@ -200,7 +200,7 @@ function unavailableRead(provider: string, reason: InboxAdmissionReason | 'reacq
     async validate() { current(); },
     sources: {
       store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
-        maxSequence: () => 0, getImapCheckpoint: () => null },
+        maxSequence: () => 0 },
       poller: { snapshotStatuses: selected => !selected || selected.includes(provider) ? [{ ...status }] : [],
         isProviderRunning: () => false },
     },
@@ -381,10 +381,6 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
     return {
       providerIds: Object.freeze([provider]), ready, close,
       unregister() { void close().catch(() => {}); },
-      getImapCheckpoint(providerId) {
-        if (closed || !current || !current.getImapCheckpoint) throw unavailable();
-        return current.getImapCheckpoint(providerId);
-      },
       async acquireRead(requireFinalProof) {
         await ready;
         const source = current, captured = revision;

@@ -82,6 +82,7 @@ import type {
   InboundMailNote,
   InboundMailObserver,
   InboundMailSink,
+  MailboxBatchOutcome,
   InboundMailTerminalFailure,
   WatcherClock,
 } from './ports.js';
@@ -519,33 +520,34 @@ export class GmailMailSource implements InboundMailSource {
     const notDone = new Set(held.map((problem) => problem.id));
     // Set by `pollOnce` before every delta; the history position this delta started from.
     const start = this.position;
-    for (const [index, message] of messages.entries()) {
-      if (signal.aborted) return this.verdict;
-      try {
-        await this.deps.sink.deliver(message);
-      } catch (error) {
-        // Google answered, so any run of unexplained 403s is over.
-        this.unexplainedForbiddenSince = null;
-        for (const rest of messages.slice(index)) notDone.add(rest.resourceId);
-        const reached = start === null ? null : reachedHistoryId(delta, start, (id) => !notDone.has(id));
-        if (reached !== null) await this.moveCursor(reached);
-        this.note('delivery-failed',
-          `Message ${message.resourceId} was not processed, so the history position moves only to `
-          + `${reached ?? 'where it was'}, just below it, and the mail from there on is fetched again: ${errorText(error)}`);
-        // Deliberately no backoff. The stated worst case is the poll interval,
-        // and stretching the interval because a sink refused would make that
-        // number untrue, the sink's problem is not a reason to notice the
-        // NEXT message later.
-        this.deliveryFailures += 1;
-        if (this.deliveryFailures < MAX_CONSECUTIVE_DELIVERY_FAILURES) return this.verdict;
-        // The same message refusing every pass holds the cursor, and everything
-        // behind it, in place under a verdict that would otherwise stay green.
-        return this.record(capabilityVerdict(
-          'reconnecting',
-          `Message ${message.resourceId} has been refused ${String(this.deliveryFailures)} times in a `
-          + `row, so mail behind it in this label is not being handed on: ${errorText(error)}`,
-        ));
-      }
+    // Every consumer of this mailbox gets the delta as one batch; the history
+    // position passes only the messages they all settled.
+    const outcome = signal.aborted ? null : await deliverToSink(this.deps.sink, messages);
+    if (outcome === null) return this.verdict;
+    const refused = outcome.failed ? messages[outcome.done] : undefined;
+    if (refused !== undefined) {
+      const error = outcome.error;
+      // Google answered, so any run of unexplained 403s is over.
+      this.unexplainedForbiddenSince = null;
+      for (const rest of messages.slice(outcome.done)) notDone.add(rest.resourceId);
+      const reached = start === null ? null : reachedHistoryId(delta, start, (id) => !notDone.has(id));
+      if (reached !== null) await this.moveCursor(reached);
+      this.note('delivery-failed',
+        `Message ${refused.resourceId} was not processed, so the history position moves only to `
+        + `${reached ?? 'where it was'}, just below it, and the mail from there on is fetched again: ${errorText(error)}`);
+      // Deliberately no backoff. The stated worst case is the poll interval,
+      // and stretching the interval because a sink refused would make that
+      // number untrue, the sink's problem is not a reason to notice the
+      // NEXT message later.
+      this.deliveryFailures += 1;
+      if (this.deliveryFailures < MAX_CONSECUTIVE_DELIVERY_FAILURES) return this.verdict;
+      // The same message refusing every pass holds the cursor, and everything
+      // behind it, in place under a verdict that would otherwise stay green.
+      return this.record(capabilityVerdict(
+        'reconnecting',
+        `Message ${refused.resourceId} has been refused ${String(this.deliveryFailures)} times in a `
+        + `row, so mail behind it in this label is not being handed on: ${errorText(error)}`,
+      ));
     }
     this.deliveryFailures = 0;
 
@@ -921,4 +923,21 @@ export class GmailMailSource implements InboundMailSource {
       // An observer that throws must not stop the mail being read.
     }
   }
+}
+
+/** A batch to the sink, one message at a time for a sink that takes no batches. */
+async function deliverToSink(
+  sink: InboundMailSink,
+  messages: readonly GmailInboundMessage[],
+): Promise<MailboxBatchOutcome> {
+  if (messages.length === 0) return { done: 0, failed: false, error: null };
+  if (sink.deliverBatch) return sink.deliverBatch(messages);
+  for (const [index, message] of messages.entries()) {
+    try {
+      await sink.deliver(message);
+    } catch (error) {
+      return { done: index, failed: true, error };
+    }
+  }
+  return { done: messages.length, failed: false, error: null };
 }

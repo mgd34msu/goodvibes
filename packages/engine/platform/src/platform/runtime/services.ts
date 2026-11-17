@@ -361,6 +361,8 @@ export interface RuntimeServices {
   readonly approvalBroker: ApprovalBroker;
   /** The daemon's owner inbox (questions, claims, purchase windows, queued actions over this broker); set by the daemon composition. */
   readonly ownerInbox?: import('../control-plane/owner-inbox.js').OwnerInbox | undefined;
+  /** Where mailbox readers and the consumers of their mail (the inbox) meet; one reader per mailbox. */
+  readonly mailboxReaders?: import('../email/inbound/mailbox-consumers.js').MailboxReaders | undefined;
   readonly userPermissionRuleStore: UserPermissionRuleStore; // durable user-origin permission rules (remembered approvals); permissions.rules.* surface
   readonly sessionBroker: SharedSessionBroker;
   readonly deliveryManager: AutomationDeliveryManager;

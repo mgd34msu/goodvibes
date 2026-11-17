@@ -29,6 +29,15 @@ export interface MailboxCursor {
   readonly lastSeenUid: number;
   /** ISO 8601. */
   readonly updatedAt: string;
+  /**
+   * The history window kept when the position was established: messages up
+   * to `historyThrough` were already in the mailbox and are delivered flagged
+   * `history`; `historyFloorUid` is the oldest of them and
+   * `skippedOlderMessages` how many older ones were left out.
+   */
+  readonly historyThrough?: number | undefined;
+  readonly historyFloorUid?: number | undefined;
+  readonly skippedOlderMessages?: number | undefined;
 }
 
 // ─────────────────────────────────────────────────────────────────────────

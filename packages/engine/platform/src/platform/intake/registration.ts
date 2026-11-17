@@ -11,7 +11,7 @@ import { HandlerError, registerCatalogHandler } from '../control-plane/host-hand
 import { InboxCursorStore } from './cursor-store.js';
 import { InboundPoller } from './poller.js';
 import { aggregateInbox, normalizeInboxQuery, type InboxListInput, type InboxListOutput } from './aggregator.js';
-import type { ImapUidCheckpoint, InboundProviderAdapter } from './provider-adapter.js';
+import type { InboundProviderAdapter } from './provider-adapter.js';
 import type { TriageReceiptScope } from './triage/types.js';
 import type { IntakeLogger } from './context.js';
 import { composeInboxReads, type InboxReadSource } from './composite.js';
@@ -56,8 +56,6 @@ export interface RegisterInboxSurfaceOptions {
 export interface InboxSurfaceRegistration {
   /** Storage and any ungated initial seed must finish; failures reject. */
   readonly ready: Promise<void>;
-  /** Current durable generation only; valid after ready, unavailable after close. */
-  getImapCheckpoint?(providerId: string): ImapUidCheckpoint | null;
   close(): Promise<void>;
   /** Legacy initiation; new owners must await close(). */
   unregister(): void;
@@ -133,6 +131,8 @@ export function createOwnedInboxSource(
     if (closed) throw stopped();
     try { await store.init(); } catch { throw startFailed(); }
     if (closed) throw stopped();
+    // A pushed provider writes as soon as the mirror is open; its reader, not the poll gate, decides where it reads.
+    poller.bindPushed();
     if (options.gatePolling) return;
     if (!options.skipInitialPoll) await poller.pollOnce();
     if (closed) throw stopped();
@@ -195,7 +195,7 @@ export function createOwnedInboxSource(
   };
 
   try {
-    if (options.gatePolling) for (const providerId of poller.providerIds()) {
+    if (options.gatePolling) for (const providerId of poller.polledProviderIds()) {
       const cleanup = options.gatePolling(providerId, controlFor(providerId));
       if (typeof cleanup === 'function') gateCleanups.push(cleanup);
     }
@@ -276,7 +276,7 @@ export function createOwnedInboxSource(
     void cleanup().then(resolve, reject);
     return result;
   };
-  return { ready, close, providerIds, mirror: store, acquireRead, getImapCheckpoint: (providerId) => store.getImapCheckpoint(providerId), unregister: () => { void close(); } };
+  return { ready, close, providerIds, mirror: store, acquireRead, unregister: () => { void close(); } };
 }
 
 /**
@@ -375,5 +375,5 @@ export function registerInboxSurface(ctx: InboxSurfaceContext, options: Register
     void closing.catch(() => {});
     return closing;
   };
-  return { ready, close, getImapCheckpoint: id => source.getImapCheckpoint!(id), unregister: () => { void close(); } };
+  return { ready, close, unregister: () => { void close(); } };
 }

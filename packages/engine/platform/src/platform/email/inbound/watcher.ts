@@ -56,12 +56,12 @@ import {
   verdictForOpenConnection,
 } from './capability.js';
 import { runIdleLoop, type IdleWakeSummary } from './idle-watcher.js';
-import { InboundNoticeTransportError } from './intake.js';
+import { isConsumerUnavailable } from './mailbox-consumers.js';
 import { anySignal } from './any-signal.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveMailboxStartPosition } from './mailbox-position.js';
-import { drainMailboxDelta, runPollLoop, type MailboxDeltaReport } from './poll-loop.js';
+import { drainMailboxDelta, MailboxReadFailures, runPollLoop, type MailboxDeltaReport } from './poll-loop.js';
 import type { EmailCapabilityFailureNotice } from '../imap-client.js';
 import type { ImapBodyProbe } from '../imap-body-probe.js';
 import type {
@@ -106,6 +106,9 @@ import type {
  */
 const NOTHING_THREW: unique symbol = Symbol('nothing-threw');
 
+/** How many of the newest messages already in a mailbox are kept as history for the inbox. */
+export const HISTORY_WINDOW_MESSAGES = 50;
+
 export class InboundMailboxWatcher {
   private readonly deps: InboundMailboxWatcherDeps;
   private readonly settings: InboundWatcherSettings;
@@ -134,6 +137,10 @@ export class InboundMailboxWatcher {
   private unreadableDrains = 0;
   /** Uncoded FETCH refusals in a row, so a bare mid-session `NO` is retried before it is called terminal. */
   private uncodedFetchRefusals = 0;
+  /** Messages that failed to read, per drain, so one that never reads is stepped over. */
+  private readonly readFailures = new MailboxReadFailures();
+  /** A consumer that shows the mailbox attached late and wants the history window. */
+  private historyRequested = false;
 
   constructor(deps: InboundMailboxWatcherDeps) {
     this.deps = deps;
@@ -215,6 +222,15 @@ export class InboundMailboxWatcher {
    */
   recheckNow(): void {
     this.recheckWake?.abort();
+  }
+
+  /**
+   * Keep the history window for a consumer that attached after the position
+   * was established. Applied at the next connection or drain, on the reader's
+   * own session.
+   */
+  requestHistory(): void {
+    this.historyRequested = true;
   }
 
   /** Await the run loop. Test seam; production uses `start()` / `stop()`. */
@@ -388,7 +404,8 @@ export class InboundMailboxWatcher {
       this.note('cursor-established',
         `Listening from UID ${resolution.cursor.lastSeenUid} onwards; `
         + `${resolution.skippedMessageCount} message(s) already in the mailbox were `
-        + 'not read. The daemon starts listening now rather than backfilling.'
+        + 'not announced. The daemon starts listening now rather than backfilling; '
+        + 'a consumer that shows the mailbox keeps the newest of them as history.'
         + position.disclosure);
     } else if (resolution.kind === 'uid-validity-changed') {
       this.note('cursor-reset',
@@ -400,6 +417,14 @@ export class InboundMailboxWatcher {
         + 'year of old mail.'
         + position.disclosure);
     }
+
+    // The history window, then the generation, both before any message: a
+    // consumer that shows the mailbox drops another generation's rows first.
+    if (resolution.kind !== 'resumed') this.historyRequested = true;
+    await this.applyHistoryRequest(connection);
+    assertImapReadingCurrent(this.readingOptions(connection));
+    await this.deps.sink.generation?.(status.uidValidity);
+    assertImapReadingCurrent(this.readingOptions(connection));
 
     // The email layer owns this decision and resolves "the server said
     // nothing" by asking. Reading `connection.report.idle` here instead would
@@ -499,6 +524,7 @@ export class InboundMailboxWatcher {
       cursor: this.requireCursor(),
       via: 'poll',
       signal: this.readingOptions(connection).signal,
+      readFailures: this.readFailures,
     });
     this.cursor = result.cursor;
     // Every drain this loop completed counts, not only the one that ended it.
@@ -531,6 +557,10 @@ export class InboundMailboxWatcher {
     via: 'idle' | 'poll',
   ): Promise<MailboxDeltaReport> {
     const signal = this.readingOptions(connection).signal;
+    if (this.historyRequested && this.deps.sink.wantsHistory?.() === true) {
+      await this.applyHistoryRequest(connection);
+      await this.deps.sink.generation?.(this.requireCursor().uidValidity);
+    }
     for (;;) {
       const report = await drainMailboxDelta({
         settings: this.settings,
@@ -543,6 +573,7 @@ export class InboundMailboxWatcher {
         cursor: this.requireCursor(),
         via,
         signal,
+        readFailures: this.readFailures,
       });
       this.cursor = report.cursor;
       if (report.outcome === 'complete') this.noteDrainCompleted();
@@ -550,10 +581,41 @@ export class InboundMailboxWatcher {
       // the delivery backoff and drain again on the same connection, with no
       // new sign-in. The sink sets the message aside after a bounded number of
       // attempts, so this ends.
-      if (report.outcome !== 'delivery-failed' || !(report.error instanceof InboundNoticeTransportError)) return report;
+      if (report.outcome !== 'delivery-failed' || !isConsumerUnavailable(report.error)) return report;
       await this.sleep(this.deliveryBackoff.next());
       if (signal.aborted) return { ...report, outcome: 'aborted' };
     }
+  }
+
+  /**
+   * Keep the newest messages at or below the position as history, once, when
+   * a consumer wants it: one search on this session and one cursor write.
+   * A failed search leaves the position as it is; new mail is still read.
+   */
+  private async applyHistoryRequest(connection: MailboxConnection): Promise<void> {
+    if (!this.historyRequested) return;
+    this.historyRequested = false;
+    const cursor = this.cursor;
+    const seed = this.deps.cursors.seedHistory?.bind(this.deps.cursors);
+    if (cursor === null || seed === undefined || this.deps.sink.wantsHistory?.() !== true) return;
+    let below: readonly number[];
+    try {
+      below = (await connection.reader.searchCompleteUids(false)).filter((uid) => uid <= cursor.lastSeenUid);
+    } catch (error) {
+      this.note('cursor-established', `The messages already in the mailbox could not be listed, so none are kept as history: ${imapFailureText(error)}`);
+      return;
+    }
+    const window = below.slice(-HISTORY_WINDOW_MESSAGES);
+    const floorUid = window[0];
+    if (floorUid === undefined) return;
+    this.cursor = await seed({
+      account: this.settings.account,
+      mailbox: this.settings.mailbox,
+      uidValidity: cursor.uidValidity,
+      floorUid,
+      throughUid: cursor.lastSeenUid,
+      skippedOlderMessages: below.length - window.length,
+    });
   }
 
   /**
@@ -631,7 +693,7 @@ export class InboundMailboxWatcher {
     if (report.outcome === 'delivery-failed') {
       // A notice route that is down is retried on the same connection by the
       // drain itself; one that reaches here came from the poll loop's last pass.
-      if (report.error instanceof InboundNoticeTransportError) {
+      if (isConsumerUnavailable(report.error)) {
         await this.sleep(this.deliveryBackoff.next());
         return;
       }

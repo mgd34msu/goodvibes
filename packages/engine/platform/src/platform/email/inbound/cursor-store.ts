@@ -359,6 +359,8 @@ export class MailboxCursorStore {
   private readonly now: () => number;
   private readonly isAccountConfigured: ((account: string) => AccountConfiguredAnswer) | undefined;
   private writeChain: Promise<void> = Promise.resolve();
+  /** Bumped on every write this process makes; readers compare it instead of re-reading the file. */
+  private writes = 0;
   /** The last unreadable-file event, latched so status can name it. */
   private corruption: PersistentStoreCorruption | null = null;
 
@@ -371,6 +373,11 @@ export class MailboxCursorStore {
 
   getPolicy(): MailboxCursorPolicy {
     return this.policy;
+  }
+
+  /** The position's revision: an integer that moves on every write this process makes. */
+  revision(): number {
+    return this.writes;
   }
 
   /**
@@ -419,6 +426,7 @@ export class MailboxCursorStore {
       if (next === null) return result;
       try { await this.store.persist({ version: 1, cursors: next }); }
       catch (error) { throw new CursorWriteError(error); }
+      this.writes += 1;
       return result;
     }));
     this.writeChain = run.then(() => undefined, () => undefined);
@@ -649,6 +657,48 @@ export class MailboxCursorStore {
       };
       const next = cursors.map((c, i) => (i === index ? updated : c));
       return { next, result: updated };
+    });
+  }
+
+  /**
+   * Keep the newest messages at or below the position as history.
+   *
+   * The cursor moves down to just below `floorUid`, so the ordinary drain
+   * delivers them, and `historyThrough` says which ones are history, so no
+   * notice announces them. One write, at establishment or when a consumer
+   * that shows the mailbox first attaches; it never moves the cursor up.
+   */
+  async seedHistory(input: {
+    readonly account: string;
+    readonly mailbox: string;
+    readonly uidValidity: number;
+    readonly floorUid: number;
+    readonly throughUid: number;
+    readonly skippedOlderMessages: number;
+  }): Promise<MailboxCursor> {
+    requireImapPosition('seed history for', input, { uidValidity: input.uidValidity, lastSeenUid: input.throughUid });
+    if (!isImapUid(input.floorUid) || input.floorUid < 1 || input.floorUid > input.throughUid
+      || !Number.isSafeInteger(input.skippedOlderMessages) || input.skippedOlderMessages < 0) {
+      throw new Error(`Refusing a history window for ${input.account}:${input.mailbox} from UID ${String(input.floorUid)} through ${String(input.throughUid)}.`);
+    }
+    const now = this.now();
+    return this.mutate(async (cursors) => {
+      const index = indexOfKey(cursors, input.account, input.mailbox);
+      const stored = index >= 0 ? cursors[index] : undefined;
+      const existing = stored !== undefined && stored.source === 'imap' ? stored : undefined;
+      if (!existing || existing.uidValidity !== input.uidValidity) {
+        throw new Error(`No IMAP cursor for ${input.account}:${input.mailbox} in UIDVALIDITY ${String(input.uidValidity)}; resolve it first.`);
+      }
+      const through = Math.max(existing.historyThrough ?? 0, Math.min(input.throughUid, existing.lastSeenUid));
+      const updated: ImapMailboxCursor = {
+        ...existing,
+        lastSeenUid: Math.min(existing.lastSeenUid, input.floorUid - 1),
+        historyThrough: through,
+        historyFloorUid: Math.min(input.floorUid, existing.historyFloorUid ?? input.floorUid),
+        skippedOlderMessages: input.skippedOlderMessages,
+        updatedAt: new Date(now).toISOString(),
+      };
+      return { next: cursors.map((c, i) => (i === index ? updated : c)), result: updated };
     });
   }
 

@@ -39,7 +39,7 @@
 
 import { publishedSequenceBound, type InboxCursorStore, type InboxPosition } from './cursor-store.js';
 import type { InboundPoller, ProviderStatus } from './poller.js';
-import type { ImapUidCheckpoint, InboundChannelItem } from './provider-adapter.js';
+import type { InboundChannelItem } from './provider-adapter.js';
 import { GatewayVerbError as HandlerError } from '../control-plane/routes/gateway-verb-error.js';
 
 export const DEFAULT_LIMIT = 50;
@@ -88,7 +88,12 @@ export interface ChannelInboxProviderStatus {
   syncing?: boolean;
   error?: string;
   /** Durable first-seed boundary for this mailbox generation; excluded history is not processed. */
-  mailboxHistory?: ImapUidCheckpoint['history'] & { readonly uidValidity: number };
+  mailboxHistory?: {
+    readonly kind: 'complete' | 'bounded-seed';
+    readonly lowerBoundUid: number;
+    readonly skippedOlderMessages: number;
+    readonly uidValidity: number;
+  };
   /** Eligible messages remaining at lastSyncAt, not a live provider total. Absent when unknown. */
   mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
   /** Messages the last sync passed because their content cannot be proven complete, with the reason. */
@@ -117,7 +122,7 @@ export interface InboxListQuery {
 
 /** Everything the aggregator reads from. Both are already-built collaborators. */
 export interface InboxAggregatorSources {
-  readonly store: Pick<InboxCursorStore, 'listItems' | 'countItems' | 'countItemsByProvider' | 'maxSequence' | 'getImapCheckpoint'>;
+  readonly store: Pick<InboxCursorStore, 'listItems' | 'countItems' | 'countItemsByProvider' | 'maxSequence'>;
   readonly poller: Pick<InboundPoller, 'snapshotStatuses' | 'isProviderRunning'>;
 }
 
@@ -290,7 +295,7 @@ export function aggregateInbox(
   }
 
   const statuses = describeProviders({
-    poller, store,
+    poller,
     requested: providers,
     storedByProvider,
     pageByProvider,
@@ -335,12 +340,11 @@ export function aggregateInbox(
  */
 function describeProviders(input: {
   poller: InboxAggregatorSources['poller'];
-  store: InboxAggregatorSources['store'];
   requested: readonly string[] | undefined;
   storedByProvider: Map<string, number>;
   pageByProvider: Map<string, number>;
 }): ChannelInboxProviderStatus[] {
-  const { poller, store, requested, storedByProvider, pageByProvider } = input;
+  const { poller, requested, storedByProvider, pageByProvider } = input;
   const known = poller.snapshotStatuses(requested);
 
   // A `?provider=` filter naming something this node has no adapter for gets an
@@ -358,9 +362,11 @@ function describeProviders(input: {
       storedCount,
       syncing: poller.isProviderRunning(status.id),
     };
-    const checkpoint = store.getImapCheckpoint?.(status.id);
-    if (checkpoint) wire.mailboxHistory = { ...checkpoint.history, uidValidity: checkpoint.uidValidity };
-    if (checkpoint && status.mailboxProgress?.uidValidity === checkpoint.uidValidity) wire.mailboxProgress = { ...status.mailboxProgress };
+    // The mailbox reader's own position, reported by the provider it feeds.
+    if (status.mailboxHistory) wire.mailboxHistory = { ...status.mailboxHistory };
+    if (status.mailboxProgress && (!status.mailboxHistory || status.mailboxHistory.uidValidity === status.mailboxProgress.uidValidity)) {
+      wire.mailboxProgress = { ...status.mailboxProgress };
+    }
     if (status.skippedMessages && status.skippedMessages.length > 0) wire.skippedMessages = status.skippedMessages.map((entry) => ({ ...entry }));
     if (status.configured !== undefined) wire.configured = status.configured;
     if (status.lastPolledAt !== undefined) wire.lastSyncAt = status.lastPolledAt;

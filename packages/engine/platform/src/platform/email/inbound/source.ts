@@ -101,6 +101,12 @@ export interface InboundMailSource {
    * grant". A source that is not `insufficient` ignores the call.
    */
   recheckNow?(): void;
+  /**
+   * Keep the history window (the newest messages already in the mailbox)
+   * once, for a consumer that shows the mailbox and attached after the
+   * position was established. IMAP only: Gmail's reader has no listing.
+   */
+  requestHistory?(): void;
 }
 
 /**

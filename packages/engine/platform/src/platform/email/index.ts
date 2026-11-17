@@ -237,6 +237,7 @@ export type { SurfaceEmailConfigProblem, SurfaceEmailSettings, ConfigReaderWithO
 
 export { EmailReplySubjectSourceOwner } from './reply-subject-source.js';
 export type { EmailInboxBatchInput, EmailInboxBatchMessage, EmailInboxBatchRead } from './email-inbox-batch.js';
-export type { EmailInboxPageInput, EmailInboxPageRead, EmailInboxPageSelection } from './email-inbox-page.js';
 export type { EmailMailboxObservation } from './reply-subject-source.js';
 export type { ImapAttachmentContent, ImapDraftSummary, ImapMessageAction, ImapMessageActionResult } from './imap-mailbox-actions.js';
+export { mailboxReaderKey, MailboxReaders } from './inbound/mailbox-consumers.js';
+export type { MailboxConsumer, MailboxReaderHandle, MailboxReaderState } from './inbound/mailbox-consumers.js';

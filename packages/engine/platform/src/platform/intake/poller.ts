@@ -2,28 +2,31 @@
 // Inbound provider poller.
 //
 // Runs one setInterval per provider at the provider's own cadence (Slack/
-// Discord 30s, email 60s, others 120s). Each tick:
-//   1. reads the provider's stored progress: the IMAP checkpoint, each
-//      conversation's cursor, or the one provider-wide timestamp
+// Discord 30s, others 120s). Each tick:
+//   1. reads the provider's stored progress: each conversation's cursor, or
+//      the one provider-wide timestamp
 //   2. calls adapter.poll() with it
 //   3. commits the returned rows and their progress in one transaction through
-//      the cursor store (commitImapPoll or commitTimestampPoll); a conversation
-//      adapter's rows and cursors are committed even when the tick also failed,
-//      so what was read is kept
+//      the cursor store (commitTimestampPoll); a conversation adapter's rows
+//      and cursors are committed even when the tick also failed, so what was
+//      read is kept
 //   4. records the last per-provider state for channels.inbox.list to report
 //   5. tells `onCommitted` (triage) that new rows are stored
+//
+// A pushed provider (email) is never polled: the mailbox reader hands its
+// adapter mail, and the adapter commits rows through the sink bound here
+// (`bindPushed`), so the same store write path and the same `onCommitted`
+// serve it; its status is the adapter's own report.
 //
 // One bad provider can never crash the loop: adapter.poll() resolves with
 // state:'unavailable' instead of rejecting, and any thrown error is caught and
 // downgraded to an 'unavailable' status here.
 // ---------------------------------------------------------------------------
 
-import type { InboundProviderAdapter, ProviderState } from './provider-adapter.js';
+import type { InboundChannelItem, InboundProviderAdapter, ProviderState } from './provider-adapter.js';
 import type { InboxCursorStore } from './cursor-store.js';
 import type { IntakeLogger as HandlerLogger } from './context.js';
 import { summarizeError } from '../utils/error-display.js';
-
-const PAUSED_TEXT = 'Email inbox polling is paused; pending message count is unknown';
 
 export interface ProviderStatus {
   id: string;
@@ -33,7 +36,14 @@ export interface ProviderStatus {
   error?: string;
   lastPolledAt?: number;
   mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
-  /** Messages the last poll passed because their content cannot be proven complete. */
+  /** The mailbox reader's history window, for a pushed mail provider. */
+  mailboxHistory?: {
+    readonly kind: 'complete' | 'bounded-seed';
+    readonly lowerBoundUid: number;
+    readonly skippedOlderMessages: number;
+    readonly uidValidity: number;
+  };
+  /** Messages the reader stepped over because they could not be read here. */
   skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
   /**
    * Whether the provider's credentials resolved on the last poll, as the
@@ -83,6 +93,10 @@ export class InboundPoller {
   private readonly paused = new Set<string>();
   private stopping: Promise<void> | null = null;
   private started = false;
+  /** Unbind callbacks of the pushed adapters, and their commits in flight. */
+  private readonly unbinds: Array<() => void> = [];
+  private readonly pushing = new Set<Promise<unknown>>();
+  private bound = false;
   /**
    * Set by stop(), which the surface teardown calls and nothing else, unlike
    * stopProvider(), which a leadership handover uses and which must stay
@@ -111,7 +125,7 @@ export class InboundPoller {
   start(): void {
     if (this.released || this.started) return;
     this.started = true;
-    for (const id of this.adapters.keys()) this.startProvider(id);
+    for (const id of this.polledProviderIds()) this.startProvider(id);
   }
 
   /**
@@ -126,17 +140,8 @@ export class InboundPoller {
   startProvider(id: string): void {
     if (this.released || this.timers.has(id)) return;
     const adapter = this.adapters.get(id);
-    if (!adapter) return;
+    if (!adapter || adapter.checkpointKind === 'pushed') return;
     this.paused.delete(id);
-    if (adapter.checkpointKind === 'imap-uid') {
-      const previous = this.statuses.get(id);
-      if (previous?.error === PAUSED_TEXT) {
-        // Resumed: the count is still unknown until the next poll, but the
-        // mailbox is no longer paused, and `skipInitialPoll` can leave this
-        // showing for a whole interval.
-        this.statuses.set(id, { ...previous, error: 'Email inbox polling resumed; pending message count is unknown until the next poll' });
-      }
-    }
     const generation = this.generations.get(id) ?? 0;
     const handle = this.setIntervalImpl(() => {
       // A queued callback belongs to the interval that created it, even when
@@ -159,13 +164,6 @@ export class InboundPoller {
     this.paused.add(id);
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
     this.controllers.get(id)?.abort();
-    if (this.adapters.get(id)?.checkpointKind === 'imap-uid') {
-      const previous = this.statuses.get(id);
-      if (previous) {
-        const { mailboxProgress: _progress, ...status } = previous;
-        this.statuses.set(id, { ...status, state: 'unavailable', error: PAUSED_TEXT });
-      }
-    }
     const handle = this.timers.get(id);
     if (handle !== undefined) {
       this.timers.delete(id);
@@ -176,8 +174,10 @@ export class InboundPoller {
     return this.pending.get(id) ?? Promise.resolve();
   }
 
-  /** True when this node is polling the given provider right now. */
+  /** True when this node is polling the given provider right now, or its pushed reader is reading. */
   isProviderRunning(id: string): boolean {
+    const adapter = this.adapters.get(id);
+    if (adapter?.checkpointKind === 'pushed') return adapter.isRunning?.() ?? false;
     return this.timers.has(id);
   }
 
@@ -186,17 +186,54 @@ export class InboundPoller {
     return [...this.adapters.keys()];
   }
 
-  /** Run a single poll across all providers now (used on register + tests). */
+  /** The providers this poller polls; a pushed provider is fed by its own reader. */
+  polledProviderIds(): string[] {
+    return [...this.adapters].filter(([, adapter]) => adapter.checkpointKind !== 'pushed').map(([id]) => id);
+  }
+
+  /**
+   * Give every pushed adapter its write path into the store. Called once the
+   * store is open, whether or not this node polls anything: placement of a
+   * pushed provider is its reader's, not the poll gate's.
+   */
+  bindPushed(): void {
+    if (this.released || this.bound) return;
+    this.bound = true;
+    for (const [id, adapter] of this.adapters) {
+      if (adapter.checkpointKind !== 'pushed' || !adapter.bind) continue;
+      this.unbinds.push(adapter.bind({
+        commit: (items, generation) => this.commitPushed(id, items, generation),
+        has: (itemId) => { this.assertOpen(); return this.store.hasItem(itemId); },
+        generation: () => { this.assertOpen(); return this.store.mailGeneration(id); },
+        seeded: () => { this.assertOpen(); return this.store.hasMailGeneration(id); },
+      }));
+    }
+  }
+
+  private assertOpen(): void {
+    if (this.released) throw new Error('The inbox store for this account is closing.');
+  }
+
+  private commitPushed(id: string, items: readonly InboundChannelItem[], generation: number | null): Promise<number> {
+    if (this.released) return Promise.reject(new Error('The inbox store for this account is closing.'));
+    const work = this.store.commitMailItems(id, items, generation).then((stored) => {
+      if (items.length > 0) this.notifyCommitted(id);
+      return stored;
+    });
+    this.pushing.add(work);
+    void work.then(() => this.pushing.delete(work), () => this.pushing.delete(work));
+    return work;
+  }
+
+  /** Run a single poll across all polled providers now (used on register + tests). */
   async pollOnce(): Promise<void> {
-    await Promise.all(
-      [...this.adapters.entries()].map(([id, adapter]) => this.pollProvider(id, adapter)),
-    );
+    await Promise.all(this.polledProviderIds().map((id) => this.pollProvider(id, this.adapters.get(id)!)));
   }
 
   /** Run a single poll for ONE provider now. Never throws. */
   async pollProviderOnce(id: string): Promise<void> {
     const adapter = this.adapters.get(id);
-    if (!adapter) return;
+    if (!adapter || adapter.checkpointKind === 'pushed') return;
     await this.pollProvider(id, adapter);
   }
 
@@ -226,11 +263,7 @@ export class InboundPoller {
     if (!current()) return;
     let configured: boolean | undefined;
     try {
-      const usesImapCheckpoint = adapter.checkpointKind === 'imap-uid';
       const assertAdapterCurrent = adapter.assertCurrent;
-      if (usesImapCheckpoint && typeof assertAdapterCurrent !== 'function') {
-        throw new Error('IMAP inbox adapter requires a trusted synchronous currentness fence');
-      }
       const assertCommitCurrent = (): void => {
         if (!current()) throw new Error('Inbound poll is no longer current');
         // HandlerSqliteStore rejects any non-void/async result from this fence.
@@ -239,11 +272,10 @@ export class InboundPoller {
         return result;
       };
       const usesConversations = adapter.checkpointKind === 'conversation';
-      const checkpoint = usesImapCheckpoint ? this.store.getImapCheckpoint(id) : null;
-      const since = usesImapCheckpoint ? undefined : this.store.getCursor(id) || undefined;
+      const since = this.store.getCursor(id) || undefined;
       const conversations = usesConversations ? this.store.getConversationCursors(id) : undefined;
       const result = await adapter.poll({ ...(since === undefined ? {} : { since }),
-        ...(checkpoint === null ? {} : { checkpoint }), ...(conversations ? { conversations } : {}),
+        ...(conversations ? { conversations } : {}),
         limit: this.perProviderLimit, signal: controller.signal });
       if (!current()) return;
       configured = result.configured;
@@ -264,23 +296,10 @@ export class InboundPoller {
           lastPolledAt: Date.now(), ...(result.configured === undefined ? {} : { configured: result.configured }), polled: true });
         return;
       }
-      if (result.pendingMessages !== undefined && (!usesImapCheckpoint || !result.checkpointAdvance
-        || !Number.isSafeInteger(result.pendingMessages) || result.pendingMessages < 0)) throw new Error('Invalid IMAP pending message count');
-      const progress = result.pendingMessages === undefined ? {} : { mailboxProgress: {
-        uidValidity: result.checkpointAdvance!.next.uidValidity, pendingMessages: result.pendingMessages } };
-      if (result.checkpointAdvance && !usesImapCheckpoint) throw new Error('Timestamp adapter cannot propose UID progress');
       if (result.state === 'unavailable' || result.state === 'pending') {
-        // Pin the first history window before attempting content on a later
-        // cadence. Failed content never advances a terminal watermark.
-        if (result.checkpointAdvance) {
-          if (result.checkpointAdvance.transition === 'advance') throw new Error('Unavailable IMAP poll cannot advance UID progress');
-          await this.store.commitImapPoll(id, result.items, result.checkpointAdvance, assertCommitCurrent);
-          if (!current()) return;
-        }
         this.setStatus(id, {
           id,
           state: result.state,
-          ...progress,
           itemCount: 0,
           ...(result.state === 'unavailable' ? { error: result.error ?? 'provider unavailable' } : {}),
           lastPolledAt: Date.now(),
@@ -289,23 +308,13 @@ export class InboundPoller {
         });
         return;
       }
-      let newCount: number;
-      if (usesImapCheckpoint) {
-        if (!result.checkpointAdvance && result.items.length > 0) throw new Error('IMAP inbox rows require terminal UID coverage');
-        newCount = result.checkpointAdvance
-          ? await this.store.commitImapPoll(id, result.items, result.checkpointAdvance, assertCommitCurrent)
-          : 0;
-      } else {
-        // A quiet tick writes nothing.
-        newCount = result.items.length > 0 ? await this.store.commitTimestampPoll(id, result.items, assertCommitCurrent) : 0;
-      }
+      // A quiet tick writes nothing.
+      const newCount = result.items.length > 0 ? await this.store.commitTimestampPoll(id, result.items, assertCommitCurrent) : 0;
       if (!current()) return;
       if (result.items.length > 0) this.notifyCommitted(id);
       this.setStatus(id, {
         id,
         state: result.items.length > 0 ? 'ready' : 'empty',
-        ...progress,
-        ...(result.skippedMessages && result.skippedMessages.length > 0 ? { skippedMessages: result.skippedMessages } : {}),
         itemCount: newCount,
         lastPolledAt: Date.now(),
         ...(result.configured === undefined ? {} : { configured: result.configured }),
@@ -337,6 +346,8 @@ export class InboundPoller {
       ? providerIds.filter((id) => this.statuses.has(id))
       : [...this.statuses.keys()];
     return ids.map((id) => {
+      const pushed = this.adapters.get(id);
+      if (pushed?.checkpointKind === 'pushed' && pushed.status) return { id, ...pushed.status() };
       const status = this.statuses.get(id)!;
       return { ...status };
     });
@@ -350,8 +361,11 @@ export class InboundPoller {
   stop(): Promise<void> {
     if (this.stopping) return this.stopping;
     this.released = true;
+    for (const unbind of this.unbinds.splice(0)) {
+      try { unbind(); } catch { this.warn('inbound pushed provider did not unbind', {}); }
+    }
     this.stopping = Promise.resolve().then(async () => {
-      await Promise.allSettled([...this.pending.values()]);
+      await Promise.allSettled([...this.pending.values(), ...this.pushing]);
     });
     for (const id of new Set([...this.adapters.keys(), ...this.pending.keys(), ...this.timers.keys()])) void this.stopProvider(id);
     this.started = false;

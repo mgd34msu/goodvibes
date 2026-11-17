@@ -9,7 +9,10 @@
 //         routeId, receivedAt INT, unread INT, triage_revision TEXT, seq INT)
 //   cursors(provider PK, nextSince INT)        one row per provider, or per
 //                                              conversation as `provider:conversation`
-//   imap_checkpoints(provider PK, checkpoint TEXT)
+//   mail_generations(provider PK, uidValidity) the mailbox generation a pushed mail
+//                                              provider's rows belong to (the
+//                                              position itself is the mailbox
+//                                              reader's, not this store's)
 //   triage_receipts(id PK, revision, status, label, score, tags, receipt, battery)
 //                                              triage labels beside their rows;
 //                                              a label shows only for the current
@@ -17,7 +20,8 @@
 //   inbox_source_revision_policy, inbox_retention_policy  format and policy versions
 //
 // One write path: the poller commits rows and their progress together through
-// commitTimestampPoll (Slack, Discord) or commitImapPoll (mail). Dedup is by
+// commitTimestampPoll (Slack, Discord) or commitMailItems (mail, pushed by the
+// mailbox reader). Dedup is by
 // items.id. `receivedAt` is the provider's own time for every provider; `seq` is
 // assigned by this store when a row is written or changes, so "new since" is
 // "committed after", the only order a store fed by several pollers can promise.
@@ -30,9 +34,8 @@
 // practice. Reclaimed counts are handed to the `onSweep` hook (counts only,
 // message previews and sender ids never reach a log line).
 //
-// Cursors are deliberately NOT reaped. Timestamp watermarks are monotonic;
-// IMAP checkpoints retain their explicit generation and history baseline.
-// Only an explicit UIDVALIDITY reset can replace an IMAP generation.
+// Cursors are deliberately NOT reaped. Timestamp watermarks are monotonic.
+// A mail generation is replaced only by the reader reporting another one.
 //
 // Idempotence/concurrency: a sweep re-run immediately reclaims nothing (the
 // DELETEs are set-based over the current contents). Every write is a statement
@@ -41,12 +44,11 @@
 // ---------------------------------------------------------------------------
 
 import { HandlerSqliteStore, type HandlerSqliteTransaction } from '../state/daemon-handler-sqlite-store.js';
-import type { ImapUidCheckpoint, ImapUidCheckpointAdvance, InboundChannelItem } from './provider-adapter.js';
+import type { InboundChannelItem } from './provider-adapter.js';
 import { captureTriageReceiptScope } from './triage/evidence.js';
 import type { TriageLabel, TriageReceiptScope } from './triage/types.js';
 import { INBOX_TRIAGE_BATTERY } from './triage/battery.js';
 import { retainActiveInboxStore } from './active-stores.js';
-import { captureImapAdvance, captureImapCheckpoint, captureImapItems, sameImapCheckpoint } from './imap-checkpoint.js';
 
 /**
  * Age TTL for feed items: rows whose receivedAt is older than this are dropped
@@ -118,8 +120,8 @@ const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS inbox_retention_policy (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1), version INTEGER NOT NULL, itemTtlMs INTEGER NOT NULL, itemCap INTEGER NOT NULL
   )`,
-  `CREATE TABLE IF NOT EXISTS imap_checkpoints (
-     provider TEXT PRIMARY KEY, checkpoint TEXT NOT NULL
+  `CREATE TABLE IF NOT EXISTS mail_generations (
+     provider TEXT PRIMARY KEY, uidValidity INTEGER
    )`,
   `CREATE TABLE IF NOT EXISTS items (
      id TEXT PRIMARY KEY,
@@ -321,6 +323,19 @@ export class InboxCursorStore {
       if (!saved || saved.itemTtlMs !== this.itemTtlMs || saved.itemCap !== this.itemCap) {
         this.store.run('INSERT OR REPLACE INTO inbox_retention_policy (singleton, version, itemTtlMs, itemCap) VALUES (1, 1, ?, ?)', [this.itemTtlMs, this.itemCap]);
       }
+      // A mirror kept its own mailbox checkpoint before the mailbox reader fed
+      // it; its generation carries over, so the reader keeps no second history.
+      const legacy = this.store.get<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'imap_checkpoints'");
+      if (legacy) {
+        for (const row of this.store.all<{ provider: string; checkpoint: string }>('SELECT provider, checkpoint FROM imap_checkpoints')) {
+          let validity: unknown;
+          try { validity = (JSON.parse(row.checkpoint) as { uidValidity?: unknown }).uidValidity; } catch { validity = undefined; }
+          if (typeof validity === 'number' && Number.isSafeInteger(validity) && validity > 0) {
+            this.store.run('INSERT OR IGNORE INTO mail_generations (provider, uidValidity) VALUES (?, ?)', [row.provider, validity]);
+          }
+        }
+        this.store.run('DROP TABLE imap_checkpoints');
+      }
       this.sourceRevisionsReady = true;
       await this.runSweep();
       if (this.closed) return;
@@ -448,46 +463,60 @@ export class InboxCursorStore {
     return pending;
   }
 
-  /** Account scoping belongs to the owning store path, never to mailbox data. */
-  getImapCheckpoint(provider: string): ImapUidCheckpoint | null {
-    this.assertOpen();
-    return readImapCheckpoint(this.store, provider);
-  }
-
   /**
-   * Publish redacted rows and their UID progress as one durable image. The
-   * synchronous fence is rechecked immediately before atomic rename. Failed
-   * transactions never publish an in-memory checkpoint or feed row.
+   * Store a mail provider's rows, pushed by the mailbox reader, in one
+   * transaction. With a generation (IMAP UIDVALIDITY), rows of any other
+   * generation of this provider and their labels are dropped first and the
+   * generation recorded; rows name UIDs, and another generation's UIDs name
+   * other messages. Returns the rows new to the mirror.
    */
-  commitImapPoll(provider: string, inputItems: readonly InboundChannelItem[], input: ImapUidCheckpointAdvance,
-    assertCurrent: () => void,
-  ): Promise<number> {
+  commitMailItems(provider: string, inputItems: readonly InboundChannelItem[], generation: number | null): Promise<number> {
     this.assertOpen();
-    const items = captureImapItems(provider, inputItems);
-    const advance = captureImapAdvance(input, items);
+    const items = captureMailItems(provider, inputItems);
+    if (generation !== null && !(Number.isSafeInteger(generation) && generation > 0)) {
+      return Promise.reject(new Error('A mail generation is a positive integer'));
+    }
     const pending = trackSequences(held => this.store.persistTransaction((transaction) => {
-      if (!sameImapCheckpoint(readImapCheckpoint(transaction, provider), advance.previous)) {
-        throw new Error('IMAP inbox checkpoint changed before commit');
-      }
-      if (advance.transition === 'reset') {
-        transaction.run('DELETE FROM items WHERE provider = ?', [provider]);
-        transaction.run('DELETE FROM triage_receipts WHERE id NOT IN (SELECT id FROM items)');
+      if (generation !== null) {
+        const stored = transaction.get<{ uidValidity: number | null }>('SELECT uidValidity FROM mail_generations WHERE provider = ?', [provider]);
+        if (!stored || stored.uidValidity !== generation) {
+          if (stored) {
+            transaction.run('DELETE FROM items WHERE provider = ?', [provider]);
+            transaction.run('DELETE FROM triage_receipts WHERE id NOT IN (SELECT id FROM items)');
+          }
+          transaction.run(`INSERT INTO mail_generations (provider, uidValidity) VALUES (?, ?)
+            ON CONFLICT(provider) DO UPDATE SET uidValidity = excluded.uidValidity`, [provider, generation]);
+        }
       }
       for (const item of items) {
         const existing = transaction.get<{ provider: string }>('SELECT provider FROM items WHERE id = ?', [item.id]);
-        if (existing && existing.provider !== provider) throw new Error('IMAP inbox item id belongs to another provider');
+        if (existing && existing.provider !== provider) throw new Error('Mail inbox item id belongs to another provider');
       }
-      const inserted = upsertRows(transaction, items, held);
-      transaction.run(`INSERT INTO imap_checkpoints (provider, checkpoint) VALUES (?, ?)
-        ON CONFLICT(provider) DO UPDATE SET checkpoint = excluded.checkpoint`, [provider, JSON.stringify(advance.next)]);
-      return inserted;
-    }, () => { this.assertOpen(); const result = assertCurrent(); this.assertOpen(); return result; }));
-    // Do not mark ordinary revisions clean: a separate flush still owns any
-    // mutation accepted after this transaction's synchronous publication.
+      return upsertRows(transaction, items, held);
+    }, () => { this.assertOpen(); }));
     const tracked = pending.then(() => {});
     this.flushing.add(tracked);
     void tracked.then(() => this.flushing.delete(tracked), () => this.flushing.delete(tracked));
     return pending;
+  }
+
+  /** The mailbox generation this provider's rows belong to, or null. */
+  mailGeneration(provider: string): number | null {
+    this.assertOpen();
+    const row = this.store.get<{ uidValidity: number | null }>('SELECT uidValidity FROM mail_generations WHERE provider = ?', [provider]);
+    return row?.uidValidity ?? null;
+  }
+
+  /** Whether the reader has ever fed this provider into this mirror. */
+  hasMailGeneration(provider: string): boolean {
+    this.assertOpen();
+    return Boolean(this.store.get<{ provider: string }>('SELECT provider FROM mail_generations WHERE provider = ?', [provider]));
+  }
+
+  /** Whether the mirror holds this row. One indexed lookup. */
+  hasItem(id: string): boolean {
+    this.assertOpen();
+    return Boolean(this.store.get<{ id: string }>('SELECT id FROM items WHERE id = ?', [id]));
   }
 
   /** Current cursor for a provider (0 when unset). */
@@ -792,9 +821,24 @@ function normalizeKind(value: string): InboundChannelItem['kind'] {
     : 'dm';
 }
 
-function readImapCheckpoint(store: HandlerSqliteTransaction, provider: string): ImapUidCheckpoint | null {
-  const row = store.get<{ checkpoint: string }>('SELECT checkpoint FROM imap_checkpoints WHERE provider = ?', [provider]);
-  return row ? captureImapCheckpoint(JSON.parse(row.checkpoint) as ImapUidCheckpoint) : null;
+/** Copy only the redacted feed fields of a pushed row, after checking its shape. */
+function captureMailItems(provider: string, input: readonly InboundChannelItem[]): readonly InboundChannelItem[] {
+  return input.map((item) => {
+    if (typeof item.id !== 'string' || !item.id || item.id.length > 500 || item.provider !== provider
+      || !['dm', 'thread', 'mention', 'reaction'].includes(item.kind)
+      || typeof item.fromDigest !== 'string' || !/^[a-f0-9]{16}$/i.test(item.fromDigest)
+      || typeof item.subjectPreview !== 'string' || item.subjectPreview.length > 200
+      || typeof item.bodyPreview !== 'string' || item.bodyPreview.length > 500
+      || !Number.isFinite(item.receivedAt) || typeof item.unread !== 'boolean'
+      || (item.routeId !== undefined && typeof item.routeId !== 'string')) {
+      throw new Error('A mail inbox row is malformed');
+    }
+    return {
+      id: item.id, provider, kind: item.kind, fromDigest: item.fromDigest,
+      subjectPreview: item.subjectPreview, bodyPreview: item.bodyPreview, receivedAt: item.receivedAt,
+      unread: item.unread, ...(item.routeId === undefined ? {} : { routeId: item.routeId }),
+    };
+  });
 }
 
 function upsertRows(store: HandlerSqliteTransaction, items: readonly InboundChannelItem[], held: Set<number>): number {

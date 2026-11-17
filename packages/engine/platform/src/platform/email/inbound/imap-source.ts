@@ -114,6 +114,10 @@ export class ImapMailSource implements InboundMailSource {
     this.watcher.recheckNow();
   }
 
+  requestHistory(): void {
+    this.watcher.requestHistory();
+  }
+
   /**
    * What the owner is told about delay, as it stands right now.
    *

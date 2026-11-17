@@ -222,12 +222,13 @@ function inboundMailGate(
 }
 
 /**
- * Inbound mail, registered only when a supervisor was composed for it.
+ * The mailbox reader, registered whenever a supervisor was composed for it.
  *
- * Switched off at boot, the surface is not contested, a node that won it would
- * read nothing and stand a reading node down, but turning it on later must
- * not need a restart, so the gate is registered the first time it is enabled.
- * Turning it off again is the supervisor's to act on; the gate stays.
+ * The reader is the one thing that reads this mailbox, for inbound notices
+ * and for the inbox alike, so its surface is the one placement rule for both:
+ * the node that holds it reads, and no other node signs in. A node holding it
+ * with notices off and no inbox attached reads nothing until one of them wants
+ * the mail; the supervisor decides that, not the election.
  */
 function registerInboundMailSurface(
   coordinator: ClusterCoordinator,
@@ -242,24 +243,10 @@ function registerInboundMailSurface(
       + 'BuiltinChannelRuntime');
     return;
   }
-  const register = (): void => {
-    coordinator.register(inboundMailGate(
-      collaborators.builtinChannels,
-      inboxSurface(`email:${mailbox.account}:${mailbox.mailbox}`),
-    ));
-  };
-  if (config.get('surfaces.email.inbound.enabled')) {
-    register();
-    return;
-  }
-  let unsubscribe: (() => void) | null = null;
-  let registered = false;
-  unsubscribe = config.subscribe('surfaces.email.inbound.enabled', (enabled) => {
-    if (!enabled || registered) return;
-    registered = true;
-    unsubscribe?.();
-    register();
-  });
+  coordinator.register(inboundMailGate(
+    collaborators.builtinChannels,
+    inboxSurface(`email:${mailbox.account}:${mailbox.mailbox}`),
+  ));
 }
 
 /**

@@ -1,9 +1,8 @@
 /** Root-owned, least-capability mail and explicit tagging constructors. */
-import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createInactiveInboxRetentionOwner, INBOX_APPLY_LABELS_METHOD_ID, INBOX_ITEM_TTL_MS, INBOX_ITEM_CAP, registerInboxLabelsMethod,
   type InactiveInboxRetentionOwner, type OwnedInboxTagging } from '@goodvibes-jev/engine/platform/platform/intake';
-import { composeMailDeps } from './mail-composition.js';
+import type { composeMailDeps } from './mail-composition.js';
 import { createDaemonTriageTaggingFactory, type DaemonTriagePermissionHost, type DaemonTriageTaggingRequest } from './tagged-inbox-composition.js';
 import type { SecretsManager } from '../config/secrets.js';
 import type { DaemonInboxControls, DaemonInboxFactory } from './daemon-handler-composition.js';
@@ -29,7 +28,7 @@ function hasHostedScreeningOwners(input: MailInput): input is MailInput & {
 
 /** Even a factory that throws after construction cannot orphan subscriptions. */
 export async function registerOwnedMailInbox(factory: DaemonInboxFactory, context: HandlerContext,
-  routing: RoutingRegistration, controls: Pick<DaemonInboxControls, 'gatePolling' | 'gatePollingOwned' | 'beforeDiscordIdentityWrite' | 'beforeAccountIdentityWrite' | 'beforeInboxTriageIdentityWrite' | 'beforeInboxTriageReceiptWrite' | 'beforeSourceRevisionWrite' | 'onOwnerMail'>,
+  routing: RoutingRegistration, controls: Pick<DaemonInboxControls, 'gatePolling' | 'gatePollingOwned' | 'beforeDiscordIdentityWrite' | 'beforeAccountIdentityWrite' | 'beforeInboxTriageIdentityWrite' | 'beforeInboxTriageReceiptWrite' | 'beforeSourceRevisionWrite' | 'onOwnerMail' | 'mailboxReaders'>,
   mailInput: MailInput, triageHost?: DaemonTriagePermissionHost): Promise<OwnedHandlerSurface> {
   const mailClosers = new Set<() => void>();
   const taggingOwners: OwnedInboxTagging[] = [];
@@ -169,28 +168,6 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
         taggingByProvider.set(request.provider, handle);
         return handle;
       } } : {}),
-      createEmailService() {
-        if (retired) throw new Error('Inbox mail constructor is retired');
-        const disposers: Array<() => void> = [];
-        let closed = false;
-        let closeFailure: AggregateError | undefined;
-        const close = (): void => {
-          if (closed) { if (closeFailure) throw closeFailure; return; }
-          closed = true;
-          const errors: unknown[] = [];
-          for (const dispose of disposers.reverse()) { try { dispose(); } catch (error) { errors.push(error); } }
-          if (errors.length) {
-            closeFailure = new AggregateError(errors, 'Inbox mail service did not close cleanly');
-            throw closeFailure;
-          }
-          mailClosers.delete(close);
-        };
-        mailClosers.add(close);
-        try {
-          const { emailServiceDeps } = composeMailDeps({ ...mailInput, registerDispose: dispose => { disposers.push(dispose); } });
-          return Object.freeze({ service: new EmailService(emailServiceDeps), close });
-        } catch (error) { close(); throw error; }
-      },
     });
     const ownedRegistration = registration;
     if (createTagging && context.catalog.get(INBOX_APPLY_LABELS_METHOD_ID)) {

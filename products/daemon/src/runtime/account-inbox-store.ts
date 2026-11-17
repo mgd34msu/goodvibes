@@ -49,6 +49,11 @@ export interface AccountInboxStoreInput<T extends InboxSurfaceRegistration, O ex
   readonly clustered: boolean;
   readonly eligibilityClock?: ClusterClock | undefined;
   readonly owner: O;
+  /**
+   * The provider's rows come from a reader placed by its own surface (mail):
+   * nothing here is polled, so no eligibility is proven and no gate contested.
+   */
+  readonly placedByReader?: boolean | undefined;
   /** Checks and subscriptions made once the owner exists; a throw here closes the owner. */
   readonly prepare?: (() => void) | undefined;
   /** The poller election discriminator, read after `prepare`. */
@@ -79,7 +84,7 @@ export async function ownAccountInboxStore<T extends InboxSurfaceRegistration, O
   let stage: InboxBuildStage = 'owner';
   try {
     input.prepare?.();
-    if (clustered && typeof owner.verifyEligibility !== 'function') throw new Error(`Clustered ${provider} inbox requires an eligible owner`);
+    if (clustered && !input.placedByReader && typeof owner.verifyEligibility !== 'function') throw new Error(`Clustered ${provider} inbox requires an eligible owner`);
     const electionScope = input.electionScope();
     const storeFileName = `inbox-${provider}-${owner.scopeId}.sqlite`;
     stage = 'lock';

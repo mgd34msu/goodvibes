@@ -139,6 +139,8 @@ export function imapMailboxConnectionPort(
         capabilities: () => client.capabilities(),
         fetchEnvelopes: (uids) => client.fetchEnvelopes(uids),
         fetchEnvelopeBatch: (uids) => client.fetchEnvelopeBatch(uids),
+        searchCompleteUids: (unreadOnly, fromUid) => client.searchCompleteUids(unreadOnly, fromUid),
+        readCompleteMessageDetail: (uid) => client.readCompleteMessageDetail(uid),
       };
       return {
         reading,

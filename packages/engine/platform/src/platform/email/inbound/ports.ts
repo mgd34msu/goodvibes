@@ -39,6 +39,7 @@ import type {
   ImapEnvelopeBatch,
 } from '../imap-client.js';
 import type { ImapConnection, ImapReadOptions } from '../imap-session.js';
+import type { CompleteMessageRead } from '../imap-message-complete.js';
 import type { CursorResolution, MailboxCursorStore } from './cursor-store.js';
 import type { MailboxCursor } from './types.js';
 
@@ -162,6 +163,21 @@ export interface MailboxCursorPort {
     readonly uidValidity: number;
     readonly lastSeenUid: number;
   }): Promise<MailboxCursor>;
+  /**
+   * Keep the newest messages at or below the position as history: the cursor
+   * moves to just below `floorUid` and everything up to `throughUid` is
+   * delivered flagged `history`, so a consumer that shows a mailbox (the
+   * inbox) starts with them and nothing announces them. Never moves the
+   * cursor above where it is. Optional: a port without it keeps no history.
+   */
+  seedHistory?(input: {
+    readonly account: string;
+    readonly mailbox: string;
+    readonly uidValidity: number;
+    readonly floorUid: number;
+    readonly throughUid: number;
+    readonly skippedOlderMessages: number;
+  }): Promise<MailboxCursor>;
 }
 
 /**
@@ -225,6 +241,17 @@ export interface MailboxReader {
    * nobody would ever be told about.
    */
   fetchEnvelopeBatch(uids: readonly number[]): Promise<ImapEnvelopeBatch>;
+  /**
+   * Every UID (or every unread one), optionally from `fromUid` up. Used for
+   * the history window and the inbox's unread flag, on this same session.
+   */
+  searchCompleteUids(unreadOnly: boolean, fromUid?: number): Promise<readonly number[]>;
+  /**
+   * One message's complete source on this session, for a consumer that shows
+   * its text (the inbox). Read only when such a consumer asks, so the notice
+   * path stays a headers-only pass and no second login is made for content.
+   */
+  readCompleteMessageDetail(uid: number): Promise<CompleteMessageRead>;
 }
 
 /**
@@ -408,7 +435,31 @@ export interface ImapInboundMessage extends InboundMessageCommon {
   readonly envelope: ImapEnvelope;
   /** Whether this arrived through IDLE push or through the poll fallback. */
   readonly via: 'idle' | 'poll';
+  /**
+   * Already in the mailbox when the reader established its position: kept so
+   * a consumer that shows the mailbox starts with it, never announced.
+   */
+  readonly history?: boolean | undefined;
+  /**
+   * Set on a stand-in for a message the reader could not read after its
+   * bounded attempts. The envelope fields are empty; the reader stepped over
+   * it and reported it, and a consumer shows that it exists.
+   */
+  readonly unreadable?: { readonly reason: string; readonly senderDomain?: string | undefined } | undefined;
+  /** The complete source on the reader's own session; read only when asked. */
+  readonly readContent?: (() => Promise<MailboxContentRead>) | undefined;
+  /** Whether the message is unread; one search per batch, only when asked. */
+  readonly readUnread?: (() => Promise<boolean>) | undefined;
 }
+
+/**
+ * A complete-source read as the reader hands it on. A read that failed on
+ * the session is retried on later drains; after the bounded attempts it comes
+ * back as `repeated-read-failure`, so no single message holds the mailbox.
+ */
+export type MailboxContentRead =
+  | CompleteMessageRead
+  | { readonly outcome: 'incomplete'; readonly reason: 'repeated-read-failure'; readonly fromMessage: true };
 
 /** One message a Gmail source found in a `users.history.list` delta. */
 export interface GmailInboundMessage extends InboundMessageCommon {
@@ -482,6 +533,38 @@ export type InboundMailboxMessage = ImapInboundMessage | GmailInboundMessage;
  */
 export interface InboundMailSink {
   deliver(message: InboundMailboxMessage): Promise<void>;
+  /**
+   * Hand over a batch and report how many leading messages every consumer
+   * settled. The reader moves its cursor past exactly those. A sink without it
+   * is fed one message at a time.
+   */
+  deliverBatch?(messages: readonly InboundMailboxMessage[]): Promise<MailboxBatchOutcome>;
+  /** The mailbox generation, told at every connection before any of its messages. */
+  generation?(uidValidity: number): Promise<void>;
+  /** Whether a consumer wants the history window kept on first run. */
+  wantsHistory?(): boolean;
+  /** Where the reader's position stands after a drain step. Never throws. */
+  position?(position: MailboxReadPosition): void;
+}
+
+/** What `deliverBatch` reports: `done` leading messages settled, and the first failure. */
+export interface MailboxBatchOutcome {
+  readonly done: number;
+  readonly failed: boolean;
+  readonly error: unknown;
+}
+
+/** The reader's position for one mailbox, as consumers may report it. */
+export interface MailboxReadPosition {
+  readonly uidValidity: number;
+  readonly lastSeenUid: number;
+  /** Messages found above the cursor and not yet settled. */
+  readonly pending: number;
+  readonly history?: {
+    readonly floorUid: number;
+    readonly throughUid: number;
+    readonly skippedOlderMessages: number;
+  } | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -532,6 +615,12 @@ export interface InboundMailNote {
      * response we can never read would otherwise be an invisible standstill.
      */
     | 'fetch-unreadable'
+    /**
+     * A message could not be read on its bounded attempts and was stepped
+     * over: consumers were handed a stand-in that says so and the cursor moved
+     * past it, so the messages after it still arrive.
+     */
+    | 'message-stepped-over'
     | 'expunge-observed'
     | 'idle-reissued'
     | 'connection-lost'

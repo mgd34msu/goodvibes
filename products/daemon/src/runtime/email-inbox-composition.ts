@@ -6,8 +6,8 @@ import { ownAccountInboxStore } from './account-inbox-store.js';
 import { atInboxBuildStage, type InboxBuildStage } from './inbox-admission-refusal.js';
 /** Explicit single-account mail inbox; does not enable all-provider default serve. */
 import { realpath } from 'node:fs/promises';
-import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
-import { createEmailInboxOwner, acquireAccountInboxIdentity, resolveAccountInboxElectionScope, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
+import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader, mailboxReaderKey } from '@goodvibes-jev/engine/platform/platform/email';
+import { createEmailInboxOwner, acquireAccountInboxIdentity, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
   type EmailInboxAccount, type EmailInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
@@ -82,45 +82,48 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
         || mailConfig('email.enabled') !== true) throw new Error('Email inbox requires enabled stable cluster mode');
     };
     current();
-    if (!controls.createEmailService) throw new Error('Email inbox requires the canonical owned mail-service constructor');
+    // The mailbox reader is the only thing that reads this mailbox; the inbox is one of its consumers.
+    const readers = controls.mailboxReaders;
+    const readerKey = mailboxReaderKey({ host: options.account.host, user: options.account.username, mailbox: options.account.mailbox });
+    if (!readers || readerKey === null) throw new Error('Email inbox requires the mailbox reader it consumes');
     const workingDirectory = await realpath(context.workingDirectory);
     current();
-    const mail = controls.createEmailService();
     let owner: EmailInboxOwner;
     let identity: Awaited<ReturnType<typeof acquireAccountInboxIdentity>>;
-    let surface: T | undefined;
     let stage: InboxBuildStage = 'identity';
     try {
       identity = await acquireAccountInboxIdentity({ workingDirectory, assertCurrent: current,
         beforeWrite: controls.beforeAccountIdentityWrite }, { provider: 'email', account: options.account });
       current();
       stage = 'owner';
-      owner = (factories.createOwner ?? createEmailInboxOwner)({ identity, account: options.account, service: mail.service,
+      owner = (factories.createOwner ?? createEmailInboxOwner)({ identity, account: options.account,
         screening: options.screening, assertCurrent: current, resolveRouteId,
-        ...(controls.onOwnerMail ? { onMail: controls.onOwnerMail } : {}),
-        getCheckpoint: () => {
-          if (!surface?.getImapCheckpoint) throw new Error('Email inbox checkpoint storage is unavailable');
-          return surface.getImapCheckpoint('email');
-        } });
+        ...(controls.onOwnerMail ? { onMail: controls.onOwnerMail } : {}) });
     } catch (error) {
-      try { mail.close(); } catch { /* The acquisition failure is the error reported. */ }
       throw atInboxBuildStage('email', stage, error);
     }
-    const selectedOwner = owner, electionIdentity = identity;
+    const selectedOwner = owner;
+    let detach: (() => void) | undefined;
+    let released = false;
     const result = await ownAccountInboxStore({
       provider: 'email', controls, workingDirectory, clustered, owner: selectedOwner, assertCurrent: current,
       ...(factories.eligibilityClock ? { eligibilityClock: factories.eligibilityClock } : {}),
+      // Placed by the mailbox reader's own surface; this store contests nothing.
+      placedByReader: true,
       prepare: current,
-      electionScope: () => clustered ? resolveAccountInboxElectionScope(electionIdentity) : selectedOwner.scopeId,
-      register: async store => {
-        surface = await register({ ...context, workingDirectory }, {
-          adapters: new Map([['email', selectedOwner.adapter]]), beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, ...store,
-          acquireReadLease: () => selectedOwner.acquireReadLease(),
-        }, selectedOwner, controls.beforeInboxTriageIdentityWrite, controls.beforeInboxTriageReceiptWrite);
-        return surface;
-      },
-      releaseExtras: () => mail.close(),
+      electionScope: () => selectedOwner.scopeId,
+      register: async store => register({ ...context, workingDirectory }, {
+        adapters: new Map([['email', selectedOwner.adapter]]), beforeSourceRevisionWrite: controls.beforeSourceRevisionWrite, ...store,
+        acquireReadLease: () => selectedOwner.acquireReadLease(),
+      }, selectedOwner, controls.beforeInboxTriageIdentityWrite, controls.beforeInboxTriageReceiptWrite),
+      releaseExtras: () => { released = true; detach?.(); },
     });
+    // Attached once the mirror is open, so the first batch has somewhere to go;
+    // a mirror the reader never fed asks it for the history window once.
+    void result.ready.then(() => {
+      if (released) return;
+      detach = readers.attach(readerKey, selectedOwner.consumer, { requestHistory: selectedOwner.needsHistory() });
+    }, () => {});
     return triageTagging ? attachDaemonInboxTagging(result, triageTagging, controls, {
       provider: 'email', accountScopeId: selectedOwner.scopeId, assertCurrent: current,
       imap: { host: selectedOwner.account.host, port: selectedOwner.account.port, user: selectedOwner.account.username, mailbox: selectedOwner.account.mailbox },

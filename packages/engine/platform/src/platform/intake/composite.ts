@@ -41,7 +41,6 @@ export function composeInboxReads(input: readonly InboxReadSource[]): InboxAggre
       maxSequence(providers) {
         return selected(providers).reduce((max, source) => Math.max(max, source.sources.store.maxSequence(providers)), 0);
       },
-      getImapCheckpoint(provider) { return owners.get(provider)?.store.getImapCheckpoint(provider) ?? null; },
     },
     poller: {
       snapshotStatuses(providers) {

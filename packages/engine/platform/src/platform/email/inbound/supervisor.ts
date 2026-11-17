@@ -40,6 +40,8 @@
  */
 
 import { createInboundMailDedup, DedupingInboundMailSink } from './sink.js';
+import { isHistoryOrStandIn, MailboxFanOut, type MailboxConsumer } from './mailbox-consumers.js';
+import type { HeldProcessLock } from '../../utils/process-lock.js';
 import { createInboundMailSetAside } from './intake.js';
 import { capabilityVerdict } from './capability.js';
 import { describeInboundMailHealth, type InboundMailHealthEntry } from './health.js';
@@ -69,6 +71,7 @@ import type {
   InboundMailObserver,
   InboundMailTerminalFailure,
   InboundMailboxMessage,
+  InboundMailSink,
 } from './ports.js';
 import { discloseCursor } from './supervisor-status.js';
 import type {
@@ -128,7 +131,7 @@ export interface InboundMailSourceFactory {
     readonly kind: InboundMailSourceKind;
     readonly account: string;
     readonly mailbox: string;
-    readonly sink: DedupingInboundMailSink;
+    readonly sink: InboundMailSink;
     readonly observer: InboundMailObserver;
   }): Promise<InboundMailSource | null>;
 }
@@ -198,6 +201,20 @@ export interface InboundMailSupervisorDeps {
   readonly startUnwindBoundMs?: number | undefined;
   /** Timer seam for the unwind bound; resolves after `ms` or when aborted. */
   readonly sleep?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
+  /**
+   * Everything else that wants this mailbox's mail (the inbox). Read on every
+   * batch, so a consumer that attaches while the reader runs gets the next one.
+   * With none attached and notices off, the mailbox is not read at all.
+   */
+  readonly consumers?: (() => readonly MailboxConsumer[]) | undefined;
+  /**
+   * The machine-wide reader lease for this mailbox, released by the kernel if
+   * the process dies. Null when another process on this machine holds it:
+   * this one then does not sign in, and tries again on the revive delay.
+   */
+  readonly readerLease?: (() => HeldProcessLock | null) | undefined;
+  /** How long a supervisor that found the lease held waits before asking again. */
+  readonly leaseRetryMs?: number | undefined;
 }
 
 const DEFAULT_REVIVE_DELAY_MS = 1_000;
@@ -206,6 +223,7 @@ const MAX_LOOP_REVIVE_DELAY_MS = 5 * 60_000;
 /** A loop that ran this long before it ended counts as having worked: the backoff starts over. */
 const LOOP_HEALTHY_AFTER_MS = 5 * 60_000;
 const DEFAULT_START_UNWIND_BOUND_MS = 15_000;
+const DEFAULT_LEASE_RETRY_MS = 30_000;
 
 function realSleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -272,6 +290,10 @@ export class InboundMailSupervisor {
   private startedWith: string | null = null;
   /** Start-time steps that failed without stopping the watcher. Carried into `status`. */
   private degradations: readonly string[] = [];
+  /** The reader lease held while a source runs. */
+  private lease: HeldProcessLock | null = null;
+  /** A consumer asked for the history window before a source existed to take it. */
+  private historyRequested = false;
 
   constructor(deps: InboundMailSupervisorDeps) {
     this.deps = deps;
@@ -399,10 +421,12 @@ export class InboundMailSupervisor {
     // must not go on being appended to every status sentence.
     this.degradations = [];
 
-    if (!this.deps.config.get('surfaces.email.inbound.enabled')) {
+    const notices = Boolean(this.deps.config.get('surfaces.email.inbound.enabled'));
+    if (!notices && this.attachedConsumers().length === 0) {
       return this.settle('inactive',
-        'inbound mail is switched off (surfaces.email.inbound.enabled=false); set it to true, '
-        + 'with at least one account in surfaces.email.inbound.accounts, to watch a mailbox');
+        'inbound mail is switched off (surfaces.email.inbound.enabled=false) and nothing else reads '
+        + 'this mailbox; set it to true, with at least one account in surfaces.email.inbound.accounts, '
+        + 'to be told about arriving mail');
     }
 
     // Rehydration, in the order §9 requires: sweep the stores, THEN bring the
@@ -451,8 +475,19 @@ export class InboundMailSupervisor {
       return this.settle('inactive', `${selection.detail} ${selection.fix}`);
     }
 
+    if (this.deps.readerLease) {
+      const lease = this.deps.readerLease();
+      if (lease === null) {
+        this.scheduleRevive(this.deps.leaseRetryMs ?? DEFAULT_LEASE_RETRY_MS);
+        return this.settle('inactive',
+          'Another GoodVibes process on this machine reads this mailbox, so this one does not sign in. '
+          + 'It takes over when that process stops.');
+      }
+      this.lease = lease;
+    }
+
     const noticeHealth = this.deps.noticeHealth;
-    const sink = new DedupingInboundMailSink({
+    const noticeSink = new DedupingInboundMailSink({
       dedup: createInboundMailDedup(this.dedupTtlMs()),
       handle: this.deps.handle,
       setAside: createInboundMailSetAside({
@@ -462,7 +497,18 @@ export class InboundMailSupervisor {
         observer: this.observer(),
       }),
     });
-    if (!this.wantsRunning) return this.settle('inactive', 'stopped');
+    // Notices are one consumer of the mailbox, beside whatever else is
+    // attached; history and stand-ins for unreadable messages are not
+    // announced (the reader reports a stepped-over message itself).
+    const notifier: MailboxConsumer = {
+      id: 'inbound-notices',
+      deliver: async (message) => {
+        if (isHistoryOrStandIn(message) || !this.deps.config.get('surfaces.email.inbound.enabled')) return;
+        await noticeSink.deliver(message);
+      },
+    };
+    const sink = new MailboxFanOut(() => [notifier, ...this.attachedConsumers()]);
+    if (!this.wantsRunning) { this.releaseLease(); return this.settle('inactive', 'stopped'); }
     const source = await this.deps.sources.create({
       kind: selection.source,
       account: this.deps.account,
@@ -471,6 +517,7 @@ export class InboundMailSupervisor {
       observer: this.observer(),
     });
     if (source === null) {
+      this.releaseLease();
       // Reported, never substituted. Serving the other source here would leave
       // the owner with a setting that says one thing while the daemon does
       // another, the silent degradation §3.4b refuses everywhere else.
@@ -480,14 +527,16 @@ export class InboundMailSupervisor {
         + 'set surfaces.email.inbound.source explicitly to the source this install can serve.');
     }
 
-    if (!this.wantsRunning) { await source.stop(); return this.settle('inactive', 'stopped'); }
+    if (!this.wantsRunning) { await source.stop(); this.releaseLease(); return this.settle('inactive', 'stopped'); }
     this.source = source;
+    if (this.historyRequested) { this.historyRequested = false; source.requestHistory?.(); }
     this.loopEnded = false;
     const abort = new AbortController();
     this.abort = abort;
     const verdict = await source.start(abort.signal);
     if (!this.wantsRunning || abort.signal.aborted || source.retired) {
       await source.stop();
+      this.releaseLease();
       return this.settle('inactive', source.retired ? 'The mail source was retired during startup.' : 'stopped');
     }
     this.verdict = verdict;
@@ -643,6 +692,25 @@ export class InboundMailSupervisor {
     this.scheduleRevive();
   }
 
+  /**
+   * A consumer that shows the mailbox attached after the position was
+   * established and wants the history window once.
+   */
+  requestHistory(): void {
+    if (this.source?.requestHistory) this.source.requestHistory();
+    else this.historyRequested = true;
+  }
+
+  /** A consumer attached or detached: start reading, or stop when nothing wants the mail. */
+  consumersChanged(): void {
+    if (!this.wantsRunning) return;
+    this.recheckNow();
+  }
+
+  private attachedConsumers(): readonly MailboxConsumer[] {
+    return this.deps.consumers?.() ?? [];
+  }
+
   private scheduleRevive(delayMs: number = this.deps.reviveDelayMs ?? DEFAULT_REVIVE_DELAY_MS): void {
     if (this.reviveTimer !== null) return;
     const timer = setTimeout(() => {
@@ -676,6 +744,9 @@ export class InboundMailSupervisor {
       // install selects: a non-Google host turns a Gmail mailbox into IMAP.
       this.deps.config.get('surfaces.email.imap.host'),
       this.deps.config.get('surfaces.email.host'),
+      // Whether anything besides notices reads this mailbox: the last consumer
+      // leaving with notices off stops the reader, the first arriving starts it.
+      this.attachedConsumers().length > 0,
     ]);
   }
 
@@ -730,6 +801,14 @@ export class InboundMailSupervisor {
     this.loopEnded = false;
     if (source !== null) await source.stop().catch(() => undefined);
     if (loop !== null) await loop;
+    // After the connection is closed, never before: the next holder signs in only once this one has let go.
+    this.releaseLease();
+  }
+
+  private releaseLease(): void {
+    const lease = this.lease;
+    this.lease = null;
+    lease?.release();
   }
 
   /** Email's health entry, read from live state (never from config presence). */
@@ -980,6 +1059,10 @@ export class InboundMailSupervisor {
       ? reason
       : `${reason} ${this.degradations.join(' ')}`;
     this.currentStatus = { mode, reason: full, running };
+    for (const consumer of this.attachedConsumers()) {
+      try { consumer.readerState?.({ running, verdict: this.verdict, reason: full }); }
+      catch { /* A reporting consumer cannot change the reader's state. */ }
+    }
     return this.currentStatus;
   }
 }

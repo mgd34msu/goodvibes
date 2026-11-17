@@ -191,11 +191,20 @@ export function validateMailboxCursorFields(record: Record<string, unknown>): Ma
   if (!isImapUidValidity(record.uidValidity)) return null;
   if (!isImapUid(record.lastSeenUid)) return null;
   if (!isParsableIsoDate(record.updatedAt)) return null;
+  // The history window is all or nothing: a torn window is dropped, never the cursor.
+  const through = record.historyThrough;
+  const floor = record.historyFloorUid;
+  const skipped = record.skippedOlderMessages;
+  const window = isImapUid(through) && through > 0 && isImapUid(floor) && floor > 0 && floor <= through
+    && typeof skipped === 'number' && Number.isSafeInteger(skipped) && skipped >= 0
+    ? { historyThrough: through, historyFloorUid: floor, skippedOlderMessages: skipped }
+    : {};
   return {
     account: (record.account as string).trim(),
     mailbox: (record.mailbox as string).trim(),
     uidValidity: record.uidValidity,
     lastSeenUid: record.lastSeenUid,
     updatedAt: record.updatedAt as string,
+    ...window,
   };
 }

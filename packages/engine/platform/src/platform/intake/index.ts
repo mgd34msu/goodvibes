@@ -9,14 +9,13 @@ export type { ProtectedInboxPreviewInput, ProtectedInboxPreviewFields } from './
 export { createEmailInboxOwner } from './providers/email-owner.js';
 export { acquireAccountInboxIdentity, resolveAccountInboxIdentity, resolveAccountInboxElectionScope } from './providers/account-identity.js';
 export type { AccountInboxIdentity, AccountInboxIdentityInput, AccountInboxIdentityOwner, AccountInboxSelectors, AccountInboxBinding } from './providers/account-identity.js';
-export type { OwnerMailObservation, EmailInboxAccount, EmailInboxOwnerOptions, EmailInboxOwner, EmailInboxReadLease, VerifiedEmailInboxOwner } from './providers/email-owner.js';
+export type { OwnerMailObservation, EmailInboxAccount, EmailInboxOwnerOptions, EmailInboxOwner, EmailInboxReadLease } from './providers/email-owner.js';
 export { createSlackInboxOwner } from './providers/slack-owner.js';
 export type { SlackInboxAccount, SlackInboxOwnerOptions, SlackInboxOwnerFactories, SlackInboxOwner, VerifiedSlackInboxOwner } from './providers/slack-owner.js';
 export { sha256First, digestSender, stripMarkup, normalizeWhitespace } from './text-normalization.js';
 export type {
-  ImapUidCheckpoint, ImapUidCheckpointAdvance, ImapUidTerminalDisposition,
   InboundChannelItem, ProviderState, ProviderPollResult, ProviderPollOptions,
-  AdapterContext, RouteResolver, InboundProviderAdapter,
+  AdapterContext, RouteResolver, InboundProviderAdapter, PushedProviderSink, PushedProviderStatus,
 } from './provider-adapter.js';
 export { POLL_CADENCE_MS } from './provider-adapter.js';
 export {

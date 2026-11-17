@@ -27,29 +27,34 @@
  *
  * The cursor moves behind the work, never ahead of it
  * ───────────────────────────────────────────────────
- * `advance()` is called once per message and only after that message's
- * `deliver()` has resolved. A crash, a failed notice or a killed process
- * between fetch and completion therefore leaves the cursor below the message,
- * and the next pass fetches it again, a duplicate for dedup to suppress
- * rather than a message nobody ever hears about. This is the same rule
+ * `advance()` is called once per batch and only past the messages every
+ * consumer settled. A crash, a failed notice or a killed process between
+ * fetch and completion therefore leaves the cursor below the message, and the
+ * next pass fetches it again, a duplicate each consumer absorbs by the message
+ * key rather than a message nobody ever hears about. This is the same rule
  * `TelegramIngressSupervisor` already follows for its offset, and it is the
  * reason a reconnect loses nothing: recovery is not "resume the stream", it is
  * "ask what is above the cursor".
  */
 
 import type { ImapEnvelopeBatch, ImapFetchProblem } from '../imap-client.js';
+import type { CompleteMessageRead } from '../imap-message-complete.js';
 import { parseSearchNumbers } from '../imap-headers.js';
 import type {
+  ImapInboundMessage,
+  InboundMailboxMessage,
   InboundMailObserver,
   InboundMailSink,
   InboundWatcherSettings,
+  MailboxBatchOutcome,
+  MailboxContentRead,
   MailboxCursorPort,
   MailboxReader,
   MailboxWire,
   WatcherClock,
 } from './ports.js';
 import { isImapUid, MAX_IMAP_UID } from './source-cursor.js';
-import { InboundNoticeTransportError } from './intake.js';
+import { isConsumerUnavailable, MailboxReadError } from './mailbox-consumers.js';
 import type { MailboxCursor } from './types.js';
 
 /** Everything one drain of the mailbox needs. */
@@ -66,6 +71,8 @@ export interface MailboxDeltaDeps {
   /** Recorded on each message so a consumer can tell push from poll. */
   readonly via: 'idle' | 'poll';
   readonly signal: AbortSignal;
+  /** Read failures per message across drains, owned by the watcher. */
+  readonly readFailures?: MailboxReadFailures | undefined;
 }
 
 /** Why a drain stopped, and where it left the cursor. */
@@ -205,6 +212,7 @@ export async function drainMailboxDelta(
   deps: MailboxDeltaDeps,
 ): Promise<MailboxDeltaReport> {
   const { settings, cursor } = deps;
+  const failures = deps.readFailures ?? new MailboxReadFailures();
   let current = cursor;
   let delivered = 0;
   let vanished = 0;
@@ -228,7 +236,10 @@ export async function drainMailboxDelta(
   } catch (error) {
     return finish(deps.signal.aborted ? 'aborted' : 'read-failed', 0, error, 'search');
   }
-  if (uids.length === 0) return finish('complete', 0);
+  if (uids.length === 0) {
+    reportPosition(deps, current, 0);
+    return finish('complete', 0);
+  }
 
   for (const batch of chunk(uids, settings.deltaBatchSize)) {
     if (deps.signal.aborted) return finish('aborted', uids.length);
@@ -242,54 +253,84 @@ export async function drainMailboxDelta(
     const byUid = new Map(fetched.envelopes.map((envelope) => [envelope.uid, envelope]));
     const unreadable = fetched.unreadable;
     const attribution = attributeUnreadable(unreadable);
+    const unread = unreadSearch(deps, batch[0]!);
 
+    const messages: ImapInboundMessage[] = [];
+    // The highest UID the cursor may pass when every message here is settled:
+    // the last message, or an expunge or stepped-over UID after it.
+    let covered = current.lastSeenUid;
+    let stop: Error | null = null;
     for (const uid of batch) {
-      if (deps.signal.aborted) return finish('aborted', uids.length);
       const envelope = byUid.get(uid);
       if (envelope === undefined) {
         if (attribution.couldBe(uid)) {
-          // Not an expunge, or not provably one. An unreadable response could
-          // have been this UID's own, see the block comment above
-          // `unreadableFetch`.
-          const error = unreadableFetch(deps, current, uid, unreadable, attribution.named.has(uid));
-          note(deps, 'fetch-unreadable', error.message);
-          return finish('read-failed', uids.length, error, 'fetch', true);
+          // Not an expunge, or not provably one. Read again on the next
+          // drains; after the bounded attempts it is stepped over and handed
+          // on as a stand-in, so it neither holds the mailbox nor goes unsaid.
+          if (failures.note('envelope', current.uidValidity, uid) < MAX_READ_ATTEMPTS) {
+            stop = unreadableFetch(deps, current, uid, unreadable, attribution.named.has(uid));
+            break;
+          }
+          failures.clear('envelope', current.uidValidity, uid);
+          messages.push(standIn(deps, current, uid, 'repeated-read-failure'));
+          note(deps, 'message-stepped-over',
+            `UID ${uid} could not be read on ${MAX_READ_ATTEMPTS} drains in a row, so it was handed on as `
+            + 'a message that could not be read here and the cursor moves past it.');
+          covered = uid;
+          continue;
         }
         vanished += 1;
-        current = await advanceTo(deps, current, uid);
+        covered = uid;
         continue;
       }
-      try {
-        // The base fields are a straight carry off the envelope: the pipeline
-        // downstream reads `InboundMessageCommon` and never narrows, so what a
-        // source can say has to be said here rather than left for each
-        // consumer to dig out of `envelope`. `date` becomes `claimedDate`
-        // because it is sender-written and is not an ordering key.
-        await deps.sink.deliver({
-          source: 'imap',
-          account: settings.account,
-          mailbox: settings.mailbox,
-          from: envelope.from,
-          subject: envelope.subject,
-          claimedDate: envelope.date,
-          messageId: envelope.messageId,
-          deliveredTo: envelope.deliveredTo,
-          unverifiedToHeaderClaim: envelope.unverifiedToHeaderClaim,
-          uidValidity: current.uidValidity,
-          uid,
-          envelope,
-          via: deps.via,
-        });
-      } catch (error) {
-        note(deps, 'delivery-failed',
-          `UID ${uid} was not processed, so the cursor stays at `
-          + `${current.lastSeenUid} and the message will be fetched again.`);
-        return finish('delivery-failed', uids.length, error);
+      failures.clear('envelope', current.uidValidity, uid);
+      // The base fields are a straight carry off the envelope: the pipeline
+      // downstream reads `InboundMessageCommon` and never narrows, so what a
+      // source can say has to be said here rather than left for each
+      // consumer to dig out of `envelope`. `date` becomes `claimedDate`
+      // because it is sender-written and is not an ordering key.
+      const uidValidity = current.uidValidity;
+      messages.push({
+        source: 'imap',
+        account: settings.account,
+        mailbox: settings.mailbox,
+        from: envelope.from,
+        subject: envelope.subject,
+        claimedDate: envelope.date,
+        messageId: envelope.messageId,
+        deliveredTo: envelope.deliveredTo,
+        unverifiedToHeaderClaim: envelope.unverifiedToHeaderClaim,
+        uidValidity,
+        uid,
+        envelope,
+        via: deps.via,
+        ...(uid <= (current.historyThrough ?? 0) ? { history: true } : {}),
+        readContent: () => readContent(deps, failures, uidValidity, uid),
+        readUnread: async () => (await unread()).has(uid),
+      });
+      covered = uid;
+    }
+
+    const outcome = await deliverBatch(deps.sink, messages);
+    delivered += outcome.done;
+    // Only now, and only past what every consumer settled. Everything about
+    // "no message is lost" is in this ordering.
+    const target = outcome.failed ? messages[outcome.done]!.uid - 1 : covered;
+    if (target > current.lastSeenUid) current = await advanceTo(deps, current, target);
+    reportPosition(deps, current, uids.filter((uid) => uid > current.lastSeenUid).length);
+    if (outcome.failed) {
+      const failedUid = messages[outcome.done]!.uid;
+      if (outcome.error instanceof MailboxReadError) {
+        return finish(deps.signal.aborted ? 'aborted' : 'read-failed', uids.length, outcome.error, 'fetch');
       }
-      if (deps.signal.aborted) return finish('aborted', uids.length);
-      delivered += 1;
-      // Only now. Everything about "no message is lost" is in this ordering.
-      current = await advanceTo(deps, current, uid);
+      note(deps, 'delivery-failed',
+        `UID ${failedUid} was not processed, so the cursor stays at `
+        + `${current.lastSeenUid} and the message will be fetched again.`);
+      return finish('delivery-failed', uids.length, outcome.error);
+    }
+    if (stop !== null) {
+      note(deps, 'fetch-unreadable', stop.message);
+      return finish('read-failed', uids.length, stop, 'fetch', true);
     }
   }
 
@@ -297,6 +338,129 @@ export async function drainMailboxDelta(
     `${delivered} message(s) processed above UID ${cursor.lastSeenUid}`
     + `${vanished > 0 ? `, ${vanished} expunged before they could be fetched` : ''}.`);
   return finish('complete', uids.length);
+}
+
+/** Drains a message may fail to read on before it is stepped over. */
+export const MAX_READ_ATTEMPTS = 3;
+/** Bound on the failure counts held at once; the oldest are forgotten first. */
+const MAX_TRACKED_READ_FAILURES = 256;
+
+/**
+ * Consecutive drains on which a message could not be read, per
+ * `uidValidity:uid` and per kind of read. Held in memory by the watcher:
+ * after a restart a message gets the same few drains again, which is the
+ * bound that matters, no single message holds the mailbox.
+ */
+export class MailboxReadFailures {
+  private readonly counts = new Map<string, number>();
+
+  note(kind: 'envelope' | 'content', uidValidity: number, uid: number): number {
+    const key = `${kind}:${String(uidValidity)}:${String(uid)}`;
+    const count = (this.counts.get(key) ?? 0) + 1;
+    this.counts.delete(key);
+    this.counts.set(key, count);
+    if (this.counts.size > MAX_TRACKED_READ_FAILURES) this.counts.delete(this.counts.keys().next().value!);
+    return count;
+  }
+
+  clear(kind: 'envelope' | 'content', uidValidity: number, uid: number): void {
+    if (this.counts.size > 0) this.counts.delete(`${kind}:${String(uidValidity)}:${String(uid)}`);
+  }
+}
+
+/** Feed a batch to the sink, one message at a time for a sink that takes no batches. */
+async function deliverBatch(
+  sink: InboundMailSink,
+  messages: readonly InboundMailboxMessage[],
+): Promise<MailboxBatchOutcome> {
+  if (messages.length === 0) return { done: 0, failed: false, error: null };
+  if (sink.deliverBatch) return sink.deliverBatch(messages);
+  for (let index = 0; index < messages.length; index += 1) {
+    try {
+      await sink.deliver(messages[index]!);
+    } catch (error) {
+      return { done: index, failed: true, error };
+    }
+  }
+  return { done: messages.length, failed: false, error: null };
+}
+
+/** One `UID SEARCH UNSEEN` per batch, and only when a consumer asks whether a message is unread. */
+function unreadSearch(deps: MailboxDeltaDeps, fromUid: number): () => Promise<ReadonlySet<number>> {
+  let pending: Promise<ReadonlySet<number>> | null = null;
+  return () => pending ??= deps.reader.searchCompleteUids(true, fromUid).then(
+    (uids) => new Set(uids),
+    (error: unknown) => {
+      pending = null;
+      throw new MailboxReadError('The unread search failed on this connection; it is asked again on the next drain.', { cause: error });
+    },
+  );
+}
+
+/**
+ * The complete source, on this session. A read that failed (not the message's
+ * own bytes) is tried on the next drains and handed back as
+ * `repeated-read-failure` after the bounded attempts.
+ */
+async function readContent(
+  deps: MailboxDeltaDeps,
+  failures: MailboxReadFailures,
+  uidValidity: number,
+  uid: number,
+): Promise<MailboxContentRead> {
+  let read: CompleteMessageRead;
+  try {
+    read = await deps.reader.readCompleteMessageDetail(uid);
+  } catch {
+    read = { outcome: 'incomplete', reason: 'source-fetch-failed', fromMessage: false };
+  }
+  if (read.outcome === 'incomplete' && !read.fromMessage) {
+    if (failures.note('content', uidValidity, uid) < MAX_READ_ATTEMPTS) {
+      throw new MailboxReadError(`The complete source of UID ${uid} could not be read on this connection; it is read again on the next drain.`);
+    }
+    failures.clear('content', uidValidity, uid);
+    note(deps, 'message-stepped-over',
+      `The complete source of UID ${uid} could not be read on ${MAX_READ_ATTEMPTS} drains in a row, so it is shown as a message that could not be read here.`);
+    return { outcome: 'incomplete', reason: 'repeated-read-failure', fromMessage: true };
+  }
+  failures.clear('content', uidValidity, uid);
+  return read;
+}
+
+/** The stand-in for a message the reader stepped over: no envelope fields, the reason, and its place. */
+function standIn(deps: MailboxDeltaDeps, current: MailboxCursor, uid: number, reason: string): ImapInboundMessage {
+  const { account, mailbox } = deps.settings;
+  return {
+    source: 'imap',
+    account,
+    mailbox,
+    from: '',
+    subject: '',
+    claimedDate: '',
+    messageId: '',
+    deliveredTo: [],
+    unverifiedToHeaderClaim: '',
+    uidValidity: current.uidValidity,
+    uid,
+    envelope: {
+      uid, from: '', subject: '', date: '', messageId: '', mailbox,
+      deliveredTo: [], deliveryEvidence: [], unverifiedToHeaderClaim: '', authenticationResults: [],
+    },
+    via: deps.via,
+    ...(uid <= (current.historyThrough ?? 0) ? { history: true } : {}),
+    unreadable: { reason },
+  };
+}
+
+function reportPosition(deps: MailboxDeltaDeps, cursor: MailboxCursor, pending: number): void {
+  const history = cursor.historyThrough !== undefined && cursor.historyFloorUid !== undefined
+    ? { floorUid: cursor.historyFloorUid, throughUid: cursor.historyThrough, skippedOlderMessages: cursor.skippedOlderMessages ?? 0 }
+    : undefined;
+  try {
+    deps.sink.position?.({ uidValidity: cursor.uidValidity, lastSeenUid: cursor.lastSeenUid, pending, history });
+  } catch {
+    // Reporting cannot stop the mail being read.
+  }
 }
 
 /**
@@ -419,7 +583,7 @@ async function advanceTo(
 
 function note(
   deps: MailboxDeltaDeps,
-  kind: 'delta-drained' | 'delivery-failed' | 'fetch-unreadable',
+  kind: 'delta-drained' | 'delivery-failed' | 'fetch-unreadable' | 'message-stepped-over',
   detail: string,
 ): void {
   try {
@@ -533,7 +697,7 @@ export async function runPollLoop(deps: MailboxDeltaDeps): Promise<PollLoopResul
     // A notice route that is down: the next pass retries on this same
     // connection after the poll interval; the sink sets the message aside
     // after a bounded number of attempts.
-    if (report.outcome === 'delivery-failed' && !(report.error instanceof InboundNoticeTransportError)) {
+    if (report.outcome === 'delivery-failed' && !isConsumerUnavailable(report.error)) {
       return {
         outcome: 'delivery-failed',
         cursor,

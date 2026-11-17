@@ -24,7 +24,6 @@ export class EmailConfigurationError extends Error {
 
 import { readEmailInboxBatch, type EmailInboxBatchInput, type EmailInboxBatchRead } from './email-inbox-batch.js';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '../utils/delivery-lifetime.js';
-import { readEmailInboxPage, type EmailInboxPageInput, type EmailInboxPageRead } from './email-inbox-page.js';
 import { listEmailInbox } from './email-inbox-list.js';
 import { readEmailMessage } from './email-message-reader.js';
 import type { EmailMailboxObservation, EmailReplySubjectSourceOwner } from './reply-subject-source.js';
@@ -352,7 +351,7 @@ export class EmailService {
   readonly #inboxObservations = new WeakMap<object, EmailMailboxObservation>();
 
   /** Exact local result only; mailbox evidence is never complete-content authority. */
-  getInboxMailboxObservation(result: EmailInboxListResult | EmailInboxBatchRead | EmailInboxPageRead): EmailMailboxObservation | undefined {
+  getInboxMailboxObservation(result: EmailInboxListResult | EmailInboxBatchRead): EmailMailboxObservation | undefined {
     const observation = this.#inboxObservations.get(result);
     try { observation?.assertCurrent(); return observation; } catch { return undefined; }
   }
@@ -517,35 +516,6 @@ export class EmailService {
     for (const message of result.messages) { current(); this.#noteDetail(config, message.source.detail); }
     current();
     this.#inboxObservations.set(result, this.bindObservation(observation, input.signal));
-    return result;
-  }
-
-  /**
-   * Plan a durable UID baseline before fetching any content, then consume oldest
-   * pending pages. A UIDVALIDITY replacement requires another seed-only commit.
-   * Complete content is still untrusted and requires protected screening.
-   */
-  async readInboxPage(input: EmailInboxPageInput = {}): Promise<EmailInboxPageRead> {
-    const { signal, limit, checkpoint, stepOver } = input;
-    input = { signal, limit, checkpoint, ...(stepOver === undefined ? {} : { stepOver: [...stepOver] }) };
-    if (signal?.aborted) throw new Error('Mail read was cancelled.');
-    const owner = this.deps.replySubjectSourceOwner;
-    if (!owner) throw new Error('Mail page requires an owned account lifetime.');
-    const config = this.getValidatedInboxConfig();
-    const sourceRead = owner.beginRead(config);
-    const result = await readEmailInboxPage(this.deps, config, sourceRead, input);
-    const current = (): void => {
-      if (signal?.aborted) throw new Error('Mail read was cancelled.');
-      sourceRead.assertCurrent();
-    };
-    current();
-    if (result.outcome === 'incomplete') return result;
-    const observation = sourceRead.completeMailboxObservation();
-    if (!observation) return Object.freeze({ outcome: 'incomplete', reason: 'Mailbox identity is unavailable.' });
-    // Screening input, not model input: see readInboxBatch.
-    if (result.outcome === 'complete') for (const message of result.messages) { current(); this.#noteDetail(config, message.source.detail); }
-    current();
-    this.#inboxObservations.set(result, this.bindObservation(observation, signal));
     return result;
   }
 

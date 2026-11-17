@@ -10,6 +10,7 @@ import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods,
 import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
 import { createRuntimeAcquisitionScope } from './acquisition.js';
 import { composeMailDeps } from './mail-composition.js';
@@ -174,6 +175,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // A surface with no owner yet never takes its first sender as owner: that sender is held
     // as a claim in the owner inbox, and becomes the owner only when the owner accepts it.
     disposalScope.registry.add('channel owner claims', channelPolicy.attachOwnerInbox(ownerInbox));
+    // Where the email inbox (built with the handlers) meets the mailbox reader the facade composes later.
+    const mailboxReaders = new MailboxReaders();
 
     // This daemon's existing owner and host-selected project are authoritative.
     // Request payloads can only verify this binding, never select a store or actor.
@@ -374,6 +377,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       workspaceTrustManager,
       triggerManager,
       ownerInbox,
+      mailboxReaders,
       workLedger: workLedgerOwner.service,
       workspaceSwap,
       browserJudgment,
@@ -409,6 +413,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       distributedRuntime,
       clusterCoordinator,
       checkoutSeam: browserCheckoutSeam.get, channelDeliveryRouter: graph.channelDeliveryRouter, inboxFactory: options.inboxFactory,
+      mailboxReaders,
       triagePermissionHost: autonomousHost,
       nativeMutationHost: autonomousHost,
       hasProfile: (profileId: string): boolean => { try { graph.profileManager.load(profileId); return true; } catch { return false; } },

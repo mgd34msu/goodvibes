@@ -80,6 +80,8 @@ export {
 
 export {
   drainMailboxDelta,
+  MailboxReadFailures,
+  MAX_READ_ATTEMPTS,
   runPollLoop,
   searchAboveCursor,
   type MailboxDeltaDeps,
@@ -108,11 +110,14 @@ export {
   type InboundMessageCommon,
   type InboundWatcherSettings,
   type MailboxConnection,
+  type MailboxBatchOutcome,
   type MailboxConnectionPort,
+  type MailboxContentRead,
   type MailboxCursorKey,
   type MailboxCursorPort,
   type MailboxOpenReport,
   type MailboxReader,
+  type MailboxReadPosition,
   type MailboxWire,
   type MailboxWireReadOptions,
   type RandomSource,
@@ -120,6 +125,7 @@ export {
 } from './ports.js';
 
 export {
+  HISTORY_WINDOW_MESSAGES,
   InboundMailboxWatcher,
   type InboundMailboxWatcherDeps,
   type InboundMailboxWatcherStatus,
@@ -224,3 +230,15 @@ export {
   type InboundMailSupervisorStatus,
 } from './supervisor.js';
 export type { MailboxCursor } from './types.js';
+export {
+  isConsumerUnavailable,
+  isHistoryOrStandIn,
+  mailboxReaderKey,
+  MailboxConsumerUnavailableError,
+  MailboxFanOut,
+  MailboxReadError,
+  MailboxReaders,
+  type MailboxConsumer,
+  type MailboxReaderHandle,
+  type MailboxReaderState,
+} from './mailbox-consumers.js';

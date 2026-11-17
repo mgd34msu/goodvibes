@@ -1,7 +1,7 @@
 import type { DaemonTriagePermissionHost, DaemonTriageTaggingRequest } from './tagged-inbox-composition.js';
 import type { OwnedInboxTagging, OwnerMailObservation } from '@goodvibes-jev/engine/platform/platform/intake';
 /** Product host surfaces over canonical engine implementations. */
-import type { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
+import type { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
 import { registerOwnedMailInbox } from './owned-inbox-mail.js';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
@@ -43,10 +43,10 @@ export interface DaemonInboxControls extends Required<Pick<RegisterInboxSurfaceO
   readonly onProviderInvalidation?: (provider: import('./inbox-provider-facts.js').InboxProvider, listener: () => void) => () => void;
   /** Value-free notifications from the native configuration owner. */
   readonly onConfigurationChange?: (key: ConfigKey, listener: () => void) => () => void;
-  /** Trusted root-owned constructor; no credentials or generic secret access escape. */
-  readonly createEmailService?: () => { readonly service: EmailService; close(): void };
   /** Receives each screened message on the owner's mailbox (see owner-mail-relay.ts). */
   readonly onOwnerMail?: ((mail: OwnerMailObservation) => void) | undefined;
+  /** Where the email inbox attaches to the mailbox reader the daemon facade composes. */
+  readonly mailboxReaders?: MailboxReaders | undefined;
   /** Native exact-pair consent, privately resolved credentials and revocable source lifetime. */
   readonly acquireHostedScreening?: (source: HostedInboxScreeningSource, operation: HostedInboxScreeningOperation) => Promise<HostedInboxScreeningAcquisition>;
 }
@@ -78,6 +78,8 @@ export interface DaemonHandlerCompositionOptions {
   readonly inboxFactory: DaemonInboxFactory;
   /** Purchase notices are posted here as well as on the configured channels. */
   readonly ownerInbox?: import('./payments-composition.js').PaymentsCompositionOptions['ownerInbox'];
+  /** The meeting point the daemon facade's mailbox readers register on. */
+  readonly mailboxReaders?: MailboxReaders | undefined;
 }
 
 /** Return only after each real surface is ready; failed acquisition rolls back. */
@@ -124,6 +126,7 @@ export async function createDaemonHandlerComposition(
       },
       gatePollingOwned: (providerId, control) => options.clusterCoordinator.registerOwned(inboxPollerGate(providerId, control)),
       onOwnerMail: ownerMail.observe,
+      ...(options.mailboxReaders ? { mailboxReaders: options.mailboxReaders } : {}),
     }, { configManager: options.configManager, secretsManager: options.secretsManager }, options.triagePermissionHost),
     registerDrafts: registerDraftMethods,
     registerPayments: () => createPaymentsServices({

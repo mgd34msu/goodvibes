@@ -77,6 +77,8 @@ export function createBuiltinChannelRuntime(
       secretsManager: runtime.runtimeServices.secretsManager,
       homeDirectory: runtime.runtimeServices.homeDirectory,
     }),
+    // The inbox attaches here, so this reader is the only one for the mailbox.
+    mailboxReaders: runtime.runtimeServices.mailboxReaders,
   });
   const builtinChannels = new BuiltinChannelRuntime({
     ...(declareData ? { beforeTelegramCursorWrite: () => declareData('telegram-account-cursors-v2') } : {}),

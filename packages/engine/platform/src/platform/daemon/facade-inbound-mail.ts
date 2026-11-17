@@ -67,6 +67,7 @@ import {
   createInboundNoticeHealth,
   createInboundTerminalFailureAnnouncer,
   expectationSweepIntervalMs,
+  mailboxReaderKey,
   resolveWatcherSettings,
   systemWatcherClock,
   type GmailSourceBuilder,
@@ -75,8 +76,11 @@ import {
   type InboundMailSourceFactory,
   type InboundWatcherSettings,
   type InboundNoticeMode,
+  type MailboxReaders,
   type NoticeRouteResolution,
 } from '../email/inbound/index.js';
+import { holdProcessLock } from '../utils/process-lock.js';
+import { createHash } from 'node:crypto';
 import type {
   GmailInboundReaderProvider,
   GmailInboundReaderResolution,
@@ -143,6 +147,11 @@ export interface InboundMailCompositionOptions {
    * start instead of at the next restart.
    */
   readonly gmailReader: GmailInboundReaderProvider;
+  /**
+   * Where the inbox (and anything else that wants this mailbox's mail) meets
+   * the reader composed here. Absent, notices are the only consumer.
+   */
+  readonly mailboxReaders?: MailboxReaders | undefined;
   /** Replaces the live IMAP/Gmail source factory, so a test can hold the sink a started source delivers into. */
   readonly sources?: InboundMailSourceFactory | undefined;
 }
@@ -280,12 +289,17 @@ export function composeInboundMail(
   options: InboundMailCompositionOptions,
 ): InboundMailSupervisor | null {
   const { configManager, shellPaths } = options;
+  const surfaceSettings = readSurfaceEmailSettings(configReaderWithOrigins(configManager));
   const watched = readWatchedAccounts(configManager);
-  if (watched === null) return null;
-  const { account } = watched;
+  // The mailbox is read whenever it is configured, not only when notices are
+  // on: the inbox reads through this same reader. Its account label is the
+  // first watched account, or the mail user when none is named.
+  const account = watched?.account ?? surfaceSettings.username?.trim();
+  if (account === undefined || account.length === 0) return null;
 
-  const mailbox = readSurfaceEmailSettings(configReaderWithOrigins(configManager)).mailbox
-    ?? DEFAULT_MAILBOX;
+  const mailbox = surfaceSettings.mailbox ?? DEFAULT_MAILBOX;
+  const readerKey = mailboxReaderKey({ host: surfaceSettings.imapHost, user: surfaceSettings.username, mailbox });
+  const readers = readerKey === null ? undefined : options.mailboxReaders;
 
   const storePath = (name: string): string => shellPaths.resolveUserPath('daemon', name);
   const cursors = new MailboxCursorStore(storePath('email-inbound-cursors.json'), {
@@ -295,6 +309,9 @@ export function composeInboundMail(
     isAccountConfigured: (candidate) => candidate === account
       || (readWatchedAccounts(configManager)?.further.includes(candidate) ?? false),
   });
+  // One reader per mailbox on this machine: a second daemon finds the lease held and does not sign in.
+  const readerLease = (name: string) => () => holdProcessLock(storePath(
+    `email-inbound-reader-${createHash('sha256').update(name).digest('hex').slice(0, 24)}.lock`));
   const records = new InboundMailStore(storePath('email-inbound-records.json'), {
     policy: {
       retentionMs: readNumberSetting(configManager, 'surfaces.email.inbound.retentionDays', 30) * 86_400_000,
@@ -549,7 +566,16 @@ export function composeInboundMail(
     // will ever arrive again. It goes to the owner through the same structured
     // notice port arriving mail goes through, and still logs.
     observer,
+    readerLease: readerLease(`${account}\n${mailbox}`),
+    ...(readers !== undefined && readerKey !== null ? { consumers: () => readers.consumers(readerKey) } : {}),
   });
+  if (readers !== undefined && readerKey !== null) {
+    const reader = supervisor;
+    readers.register(readerKey, {
+      requestHistory: () => { reader.requestHistory(); },
+      consumersChanged: () => { reader.consumersChanged(); },
+    });
+  }
 
   // Everything below runs while the supervisor runs and is released when it stops, so a node that handed the
   // mailbox over (or a stopped daemon) neither sweeps nor writes the stores and does not keep listeners.
@@ -613,6 +639,7 @@ export function composeInboundMail(
     noticeHealth,
     handle,
     observer: furtherObserver(),
+    readerLease: readerLease(`${entry.account}\n${entry.mailbox}`),
   }));
 
   const startSupervisor = supervisor.start.bind(supervisor);

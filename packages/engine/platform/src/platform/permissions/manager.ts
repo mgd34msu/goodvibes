@@ -197,40 +197,81 @@ function callSubjects(args: Record<string, unknown>, definition: Pick<ToolDefini
 }
 
 /**
- * The fields of the host source a decision was made for, copied when it is
+ * The fields of the host source a decision was made for, taken when it is
  * captured (a host may change its source object in place): the goal, the
- * criteria, the transcript's length and last message, the selected diff.
+ * criteria, the transcript's length, and the last message and selected diff,
+ * each kept as the value itself (its identity), a cheap size and, serialised
+ * once here, its text.
  */
 interface SourceFingerprint {
   readonly goal: unknown;
   readonly criteria: readonly unknown[] | undefined;
   readonly messages: number;
-  readonly lastMessage: string | undefined;
-  readonly diff: string | undefined;
+  readonly lastMessage: SourcePart;
+  readonly diff: SourcePart;
 }
 
-function sourceFingerprint(value: unknown): SourceFingerprint {
+/** One possibly large part of the source: the value as captured, its size, and its text serialised once at capture. */
+interface SourcePart {
+  readonly value: unknown;
+  readonly size: number;
+  readonly text: string | undefined;
+}
+
+/** A size read without walking the value: a string's or list's length, or an object's text content length and key count. */
+function partSize(value: unknown): number {
+  if (typeof value === 'string' || Array.isArray(value)) return value.length;
+  if (!value || typeof value !== 'object') return -1;
+  const content = (value as { content?: unknown }).content;
+  const contentSize = typeof content === 'string' || Array.isArray(content) ? content.length : -1;
+  return contentSize * 1024 + Object.keys(value).length;
+}
+
+function capturePart(value: unknown): SourcePart {
+  return { value, size: partSize(value), text: value === undefined ? undefined : JSON.stringify(value) };
+}
+
+/**
+ * Whether a part is still the captured one. The same value (by identity) of
+ * the same size is taken as unchanged without serialising it, so a check costs
+ * the same for any message or diff size; only a host that hands a different
+ * object is compared by its text.
+ */
+function samePart(now: unknown, then: SourcePart): boolean {
+  if (now === then.value) return partSize(now) === then.size;
+  return (now === undefined ? undefined : JSON.stringify(now)) === then.text;
+}
+
+function sourceParts(value: unknown): { readonly source: Partial<AutonomousToolSource>; readonly messages: readonly unknown[] | undefined } {
   const source = (value && typeof value === 'object' ? value : {}) as Partial<AutonomousToolSource>;
-  const messages = Array.isArray(source.conversationContext) ? source.conversationContext : undefined;
+  return { source, messages: Array.isArray(source.conversationContext) ? source.conversationContext : undefined };
+}
+
+/** Serialises the last message and the selected diff once, at capture; later checks use {@link sameSource}. */
+function sourceFingerprint(value: unknown): SourceFingerprint {
+  const { source, messages } = sourceParts(value);
   return {
     goal: source.goal,
     criteria: Array.isArray(source.criteria) ? [...source.criteria] : undefined,
     messages: messages?.length ?? -1,
-    lastMessage: messages && messages.length > 0 ? JSON.stringify(messages[messages.length - 1]) : undefined,
-    diff: source.selectedDiffContext === undefined ? undefined : JSON.stringify(source.selectedDiffContext),
+    lastMessage: capturePart(messages && messages.length > 0 ? messages[messages.length - 1] : undefined),
+    diff: capturePart(source.selectedDiffContext),
   };
 }
 
 /**
  * Whether the host source now is the one a decision was made for: a field
  * compare against the captured fingerprint, never a copy or a schema parse of
- * the transcript.
+ * the transcript, and no serialisation while the host keeps its objects.
  */
 function sameSource(now: unknown, then: SourceFingerprint): boolean {
-  const current = sourceFingerprint(now);
-  return current.goal === then.goal && current.messages === then.messages && current.lastMessage === then.lastMessage
-    && current.diff === then.diff && current.criteria?.length === then.criteria?.length
-    && (current.criteria ?? []).every((criterion, index) => criterion === then.criteria?.[index]);
+  const { source, messages } = sourceParts(now);
+  const criteria = Array.isArray(source.criteria) ? source.criteria : undefined;
+  return source.goal === then.goal && (messages?.length ?? -1) === then.messages
+    && criteria?.length === then.criteria?.length
+    && (criteria ?? []).every((criterion, index) => criterion === then.criteria?.[index])
+    && samePart(messages && messages.length > 0 ? messages[messages.length - 1] : undefined, then.lastMessage)
+    && samePart(source.selectedDiffContext, then.diff);
 }
 
 /** A session answer to an owner-only item is kept apart, so only it settles that item again. */
@@ -726,8 +767,9 @@ export class PermissionManager {
   /**
    * The revisions of every owner one decision reads, captured once (B1). The
    * checks compare integers and identities and look at the host source's own
-   * fields; nothing is copied, serialised or deep-compared, so a check costs
-   * the same with 0 or 500 remembered rules and any transcript length.
+   * fields; the source's last message and selected diff are serialised once at
+   * capture and, while the host keeps those objects, never again, so a check
+   * costs the same with 0 or 500 remembered rules and any transcript or diff size.
    * `assertSettings` is apart because a settings change the call itself makes
    * moves that revision on purpose.
    */

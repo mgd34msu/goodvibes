@@ -6,5 +6,23 @@
     "noEmit": true
   },
   "include": ["src", "scripts", "bin", "../../packages/engine/platform/src/platform/types/*.d.ts"],
-  "exclude": []
+  "exclude": [],
+  // Engine imports resolve to source through the bun condition; with these
+  // references they read the engine projects' declarations instead, so the
+  // engine is checked once (by its own build), not again in this program.
+  // References are not inherited through extends.
+  "references": [
+    { "path": "../../packages/judgment" },
+    { "path": "../../packages/engine/contracts" },
+    { "path": "../../packages/engine/errors" },
+    { "path": "../../packages/engine/daemon-api" },
+    { "path": "../../packages/engine/transport-core" },
+    { "path": "../../packages/engine/transport-http" },
+    { "path": "../../packages/engine/transport-realtime" },
+    { "path": "../../packages/engine/operator-client" },
+    { "path": "../../packages/engine/peer-client" },
+    { "path": "../../packages/engine/platform" },
+    { "path": "../../packages/engine/terminal-shell" },
+    { "path": "../../packages/engine/toolchain" }
+  ]
 }

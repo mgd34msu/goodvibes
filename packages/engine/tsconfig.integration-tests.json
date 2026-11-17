@@ -13,5 +13,23 @@
     "test/workspace-version.test.ts",
     "platform/src/platform/types/*.d.ts"
   ],
-  "exclude": []
+  "exclude": [],
+  // Engine imports resolve to source through the bun condition; with these
+  // references they read the engine projects' declarations instead, so the
+  // engine is checked once (by its own build), not again in this program.
+  // References are not inherited through extends.
+  "references": [
+    { "path": "../judgment" },
+    { "path": "./contracts" },
+    { "path": "./errors" },
+    { "path": "./daemon-api" },
+    { "path": "./transport-core" },
+    { "path": "./transport-http" },
+    { "path": "./transport-realtime" },
+    { "path": "./operator-client" },
+    { "path": "./peer-client" },
+    { "path": "./platform" },
+    { "path": "./terminal-shell" },
+    { "path": "./toolchain" }
+  ]
 }

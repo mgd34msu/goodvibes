@@ -1,4 +1,4 @@
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertSynchronousCurrent } from './reading-lifetime.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
 import { readInboundMessage, type InboundReading } from './inbound-reading.js';
@@ -22,7 +22,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
 export type WorkProposalReplyOutcome =
-  | { readonly consumed: false; readonly reason?: 'decision-model-required' }
+  | { readonly consumed: false }
   | { readonly consumed: true; readonly action: 'accepted' | 'declined' | 'expired' | 'already-accepted' | 'start-failed' };
 
 export interface WorkProposalReplyDeps {
@@ -88,23 +88,37 @@ export async function tryResolveWorkProposalReplyFromChannel(
 /**
  * The pending proposal a message may answer, decided in code before anything
  * is read: a delivered proposal pending on the exact conversation for the same
- * sender. Undefined when there is none or decision models are off.
+ * sender. Undefined when there is none.
  */
 export function proposalReplyTarget(
   input: ChannelIngressPolicyInput,
   proposals: WorkProposalReplyDeps['proposals'],
 ): WorkProposalRecord | undefined {
-  if (isClassicOperation() || !proposals) return undefined;
+  if (!proposals) return undefined;
   // Explicit authenticated button wire tokens are not conversational replies.
   if ((input.surface === 'slack' || input.surface === 'discord') && input.metadata?.interactive === true
     && /^gv:(?:approval:(?:approve|deny|claim)|run:(?:cancel|retry)):.+$/.test(input.text ?? '')) return undefined;
   return findProposalForReply(input, proposals.listPending({ surfaceKind: input.surface })) ?? undefined;
 }
 
+const AGREE = /^(?:yes|y|yep|yeah|ok|okay|sure|go|go ahead|do it|start|start it|approve|approved|accept|agreed)$/;
+const DECLINE = /^(?:no|n|nope|cancel|decline|stop|don't|do not|never mind|nevermind)$/;
+
+/**
+ * The answer a reply gives with no decision model in use, read by code: a
+ * plain yes or no (and their usual short forms). Anything else answers
+ * nothing: the message goes on as conversation and the proposal stays pending.
+ */
+export function proposalAnswerLiterally(text: string): InboundReading['proposal'] {
+  const word = text.trim().replace(/[.!]+$/, '').trim().toLowerCase();
+  if (AGREE.test(word)) return 'approve';
+  if (DECLINE.test(word)) return 'reject';
+  return 'unsure';
+}
+
 async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps: WorkProposalReplyDeps): Promise<WorkProposalReplyOutcome> {
   deps.readingOptions?.signal?.throwIfAborted();
   assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
-  if (isClassicOperation()) return { consumed: false, reason: 'decision-model-required' };
   const store = deps.proposals;
   if (!store) return { consumed: false };
   // Bind an actual delivered pending proposal BEFORE interpreting the reply.
@@ -112,9 +126,11 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
   if (!target) return { consumed: false };
   const proposalCurrent = deps.captureProposalSource?.(target);
   const text = input.text ?? '';
-  const answer = deps.reading?.target === target
-    ? deps.reading.answer
-    : (await readInboundMessage({ message: text, proposal: { task: target.task, summary: target.summary } }, { signal: deps.readingOptions?.signal })).proposal;
+  // With no decision model in use the reply is read literally; nothing is asked.
+  const answer = isClassicOperation() ? proposalAnswerLiterally(text)
+    : deps.reading?.target === target
+      ? deps.reading.answer
+      : (await readInboundMessage({ message: text, proposal: { task: target.task, summary: target.summary } }, { signal: deps.readingOptions?.signal })).proposal;
   // An unsure reading answers nothing: the message goes on as conversation and the proposal stays pending.
   if (answer === undefined || answer === 'unsure' || answer === 'message') return { consumed: false };
   // Checked once, where the answer is acted on.
@@ -123,7 +139,6 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
   assertSynchronousCurrent(proposalCurrent);
   const reply = { decision: answer === 'reject' ? 'negative' : 'affirmative',
     ...(answer === 'steer' ? { note: text } : {}) };
-  if (reply.decision === 'affirmative') requireDecisionFeature('accepting an autonomous work proposal; continue through an ordinary conversation instead');
 
   const resolved = store.resolve(target.id, reply.decision === 'affirmative' ? 'accepted' : 'declined');
   if (!resolved) {

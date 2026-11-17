@@ -62,7 +62,7 @@ import { requestRisk } from '../routing/batteries/request.js';
 import { requestState } from '../routing/request-reading.js';
 import type { RemoteSupervisor } from '../runtime/remote/supervisor.js';
 import type { RuntimeStore } from '../runtime/store/index.js';
-import { decisionOrClassic, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 export interface WorkstreamServicesDeps {
   readonly agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel' | 'registerCancellationSignal' | 'releaseCancellationSignal'>;
@@ -401,10 +401,11 @@ function createDraftFacade(
    * Start an approved draft's contract (design 10.4). A multi-item draft is a
    * drafted plan: its items become the units (task as brief), the planner
    * writes only their criteria, and every plan check runs. A single-item draft
-   * is an ask: the item's task starts the contract.
+   * is an ask: the item's task starts the contract. The owner's approval of
+   * the draft is what starts it; with no decision model in use the contract
+   * runs on its own no-model paths.
    */
   function startDraftContract(draft: WorkstreamDraft, options: Parameters<ContractRunner['start']>[1]): ReturnType<ContractRunner['start']> {
-    requireDecisionFeature('autonomous execution and acceptance of a workstream contract; the draft can still be inspected and edited');
     const spec = draft.spec;
     const launch = {
       sessionId: typeof sessionId === 'function' ? sessionId() : sessionId,
@@ -479,7 +480,6 @@ function createDraftFacade(
       if (pending) return pending;
       const draft = drafts.get(id);
       if (!draft || !draft.approved) return Promise.resolve(null);
-      requireDecisionFeature('autonomous execution and acceptance of a workstream contract; the draft can still be inspected and edited');
       const attempts = validateAttempts(draft.spec);
       if (attempts.violations.length > 0) {
         return Promise.reject(new Error(`The workstream draft cannot launch: ${attempts.violations.join(' ')}`));

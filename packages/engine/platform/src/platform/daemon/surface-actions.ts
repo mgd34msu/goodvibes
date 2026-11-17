@@ -30,7 +30,7 @@ import { resolveSecretInput } from '../config/secret-refs.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { approvalProposal, approvalReplyCandidates, tryResolveApprovalReplyFromChannel, type ApprovalReplyBroker } from './approval-reply.js';
-import { proposalReplyTarget, tryResolveWorkProposalReplyFromChannel } from './work-proposal-reply.js';
+import { proposalAnswerLiterally, proposalReplyTarget, tryResolveWorkProposalReplyFromChannel } from './work-proposal-reply.js';
 import { tryResolvePaymentReplyFromChannel } from './payment-reply.js';
 import { PaymentReplyInbox, type PaymentReplyOffer } from '../payments/reply-inbox.js';
 import { refuseCardShapedIngress, refuseCardTalk, CARD_SHAPES_REFUSED_REASON, JUDGMENT_INPUT_REFUSED_REASON } from './surface-card-gate.js';
@@ -460,7 +460,8 @@ export class DaemonSurfaceActionHelper {
       const proposalReply = await tryResolveWorkProposalReplyFromChannel(input, {
         readingOptions: { signal: lifecycle, beforeAttempt: assertReplyCurrent },
         proposals: this.context.workProposals,
-        reading: { target: proposal, answer: reading?.proposal },
+        // A reading no decision model made is replaced by the reply read literally (a plain yes or no).
+        reading: { target: proposal, answer: reading?.source === 'fallback' && reading.proposal === 'unsure' ? proposalAnswerLiterally(text) : reading?.proposal },
         captureProposalSource: (target) => {
           const route = target.routeId ? this.context.routeBindings.getBinding(target.routeId) : undefined;
           return () => {

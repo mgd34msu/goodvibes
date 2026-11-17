@@ -1,4 +1,4 @@
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertSynchronousCurrent } from './reading-lifetime.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
@@ -407,7 +407,9 @@ export async function deliverProposalNotice(
 
 /**
  * Start work the owner just agreed to. Goes through the RAW spawn path: the
- * agreement IS the authorization, so re-gating it here would ask twice.
+ * agreement IS the authorization, so re-gating it here would ask twice. It
+ * needs no decision model: the owner's yes is the fact that starts it, and the
+ * work runs on the session's model whether or not a decision model is in use.
  */
 export async function startAgreedWork(
   deps: ConversationGateDeps,
@@ -416,7 +418,6 @@ export async function startAgreedWork(
 ): Promise<void> {
   deps.readingOptions?.signal?.throwIfAborted();
   assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
-  requireDecisionFeature('starting agreed autonomous work; continue through an ordinary conversation and its native tool approvals');
   const task = note ? `${proposal.task}\n\nAdditional direction from the owner: ${note}` : proposal.task;
   const spawned = deps.trySpawnAgent({ mode: 'spawn', task }, 'ConversationGate.startAgreedWork', proposal.sessionId);
   const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;

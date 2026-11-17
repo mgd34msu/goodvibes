@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
+import { withProcessLockSync } from '../utils/process-lock.js';
 import {
   accountSafetyFields, boundAccountRecords, buildAccountRecord, formatStore,
   parseAccountFields, sweepAccountRecords, validateAccountCreateFields,
@@ -65,11 +66,10 @@ function readRevision(path: string): FileRevision | null {
  * another process during the (slow, asynchronous) safety readings is noticed
  * and the caller retries from the current file.
  *
- * This is a check, not a lock: a second process that writes between this
- * check and the rename that follows is still overwritten. Accounts have one
- * writing process (the daemon that owns the store); the in-process queue
- * serializes that process's own operations, and nothing here makes a second
- * concurrent writer safe.
+ * The check and the rename that follows run under the store's writer lock,
+ * the same one the synchronous registry takes, so a writer in another process
+ * cannot land between them; the in-process queue serializes this process's
+ * own operations.
  */
 function assertCurrentRevision(path: string, expected: FileRevision | null): void {
   const actual = readRevision(path);
@@ -200,8 +200,16 @@ export class AsyncAgentAccountRegistry {
       const parsed = boundAccountRecords(accounts, entries.length);
       const result = await operation(parsed, read);
       signal?.throwIfAborted();
-      assertCurrentRevision(this.storePath, revision);
-      if (result.write) this.writeStore(result.write);
+      if (result.write) {
+        const write = result.write;
+        mkdirSync(dirname(this.storePath), { recursive: true });
+        withProcessLockSync(`${this.storePath}.writer.sqlite`, () => {
+          assertCurrentRevision(this.storePath, revision);
+          this.writeStore(write);
+        }, { waitMs: 1_000 });
+      } else {
+        assertCurrentRevision(this.storePath, revision);
+      }
       return result.value;
     });
     const tail = pending.then(() => {}, () => {});

@@ -329,13 +329,12 @@ function authenticateTelemetryRequest(
   });
   if (missingRead) return jsonErrorResponse(missingRead, { status: 403 });
 
-  const rawAuthorized = principal.admin || principal.scopes.includes('read:telemetry-sensitive');
-  if (requestedView === 'raw' && !rawAuthorized) {
-    const missingRaw = missingScopeRefusal('the raw telemetry view', ['read:telemetry-sensitive'], principal.scopes, {
-      hint: 'Use an admin/shared-token session or a token granted read:telemetry-sensitive to access raw telemetry payloads.',
-    });
-    if (missingRaw) return jsonErrorResponse(missingRaw, { status: 403 });
-  }
+  // One scope test grants and refuses the raw view, so a caller it refuses is told the scope, not the setting.
+  const missingRaw = principal.admin ? null : missingScopeRefusal('the raw telemetry view', ['read:telemetry-sensitive'], principal.scopes, {
+    hint: 'Use an admin/shared-token session or a token granted read:telemetry-sensitive to access raw telemetry payloads.',
+  });
+  const rawAuthorized = missingRaw === null;
+  if (requestedView === 'raw' && missingRaw) return jsonErrorResponse(missingRaw, { status: 403 });
 
   const rawAccessible = rawAuthorized && context.telemetryApi?.isRawEnabled() === true;
   if (requestedView === 'raw' && !rawAccessible) return rawDisabled();

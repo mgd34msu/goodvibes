@@ -94,23 +94,3 @@ export function parseDiffForApply(diffText: string): DiffParseResult {
     diffUpdated: updated.join('\n'),
   };
 }
-
-export function applyDiffContent(
-  fileContent: string,
-  original: string,
-  updated: string,
-): { ok: true; content: string } | { ok: false; error: string } {
-  if (!original) {
-    return { ok: false, error: 'the diff has no original text to match' };
-  }
-  if (!fileContent.includes(original)) {
-    return { ok: false, error: 'the original text was not found' };
-  }
-  const occurrenceCount = fileContent.split(original).length - 1;
-  if (occurrenceCount > 1) {
-    return { ok: false, error: `ambiguous: the original text appears ${occurrenceCount} times` };
-  }
-  // A replacer function writes the new text verbatim: a string replacement
-  // would expand `$$`, `$&` and `$1` found in shell, Makefile or regex text.
-  return { ok: true, content: fileContent.replace(original, () => updated) };
-}

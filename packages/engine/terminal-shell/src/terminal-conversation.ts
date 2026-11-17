@@ -903,4 +903,4 @@ export class TerminalConversationManager extends PlatformConversationManager {
     public markSearchExpanded(key: string): void { this.searchExpansion.markSearchExpanded(key); }
     public restoreSearchExpansions(): void { this.searchExpansion.restoreOnto(this); }
 }
-export { parseDiffForApply, applyDiffContent } from '@goodvibes-jev/engine/platform/platform/core';
+export { parseDiffForApply } from '@goodvibes-jev/engine/platform/platform/core';

@@ -20,7 +20,6 @@ import {
   restoreKeptMessages,
   restoreBranchMap,
 } from './conversation-utils.js';
-import { applyDiffContent, parseDiffForApply } from './conversation-diff.js';
 import { logger } from '../utils/logger.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { archiveVerificationCompaction, detachVerificationMessages, forkVerificationArchive, isVerificationRuntimeMessage, mergeVerificationArchive, resetVerificationArchives,
@@ -815,4 +814,4 @@ export function captureConversationEvidence(conversation: ConversationManager) {
   return nativeMessageEvidence.call(conversation);
 }
 
-export { parseDiffForApply, applyDiffContent } from './conversation-diff.js';
+export { parseDiffForApply } from './conversation-diff.js';

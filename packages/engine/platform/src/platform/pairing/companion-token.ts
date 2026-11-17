@@ -398,38 +398,3 @@ export function pruneStaleOperatorTokens(
     skippedPaths,
   };
 }
-
-/**
- * Build a CompanionConnectionInfo object from raw parameters.
- */
-export function buildCompanionConnectionInfo(options: {
-  daemonUrl: string;
-  token: string;
-  username?: string | undefined;
-  password?: string | undefined;
-  version?: string | undefined;
-  surface?: string | undefined;
-}): CompanionConnectionInfo {
-  return {
-    url: options.daemonUrl,
-    token: options.token,
-    username: options.username ?? 'admin',
-    ...(options.password !== undefined ? { password: options.password } : {}),
-    version: options.version ?? '0.0.0',
-    surface: options.surface ?? 'daemon',
-  };
-}
-
-/**
- * Encode a CompanionConnectionInfo as a JSON string suitable for QR encoding.
- */
-export function encodeConnectionPayload(info: CompanionConnectionInfo): string {
-  return JSON.stringify({
-    url: info.url,
-    token: info.token,
-    username: info.username,
-    ...(info.password !== undefined ? { password: info.password } : {}),
-    version: info.version,
-    surface: info.surface,
-  });
-}

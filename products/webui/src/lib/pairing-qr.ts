@@ -12,9 +12,8 @@
  * invented here:
  *
  *   1. The platform's companion connection payload, a JSON object
- *      `{url, token, username, password?, version, surface}` produced by
- *      encodeConnectionPayload (@goodvibes-jev/engine/platform/platform/pairing) and
- *      served by goodvibes-app's /app/pairing/connection route. This is the QR
+ *      `{url, token, username, password?, version, surface}` (the engine's
+ *      CompanionConnectionInfo shape) that earlier versions printed. This is the QR
  *      the retired Android companion existed to scan, and the reason this file
  *      exists: the scanner replaces that app.
  *   2. The `goodvibes pair` hand-off link, `https://<webui-origin>/#pair=<token>`
@@ -58,8 +57,8 @@ export type ScannedPairing =
 // Field names
 // ---------------------------------------------------------------------------
 
-// The first entry of each list is the platform's own key (companion-token.ts's
-// encodeConnectionPayload). The rest are aliases the retired Android companion
+// The first entry of each list is the platform's own key (the engine's
+// CompanionConnectionInfo). The rest are aliases the retired Android companion
 // accepted, kept so its QRs still scan. `version` and `surface` ride along in
 // the platform payload and are deliberately ignored: nothing on this screen acts on
 // them, and the daemon is the authority on both.

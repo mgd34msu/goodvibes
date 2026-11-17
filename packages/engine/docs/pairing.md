@@ -286,36 +286,19 @@ This is synchronous and idempotent. Calling it repeatedly returns the same recor
 `regenerateCompanionToken` (host-level) or `pairing.tokens.revokeShared` (the operator verb) is
 called. Token storage is daemon-home scoped (see [Storage](#storage)).
 
-### Building the legacy connection payload
-
-```ts
-import { buildCompanionConnectionInfo, encodeConnectionPayload } from '@goodvibes-jev/engine/platform/platform/pairing';
-
-const payload = buildCompanionConnectionInfo({
-  daemonUrl: 'http://192.168.1.42:3421',
-  token: record.token,
-  username: 'admin',      // optional; defaults to 'admin'
-  version: 'host-product-version', // optional
-  surface: 'tui',          // optional; defaults to 'daemon'
-  // password: 'bootstrap-pw',  // optional; include when local auth is active
-});
-
-const json = encodeConnectionPayload(payload);
-// { url, token, username, version, surface, password? }, JSON-encoded for the QR
-```
-
-The `daemonUrl` should be the address reachable by the companion device. For local-only use, `http://127.0.0.1:3421` works. For cross-device pairing, use the host machine's LAN address.
-
 ### Encoding and rendering
 
 ```ts
-import { generateQrMatrix, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { generateQrMatrix, pairingQrContent, renderQrToString } from '@goodvibes-jev/engine/platform/platform/pairing';
 
-const matrix = generateQrMatrix(json);
+const matrix = generateQrMatrix(pairingQrContent(handoff)); // handoff from mintPairingHandoff
 const qrString = renderQrToString(matrix); // block-character QR for terminal output
 ```
 
 ### Companion side: parsing the legacy payload
+
+Nothing in the platform produces this JSON payload any more; the web UI's
+scanner still reads it so QR codes printed by older versions keep working.
 
 ```ts
 // Companion-side (pseudocode)
@@ -582,8 +565,8 @@ each refused by name.
 
 > **platform vs host wiring:** The `/qrcode` TUI command and the `goodvibes-daemon pair` subcommand
 > are host-application wrappers, not platform exports. The primitives they compose,
-> `mintPairingHandoff`, `generateQrMatrix`, `renderQrToString`, and (for the legacy path)
-> `getOrCreateCompanionToken`, `buildCompanionConnectionInfo`, `encodeConnectionPayload`, are all
+> `mintPairingHandoff`, `pairingQrContent`, `generateQrMatrix`, `renderQrToString`, and
+> `getOrCreateCompanionToken`, are all
 > exported from `@goodvibes-jev/engine/platform/platform/pairing` and can be composed directly by any
 > embedder.
 

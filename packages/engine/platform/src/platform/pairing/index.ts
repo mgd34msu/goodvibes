@@ -16,13 +16,9 @@ export type {
 export {
   getOrCreateCompanionToken,
   regenerateCompanionToken,
-  buildCompanionConnectionInfo,
-  encodeConnectionPayload,
   pruneStaleOperatorTokens,
 } from './companion-token.js';
 export type { PruneStaleOperatorTokensOptions, PruneStaleOperatorTokensResult } from './companion-token.js';
-
-export { formatConnectionBlock } from './connection-info.js';
 
 export { PairingLimitReachedError, PairingTokenManager, pairingPrincipalId, readLegacySharedRevoked } from './pairing-token-store.js';
 export type {

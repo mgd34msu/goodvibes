@@ -137,9 +137,6 @@ export {
   listPeerEndpoints,
   isOperatorMethodId,
   isPeerEndpointId,
-  SerializedEventEnvelopeSchema,
-  TypedSerializedEventEnvelopeSchema,
-  RuntimeEventRecordSchema,
 } from './contracts.js';
 export * from './errors.js';
 export * from './transport-core.js';

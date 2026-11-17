@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { httpStatusOf, structuralFailureConclusions } from '@goodvibes-jev/engine/errors';
 import { STALE_TEMP_FILE_MIN_AGE_MS, writeDocument } from '../utils/atomic-json-store.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ProviderRegistry } from '../providers/registry.js';
@@ -43,6 +44,9 @@ export const BATCH_TERMINAL_RETENTION_COUNT = 1000;
 
 /** Batch metadata key that carries a job's submission id to the provider. */
 export const BATCH_SUBMISSION_METADATA_KEY = 'goodvibesSubmissionId';
+
+/** Error code on a submitting job whose create call failed before the provider's answer arrived. */
+const BATCH_SUBMISSION_UNANSWERED = 'BATCH_SUBMISSION_UNANSWERED';
 
 /** A provider adapter that can find a batch by the metadata it was created with. */
 type BatchAdapterWithLookup = ProviderBatchAdapter & {
@@ -95,8 +99,41 @@ interface QuarantinedRow {
 }
 
 /**
- * One file per job (`<dir>/<id>.json`) and one per result (`<id>.result.json`),
- * so a change writes one small file and pruning is an unlink.
+ * One provider submission in flight: written once before the paid create call
+ * (instead of one `submitting` row per job), and again with the provider batch
+ * id once the provider answers, so a daemon that stops part-way through
+ * writing the job rows still knows which batch holds them.
+ */
+interface BatchSubmissionRecord {
+  readonly version: 1;
+  readonly submissionId: string;
+  readonly submittedAt: number;
+  readonly jobIds: readonly string[];
+  readonly providerBatchId?: string | undefined;
+  readonly providerBatchStatus?: ProviderBatchStatus | undefined;
+}
+
+function isSubmissionRecord(value: unknown): value is BatchSubmissionRecord {
+  if (!isRecord(value)) return false;
+  const jobIds: unknown = value['jobIds'];
+  return typeof value['submissionId'] === 'string'
+    && isFiniteNumber(value['submittedAt'])
+    && Array.isArray(jobIds)
+    && (jobIds as readonly unknown[]).every((id) => typeof id === 'string')
+    && (value['providerBatchId'] === undefined || typeof value['providerBatchId'] === 'string');
+}
+
+/** The job status a provider batch's create answer puts its jobs in. */
+function submittedStatus(status: ProviderBatchStatus): DaemonBatchJobStatus {
+  return status === 'running' ? 'running' : status === 'failed' ? 'failed' : 'submitted';
+}
+
+/**
+ * One file per job (`<dir>/<id>.json`, a few hundred bytes), one per request
+ * (`<id>.request.json`, written once when the job is made) and one per result
+ * (`<id>.result.json`, written once when it completes), so a status change
+ * writes one small file and pruning is an unlink. A provider submission in
+ * flight is one `<submissionId>.submission.json`.
  * A row that cannot be used is moved to `batch-jobs.invalid.json` with the
  * reason, and the rest are served.
  */
@@ -105,6 +142,8 @@ class BatchJobFiles {
   readonly invalidPath: string;
   /** Results already on disk; a result is written once, when its job completes. */
   private readonly resultsOnDisk = new Set<string>();
+  /** Requests already in their own file; a row read with its request inline is split on its next write. */
+  private readonly requestsOnDisk = new Set<string>();
 
   constructor(storePath: string) {
     const base = storePath.endsWith('.json') ? storePath.slice(0, -'.json'.length) : storePath;
@@ -120,11 +159,20 @@ class BatchJobFiles {
     return join(this.dir, `${encodeURIComponent(id)}.result.json`);
   }
 
+  private requestPath(id: string): string {
+    return join(this.dir, `${encodeURIComponent(id)}.request.json`);
+  }
+
+  private submissionPath(submissionId: string): string {
+    return join(this.dir, `${encodeURIComponent(submissionId)}.submission.json`);
+  }
+
   /** Reads every job. Throws only when the directory itself cannot be made or read. */
   loadAll(): Record<string, DaemonBatchJob> {
     mkdirSync(this.dir, { recursive: true });
     const invalid: QuarantinedRow[] = [];
     const badFiles: string[] = [];
+    const submissionFiles: string[] = [];
     const jobs: Record<string, DaemonBatchJob> = {};
     const staleBefore = now() - STALE_TEMP_FILE_MIN_AGE_MS;
     for (const name of readdirSync(this.dir)) {
@@ -134,7 +182,11 @@ class BatchJobFiles {
         try { if (statSync(path).mtimeMs < staleBefore) unlinkSync(path); } catch { /* gone already */ }
         continue;
       }
-      if (!name.endsWith('.json') || name.endsWith('.result.json')) continue;
+      if (name.endsWith('.submission.json')) {
+        submissionFiles.push(path);
+        continue;
+      }
+      if (!name.endsWith('.json') || name.endsWith('.result.json') || name.endsWith('.request.json')) continue;
       let id: string;
       try { id = decodeURIComponent(name.slice(0, -'.json'.length)); } catch { id = name; }
       let value: unknown;
@@ -147,6 +199,13 @@ class BatchJobFiles {
         badFiles.push(path);
         continue;
       }
+      const withRequest = this.withRequest(id, value);
+      if (typeof withRequest === 'string') {
+        invalid.push({ source: path, reason: withRequest, quarantinedAt: now(), value });
+        badFiles.push(path);
+        continue;
+      }
+      value = withRequest;
       const reason = invalidJobReason(id, value);
       if (reason) {
         invalid.push({ source: path, reason, quarantinedAt: now(), value });
@@ -156,6 +215,7 @@ class BatchJobFiles {
       const job = value as DaemonBatchJob;
       jobs[id] = job.status === 'completed' ? this.withResult(job) : job;
     }
+    for (const path of submissionFiles) this.applySubmission(path, jobs);
     if (invalid.length > 0) {
       try {
         this.quarantine(invalid);
@@ -172,6 +232,101 @@ class BatchJobFiles {
       }
     }
     return jobs;
+  }
+
+  /**
+   * The row with its request: from `<id>.request.json`, or inline in a row
+   * written before requests had their own file. A string is why it has none.
+   */
+  private withRequest(id: string, value: unknown): unknown {
+    if (!isRecord(value) || value['request'] !== undefined) return value;
+    try {
+      const request: unknown = JSON.parse(readFileSync(this.requestPath(id), 'utf-8'));
+      this.requestsOnDisk.add(id);
+      return { ...value, request };
+    } catch (error) {
+      return `its request file ${this.requestPath(id)} is missing or not readable JSON: ${summarizeError(error)}`;
+    }
+  }
+
+  /**
+   * Puts the jobs of a submission the daemon was making when it stopped back
+   * in the state that submission reached: `submitting` with its submission
+   * id, or in its provider batch when the provider had answered. A file whose
+   * jobs have all moved on is removed.
+   */
+  private applySubmission(path: string, jobs: Record<string, DaemonBatchJob>): void {
+    let record: unknown;
+    try {
+      record = JSON.parse(readFileSync(path, 'utf-8'));
+    } catch (error) {
+      record = undefined;
+      logger.warn('A batch submission file is not readable JSON and is removed; its jobs keep the state their own rows record', { path, error: summarizeError(error) });
+    }
+    // Kept while a job still depends on it: one waiting for its submission to
+    // be confirmed, or one whose row could not be brought up to date.
+    let keep = false;
+    if (isSubmissionRecord(record)) {
+      for (const id of record.jobIds) {
+        const job = jobs[id];
+        if (!job) continue;
+        const pending = job.status === 'queued' || (job.status === 'submitting' && (job.submissionId === undefined || job.submissionId === record.submissionId));
+        if (!pending) continue;
+        if (record.providerBatchId === undefined || record.providerBatchStatus === undefined) {
+          jobs[id] = { ...job, status: 'submitting', submissionId: record.submissionId, submittedAt: record.submittedAt };
+          keep = true;
+          continue;
+        }
+        // The provider had answered and the daemon stopped before this row
+        // said so: it joins its provider batch, and the row is written now.
+        const status = submittedStatus(record.providerBatchStatus);
+        const timestamp = now();
+        const joined: DaemonBatchJob = {
+          ...job,
+          status,
+          updatedAt: timestamp,
+          attempts: job.attempts + 1,
+          submissionId: record.submissionId,
+          submittedAt: record.submittedAt,
+          providerBatchId: record.providerBatchId,
+          providerBatchStatus: record.providerBatchStatus,
+          ...(status === 'failed' ? { completedAt: timestamp, error: { message: 'The provider refused to create the batch.' } } : {}),
+        };
+        jobs[id] = joined;
+        try {
+          this.save(joined);
+        } catch (error) {
+          keep = true;
+          logger.warn('A batch job row could not be brought up to date with its provider batch; the submission file is kept and read again next start', {
+            jobId: id,
+            path,
+            error: summarizeError(error),
+          });
+        }
+      }
+    } else if (record !== undefined) {
+      logger.warn('A batch submission file does not name a submission and its jobs; it is removed', { path });
+    }
+    if (!keep) {
+      try { unlinkSync(path); } catch { /* removed already */ }
+    }
+  }
+
+  /** Writes a submission before its paid provider call, and again with the provider's answer. Throws when not written. */
+  saveSubmission(record: BatchSubmissionRecord): void {
+    writeDocument(this.submissionPath(record.submissionId), record, { indent: null });
+  }
+
+  /** Removes a submission once every job row records where it went. */
+  removeSubmission(submissionId: string): void {
+    try { unlinkSync(this.submissionPath(submissionId)); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn('A finished batch submission file could not be removed; the next start reads it and finds its jobs moved on', {
+          path: this.submissionPath(submissionId),
+          error: summarizeError(error),
+        });
+      }
+    }
   }
 
   private withResult(job: DaemonBatchJob): DaemonBatchJob {
@@ -203,9 +358,16 @@ class BatchJobFiles {
     });
   }
 
-  /** Writes the job's row, and its result the first time it has one. Throws when not written. */
+  /**
+   * Writes the job's row, its request the first time (before the row that
+   * needs it), and its result the first time it has one. Throws when not written.
+   */
   save(job: DaemonBatchJob): void {
-    const { result, ...row } = job;
+    const { result, request, ...row } = job;
+    if (!this.requestsOnDisk.has(job.id)) {
+      writeDocument(this.requestPath(job.id), request, { indent: null });
+      this.requestsOnDisk.add(job.id);
+    }
     if (result !== undefined && !this.resultsOnDisk.has(job.id)) {
       writeDocument(this.resultPath(job.id), result, { indent: null });
       this.resultsOnDisk.add(job.id);
@@ -214,7 +376,7 @@ class BatchJobFiles {
   }
 
   remove(id: string): void {
-    for (const path of [this.jobPath(id), this.resultPath(id)]) {
+    for (const path of [this.jobPath(id), this.resultPath(id), this.requestPath(id)]) {
       try { unlinkSync(path); } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
           logger.warn('A pruned batch job file could not be removed; it is pruned again after the next start', { path, error: summarizeError(error) });
@@ -222,7 +384,32 @@ class BatchJobFiles {
       }
     }
     this.resultsOnDisk.delete(id);
+    this.requestsOnDisk.delete(id);
   }
+}
+
+/** Lets the daemon answer other requests between the synchronous row writes of one batch. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Statuses from something between the daemon and the provider that gave up waiting: the provider may still have acted. */
+const UNANSWERED_STATUSES: ReadonlySet<number> = new Set([408, 504, 524]);
+
+/**
+ * Whether a failed create call can have left a batch at the provider. A
+ * provider that answered with a status made none, and a connection that was
+ * never opened sent nothing; a reset, a timeout or a lost answer may have
+ * reached it.
+ */
+function createMayHaveReachedProvider(error: unknown): boolean {
+  const status = httpStatusOf(error);
+  if (status !== undefined) return UNANSWERED_STATUSES.has(status);
+  for (const holder of [error, isRecord(error) ? error['cause'] : undefined]) {
+    const code = isRecord(holder) && typeof holder['code'] === 'string' ? holder['code'] : undefined;
+    if (code !== undefined && structuralFailureConclusions({ message: code, code }).beforeResponse) return false;
+  }
+  return true;
 }
 
 type JobPatch = Partial<Omit<DaemonBatchJob, 'id' | 'status' | 'updatedAt'>>;
@@ -617,18 +804,25 @@ export class DaemonBatchManager {
     const marked: DaemonBatchJob[] = [];
     for (const id of jobIds) {
       if (this.jobs?.[id]?.status !== 'queued') continue;
-      const next = this.transition(id, 'submitting', { submissionId, submittedAt: startedAt });
+      // In memory only: the one submission file below records all of them.
+      const next = this.transition(id, 'submitting', { submissionId, submittedAt: startedAt }, { persist: false });
       if (next) marked.push(next);
     }
     const first = marked[0];
     if (!first) return;
-    if (marked.some((job) => this.unsaved.has(job.id))) {
+    const submission: BatchSubmissionRecord = { version: 1, submissionId, submittedAt: startedAt, jobIds: marked.map((job) => job.id) };
+    try {
+      this.files.saveSubmission(submission);
+    } catch (error) {
       // The provider call is paid and not idempotent. Without the submission
       // id on disk a restart could not find the batch and would pay again.
-      for (const job of marked) this.putBack(job.id, {});
+      for (const job of marked) {
+        this.transition(job.id, 'queued', { submissionId: undefined, submittedAt: undefined }, { persist: false });
+      }
       logger.warn('Batch jobs were not submitted because the job store could not be written; they stay queued', {
         path: this.files.dir,
         jobs: marked.length,
+        error: summarizeError(error),
       });
       return;
     }
@@ -664,22 +858,55 @@ export class DaemonBatchManager {
         model: first.model,
         jobs: marked.length,
       });
+      const errorRecord = { message: summarizeError(error) };
+      if (retryable && createMayHaveReachedProvider(error)) {
+        // The provider may have made the batch and only its answer was lost.
+        // The jobs stay submitting under this submission id, and the next pass
+        // asks the provider for it: found, they join it; not there, they are
+        // queued again with this attempt counted. Nothing is paid for twice.
+        for (const snap of marked) {
+          const job = this.jobs?.[snap.id];
+          if (!job || job.status !== 'submitting') continue;
+          this.transition(job.id, 'submitting', { error: { ...errorRecord, code: BATCH_SUBMISSION_UNANSWERED } }, { persist: false });
+        }
+        logger.warn('A provider batch create call failed before its answer arrived; the next pass asks the provider whether it made the batch', {
+          provider: first.provider,
+          submissionId,
+          jobs: marked.length,
+        });
+        return;
+      }
       for (const snap of marked) {
         // A job cancelled while the call was in flight stays cancelled (the lifecycle refuses the move).
         const job = this.jobs?.[snap.id];
         if (!job || job.status !== 'submitting') continue;
         const attempts = job.attempts + 1;
-        const errorRecord = { message: summarizeError(error) };
         if (retryable && attempts < MAX_BATCH_SUBMIT_ATTEMPTS) {
           this.putBack(job.id, { attempts, error: errorRecord });
         } else if (this.transition(job.id, 'dead_lettered', { attempts, completedAt: now(), error: errorRecord })) {
           result.failedJobs += 1;
         }
+        await yieldToEventLoop();
       }
+      // The provider answered, so it holds no batch for this submission.
+      this.files.removeSubmission(submissionId);
       return;
     }
 
-    const counted = this.recordSubmitted(marked.map((job) => job.id), created, result);
+    // The provider's answer is recorded once, before the job rows, so a daemon
+    // that stops while they are written still finds every job's batch.
+    try {
+      this.files.saveSubmission({ ...submission, providerBatchId: created.providerBatchId, providerBatchStatus: created.status });
+    } catch (error) {
+      logger.warn('A provider batch was created but could not be recorded beside its jobs; each job row records it as it is written', {
+        provider: first.provider,
+        providerBatchId: created.providerBatchId,
+        error: summarizeError(error),
+      });
+    }
+    const markedIds = marked.map((job) => job.id);
+    const counted = await this.recordSubmitted(markedIds, created, result);
+    if (!markedIds.some((id) => this.unsaved.has(id))) this.files.removeSubmission(submissionId);
     result.submittedProviderBatches += 1;
     if (counted.superseded.length > 0) {
       logger.warn('Batch jobs were cancelled while their provider batch was being created; the provider batch still holds them and their results will be ignored', {
@@ -690,25 +917,31 @@ export class DaemonBatchManager {
     }
   }
 
-  /** Moves submitting jobs to the state of the provider batch that holds them. Each row is written before the next provider batch is made. */
-  private recordSubmitted(
+  /**
+   * Moves submitting jobs to the state of the provider batch that holds them.
+   * Each row is written before the next provider batch is made, with a yield
+   * between rows so other requests are answered while a large batch is recorded.
+   */
+  private async recordSubmitted(
     jobIds: readonly string[],
     created: { readonly providerBatchId: string; readonly status: ProviderBatchStatus; readonly raw?: unknown },
     result: DaemonBatchTickResult,
-  ): { superseded: string[] } {
+  ): Promise<{ superseded: string[] }> {
     const timestamp = now();
-    const target: DaemonBatchJobStatus = created.status === 'running' ? 'running' : created.status === 'failed' ? 'failed' : 'submitted';
+    const target = submittedStatus(created.status);
     const superseded: string[] = [];
-    for (const id of jobIds) {
+    for (const [index, id] of jobIds.entries()) {
+      if (index > 0) await yieldToEventLoop();
       const job = this.jobs?.[id];
       const moved = job && job.status === 'submitting'
         ? this.transition(id, target, {
           attempts: job.attempts + 1,
           providerBatchId: created.providerBatchId,
           providerBatchStatus: created.status,
+          // A job that joins its batch carries no error from a create call whose answer was lost.
           ...(created.status === 'failed'
             ? { completedAt: timestamp, error: { message: 'The provider refused to create the batch.', raw: created.raw } }
-            : {}),
+            : { error: undefined }),
         })
         : null;
       if (!moved) {
@@ -723,10 +956,11 @@ export class DaemonBatchManager {
 
   /**
    * A job still `submitting` when a pass starts was left by a daemon that
-   * stopped during the provider call. The provider is asked for the batch by
-   * its submission id: found, the job joins it; not there, it is queued again;
-   * a provider that cannot be asked gets no second paid call, and the job
-   * fails with what to check.
+   * stopped during the provider call, or by a create call whose answer was
+   * lost. The provider is asked for the batch by its submission id: found, the
+   * job joins it; not there, it is queued again with the attempt counted (and
+   * dead-lettered once the attempts are spent); a provider that cannot be
+   * asked gets no second paid call, and the job fails with what to check.
    */
   private async reconcileSubmitting(result: DaemonBatchTickResult): Promise<void> {
     const groups = new Map<string, DaemonBatchJob[]>();
@@ -751,7 +985,8 @@ export class DaemonBatchManager {
         lookup = undefined;
       }
       if (!lookup || !first.submissionId) {
-        this.failUnconfirmed(ids, first.provider, submittedAt, result);
+        await this.failUnconfirmed(jobs, first.provider, submittedAt, result);
+        if (first.submissionId) this.files.removeSubmission(first.submissionId);
         continue;
       }
       let found: ProviderBatchPollResult | null;
@@ -762,30 +997,52 @@ export class DaemonBatchManager {
           provider: first.provider,
           submissionId: first.submissionId,
         });
-        if (!retryable) this.failUnconfirmed(ids, first.provider, submittedAt, result);
+        if (!retryable) {
+          await this.failUnconfirmed(jobs, first.provider, submittedAt, result);
+          this.files.removeSubmission(first.submissionId);
+        }
         continue;
       }
       if (found) {
-        this.recordSubmitted(ids, found, result);
-        logger.info('A provider batch accepted before the daemon stopped was found and resumed', {
+        await this.recordSubmitted(ids, found, result);
+        logger.info('A provider batch whose create answer never arrived was found and resumed', {
           provider: first.provider,
           providerBatchId: found.providerBatchId,
           jobs: ids.length,
         });
       } else {
-        for (const id of ids) this.putBack(id, {});
+        for (const [index, id] of ids.entries()) {
+          if (index > 0) await yieldToEventLoop();
+          const job = this.jobs?.[id];
+          if (!job || job.status !== 'submitting') continue;
+          const attempts = job.attempts + 1;
+          if (attempts < MAX_BATCH_SUBMIT_ATTEMPTS) {
+            this.putBack(id, { attempts });
+          } else if (this.transition(id, 'dead_lettered', {
+            attempts,
+            completedAt: now(),
+            error: job.error ?? { message: `${first.provider} holds no batch for this job after ${attempts} submissions.` },
+          })) {
+            result.failedJobs += 1;
+          }
+        }
       }
+      if (!ids.some((id) => this.unsaved.has(id))) this.files.removeSubmission(first.submissionId);
     }
   }
 
-  private failUnconfirmed(ids: readonly string[], provider: string, submittedAt: number, result: DaemonBatchTickResult): void {
+  private async failUnconfirmed(jobs: readonly DaemonBatchJob[], provider: string, submittedAt: number, result: DaemonBatchTickResult): Promise<void> {
     const when = new Date(submittedAt).toISOString();
-    for (const id of ids) {
-      const moved = this.transition(id, 'failed', {
+    for (const [index, job] of jobs.entries()) {
+      if (index > 0) await yieldToEventLoop();
+      const cause = job.error?.code === BATCH_SUBMISSION_UNANSWERED
+        ? `The answer to sending this job to ${provider} was lost (${job.error.message})`
+        : `The daemon stopped while sending this job to ${provider}`;
+      const moved = this.transition(job.id, 'failed', {
         completedAt: now(),
         error: {
           code: 'BATCH_SUBMISSION_UNCONFIRMED',
-          message: `The daemon stopped while sending this job to ${provider}, and ${provider} cannot be asked whether it accepted the batch. It was not sent again, so it is not paid for twice. Check ${provider}'s batch list for a batch created around ${when}; if there is none, create the job again.`,
+          message: `${cause}, and ${provider} cannot be asked whether it accepted the batch. It was not sent again, so it is not paid for twice. Check ${provider}'s batch list for a batch created around ${when}; if there is none, create the job again.`,
         },
       });
       if (moved) result.failedJobs += 1;
@@ -821,7 +1078,8 @@ export class DaemonBatchManager {
           providerBatchId,
         });
         if (retryable) continue;
-        for (const id of ids) {
+        for (const [index, id] of ids.entries()) {
+          if (index > 0) await yieldToEventLoop();
           if (this.transition(id, 'dead_lettered', { completedAt: now(), error: { message: summarizeError(error) } })) {
             result.failedJobs += 1;
           }
@@ -845,23 +1103,24 @@ export class DaemonBatchManager {
       // A poll that changes nothing writes nothing.
       if (to !== job.status || job.providerBatchStatus !== polled.status) {
         this.transition(id, to, { providerBatchStatus: polled.status });
+        await yieldToEventLoop();
       }
     }
     if (polled.resultAvailable || polled.status === 'completed') {
-      this.applyProviderResults(await adapter.getResults(providerBatchId), result);
+      await this.applyProviderResults(await adapter.getResults(providerBatchId), result);
     }
-    if (PROVIDER_TERMINAL.has(polled.status)) this.finishJobsWithoutResult(jobIds, polled, result);
+    if (PROVIDER_TERMINAL.has(polled.status)) await this.finishJobsWithoutResult(jobIds, polled, result);
   }
 
   /**
    * A provider batch that has ended leaves no job open: a job it returned no
    * result for takes the batch's end state instead of being polled forever.
    */
-  private finishJobsWithoutResult(
+  private async finishJobsWithoutResult(
     jobIds: readonly string[],
     polled: ProviderBatchPollResult,
     result: DaemonBatchTickResult,
-  ): void {
+  ): Promise<void> {
     const status: DaemonBatchJobStatus = polled.status === 'cancelled' ? 'cancelled' : polled.status === 'expired' ? 'expired' : 'failed';
     const message = polled.status === 'completed'
       ? 'The provider completed the batch but returned no result for this job.'
@@ -876,11 +1135,14 @@ export class DaemonBatchManager {
         error: { message, ...(polled.status === 'failed' ? { raw: polled.raw } : {}) },
       });
       if (moved && status === 'failed') result.failedJobs += 1;
+      await yieldToEventLoop();
     }
   }
 
-  private applyProviderResults(providerResults: readonly ProviderBatchResult[], tickResult: DaemonBatchTickResult): void {
-    for (const providerResult of providerResults) {
+  /** Records each result, yielding between rows so a large batch does not hold the daemon. */
+  private async applyProviderResults(providerResults: readonly ProviderBatchResult[], tickResult: DaemonBatchTickResult): Promise<void> {
+    for (const [index, providerResult] of providerResults.entries()) {
+      if (index > 0) await yieldToEventLoop();
       const job = this.jobs?.[providerResult.customId];
       if (!job || isTerminal(job.status)) continue;
       if (providerResult.status === 'succeeded' && providerResult.response) {
@@ -920,15 +1182,17 @@ export class DaemonBatchManager {
 
   /**
    * The one place a job's status changes: the move must be in the lifecycle
-   * table (a terminal job never moves), and the row is written at once.
+   * table (a terminal job never moves), and the row is written at once
+   * unless `persist: false` says another file records the move (a
+   * submission records all of its jobs going `submitting` in one write).
    * Returns the job as stored in memory, or null when the move is not legal.
    */
-  private transition(id: string, to: DaemonBatchJobStatus, patch: JobPatch): DaemonBatchJob | null {
+  private transition(id: string, to: DaemonBatchJobStatus, patch: JobPatch, options: { readonly persist?: boolean } = {}): DaemonBatchJob | null {
     const current = this.jobs?.[id];
     if (!current || !daemonBatchJobLifecycle.can(current.status, to)) return null;
     const next: DaemonBatchJob = { ...current, ...patch, status: to, updatedAt: now() };
     this.jobs![id] = next;
-    this.save(next);
+    if (options.persist !== false) this.save(next);
     this.notifySettled(next);
     return next;
   }

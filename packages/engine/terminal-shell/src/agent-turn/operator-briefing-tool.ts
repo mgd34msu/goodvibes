@@ -4,7 +4,7 @@ import { createOperatorWorkLedgerReadClient } from '@goodvibes-jev/engine/platfo
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import { requestDeadline, type ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { readConnectedHostOperatorToken } from './connected-host-auth.js';
 import { connectedHostBaseUrl } from './connected-host-dial.js';
 import type { AgentInProcessHost } from './in-process-host.js';
@@ -294,7 +294,7 @@ export function createAgentOperatorBriefingTool(
       const connection = briefingConnection(configManager, shellPaths.homeDirectory, inProcess);
       const token = connection.token;
       if (!token) return { success: false, error: `auth_required: ${connection.unavailable ?? 'no connected-host operator token'}` };
-      const signal = AbortSignal.any([AbortSignal.timeout(deadlineMs), ...(options?.signal ? [options.signal] : [])]);
+      const { signal } = requestDeadline(deadlineMs, options?.signal);
       // No streams, subscriptions, retries, history, or lifecycle calls. The
       // snapshot reader is disposed when the briefing ends, which aborts its request.
       const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl,

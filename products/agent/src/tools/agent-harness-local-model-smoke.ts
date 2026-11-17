@@ -1,7 +1,7 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import type { AgentHarnessModelRoutingArgs, LocalModelServerDefaultEndpoint, LocalModelServerEndpoint, LocalModelSmokeTarget } from './agent-harness-model-routing-types.ts';
-import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { previewHarnessText, requestDeadline } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readLimit, readRecord, readString } from './agent-harness-model-routing-utils.ts';
 import { readLocalServerEndpointCandidates, describeLocalServerEndpoint, isPrivateOrLocalUrl, localEndpointSmokeRoute, localModelServerDefaults, parseUrlCandidate, recordLocalModelSmoke } from './agent-harness-local-model-endpoints.ts';
 import type { LocalModelLastSmoke } from './agent-harness-model-routing-types.ts';
@@ -222,8 +222,7 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
     };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const bounded = requestDeadline(timeoutMs, options.signal);
   const started = Date.now();
   try {
     const response = await fetch(target.modelsUrl, {
@@ -231,7 +230,7 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
       headers: { Accept: 'application/json' },
       // A redirect could leave the local/private scope that was checked above, so it is reported, never followed.
       redirect: 'manual',
-      signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal,
+      signal: bounded.signal,
     });
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const elapsedMs = Date.now() - started;
@@ -278,7 +277,7 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
   } catch (error) {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const elapsedMs = Date.now() - started;
-    const aborted = controller.signal.aborted;
+    const aborted = bounded.deadline.aborted;
     return {
       ...target,
       status: aborted ? 'timeout' : 'unreachable',
@@ -290,8 +289,6 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
       failure: aborted ? `Timed out after ${timeoutMs}ms.` : safeSmokeError(error),
       nextActions: ['Start the local server, load at least one model, verify the base URL, then retry this smoke check.'],
     };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

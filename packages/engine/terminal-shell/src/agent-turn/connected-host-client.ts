@@ -51,6 +51,29 @@ export const CONNECTED_HOST_WRITE_DEADLINE_MS = 60_000;
 /** The `/status` probe that tells an older host from no host after a 404. */
 const STATUS_PROBE_DEADLINE_MS = 3_000;
 
+/** A request's signal: the caller's, also ended by a deadline; `deadline` says which ended it. */
+export interface RequestDeadline {
+  readonly signal: AbortSignal;
+  readonly deadline: AbortSignal;
+  readonly deadlineMs: number;
+}
+
+/**
+ * The one way a tool bounds a request it sends: a host or server that accepts
+ * the connection and never answers ends the call at the deadline, with a
+ * timeout the caller can name, instead of holding the turn until the owner
+ * cancels. One timer per request.
+ */
+export function requestDeadline(deadlineMs: number, signal?: AbortSignal): RequestDeadline {
+  const deadline = AbortSignal.timeout(deadlineMs);
+  return { signal: signal ? AbortSignal.any([signal, deadline]) : deadline, deadline, deadlineMs };
+}
+
+/** The deadline for one connected-host request: a read waits less than a write, which may start work on the host. */
+export function connectedHostRequestDeadline(isRead: boolean, signal?: AbortSignal): RequestDeadline {
+  return requestDeadline(isRead ? CONNECTED_HOST_READ_DEADLINE_MS : CONNECTED_HOST_WRITE_DEADLINE_MS, signal);
+}
+
 /** The header the daemon reads the explicit-user-request claim from. */
 export const EXPLICIT_USER_REQUEST_HEADER = 'x-goodvibes-explicit-user-request';
 
@@ -630,9 +653,7 @@ export function createConnectedHost(
     }
 
     const fetchImpl = resolved.fetch ?? options.fetchImpl ?? globalThis.fetch;
-    const deadlineMs = callOptions.deadlineMs ?? (isRead ? readDeadlineMs : writeDeadlineMs);
-    const deadline = AbortSignal.timeout(deadlineMs);
-    const signal = callOptions.signal ? AbortSignal.any([callOptions.signal, deadline]) : deadline;
+    const { signal, deadline, deadlineMs } = requestDeadline(callOptions.deadlineMs ?? (isRead ? readDeadlineMs : writeDeadlineMs), callOptions.signal);
     const facts: CallFacts = {
       methodId, route, isRead, connection: { ...resolved, token: resolved.token }, fetchImpl,
       callerSignal: callOptions.signal, deadline, deadlineMs,

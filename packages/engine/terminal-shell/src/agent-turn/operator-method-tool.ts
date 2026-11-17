@@ -5,7 +5,7 @@ import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/e
 import { logger, redactStructuredDataAsync, type StructuredRedactionOptions } from '@goodvibes-jev/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import { connectedHostRequestDeadline, type ConnectedHostConfigReader as AgentConnectedHostConfigReader, type RequestDeadline } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { assertOperatorEffect, captureOperatorConnection } from './operator-connection-owner.js';
 import { forgetDelegatedCredential } from './agent-delegation-credential.js';
@@ -429,6 +429,7 @@ export function createAgentOperatorMethodTool(
       // Once the request is on the wire a throw no longer means "not done": a write may have landed.
       let stage: 'before-send' | 'sending' | 'answered' = 'before-send';
       let httpStatus: number | undefined;
+      let bounded: RequestDeadline | undefined;
       try {
         const assertInvocation = () => {
           options?.signal?.throwIfAborted();
@@ -462,9 +463,11 @@ export function createAgentOperatorMethodTool(
         // The owner-request signal for a purchase rides only on a call whose admission was just confirmed here.
         assertCurrent();
         stage = 'sending';
+        // A host that takes the request and never answers ends the call at the deadline, not the turn.
+        bounded = connectedHostRequestDeadline(readOnlyHttp, options?.signal);
         // The connection's own transport: the network, or the daemon's request path in a turn it hosts.
         const response = await (connection.fetch ?? fetch)(`${connection.baseUrl}${requestPath}`, {
-          ...(options?.signal ? { signal: options.signal } : {}),
+          signal: bounded.signal,
           redirect: 'error',
           method: route.httpMethod,
           headers: {
@@ -516,7 +519,10 @@ export function createAgentOperatorMethodTool(
         if (!response.ok) return { success: false, error: formatted };
         return { success: true, output: formatted };
       } catch (error) {
-        return { success: false, error: operatorMethodFailure(stage, readOnlyHttp, httpStatus, route.method.id, error) };
+        const sent = bounded;
+        const cause = sent && sent.deadline.aborted && options?.signal?.aborted !== true
+          ? new Error(`the host did not answer within ${sent.deadlineMs / 1000} s`) : error;
+        return { success: false, error: operatorMethodFailure(stage, readOnlyHttp, httpStatus, route.method.id, cause) };
       }
     },
   };

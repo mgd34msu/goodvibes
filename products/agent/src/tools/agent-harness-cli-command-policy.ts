@@ -39,7 +39,7 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
     'webhook',
   ].includes(root)) {
     return {
-      effect: 'unknown',
+      effect: 'undeclared',
       confirmation,
       boundary: `Blocked package CLI token. Agent can launch its own TUI and use public connected-host routes. ${CONNECTED_HOST_LIFECYCLE_STATEMENT} Servers, route relays, remotes, web surfaces, and webhook listeners are not managed from this CLI mirror.`,
     };
@@ -153,7 +153,7 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
     };
   }
   return {
-    effect: 'unknown',
+    effect: 'undeclared',
     confirmation,
     boundary: 'Inspect the CLI help, parser result, and preferred model routes before using an equivalent command path.',
   };

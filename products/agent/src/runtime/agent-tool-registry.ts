@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
-import { registerAgentAutonomyScheduleTool } from '../tools/agent-autonomy-schedule-tool.ts';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend } from './agent-browser.ts';
 import { registerAgentAccountsTool } from '../tools/agent-accounts-tool.ts';
 import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS } from '@goodvibes-jev/engine/platform/platform/google';
@@ -12,7 +11,6 @@ import { registerAgentKnowledgeIngestTool } from '@goodvibes-jev/engine/terminal
 import { registerAgentKnowledgeTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
 import { registerAgentModelCompareTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { registerAgentReminderScheduleTool } from '../tools/agent-reminder-schedule-tool.ts';
 import { registerAgentResearchReportTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   connectedHostGoogleCalendar,
@@ -22,8 +20,6 @@ import {
   type GoogleToolWiringDeps,
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
-import { registerAgentScheduleEditTool } from '../tools/agent-schedule-edit-tool.ts';
-import { registerAgentScheduleTool } from '../tools/agent-schedule-tool.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -231,10 +227,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
       };
     },
   });
-  registerAgentAutonomyScheduleTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentReminderScheduleTool(toolRegistry, services.shellPaths, configManager, services.artifactStore);
-  registerAgentScheduleEditTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentScheduleTool(toolRegistry, services.shellPaths, configManager);
   installAgentToolPolicyGuard(toolRegistry);
   compactRegisteredToolDefinitions(toolRegistry);
   return { toolRegistry, fileCache, projectIndex, dispose };

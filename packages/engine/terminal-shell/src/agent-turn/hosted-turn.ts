@@ -46,6 +46,10 @@ import { registerAgentWorkPlanTool, type AgentWorkPlanStore } from './work-plan-
 import { registerAgentOperatorActionTool } from './operator-action-tool.js';
 import { registerAgentOperatorBriefingTool } from './operator-briefing-tool.js';
 import { registerAgentOperatorMethodTool } from './operator-method-tool.js';
+import { registerAgentAutonomyScheduleTool } from './autonomy-schedule-tool.js';
+import { registerAgentReminderScheduleTool } from './reminder-schedule-tool.js';
+import { registerAgentScheduleEditTool } from './schedule-edit-tool.js';
+import { registerAgentScheduleTool } from './schedule-tool.js';
 import { createAgentInProcessHost, type AgentInProcessHost } from './in-process-host.js';
 import { connectedHostBaseUrl } from './connected-host-dial.js';
 import type { ConnectedHostConfigReader } from './connected-host-client.js';
@@ -134,6 +138,11 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentOperatorActionTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentOperatorBriefingTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentOperatorMethodTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  // Schedules are created and changed through agent_operator_method and agent_operator_action, as nested calls.
+  registerAgentAutonomyScheduleTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  registerAgentReminderScheduleTool(registry, deps.shellPaths, deps.settings, deps.artifactStore, deps.inProcessHost);
+  registerAgentScheduleEditTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  registerAgentScheduleTool(registry, deps.shellPaths, deps.settings);
   registerAgentLocalRegistryTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess);
   registerAgentChannelSendTool(registry, deps.channelDeliveryRouter, { shellPaths: deps.shellPaths });
   if (deps.browser) registerAgentBrowserTool(registry, deps.browser);
@@ -161,9 +170,8 @@ export const AGENT_SHELL_TOOL_NAMES: readonly string[] = Object.freeze([
  * `registerAgentTurnTools`.
  */
 export const AGENT_NOT_YET_HOSTED_TOOL_NAMES: readonly string[] = Object.freeze([
-  'accounts', 'agent_autonomy_schedule', 'agent_knowledge', 'agent_knowledge_ingest',
-  'agent_learning_consolidation', 'agent_model_compare', 'agent_reminder_schedule', 'agent_research_report',
-  'agent_schedule_edit', 'schedule',
+  'accounts', 'agent_knowledge', 'agent_knowledge_ingest',
+  'agent_learning_consolidation', 'agent_model_compare', 'agent_research_report',
 ]);
 
 /** Every Agent tool a hosted turn refuses. */
@@ -186,6 +194,7 @@ function hostedAgentSection(): string {
     '## This Agent turn is hosted by the daemon',
     'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_channel_send`, `browser` (the daemon\'s browser), `google` (the daemon\'s Google account and calendar) and, in the daemon\'s own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
     'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing` and `agent_operator_method` are here too: their host is this daemon, reached in process with the Agent\'s own credential, so each call is judged as the Agent\'s.',
+    'The schedule tools `schedule`, `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` are here too: they list, create, edit, run, pause, resume and delete this daemon\'s own schedules through `agent_operator_method` and `agent_operator_action`, so each change is judged as the Agent\'s.',
     `These work through the Agent's own command registry and session and are not here: ${names(AGENT_SHELL_TOOL_NAMES)}. Use the platform tool that covers the same facts, or say the request runs when the owner continues in the GoodVibes Agent itself.`,
     `These are not in this hosted turn yet: ${names(AGENT_NOT_YET_HOSTED_TOOL_NAMES)}. Where the request needs one, say which and that it runs in the GoodVibes Agent itself. A call to any listed tool is refused.`,
   ].join('\n');

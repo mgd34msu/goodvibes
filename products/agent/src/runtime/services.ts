@@ -113,6 +113,7 @@ import { type LocalhostFetchApproval } from '@goodvibes-jev/engine/platform/plat
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { WorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
 import { AgentExecutionLedger } from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import type { ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 import { VERSION } from '../version.ts';
 import { ClientBuildGuard } from './client-build-compatibility.ts';
 import { AGENT_DAEMON_BUILD_FLOOR, DaemonBuildGuard, createDaemonAdoptionGate, readDaemonStatusPayload } from './daemon-build-compatibility.ts';
@@ -602,6 +603,12 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   readonly fileUndoManager: FileUndoManager;
   readonly executionLedger: AgentExecutionLedger;
   /**
+   * Gives the execution ledger the main tool registry's definitions, once that
+   * registry is composed: a tool that declares its effects or category is then
+   * recorded by code, with no reading.
+   */
+  readonly bindToolDefinitions: (describe: (name: string) => ToolDefinition | undefined) => void;
+  /**
    * Stop every poller this graph started (config watch, fleet tick, memory
    * governor, watcher registry, cross-session sweep, orchestration writer, push
    * sweep, both knowledge schedulers, the snapshot/retention/consolidation
@@ -1015,6 +1022,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           void requestConversationRewindStop().catch(() => {});
           return base.close();
         };
+        // The main tool registry is composed after this graph (bootstrap-core.ts), so the ledger reads its definitions through this.
+        let describeTool: (name: string) => ToolDefinition | undefined = () => undefined;
         const own = {
           keybindingsManager,
           approvalsView,
@@ -1046,7 +1055,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           // OS-level terminal focus, fed from 'focus' tokens and read by the approval alerts.
           focusTracker: new FocusTracker(),
           contractIntake,
-          executionLedger: new AgentExecutionLedger(runtimeBus),
+          executionLedger: new AgentExecutionLedger(runtimeBus, undefined, { describeTool: (name) => describeTool(name) }),
+          bindToolDefinitions: (describe: (name: string) => ToolDefinition | undefined): void => { describeTool = describe; },
           mcpRegistry: lazyMcp.registry,
           close,
           dispose: (): void => { void close().catch(() => {}); },

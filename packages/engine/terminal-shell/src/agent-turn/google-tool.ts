@@ -538,6 +538,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         },
         required: ['action'],
       },
+      // Gmail and Calendar over the network; connect.clientFile reads a file; the credential is stored.
+      sideEffects: ['network', 'read_fs', 'state'],
     },
     execute: async (rawArgs: Record<string, unknown>, executionOptions): Promise<ToolOutput> => {
       const args = captureStrictJudgmentJson(rawArgs); snapshotJudgmentInput(args);

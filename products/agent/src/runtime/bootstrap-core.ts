@@ -253,6 +253,8 @@ export async function initializeBootstrapCore(
     // First-party local reads need no hosted screening: a code-only local owner, always bound.
     researchSourceOwner: services.localReadSourceOwner,
   });
+  // The execution history records a tool that declares its effects by code, with no reading.
+  services.bindToolDefinitions((name) => toolRegistry.definitionOf(name));
   // The permission gate is the graph's. services.permissionManager rides the
   // client raiser: the ask is posted to the daemon AND prompted here, and the
   // first real answer wins. The background-agent attribution that feeds the

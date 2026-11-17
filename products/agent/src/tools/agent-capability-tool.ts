@@ -258,6 +258,9 @@ export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): 
         },
         required: [],
       },
+      // Reads this process's live runtime state and changes nothing.
+      sideEffects: [],
+      category: 'read',
     },
     execute: async (args: Record<string, unknown>) => {
       const raw = typeof args['subject'] === 'string' ? args['subject'].trim().toLowerCase() : 'all';

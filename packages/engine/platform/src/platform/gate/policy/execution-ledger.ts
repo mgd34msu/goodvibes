@@ -163,7 +163,11 @@ const ENGINE_TOOL_ROUTES: Readonly<Record<string, ToolFacts>> = {
   agent: { kind: 'delegation', targets: ['task'] }, delegate: { kind: 'delegation', targets: ['task'] }, workflow: { kind: 'delegation', targets: ['workflowId'] },
 };
 
-/** A registered tool's facts from its declared effects or category; undefined when it declares neither. */
+/**
+ * A registered tool's facts from its declared effects or category; undefined
+ * when it declares neither. A declared empty list with no category is a tool
+ * that changes nothing, so it is a read.
+ */
 function definitionFacts(definition: ToolDefinition | undefined): ToolFacts | undefined {
   if (!definition) return undefined;
   const effects = definition.sideEffects ?? [];
@@ -173,7 +177,8 @@ function definitionFacts(definition: ToolDefinition | undefined): ToolFacts | un
       : effects.includes('agent') || effects.includes('workflow') ? 'delegation'
         : effects.includes('write_fs') || effects.includes('state') ? 'write'
           : effects.length > 0 ? 'read'
-            : category === 'execute' ? 'shell' : category === 'write' ? 'write' : category === 'read' ? 'read' : category === 'delegate' ? 'delegation' : undefined;
+            : category === 'execute' ? 'shell' : category === 'write' ? 'write' : category === 'read' ? 'read' : category === 'delegate' ? 'delegation'
+              : definition.sideEffects !== undefined ? 'read' : undefined;
   if (kind === undefined) return undefined;
   const subjects = definition.subjects;
   return { kind, targets: subjects?.paths ?? subjects?.hosts ?? subjects?.recipients, commands: subjects?.commands };

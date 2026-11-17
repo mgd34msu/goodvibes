@@ -103,6 +103,8 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
         },
         required: ['action'],
       },
+      // The register is the Agent's own state; an alias opens its watch on the connected daemon.
+      sideEffects: ['network', 'state'],
     },
     execute: async (rawArgs: Record<string, unknown>, execution?: Parameters<Tool['execute']>[1]): Promise<ToolOutput> => {
       const cancelled = (): ToolOutput => ({ success: false, cancelled: true, error: 'Account action cancelled.' });

@@ -7,7 +7,8 @@
 // delegates the trigger keys and the pick-mode input here and draws pickView().
 //
 //   • Pick: a contract plan-unit row opens only its recorded attempt group.
-//     Choosing a candidate previews its diff; only confirmation applies it.
+//     Choosing a candidate shows the diff the picker already holds; only
+//     confirmation applies it, and the daemon validates that confirmation.
 //   • Conflict: a recorded contract-unit ID maps to the qualified public verb
 //     and attaches only the resolution session the gateway actually returns.
 //   • Discard: only a terminal contract root exposes its own recorded worktree.
@@ -368,16 +369,18 @@ export class FleetActs {
       this.deps.markDirty();
       return true;
     }
-    if (key === 'enter' || key === 'return') { void this.confirmSelectedPick(); return true; }
+    if (key === 'enter' || key === 'return') { this.confirmSelectedPick(); return true; }
     return true; // absorb every other key while the picker owns the view
   }
 
   /**
-   * Drive fleet.attempts.pick preview (confirm:false) then, behind the question
-   * on the candidate's Changes preview, confirm (confirm:true). No id is typed, the group id and
-   * the winner item id both come from the picker state.
+   * Open the candidate's Changes preview from the diff the picker already holds
+   * (no round trip), then, behind the question on it, apply with confirm:true.
+   * The daemon's confirm:true validates the group and the winner itself and is
+   * the authority; its refusal names the reason. No id is typed, the group id
+   * and the winner item id both come from the picker state.
    */
-  private async confirmSelectedPick(): Promise<void> {
+  private confirmSelectedPick(): void {
     if (!this.pick || this.pickBusy || !this.pickRequest) return;
     const request = this.pickRequest;
     const { group, workstreamNodeId } = this.pick;
@@ -386,21 +389,6 @@ export class FleetActs {
     const gateway = this.requireGateway();
     if (!gateway) return;
     this.pickBusy = true;
-    // Preview: confirm:false returns the group WITHOUT applying (the honest
-    // "here is what you are about to merge"). A refusal to even preview surfaces.
-    try {
-      await gateway.pick({ groupId: group.groupId, winnerItemId: cand.itemId, confirm: false });
-    } catch (err) {
-      if (this.pickRequest !== request) return;
-      this.pickBusy = false;
-      this.deps.notify(`Pick preview failed: ${summarizeError(err)}`);
-      return;
-    }
-    if (this.pickRequest !== request) return;
-    const current = this.currentPick(workstreamNodeId, group.groupId, group.workstreamId);
-    if (!current || !current.selection.candidateIds.some(id => `${current.data.contract.id}:${id}` === cand.itemId)) {
-      this.cancelPick(); this.deps.markDirty(); return;
-    }
     const losers = heldCandidates(group).length - 1;
     this.pickPreviewOpen = true;
     let answered = false;

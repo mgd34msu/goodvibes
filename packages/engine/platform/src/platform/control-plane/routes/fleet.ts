@@ -348,7 +348,8 @@ export function createFleetArchivedListHandler(registry: FleetArchiveCapableRegi
  * engine simply doesn't register the fleet.attempts.* verbs (graceful degrade).
  */
 export interface FleetAttemptsController {
-  listHeldMergeGroups(workstreamId?: string): Promise<HeldMergeGroup[]>;
+  /** Held-merge groups: all, one workstream's, or (with `groupId`) only the group named, so only it is diffed. */
+  listHeldMergeGroups(workstreamId?: string, groupId?: string): Promise<HeldMergeGroup[]>;
   /** The task-graph snapshot (fleet.graph.get), nodes/edges/pool/stalled tells. Optional for narrower embeds. */
   getGraphSnapshot?(workstreamId: string): import('../../orchestration/graph-dynamics.js').WorkstreamGraphSnapshot | null;
   pickAttemptWinner(groupId: string, winnerItemId: string): Promise<AttemptPickResult>;
@@ -391,7 +392,7 @@ export function createFleetAttemptsPickHandler(controller: FleetAttemptsControll
     // single verb, no list->diff->pick-id transcription ceremony. confirm:true
     // applies (merge winner through the integration lane, clean the losers).
     if (params.confirm !== true) {
-      const groups = await controller.listHeldMergeGroups();
+      const groups = await controller.listHeldMergeGroups(undefined, groupId);
       const group = groups.find((candidate) => candidate.groupId === groupId);
       if (!group) throw new GatewayVerbError(`Unknown attempt group: ${groupId}`, 'FAILED_PRECONDITION', 409);
       if (!group.candidates.some((candidate) => candidate.itemId === winnerItemId && candidate.state === 'held-merge')) {

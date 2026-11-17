@@ -150,8 +150,8 @@ export interface OrchestrationEngine {
   /** Reset a terminally-FAILED item to re-run from its first phase (the failed-dependency recovery path); re-ticks immediately. */
   retryItem(itemId: string): boolean;
   getPhaseResults(workstreamId: string): readonly PhaseResult[];
-  /** Best-of-N: held-merge groups awaiting a winner pick. */
-  listHeldMergeGroups(workstreamId?: string): Promise<HeldMergeGroup[]>;
+  /** Best-of-N: held-merge groups awaiting a winner pick (one workstream's, or the one group named). */
+  listHeldMergeGroups(workstreamId?: string, groupId?: string): Promise<HeldMergeGroup[]>;
   /** Best-of-N: accept a winner (merges through the lane; losers cleaned). */
   pickAttemptWinner(groupId: string, winnerItemId: string): Promise<AttemptPickResult>;
   /** Best-of-N: judge the candidates and PROPOSE a winner (never auto-picks). */
@@ -1010,7 +1010,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     updateBudget,
     retryItem,
     getPhaseResults,
-    listHeldMergeGroups: (workstreamId) => attempts.listGroups(workstreamId),
+    listHeldMergeGroups: (workstreamId, groupId) => attempts.listGroups(workstreamId, groupId),
     pickAttemptWinner: (groupId, winnerItemId) => attempts.pickWinner(groupId, winnerItemId),
     proposeAttemptWinner: (groupId) => attempts.proposeWinner(groupId),
     stampConflictSession: (itemId, sessionId) => {

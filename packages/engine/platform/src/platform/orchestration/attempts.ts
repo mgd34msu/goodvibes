@@ -103,8 +103,12 @@ export interface AttemptsCoordinator {
    * No-op for non-attempt items.
    */
   onItemReopened(item: WorkItem): void;
-  /** The held-merge groups (optionally filtered by workstream), each with its candidates' diffs. */
-  listGroups(workstreamId?: string): Promise<HeldMergeGroup[]>;
+  /**
+   * The held-merge groups (optionally filtered by workstream, or narrowed to
+   * one group id), each with its candidates' diffs. Only the groups returned
+   * are diffed.
+   */
+  listGroups(workstreamId?: string, groupId?: string): Promise<HeldMergeGroup[]>;
   /** Accept a winner: merge it through the integration lane, clean the losers. */
   pickWinner(groupId: string, winnerItemId: string): Promise<AttemptPickResult>;
   /** Run the judge over a group's candidates and PROPOSE a winner (never auto-picks here). */
@@ -321,9 +325,10 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
     };
   }
 
-  async function listGroups(workstreamId?: string): Promise<HeldMergeGroup[]> {
+  async function listGroups(workstreamId?: string, onlyGroupId?: string): Promise<HeldMergeGroup[]> {
     const result: HeldMergeGroup[] = [];
     for (const [groupId, entry] of groups) {
+      if (onlyGroupId !== undefined && groupId !== onlyGroupId) continue;
       if (workstreamId && entry.workstreamId !== workstreamId) continue;
       if (resolving.has(groupId)) continue;
       const workstream = deps.getWorkstream(entry.workstreamId);
@@ -463,7 +468,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
 
   return {
     expandItems, assertImportable, reconcileGroups, onItemPassedTerminal, onItemFailedTerminal, onItemReopened,
-    listGroups: (workstreamId) => ownedWork.run(() => listGroups(workstreamId)),
+    listGroups: (workstreamId, groupId) => ownedWork.run(() => listGroups(workstreamId, groupId)),
     pickWinner: (groupId, winnerItemId) => ownedWork.run(() => pickWinner(groupId, winnerItemId)),
     proposeWinner: (groupId) => ownedWork.run(() => proposeWinner(groupId)),
     join: () => ownedWork.join(),

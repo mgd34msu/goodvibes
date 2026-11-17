@@ -32,7 +32,7 @@ export interface ContractConflictItem {
 
 /** The controller the fleet verbs take (control-plane/routes/fleet.ts `FleetAttemptsController`, structurally). */
 export interface ContractFleetControls {
-  listHeldMergeGroups(workstreamId?: string): Promise<HeldMergeGroup[]>;
+  listHeldMergeGroups(workstreamId?: string, groupId?: string): Promise<HeldMergeGroup[]>;
   getGraphSnapshot(workstreamId: string): WorkstreamGraphSnapshot | null;
   pickAttemptWinner(groupId: string, winnerItemId: string): Promise<AttemptPickResult>;
   proposeAttemptWinner(groupId: string): Promise<AttemptJudgment>;
@@ -118,7 +118,16 @@ export function createContractFleetControls(deps: ContractFleetControlsDeps): Co
   }
 
   return {
-    async listHeldMergeGroups(workstreamId) {
+    async listHeldMergeGroups(workstreamId, groupId) {
+      if (groupId !== undefined) {
+        // One group: only its contract's engine is asked, and only that group is diffed.
+        const found = lookup(groupId);
+        if (found === null) return [];
+        const groups = await found.engine.listHeldMergeGroups(undefined, found.id);
+        return groups
+          .map((group) => qualifyGroup(found.run.id, group))
+          .filter((group) => workstreamId === undefined || group.workstreamId === workstreamId);
+      }
       if (workstreamId !== undefined) {
         const found = lookup(workstreamId);
         if (found === null) return [];

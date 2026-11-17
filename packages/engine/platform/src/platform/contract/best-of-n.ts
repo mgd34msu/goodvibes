@@ -368,7 +368,7 @@ export async function selectAttempts(run: ContractRun, engineGroupId: string, de
   let nativeCandidates: readonly Candidate[] = [];
   const context = unitSelectionContext(unit);
   try {
-    const held = (await engine.listHeldMergeGroups(workstream.id)).find((group) => group.groupId === engineGroupId);
+    const held = (await engine.listHeldMergeGroups(workstream.id, engineGroupId)).find((group) => group.groupId === engineGroupId);
     const diffOf = (id: string): AttemptCandidateDiff | null => held?.candidates.find((candidate) => candidate.itemId === id)?.diff ?? null;
     const candidates = selectionCandidates(context, passing.map((attempt) => ({ id: attempt.id, diff: diffOf(attempt.id), answer: attempt.answer })), unit.files);
     nativeCandidates = candidates;

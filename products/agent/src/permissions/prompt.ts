@@ -5,7 +5,8 @@ import { button, buttonWidth, type ButtonTone } from '../renderer/surface-kit-pa
 import { modalHeightFor, modalTextWidth } from '../renderer/surface-kit-extra.ts';
 import { renderDiffView } from '../renderer/diff-view.ts';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
-import { approvalDiffText } from './approval-diff.ts';
+import { approvalDiffText, approvalHunkDiffText } from './approval-diff.ts';
+import type { HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 import { buildPermissionApprovalBrief, execFileOperationLines, execRunPlace, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import type {
@@ -99,12 +100,14 @@ export class PermissionPromptUI extends PermissionPromptFacts {
    * `edit` the change itself as a diff under the facts, and the three choices.
    * Drawn above every other modal; the keys (y / a / n, Esc denies) live in
    * shell/blocking-input.ts. A command waiting on its terminal shows the answer
-   * being typed, masked, in place of the choices.
+   * being typed, masked, in place of the choices. A multi-edit `edit` shows its
+   * hunks with checkboxes instead (space toggles, j/k move, Enter applies the
+   * selected ones, y applies all, n denies), the keys the TUI card uses.
    */
   static createPromptLayer(
     screenWidth: number,
     screenHeight: number,
-    request: PermissionRequest & { readonly replyBuffer?: string | undefined },
+    request: PermissionRequest & { readonly replyBuffer?: string | undefined; readonly hunkState?: HunkSelectionState | undefined },
     view: { readonly awaitingTab?: boolean | undefined } = {},
   ): SurfaceLayer {
     const tokens = activeTokens();
@@ -116,17 +119,21 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     const labelW = 11;
     const valueW = Math.max(8, width - labelW - 1);
     const facts = this.promptFacts(request);
+    const hunkState = request.hunkState;
+    if (hunkState) {
+      facts.push({ label: 'Hunks', value: `${hunkState.selected.size} of ${hunkState.hunks.length} selected`, fg: hunkState.selected.size === 0 ? tokens.warning : tokens.text });
+    }
     if (isExecPrompt(request)) {
       const typed = [...(request.replyBuffer ?? '')].length;
       facts.push({ label: 'Answer', value: typed > 0 ? '•'.repeat(typed) : '(type the answer; Enter sends it)', fg: tokens.text });
     }
     const factRows = facts.reduce((n, fact) => n + wrapLines(fact.value, valueW).length, 0);
     // No change can show more source lines than the screen has rows, so none past that are drawn.
-    const diff = approvalDiffText(request, Math.max(1, screenHeight));
+    const diff = hunkState ? approvalHunkDiffText(hunkState, Math.max(1, screenHeight)) : approvalDiffText(request, Math.max(1, screenHeight));
     const diffLines = diff ? renderDiffView(diff.text, width) : [];
     const body = factRows + diffLines.length + (diff && diff.hiddenLines > 0 ? 1 : 0) + 2;
     // While the composer holds a draft every key but Tab and Ctrl+C types into it.
-    const hints = view.awaitingTab ? AWAITING_TAB_HINTS : promptHints(request, (request.replyBuffer ?? '').length > 0);
+    const hints = view.awaitingTab ? AWAITING_TAB_HINTS : hunkState ? HUNK_HINTS : promptHints(request, (request.replyBuffer ?? '').length > 0);
     const height = modalHeightFor(screenWidth, screenHeight, { hints }, body);
     const f = beginModal(screenWidth, screenHeight, {
       title: brief.title,
@@ -153,7 +160,7 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     // The choices, as chips on the last body row.
     let x = f.l;
     const by = f.bottom;
-    for (const [key, text, tone] of promptChoices(request)) {
+    for (const [key, text, tone] of hunkState ? HUNK_CHOICES : promptChoices(request)) {
       if (x + buttonWidth(`${text} ${key}`) > f.r) break;
       x = button(f.canvas, x, by, `${text} ${key}`, false, tone) + 2;
     }
@@ -262,6 +269,19 @@ function promptHints(request: PermissionRequest, typed = false): readonly KitHin
   if (isExecPrompt(request)) return [['⏎', 'send answer'], ['esc', typed ? 'clear' : 'decline'], ['ctrl+c', 'stop turn']];
   return remembersAllow(request) ? PROMPT_HINTS : PROMPT_HINTS.filter(([key]) => key !== 'a');
 }
+/** A multi-edit card: the hunk keys shared with the TUI (terminal-shell hunk-selection.ts). */
+const HUNK_HINTS: readonly KitHint[] = [
+  ['space', 'toggle hunk'],
+  ['j/k', 'move'],
+  ['enter', 'apply selected'],
+  ['y', 'apply all'],
+  ['n, esc', 'deny'],
+];
+const HUNK_CHOICES: typeof PROMPT_CHOICES = [
+  ['⏎', 'Apply selected', 'primary'],
+  ['y', 'Apply all', 'warning'],
+  ['n', 'Deny', 'danger'],
+];
 const EXEC_PROMPT_CHOICES: typeof PROMPT_CHOICES = [
   ['⏎', 'Send answer', 'primary'],
   ['esc', 'Decline', 'danger'],

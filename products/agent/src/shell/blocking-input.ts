@@ -1,11 +1,18 @@
 import { handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { applyHunkKey, hunkSelectionAnswer, type HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 
 export type PendingPermissionState = PermissionRequest & {
-  /** `modifiedArgs.answer` carries the text typed into a command's terminal prompt (an `exec:prompt` ask). */
-  resolve: (approved: boolean, remember?: boolean, modifiedArgs?: Record<string, unknown>) => void;
+  /**
+   * `modifiedArgs.answer` carries the text typed into a command's terminal prompt (an `exec:prompt` ask);
+   * for a multi-edit `edit` with only some hunks applied, `modifiedArgs` holds those edits and
+   * `extras.selectedHunks` their indices, which the approval broker applies.
+   */
+  resolve: (approved: boolean, remember?: boolean, modifiedArgs?: Record<string, unknown>, extras?: { readonly selectedHunks?: readonly number[] | undefined }) => void;
+  /** Present when the ask is a multi-edit `edit` (isHunkSelectable): which hunks are applied, and the cursor. */
+  hunkState?: HunkSelectionState | undefined;
   /** The answer being typed into a command's terminal prompt; shown masked on the card. */
   replyBuffer?: string | undefined;
   /** When the card was put on screen; keys typed within the settle time or as one burst go to the composer. */
@@ -126,6 +133,29 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       }
       render();
       return { handled: true, pendingPermission: req, recoveryPending };
+    }
+    // A multi-edit `edit`: each hunk is applied or left out, with the keys the TUI
+    // card uses (terminal-shell hunk-selection.ts). A hunk card offers no "for session".
+    if (req.hunkState) {
+      const { state, commit } = applyHunkKey(req.hunkState, data);
+      if (commit === 'apply') {
+        const answer = hunkSelectionAnswer(req, state);
+        // Every hunk is the request as asked, approved whole; fewer ride as the broker's
+        // selection and, for a resolver that forwards only arguments, as reduced edits.
+        if (answer.selectedHunks.length === state.hunks.length) req.resolve(true, false);
+        else req.resolve(true, false, answer.modifiedArgs, { selectedHunks: answer.selectedHunks });
+        render();
+        return { handled: true, pendingPermission: null, recoveryPending };
+      }
+      if (commit === 'cancel') {
+        // Deny on this card stops the turn, as it does on the plain card.
+        req.resolve(false, false);
+        abortTurn();
+        render();
+        return { handled: true, pendingPermission: null, recoveryPending };
+      }
+      render();
+      return { handled: true, pendingPermission: { ...req, hunkState: state }, recoveryPending };
     }
     // "For session" is not offered for an ask the owner is asked again.
     const canRemember = req.rememberEffect !== 'owner-asked-again';

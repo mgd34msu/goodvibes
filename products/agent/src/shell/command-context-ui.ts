@@ -16,16 +16,19 @@ import { allowTerminalWrite } from '@goodvibes-jev/engine/terminal-shell';
 import { CLEAR_VIEWPORT_HOME } from '../renderer/terminal-escapes.ts';
 import type { PermissionExecutionOptions } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { PendingPermissionState } from './blocking-input.ts';
+import { buildHunkSelectionState, isHunkSelectable } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 
 /** What a permission ask resolves with once the person answers it. */
 export interface PermissionAnswer {
   readonly approved: boolean;
   readonly remember: boolean;
-  /** The typed answer to a command's terminal prompt, as `{ answer }`; absent for every other ask. */
+  /** The typed answer to a command's terminal prompt, as `{ answer }`, or the edits of the hunks a multi-edit card applied; absent otherwise. */
   readonly modifiedArgs?: Record<string, unknown>;
+  /** The hunks a multi-edit card applied when not all were (indices into the ask's own edits); the approval broker applies them. */
+  readonly selectedHunks?: readonly number[];
 }
 
-type Settle = (approved: boolean, remember: boolean, modifiedArgs?: Record<string, unknown>) => void;
+type Settle = (approved: boolean, remember: boolean, modifiedArgs?: Record<string, unknown>, selectedHunks?: readonly number[]) => void;
 
 export interface CommandContextUiOptions {
   readonly compositor: { resetDiff(): void };
@@ -78,10 +81,12 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
       ...request,
       // A queued card replacing the one just answered starts its own settle time, so a held or repeated key cannot answer it.
       openedAt: Date.now(),
-      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>) => {
+      // A multi-edit `edit` opens with every hunk selected; the owner can leave some out.
+      hunkState: isHunkSelectable(request) ? buildHunkSelectionState(request) : undefined,
+      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>, extras?: { readonly selectedHunks?: readonly number[] | undefined }) => {
         if (active !== entry) return;
         active = null;
-        for (const settleOne of entry.settle) settleOne(approved, remember, modifiedArgs);
+        for (const settleOne of entry.settle) settleOne(approved, remember, modifiedArgs, extras?.selectedHunks);
         // The shell clears its pending slot right after this call returns, so the
         // next card is placed after that, not into the slot about to be emptied.
         queueMicrotask(showNext);
@@ -96,7 +101,8 @@ export function createCommandContextUi(options: CommandContextUiOptions): Comman
       options.render();
     },
     requestPermission: (request, permissionOptions) => new Promise<PermissionAnswer>((resolve) => {
-      const settle: Settle = (approved, remember, modifiedArgs) => resolve({ approved, remember, ...(approved && modifiedArgs ? { modifiedArgs } : {}) });
+      const settle: Settle = (approved, remember, modifiedArgs, selectedHunks) => resolve({ approved, remember,
+        ...(approved && modifiedArgs ? { modifiedArgs } : {}), ...(approved && selectedHunks ? { selectedHunks } : {}) });
       const signal = permissionOptions?.signal;
       if (signal?.aborted) {
         settle(false, false);

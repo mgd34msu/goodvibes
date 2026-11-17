@@ -1,5 +1,6 @@
 import { decodeBase64, readApprovalEditHunks } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
 import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
+import type { HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 
 /**
  * The change a `write` or `edit` ask would make, as unified-diff text for
@@ -59,5 +60,31 @@ export function approvalDiffText(
   }
 
   if (out.length === 0) return null;
+  return { text: out.join('\n'), hiddenLines: hidden, totalLines: out.length + hidden };
+}
+
+/**
+ * A multi-edit `edit` ask as the hunk-selection card shows it: each hunk under
+ * a header with its checkbox (`[x]` applies it) and number, the cursor's hunk
+ * marked `›` and listed first, so it is always in view; the hunks above it are
+ * counted. Same shape as {@link approvalDiffText}, for renderDiffView.
+ */
+export function approvalHunkDiffText(
+  state: HunkSelectionState,
+  maxLines: number,
+): { readonly text: string; readonly hiddenLines: number; readonly totalLines: number } {
+  const out: string[] = [];
+  let hidden = 0;
+  const push = (line: string): void => {
+    if (out.length < maxLines) out.push(line);
+    else hidden += 1;
+  };
+  if (state.cursor > 0) push(`@@ ${state.cursor} hunk${state.cursor === 1 ? '' : 's'} above (k moves up) @@`);
+  state.hunks.forEach((hunk, index) => {
+    if (index < state.cursor) return;
+    push(`@@ ${index === state.cursor ? '›' : ' '} [${state.selected.has(index) ? 'x' : ' '}] ${index + 1}. ${hunk.path} @@`);
+    for (const line of hunk.find.split('\n')) push(`-${line}`);
+    if (hunk.replace !== '') for (const line of hunk.replace.split('\n')) push(`+${line}`);
+  });
   return { text: out.join('\n'), hiddenLines: hidden, totalLines: out.length + hidden };
 }

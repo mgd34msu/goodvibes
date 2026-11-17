@@ -23,15 +23,17 @@
  * in this same process, and any other surface polling/watching the record.
  *
  * The card is the same one a local ask opens (permissions/prompt.ts), so a
- * broker-originated write or edit shows its change as a diff too. It is
- * deliberately narrower than the TUI's broker-approval-card.ts: this product's
- * PendingPermissionState (shell/blocking-input.ts) has no hunk-selection, no
- * deny-with-reason mode (it does take a command's typed terminal answer), and no CI fix-session concept (the agent does not own
- * build/fix/review worktrees, see DisabledAgentWorktreeRegistry in
- * runtime/services.ts), so none of that TUI-only machinery is ported here.
+ * broker-originated write or edit shows its change as a diff too, and a
+ * multi-edit `edit` opens with its hunks selectable (the terminal-shell keys
+ * the TUI card uses); the answer carries `selectedHunks`, which the broker
+ * applies. It is narrower than the TUI's broker-approval-card.ts in two ways:
+ * no deny-with-reason mode (it does take a command's typed terminal answer),
+ * and no CI fix-session concept (the agent does not own build/fix/review
+ * worktrees, see DisabledAgentWorktreeRegistry in runtime/services.ts).
  */
 
 import type { PendingPermissionState } from '../shell/blocking-input.ts';
+import { buildHunkSelectionState, isHunkSelectable } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 import type { PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 /** The broker seam this module answers through, a subset of ApprovalBroker. */
@@ -43,6 +45,7 @@ export interface BrokerApprovalBroker {
       readonly approved: boolean;
       readonly remember?: boolean;
       readonly modifiedArgs?: Record<string, unknown>;
+      readonly selectedHunks?: readonly number[];
       readonly actor: string;
       readonly actorSurface?: string;
     },
@@ -94,11 +97,13 @@ export function handleBrokerApprovalChange(params: BrokerApprovalChangeParams): 
     const card: PendingPermissionState = {
       ...current.request,
       openedAt: Date.now(),
-      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>) => {
+      hunkState: isHunkSelectable(current.request) ? buildHunkSelectionState(current.request) : undefined,
+      resolve: (approved: boolean, remember = false, modifiedArgs?: Record<string, unknown>, extras?: { readonly selectedHunks?: readonly number[] | undefined }) => {
         void broker.resolveApproval(approval.id, {
           approved,
           remember,
           ...(approved && modifiedArgs ? { modifiedArgs } : {}),
+          ...(approved && extras?.selectedHunks ? { selectedHunks: extras.selectedHunks } : {}),
           actor: 'agent',
           actorSurface: 'agent',
         }).catch((error: unknown) => {

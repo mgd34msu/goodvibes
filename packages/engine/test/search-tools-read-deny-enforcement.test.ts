@@ -1,5 +1,7 @@
 // Proves: When the owner denies reads, content search and the repository map return no file text and no exported names.
 // Red when: Find's content search or the repository map returns file text or exported names while reads are denied, or returns nothing while reads are allowed so the refusal proves nothing.
+// Proves: A link inside the project reaches a file the owner denied.
+// Red when: The read check judges a link by the path as written instead of where it leads, so a link to the denied file is allowed.
 /**
  * When the owner denies reads, the search and map tools do not read for the
  * agent either: the find tool's content search and the repository map return
@@ -12,12 +14,13 @@
  * `permissions.tools.read` as the settings screen does.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { PermissionManager, createPermissionConfigReader } from '../platform/src/platform/permissions/manager.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
 import type { ReadAccessFilter } from '../platform/src/platform/tools/shared/read-access.ts';
 import { createFindTool } from '../platform/src/platform/tools/find/executor.ts';
 import { createRepoMapTool } from '../platform/src/platform/tools/repo-map/index.ts';
@@ -35,6 +38,7 @@ let project: string;
 let deniedPath: string;
 let config: ConfigManager;
 let filter: ReadAccessFilter;
+let rules: UserPermissionRuleStore;
 
 beforeAll(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-search-deny-')));
@@ -45,9 +49,12 @@ beforeAll(() => {
   writeFileSync(join(project, 'public.txt'), `first\n${OPEN_TEXT} here\nlast\n`);
   writeFileSync(join(project, 'src', 'private.ts'), `export const ${DENIED_EXPORT} = '${DENIED_TEXT}';\n`);
   writeFileSync(join(project, 'src', 'public.ts'), `export const ${OPEN_EXPORT} = 1;\n`);
+  // What a cloned repository can ship: a link under an innocent name to the private file.
+  symlinkSync(deniedPath, join(project, 'notes.txt'));
 
   config = new ConfigManager({ configDir: join(root, 'config'), workingDir: project, surfaceRoot: 'goodvibes' });
-  const permissions = new PermissionManager(async () => ({ approved: false }), createPermissionConfigReader(config), new PolicyRuntimeState());
+  rules = new UserPermissionRuleStore(':memory:');
+  const permissions = new PermissionManager(async () => ({ approved: false }), createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, rules);
   // The same adapter the products wire into these tools.
   filter = async (path) => (await permissions.readAccess(path)) === 'allow';
 });
@@ -74,6 +81,12 @@ describe('reads the owner denied are not made through search tools', () => {
   });
 
   test('after the owner denies reads, no search or map returns file text or exports', async () => {
+    // The owner's rule denies the private file only; a link to it is judged where it leads.
+    await rules.add({ rule: { type: 'path-scope', id: 'deny-private', origin: 'user', effect: 'deny', toolPattern: 'read',
+      pathPatterns: [deniedPath] }, tier: 'path', tool: 'read', createdAt: 1 });
+    expect(await filter(join(project, 'notes.txt'))).toBe(false);
+    expect(await filter(join(project, 'public.txt'))).toBe(true);
+
     config.set('permissions.tools.read', 'deny');
     expect(await filter(deniedPath)).toBe(false);
     const found = await contentSearch('_FILE_TEXT_');

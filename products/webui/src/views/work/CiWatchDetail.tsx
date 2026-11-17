@@ -24,6 +24,12 @@ import { ciWatchLabel, type CiWatch, whenLabel } from './work-items';
 export type CiReport = OperatorMethodOutput<'ci.status'>['report'];
 type CiWatchRunResult = OperatorMethodOutput<'ci.watches.run'>;
 
+function repairLabel(repair: NonNullable<CiWatch['repair']>): string {
+  const outcome = repair.outcome === 'started' ? 'Started' : repair.outcome === 'denied' ? 'Refused' : 'Failed to start';
+  const retry = repair.outcome === 'error' && whenLabel(repair.retryAt) ? `, tried again ${whenLabel(repair.retryAt)}` : '';
+  return `${outcome} after ${repair.attempts} attempt${repair.attempts === 1 ? '' : 's'}${repair.reason ? ` (${repair.reason})` : ''}${retry}`;
+}
+
 export function overallTone(overall: string): StatusTone {
   if (overall === 'passed') return 'ok';
   if (overall === 'failed') return 'bad';
@@ -140,6 +146,8 @@ export function CiWatchDetail({ watch, onClose, onOpenSession }: {
         items={[
           { label: 'Delivers to', value: watch.deliveryChannel },
           { label: 'On failure', value: watch.triggerFixSession ? 'Starts a fix session' : 'Notifies only' },
+          { label: 'Ends without a verdict', value: whenLabel(watch.expiresAt) },
+          { label: 'Repair', value: watch.repair ? repairLabel(watch.repair) : '' },
         ]}
       />
       {runResult && (
@@ -148,7 +156,8 @@ export function CiWatchDetail({ watch, onClose, onOpenSession }: {
           <p className="work-prose">
             {runResult.notified ? 'A notification was sent.' : 'No notification was sent (no state change, or quiet).'}
             {runResult.fixSessionTriggered && runResult.fixSessionId && ' A fix session was started.'}
-            {runResult.fixSessionTriggered && runResult.fixSessionError && ` The fix session could not start; ${runResult.fixSessionError}`}
+            {runResult.fixSessionError && ` The fix session could not start; ${runResult.fixSessionError}`}
+            {runResult.retired && ` The watch ended${runResult.endedReason ? `: ${runResult.endedReason}` : '.'}`}
           </p>
           {runResult.fixSessionTriggered && runResult.fixSessionId && onOpenSession && (
             <div>

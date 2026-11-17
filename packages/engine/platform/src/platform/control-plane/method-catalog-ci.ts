@@ -44,6 +44,16 @@ export const CI_REPORT_SCHEMA = objectSchema({
   checkedAt: NUMBER_SCHEMA,
 }, ['repo', 'overall', 'jobs', 'violations', 'checkedAt']);
 
+/** The last repair attempt for a watch's current failure (ci-watch/types.ts CiRepairRecord). */
+const CI_REPAIR_RECORD_SCHEMA = objectSchema({
+  failureKey: STRING_SCHEMA,
+  outcome: { type: 'string', enum: ['started', 'denied', 'error'] },
+  at: NUMBER_SCHEMA,
+  attempts: NUMBER_SCHEMA,
+  retryAt: NUMBER_SCHEMA,
+  reason: STRING_SCHEMA,
+}, ['failureKey', 'outcome', 'at', 'attempts']);
+
 export const CI_WATCH_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   // Present only on a watch created under a native owner; the service stores and lists it.
@@ -56,6 +66,9 @@ export const CI_WATCH_SCHEMA = objectSchema({
   lastOverall: CI_OVERALL_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
+  // When the watch ends without a verdict: pushed forward while CI is pending, never past seven days from creation.
+  expiresAt: NUMBER_SCHEMA,
+  repair: CI_REPAIR_RECORD_SCHEMA,
 }, ['id', 'repo', 'deliveryChannel', 'triggerFixSession', 'createdAt', 'updatedAt']);
 
 export const CI_STATUS_INPUT_SCHEMA = objectSchema({
@@ -96,6 +109,8 @@ export const CI_WATCHES_RUN_OUTPUT_SCHEMA = objectSchema({
   // attachable session; mutually exclusive with fixSessionId.
   fixSessionError: STRING_SCHEMA,
   retired: BOOLEAN_SCHEMA,
+  // Why the watch ended without delivering a verdict or starting a repair.
+  endedReason: STRING_SCHEMA,
 }, ['report', 'notified', 'fixSessionTriggered']);
 
 export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor[] = [
@@ -112,7 +127,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
   methodDescriptor({
     id: 'ci.watches.list',
     title: 'List CI Watches',
-    description: 'Return every standing CI watch. Stored flags are not repair authority; production repair requires current original-source ownership and Jev admission.',
+    description: 'Return every standing CI watch, each with `expiresAt` (when it ends without a verdict) and, after a repair was tried for the current failure, `repair` (its outcome, attempts and next retry). Stored flags are not repair authority; production repair requires current original-source ownership and Jev admission.',
     category: 'ci',
     scopes: ['read:ci'],
     http: { method: 'GET', path: '/api/ci/watches' },
@@ -144,7 +159,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
     id: 'ci.watches.run',
     effect: 'outward',
     title: 'Check CI Watch Now',
-    description: 'Poll a standing watch immediately: returns the per-job report, whether a completion notification fired, and whether an admitted fix-session started, or an honest refusal/error.',
+    description: 'Poll a standing watch immediately: returns the per-job report, whether a completion notification fired, and whether an admitted fix-session started, or an honest refusal/error. When the check ended the watch without a verdict or a repair, `retired` is true and `endedReason` says why.',
     category: 'ci',
     scopes: ['write:ci'],
     http: { method: 'POST', path: '/api/ci/watches/{watchId}/run' },

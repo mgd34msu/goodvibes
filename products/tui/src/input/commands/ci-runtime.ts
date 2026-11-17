@@ -77,6 +77,11 @@ export function renderWatch(watch: CiWatchSubscription): string {
     `    fix-session on failure: ${watch.triggerFixSession ? 'yes' : 'no'}`,
   ];
   if (watch.lastOverall) parts.push(`    last checked: ${watch.lastOverall}`);
+  if (watch.expiresAt !== undefined) parts.push(`    ends without a verdict at: ${new Date(watch.expiresAt).toISOString()}`);
+  if (watch.repair) {
+    const retry = watch.repair.retryAt !== undefined ? `, next try ${new Date(watch.repair.retryAt).toISOString()}` : '';
+    parts.push(`    repair: ${watch.repair.outcome} after ${watch.repair.attempts} attempt(s)${watch.repair.reason ? ` (${watch.repair.reason})` : ''}${retry}`);
+  }
   return parts.join('\n');
 }
 
@@ -163,6 +168,8 @@ export function registerCiRuntimeCommands(registry: CommandRegistry): void {
             const lines = [renderReport(result.report)];
             lines.push(`notified: ${result.notified ? 'yes' : 'no'}${result.notificationId ? ` (${result.notificationId})` : ''}`);
             lines.push(`fix-session triggered: ${result.fixSessionTriggered ? 'yes' : 'no'}`);
+            if (result.fixSessionError) lines.push(`fix-session not started: ${result.fixSessionError}`);
+            if (result.retired) lines.push(`watch ended${result.endedReason ? `: ${result.endedReason}` : ''}`);
             ctx.print(lines.join('\n'));
             // Offer the spawned session through the shell's Alt+J action, the
             // same open flow as every other fix-session start.

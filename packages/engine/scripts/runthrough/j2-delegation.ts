@@ -83,7 +83,7 @@ try {
   journey.check('a contract started on the daemon runs, or says why it cannot', 'POST /api/contracts { ask, workspaceRoot }',
     `${started.status} ${short(started.text, 500)}`,
     (started.status === 200 || started.status === 201) && typeof contractId === 'string'
-    || (started.status === 409 && (started.body as { code?: string }).code === 'DECISION_MODELS_DISABLED' && /Classic/.test(started.text)));
+    || (started.status === 409 && (started.body as { code?: string }).code === 'DECISION_MODELS_DISABLED' && /decision model/i.test(started.text)));
   if (typeof contractId === 'string') {
     await s.restartDaemon();
     const again = await api(s.daemon, operatorToken(s.home), 'GET', `/api/contracts/${encodeURIComponent(contractId)}`);

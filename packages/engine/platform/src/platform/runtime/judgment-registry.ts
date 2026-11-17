@@ -103,9 +103,8 @@ import { voiceRoundTripReading } from '../voice/provisioning/round-trip-reading.
 registry.register(voiceRoundTripReading);
 
 // Occasion meaning; closed dates and delivery authority remain mechanical.
-import { occasionInterest, occasionTitlePerson, occasionSubject } from '../occasions/readings.js';
+import { occasionInterest, occasionSubject } from '../occasions/readings.js';
 registry.register(occasionInterest);
-registry.register(occasionTitlePerson);
 registry.register(occasionSubject);
 // Recorder diagnostic semantics shared by Agent and TUI capture.
 import { recorderFailureReading } from '../voice/capture/recorder-failure-reading.js';

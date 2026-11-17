@@ -53,7 +53,7 @@ export function openModelPickerNow<Info>(deps: ModelPickerOpenDeps<Info>, mode: 
   const models = deps.listModels();
   const providers = mode === 'providers' ? deps.listProviders() : [...new Set(models.map((m) => m.provider))];
   picker.configuredProviders = configured;
-  picker.unreachableProviders = new Map(deps.unreachableProviders?.() ?? []);
+  picker.unreachableProviders = new Map<string, string>(deps.unreachableProviders?.() ?? []);
   picker.configuredViaMap = deps.buildConfiguredVia(providers, configured, new Set());
   picker.setTargetInfos(deps.buildTargets(picker.embeddingProviders ?? []));
   if (mode === 'providers') picker.openProviders(providers, deps.currentProviderId());

@@ -1,9 +1,7 @@
 import type { CommandRegistry, SlashCommand } from '../input/command-registry.ts';
 import { parseSlashCommand } from '../input/slash-command-parser.ts';
 import { describeCommandPolicy } from './agent-harness-metadata.ts';
-import { rankHarnessCatalog, captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { types as nodeTypes } from 'node:util';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
 
 export interface AgentHarnessCommandCatalogArgs {
@@ -25,7 +23,7 @@ export interface CommandDetailLookup {
 }
 
 export type CommandDetailResolution =
-  | { readonly status: 'found'; readonly command: SlashCommand; readonly lookup: CommandDetailLookup; readonly assertCurrent?: () => void }
+  | { readonly status: 'found'; readonly command: SlashCommand; readonly lookup: CommandDetailLookup }
   | { readonly status: 'ambiguous'; readonly input: string; readonly candidates: readonly Record<string, unknown>[] };
 
 function readString(value: unknown): string {
@@ -58,42 +56,27 @@ function commandSearchText(command: CatalogCommand): string {
 
 type CatalogCommand = Omit<SlashCommand, 'handler'>;
 
-/** The executable handler is an identity capability, never semantic evidence. */
-function captureCommands(commands: readonly SlashCommand[]): readonly CatalogCommand[] {
-  const budget = { nodes: 0, characters: 0, slots: 0 };
-  return commands.map((command) => {
-    if (nodeTypes.isProxy(command) || ![Object.prototype, null].includes(Object.getPrototypeOf(command))) throw new ToolInputProjectionError('invalid');
-    const descriptors = Object.getOwnPropertyDescriptors(command);
-    if (Object.getOwnPropertySymbols(command).length || !('value' in (descriptors.handler ?? {}))
-      || typeof descriptors.handler!.value !== 'function') throw new ToolInputProjectionError('invalid');
-    const { handler: _handler, ...data } = descriptors;
-    return captureCatalogData(Object.defineProperties({}, data), budget) as CatalogCommand;
-  });
+/** The registry's commands as data: the handler is left out, it is never evidence. */
+function catalogCommand(command: SlashCommand): CatalogCommand {
+  const { handler: _handler, ...data } = command;
+  return data;
 }
 
-function captureCommandCatalog(commandRegistry: CommandRegistry, options: CatalogRankingOptions) {
+/**
+ * One read of the registry per call. A description built from that read is
+ * consistent by construction; a command registered while the call runs shows
+ * up in the next call.
+ */
+function readCommandCatalog(commandRegistry: CommandRegistry, options: CatalogRankingOptions) {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const commands = commandRegistry.list();
-  const catalog = captureCommands(commands);
-  const handlers = commands.map((command) => Object.getOwnPropertyDescriptor(command, 'handler')?.value);
-  const revision = JSON.stringify(catalog);
-  const assertCurrent = () => {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    const current = commandRegistry.list();
-    const currentData = captureCommands(current);
-    if (current.length !== commands.length || current.some((command, index) => command !== commands[index]
-      || Object.getOwnPropertyDescriptor(command, 'handler')?.value !== handlers[index])
-      || JSON.stringify(currentData) !== revision) throw new ToolInputProjectionError('stale');
-  };
-  return { commands, catalog, assertCurrent };
+  return { commands, catalog: commands.map(catalogCommand) };
 }
 
 async function matchingCommands(commandRegistry: CommandRegistry, query: string, options: CatalogRankingOptions) {
-  const { catalog, assertCurrent } = captureCommandCatalog(commandRegistry, options);
-  if (!query) return { matches: catalog.slice().sort((a, b) => a.name.localeCompare(b.name)).map((entry) => ({ entry, judgment: undefined })), assertCurrent };
-  const result = await rankHarnessCatalog(catalog, query, (entry) => ({ id: entry.name, description: commandSearchText(entry), evidence: entry }), 'agent.harness.commands', { ...options, requirePreservedSource: true, assertCurrent });
-  assertCurrent();
-  return { ...result, assertCurrent };
+  const { catalog } = readCommandCatalog(commandRegistry, options);
+  if (!query) return { matches: catalog.slice().sort((a, b) => a.name.localeCompare(b.name)).map((entry) => ({ entry, judgment: undefined })) };
+  return rankHarnessCatalog(catalog, query, (entry) => ({ id: entry.name, description: commandSearchText(entry) }), 'agent.harness.commands', options);
 }
 
 function describeCommand(command: CatalogCommand, lookup?: CommandDetailLookup): Record<string, unknown> {
@@ -176,13 +159,11 @@ export async function resolveHarnessCommandDetail(commandRegistry: CommandRegist
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const lookup = commandDetailLookupFromArgs(args);
   if (!lookup?.parsedName) return null;
-  const captured = captureCommandCatalog(commandRegistry, options);
   const direct = commandRegistry.get(lookup.parsedName);
   if (direct) {
     return {
       status: 'found',
       command: direct,
-      assertCurrent: captured.assertCurrent,
       lookup: {
         ...lookup,
         resolvedBy: direct.name === lookup.parsedName ? 'name' : 'alias',
@@ -191,24 +172,22 @@ export async function resolveHarnessCommandDetail(commandRegistry: CommandRegist
   }
 
   const normalized = lookup.parsedName.toLowerCase();
-  for (const [index, data] of captured.catalog.entries()) {
-    const command = captured.commands[index]!;
-    if (data.name.toLowerCase() === normalized) {
-      return { status: 'found', command, lookup: { ...lookup, resolvedBy: 'case-insensitive-name' }, assertCurrent: captured.assertCurrent };
+  for (const command of readCommandCatalog(commandRegistry, options).commands) {
+    if (command.name.toLowerCase() === normalized) {
+      return { status: 'found', command, lookup: { ...lookup, resolvedBy: 'case-insensitive-name' } };
     }
-    if ((data.aliases ?? []).some((alias) => alias.toLowerCase() === normalized)) {
-      return { status: 'found', command, lookup: { ...lookup, resolvedBy: 'case-insensitive-alias' }, assertCurrent: captured.assertCurrent };
+    if ((command.aliases ?? []).some((alias) => alias.toLowerCase() === normalized)) {
+      return { status: 'found', command, lookup: { ...lookup, resolvedBy: 'case-insensitive-alias' } };
     }
   }
 
   // Explicit command names and parsed invocations never become guessed effects.
   if (lookup.source === 'commandName' || lookup.source === 'command') return null;
   const found = await matchingCommands(commandRegistry, lookup.input, options);
-  found.assertCurrent();
+  options.signal?.throwIfAborted();
   if (found.matches.length === 1 && found.matches[0]!.judgment?.reading.verdict === 'yes' && found.matches[0]!.judgment?.reading.outcome === 'act') {
     const selected = commandRegistry.get(found.matches[0]!.entry.name);
-    if (!selected) throw new ToolInputProjectionError('stale');
-    return { status: 'found', command: selected, lookup: { ...lookup, resolvedBy: 'description' }, assertCurrent: found.assertCurrent };
+    if (selected) return { status: 'found', command: selected, lookup: { ...lookup, resolvedBy: 'description' } };
   }
   if (found.matches.length > 0) return { status: 'ambiguous', input: lookup.input,
     candidates: found.matches.slice(0, 8).map(({ entry, judgment }) => ({ ...describeCommandCandidate(entry), judgment })),
@@ -225,7 +204,7 @@ export async function searchHarnessCommands(
   const limit = readLimit(args.limit, 500);
   const includeParameters = args.includeParameters === true;
   const found = await matchingCommands(commandRegistry, query, options);
-  found.assertCurrent();
+  options.signal?.throwIfAborted();
   return {
     matches: found.matches
       .slice(0, limit)
@@ -235,8 +214,8 @@ export async function searchHarnessCommands(
 
 export async function describeHarnessCommand(commandRegistry: CommandRegistry, args: AgentHarnessCommandCatalogArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown> | null> {
   const detail = await resolveHarnessCommandDetail(commandRegistry, args, options);
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  if (detail?.status === 'found') { detail.assertCurrent?.(); return describeCommand(detail.command, detail.lookup); }
+  options.signal?.throwIfAborted();
+  if (detail?.status === 'found') return describeCommand(detail.command, detail.lookup);
   if (detail?.status === 'ambiguous') return { status: 'ambiguous', input: detail.input, candidates: detail.candidates };
   return null;
 }

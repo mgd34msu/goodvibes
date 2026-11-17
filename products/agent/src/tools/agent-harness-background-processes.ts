@@ -87,11 +87,12 @@ function operatorMethodSearchText(method: OperatorContractMethod): string {
 
 function matchingOperatorMethodRoutes(tokens: readonly string[]): readonly Record<string, unknown>[] {
   if (tokens.length === 0) return [];
+  // \b-anchored: a raw text.includes(token) false-matches short tokens like 'pty' inside an unrelated word ('empty').
+  const patterns = tokens.map((token) => new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`));
   return operatorContractMethods()
     .filter((method) => {
       const text = operatorMethodSearchText(method);
-      // \b-anchored: a raw text.includes(token) false-matches short tokens like 'pty' inside an unrelated word ('empty').
-      return tokens.some((token) => new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text));
+      return patterns.some((pattern) => pattern.test(text));
     })
     .map((method) => ({
       methodId: method.id,
@@ -115,14 +116,28 @@ function managerMethodNames(manager: ProcessManager | undefined): readonly strin
     .sort((left, right) => left.localeCompare(right));
 }
 
+/** The operator contract is bundled with the program, so the three route lists are built once. */
+let processOperatorRoutes: {
+  readonly terminalRoutes: readonly Record<string, unknown>[];
+  readonly sessionInputRoutes: readonly Record<string, unknown>[];
+  readonly credentialRoutes: readonly Record<string, unknown>[];
+} | undefined;
+
+function operatorRoutesForProcesses(): NonNullable<typeof processOperatorRoutes> {
+  processOperatorRoutes ??= Object.freeze({
+    terminalRoutes: Object.freeze(matchingOperatorMethodRoutes(['terminal', 'pty', 'process.write', 'stdin'])),
+    sessionInputRoutes: Object.freeze(matchingOperatorMethodRoutes(['sessions.inputs'])),
+    credentialRoutes: Object.freeze(matchingOperatorMethodRoutes(['credential', 'sudo', 'privilege'])),
+  });
+  return processOperatorRoutes;
+}
+
 function processSubstrateReport(context?: CommandContext): Record<string, unknown> {
   const manager = context ? managerFrom(context) : undefined;
   const methodNames = managerMethodNames(manager);
   const localStdinMethod = STDIN_WRITE_METHOD_NAMES.find((name) => methodNames.includes(name)) ?? null;
   const localPtyMethod = PTY_METHOD_NAMES.find((name) => methodNames.includes(name)) ?? null;
-  const terminalRoutes = matchingOperatorMethodRoutes(['terminal', 'pty', 'process.write', 'stdin']);
-  const sessionInputRoutes = matchingOperatorMethodRoutes(['sessions.inputs']);
-  const credentialRoutes = matchingOperatorMethodRoutes(['credential', 'sudo', 'privilege']);
+  const { terminalRoutes, sessionInputRoutes, credentialRoutes } = operatorRoutesForProcesses();
   return {
     localProcessManager: {
       status: manager ? 'available' : 'unavailable',

@@ -45,7 +45,6 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
   const executeNested = tools.executeNested;
   const resolved = await resolveHarnessCommandDetail(deps.commandRegistry, args, options);
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  if (resolved?.status === 'found') resolved.assertCurrent?.();
   if (resolved?.status === 'ambiguous') {
     return error(`Ambiguous slash command ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
   }
@@ -72,7 +71,7 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     const effect = verb ? (verb.effect === 'local-write' ? 'write' : 'send')
       : ['local-state', 'ui-navigation', 'session-lifecycle'].includes(policy.effect) ? 'write' : 'send';
     if (!read && !harnessCatalogInvocationAuthority(args, executionOptions, effect)) throw new ToolInputProjectionError('held');
-    resolved.assertCurrent?.(); assertCommandMethods();
+    assertCommandMethods();
     if (deps.commandRegistry !== registry || registry.execute !== execute || deps.commandContext !== context) throw new ToolInputProjectionError('held');
   };
 
@@ -80,7 +79,7 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
   const toolContext: CommandContext = {
     ...deps.commandContext,
     judgmentReadingOptions: { signal: options.signal, assertCurrent: () => {
-      options.signal?.throwIfAborted(); options.assertCurrent?.(); resolved.assertCurrent?.();
+      options.signal?.throwIfAborted(); options.assertCurrent?.();
       if (deps.commandRegistry !== registry || registry.execute !== execute || deps.commandContext !== context) throw new ToolInputProjectionError('stale');
     } },
     // This is the model running a command, not the owner typing one. Said out
@@ -95,7 +94,7 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     executeCommand: async (name: string, commandArgs: string[]) => {
       assertCommandEffect(name, commandArgs);
       const handled = await executeModelCommand(name, commandArgs);
-      options.signal?.throwIfAborted(); options.assertCurrent?.(); resolved.assertCurrent?.();
+      options.signal?.throwIfAborted(); options.assertCurrent?.();
       return handled;
     },
   };
@@ -143,7 +142,7 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
     if (!refused) throw thrown;
     handled = true;
   }
-  options.signal?.throwIfAborted(); options.assertCurrent?.(); resolved.assertCurrent?.();
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
   if (!handled) return error(`Unknown slash command /${resolved.command.name}.`);
   const printedText = printed.length > 0 ? printed.join('\n') : '(no text output)';
   const body = [

@@ -1,7 +1,7 @@
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { CommandContext } from '../input/command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { AgentExecutionRecord, AgentExecutionRouteKind, AgentExecutionStatus } from '../runtime/execution-ledger.ts';
 import { fileRecoveryCatalogStatus } from './agent-harness-file-recovery.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -457,39 +457,11 @@ export function executionHistoryCatalogStatus(context: CommandContext): Record<s
   };
 }
 
-function historySources(context: CommandContext) {
-  return captureCatalogData({ records: records(context), recovery: fileRecoveryCatalogStatus(context), sessionId: context.session.runtime.sessionId,
-    processMonitor: typeof context.openProcessModal === 'function', liveTail: typeof context.openLiveTail === 'function' });
-}
-
-function captureHistoryBackend(context: CommandContext) {
-  const guards = [captureCatalogMethods(context, ['ops', 'workspace', 'session', 'openProcessModal', 'openLiveTail']),
-    captureCatalogMethods(context.ops, ['executionLedger']), captureCatalogMethods(context.workspace, ['fileUndoManager', 'shellPaths']),
-    captureCatalogMethods(context.session, ['runtime']), captureCatalogMethods(context.session.runtime, ['sessionId'])];
-  if (context.ops.executionLedger) guards.push(captureCatalogMethods(context.ops.executionLedger, ['getSnapshot']));
-  if (context.workspace.shellPaths) guards.push(captureCatalogMethods(context.workspace.shellPaths, ['workingDirectory']));
-  if (context.workspace.fileUndoManager) guards.push(captureCatalogMethods(context.workspace.fileUndoManager, ['peekUndo', 'undoDepth', 'redoDepth']));
-  return () => { for (const guard of guards) guard(); };
-}
-
-function retainHistorySources(context: CommandContext, sources: ReturnType<typeof historySources>, options: CatalogRankingOptions, assertBackend: () => void) {
-  const revision = JSON.stringify(sources);
-  const assertSourceCurrent = () => {
-    options.signal?.throwIfAborted();
-    assertBackend();
-    if (JSON.stringify(historySources(context)) !== revision) throw new ToolInputProjectionError('stale');
-    assertBackend();
-  };
-  options.retainCurrent?.(assertSourceCurrent, 'agent.harness.execution-history.sources');
-  const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); assertSourceCurrent(); };
-  assertCurrent(); return assertCurrent;
-}
-
 async function matchingRecords(all: readonly AgentExecutionRecord[], query: string, options: CatalogRankingOptions) {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   if (!query) return { matches: all.map(entry => ({ entry, judgment: undefined })), judgments: [] };
   return rankHarnessCatalog(all, query, record => ({ id: record.id, description: recordSearchText(record), evidence: verificationRecordView(record) }),
-    'agent.harness.execution-history', { ...options, requirePreservedSource: true });
+    'agent.harness.execution-history', options);
 }
 
 /**
@@ -512,14 +484,12 @@ export async function executionHistorySummary(context: CommandContext, args: Age
 
 async function ownedExecutionHistorySummary(context: CommandContext, args: AgentHarnessExecutionHistoryArgs, options: CatalogRankingOptions): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const assertBackend = captureHistoryBackend(context);
-  const sources = historySources(context);
-  const assertCurrent = retainHistorySources(context, sources, options, assertBackend);
-  const all = sources.records;
+  // One read of the ledger per call; the view is consistent with that read.
+  const all = records(context);
   const query = readString(args.query);
   const includeParameters = args.includeParameters === true;
-  const selected = await matchingRecords(all, query, { ...options, assertCurrent });
-  assertCurrent();
+  const selected = await matchingRecords(all, query, options);
+  options.signal?.throwIfAborted();
   const filtered = selected.matches.slice(0, readLimit(args.limit, 100));
   const observations = verificationObservations(filtered.map(({ entry }) => entry));
   const cards = activityCards(context, filtered.map(({ entry }) => entry), includeParameters, observations);
@@ -548,7 +518,6 @@ export async function describeExecutionHistoryItem(context: CommandContext, args
 
 async function ownedExecutionHistoryItem(context: CommandContext, args: AgentHarnessExecutionHistoryArgs, options: CatalogRankingOptions): Promise<ExecutionHistoryResolution> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const assertBackend = captureHistoryBackend(context);
   const lookup = lookupFromArgs(args);
   if (!lookup) {
     return {
@@ -556,9 +525,7 @@ async function ownedExecutionHistoryItem(context: CommandContext, args: AgentHar
       usage: 'execution action:"record" requires executionRecordId, recordId, target, or query. Use execution action:"history" to inspect recent record ids.',
     };
   }
-  const sources = historySources(context);
-  const assertCurrent = retainHistorySources(context, sources, options, assertBackend);
-  const all = sources.records;
+  const all = records(context);
   const describe = async (record: AgentExecutionRecord, resolvedBy: string) => {
     return describeRecord(context, record, true, verificationObservations([record]), { ...lookup, resolvedBy });
   };
@@ -568,8 +535,8 @@ async function ownedExecutionHistoryItem(context: CommandContext, args: AgentHar
   const insensitive = all.find((record) => record.id.toLowerCase() === normalized || record.callId.toLowerCase() === normalized);
   if (insensitive) return { status: 'found', record: await describe(insensitive, 'case-insensitive-id') };
   const selected = lookup.source === 'executionRecordId' || lookup.source === 'recordId' ? { matches: [], judgments: [] }
-    : await matchingRecords(all, lookup.input, { ...options, assertCurrent });
-  assertCurrent();
+    : await matchingRecords(all, lookup.input, options);
+  options.signal?.throwIfAborted();
   const searched = selected.matches;
   if (searched.length === 1 && searched[0]!.judgment?.reading.verdict === 'yes' && searched[0]!.judgment?.reading.outcome === 'act') return { status: 'found', record: { ...await describe(searched[0]!.entry, 'search'), judgment: searched[0]!.judgment } };
   if (searched.length > 0) {

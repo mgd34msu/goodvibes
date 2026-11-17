@@ -44,6 +44,7 @@
  * reconciliation is done with Bun.spawnSync, paid once per import, exactly
  * like the launch-dirty snapshot.
  */
+import { existsSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { WorktreeIdentityRegistry, type StoredWorktreeIdentity, type WorktreeIdentityKey } from './worktree-identities.js';
@@ -138,18 +139,20 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   let repositoryGuard: (() => void) | undefined;
   let identities: WorktreeIdentityRegistry | undefined, openingIdentities: Promise<WorktreeIdentityRegistry> | undefined;
   const identityKey = (workstream: Workstream, item: WorkItem): WorktreeIdentityKey => ({ namespace: deps.stateNamespace ?? null, workstreamId: workstream.id, itemId: item.id });
-  const unavailable = () => new Error('Worktree identity is unavailable; original resources preserved');
+  /** A refusal that says what was observed and what to do; nothing was changed. */
+  const refused = (observed: string, next = 'Restart the contract or workstream; its worktrees and branches are kept.') =>
+    new Error(`Worktree isolation refused: ${observed}; nothing was changed. ${next}`);
   const commonOutput = (output: Uint8Array): string => {
     let text: string;
-    try { text = new TextDecoder('utf-8', { fatal: true }).decode(output); } catch { throw unavailable(); }
-    if (!text.endsWith('\n')) throw unavailable();
-    const path = text.slice(0, -1); if (!path) throw unavailable(); return path;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(output); } catch { throw refused('git rev-parse --git-common-dir printed a path that is not UTF-8'); }
+    if (!text.endsWith('\n')) throw refused('git rev-parse --git-common-dir printed an incomplete line');
+    const path = text.slice(0, -1); if (!path) throw refused('git rev-parse --git-common-dir printed no path'); return path;
   };
   function identityRegistrySync(): WorktreeIdentityRegistry {
     if (identities) { repositoryGuard?.(); return identities; }
     const root = captureExistingDirectory(deps.projectRoot);
     const result = Bun.spawnSync(['git', '-C', deps.projectRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
-    root.assertCurrent(); if (result.exitCode !== 0) throw unavailable();
+    root.assertCurrent(); if (result.exitCode !== 0) throw refused(`${deps.projectRoot} is not inside a git repository (git rev-parse exited ${result.exitCode})`, 'Run the work in a git repository, or without worktree isolation.');
     identities = new WorktreeIdentityRegistry(commonOutput(result.stdout), deps.nativeDataWriter);
     repositoryGuard = identities.retainRepository(deps.projectRoot);
     return identities;
@@ -161,7 +164,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       const root = captureExistingDirectory(deps.projectRoot);
       const child = Bun.spawn(['git', '-C', deps.projectRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { stdout: 'pipe', stderr: 'pipe' });
       const [code, output] = await Promise.all([child.exited, new Response(child.stdout).arrayBuffer(), new Response(child.stderr).arrayBuffer()]);
-      root.assertCurrent(); if (code !== 0) throw unavailable();
+      root.assertCurrent(); if (code !== 0) throw refused(`${deps.projectRoot} is not inside a git repository (git rev-parse exited ${code})`, 'Run the work in a git repository, or without worktree isolation.');
       if (!identities) { identities = new WorktreeIdentityRegistry(commonOutput(new Uint8Array(output)), deps.nativeDataWriter); repositoryGuard = identities.retainRepository(deps.projectRoot); }
       repositoryGuard?.(); return identities;
     })();
@@ -189,18 +192,18 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
 
   function getOrCreateInstance(workstream: Workstream, item: WorkItem, path: string, branch: string): IsolatedWorktree {
     let instance = instances.get(item);
-    if (instance && (instance.path !== path || instance.branch !== branch)) throw unavailable();
+    if (instance && (instance.path !== path || instance.branch !== branch)) throw refused(`item ${item.id} already has the worktree ${instance.path} on ${instance.branch}, not ${path} on ${branch}`);
     if (!instance) {
       instance = new class extends IsolatedWorktree {
         override async create(startPoint?: string, checkout = true): Promise<void> {
-          if (this.path !== path || this.branch !== branch) throw unavailable();
+          if (this.path !== path || this.branch !== branch) throw refused(`the worktree being created moved from ${path} on ${branch} to ${this.path} on ${this.branch}`);
           let failed = false, failure: unknown;
           try { await super.create(startPoint, checkout, repositoryGuard); } catch (error) { failed = true; failure = error; }
           const proof = readIsolatedWorktreeCreation(this);
-          if (!proof) { if (failed) throw failure; throw unavailable(); }
+          if (!proof) { if (failed) throw failure; throw refused(`git worktree add left no record of creating ${path}`); }
           proof.assertCurrent();
           const registry = identities;
-          if (!registry) throw unavailable();
+          if (!registry) throw refused('the worktree record store was not opened before the worktree was created');
           const binding = registry.retainRecorded(this.path, this.branch);
           const guard = () => { repositoryGuard?.(); proof.assertCurrent(); binding(); };
           guard(); resourceGuards.set(this, guard);
@@ -217,6 +220,35 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     return instance;
   }
 
+  /** Runs git in the project root; resolves to its exit code. */
+  async function rootGitCommand(args: readonly string[]): Promise<number> {
+    const child = Bun.spawn(['git', '-C', deps.projectRoot, ...args], { stdout: 'ignore', stderr: 'pipe' });
+    const [code] = await Promise.all([child.exited, new Response(child.stderr).arrayBuffer()]);
+    return code;
+  }
+
+  /**
+   * The one discard-and-recreate path: a worktree that never reached a working
+   * state (created but never recorded, or its initializer failed) holds no
+   * agent work, so its tree, branch and record are removed and the caller
+   * creates it again, instead of every later claim meeting the same refusal.
+   */
+  async function discardUnstarted(workstream: Workstream, item: WorkItem, path: string, branch: string, why: string): Promise<void> {
+    logger.warn('worktree-isolation: removing a worktree that never started, to create it again', { itemId: item.id, path, branch, why });
+    repositoryGuard?.();
+    const removed = await rootGitCommand(['worktree', 'remove', '--force', path]);
+    await rootGitCommand(['worktree', 'prune']);
+    const deleted = await rootGitCommand(['branch', '-D', branch]);
+    if (removed !== 0 && existsSync(path)) {
+      throw refused(`the worktree ${path} for item ${item.id} never started (${why}) and git could not remove it`, `Remove it with git worktree remove --force ${path} and git branch -D ${branch}, then run the item again.`);
+    }
+    if (deleted !== 0) logger.debug('worktree-isolation: discarded branch was already gone', { branch });
+    await (await identityRegistry()).release(identityKey(workstream, item));
+    instances.delete(item);
+    item.worktreePath = undefined; item.worktreeBranch = undefined; item.worktreeInitialized = undefined;
+    deps.emit({ type: 'item-worktree-removed', workstreamId: workstream.id, itemId: item.id, path });
+  }
+
   async function ensureWorktree(workstream: Workstream, item: WorkItem): Promise<ItemWorktreeHandle> {
     const registry = await identityRegistry(), key = identityKey(workstream, item);
     let row: StoredWorktreeIdentity | undefined = registry.find(key);
@@ -227,9 +259,12 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       const branchForReservation = row.branch;
       const resources = await rootGit.worktreeList();
       const existing = resources.filter(resource => resource.branch === branchForReservation);
-      if (existing.length > 1) throw unavailable();
-      if (existing[0]) {
-        if (row.state === 'reserved') throw new Error('Unproved worktree reservation requires recovery; resource preserved');
+      if (existing.length > 1) throw refused(`branch ${branchForReservation} is checked out in ${existing.length} worktrees (${existing.map(resource => resource.path).join(', ')})`, 'Remove the extra worktrees with git worktree remove, then restart the work.');
+      if (existing[0] && row.state === 'reserved') {
+        // Created but never recorded (a stop between git worktree add and the record): no agent ran there.
+        await discardUnstarted(workstream, item, existing[0].path, branchForReservation, 'its creation was never recorded');
+        row = await registry.reserve(key);
+      } else if (existing[0]) {
         const guard = registry.retainAcquired(row, existing[0].path);
         item.worktreePath = existing[0].path; item.worktreeBranch = row.branch;
         item.worktreeInitialized = row.state === 'initialized';
@@ -237,9 +272,13 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         resourceGuards.set(restored, () => { repositoryGuard?.(); guard(); });
       }
     }
-    if (item.worktreeInitialized === false) throw new Error('worktree initialization did not complete; retained resource requires recovery');
+    if (item.worktreeInitialized === false && item.worktreePath && item.worktreeBranch) {
+      // Its initializer failed before any agent ran, so it holds no work: remove it and create it again.
+      await discardUnstarted(workstream, item, item.worktreePath, item.worktreeBranch, 'its initialization did not complete');
+      row = await registry.reserve(key);
+    }
     const branch = item.worktreeBranch ?? row?.branch;
-    if (!branch) throw unavailable();
+    if (!branch) throw refused(`item ${item.id} has no worktree branch recorded`);
     const path = item.worktreePath ?? itemWorktreeDir(deps.projectRoot, branch);
     const instance = getOrCreateInstance(workstream, item, path, branch);
     resourceGuards.get(instance)?.();
@@ -248,7 +287,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         if (deps.initializeWorktree === undefined) await instance.create();
         else await deps.initializeWorktree(instance);
         const proof = readIsolatedWorktreeCreation(instance);
-        if (!proof) throw unavailable();
+        if (!proof) throw refused(`creating the worktree ${instance.path} left no record of the creation`);
         const recorded = await registry.acquired(key, instance, true);
         const binding = registry.retainAcquired(recorded, instance.path);
         resourceGuards.set(instance, () => { repositoryGuard?.(); proof.assertCurrent(); binding(); });
@@ -375,7 +414,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     item.mergeState = 'pending';
     try {
       const branch = item.worktreeBranch;
-      if (!branch || !item.worktreePath) throw unavailable();
+      if (!branch || !item.worktreePath) throw refused(`item ${item.id} has no worktree to integrate`);
       const path = item.worktreePath;
       const registry = await identityRegistry(), row = registry.find(identityKey(workstream, item));
       instance = getOrCreateInstance(workstream, item, path, branch);
@@ -384,7 +423,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         const binding = row && row.branch === branch && row.state !== 'reserved' ? registry.retainAcquired(row, path) : registry.retainRecorded(path, branch);
         resourceGuards.set(bound, () => { repositoryGuard?.(); binding(); });
       }
-      if (item.worktreeInitialized === false) throw new Error('worktree initialization did not complete; retained resource requires recovery');
+      if (item.worktreeInitialized === false) throw refused(`item ${item.id}'s worktree ${path} never finished initializing, so it holds no work to merge`, 'Run the item again; its worktree is removed and created again.');
       // The resource guard already begins with the repository guard.
       const outcome = await bound.integrate(() => { (resourceGuards.get(bound) ?? repositoryGuard)?.(); });
       if (outcome.status === 'merged') {

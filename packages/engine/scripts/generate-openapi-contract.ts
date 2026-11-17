@@ -26,6 +26,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { OperatorContractManifest, OperatorMethodContract } from '../contracts/src/types.ts';
+import { GATEWAY_METHOD_INVOKE_PATH } from '../daemon-api/src/operator.ts';
 import { buildParameters, errorBodySchema, hasRequestBody, isOpaqueSchema, knownErrorCodes, replayKey, requestBodySchema, SSE_METHODS, SSE_RESPONSE } from './openapi-shared.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -35,7 +36,8 @@ const CHECK_ONLY = process.argv.includes('--check');
 const CONTRACT_PATH = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-contract.json');
 const ARTIFACT_OUT = resolve(ENGINE_ROOT, 'contracts/artifacts/operator-openapi.json');
 
-const INVOKE_PATH = '/api/control/gateway-methods/{methodId}/invoke';
+// The path the daemon serves (daemon-api/src/operator.ts), so the spec can never name another.
+const INVOKE_PATH = GATEWAY_METHOD_INVOKE_PATH;
 
 interface OpenApiOperation {
   operationId: string;

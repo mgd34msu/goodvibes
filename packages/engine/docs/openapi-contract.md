@@ -20,7 +20,7 @@ from the committed contract artifact and kept honest by a drift gate.
   <!-- openapi-counts:start -->
   Methods with a dedicated REST binding appear as path operations (509 operations, one per
   method's declared HTTP verb and path); methods without one are reachable only through the
-  generic invoke endpoint (`POST /api/control/gateway-methods/{methodId}/invoke`, operation 510,
+  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 510,
   99 methods) and are listed on it under `x-invoke-only-methods`.
   `x-operator-methods` is a flat index of all 608 cataloged methods, REST-bound
   or invoke-only, each with its category, access level, resolved REST route (or

@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EngineErrorCodes } from '../errors/src/error-codes.ts';
+import { GATEWAY_METHOD_INVOKE_PATH } from '../daemon-api/src/operator.ts';
 import type { ContractErrorCode, OperatorContractManifest, OperatorMethodContract, OperatorEventContract, JsonSchema } from '../contracts/src/types.ts';
 import {
   buildParameters, errorBodySchema, hasRequestBody, isOpaqueSchema, knownErrorCodes, pathParamNames, replayKey, requestBodySchema,
@@ -36,7 +37,8 @@ const INDEX_OUT = resolve(ENGINE_ROOT, 'docs/agent-api-index.md');
 
 const FAMILIES = ['sessions', 'tasks', 'contracts', 'approvals'] as const;
 const EVENT_METHODS = new Set(['control.events.stream', 'control.events.catalog']);
-const INVOKE_PATH = '/api/control/gateway-methods/{methodId}/invoke';
+// The path the daemon serves (daemon-api/src/operator.ts), so the spec can never name another.
+const INVOKE_PATH = GATEWAY_METHOD_INVOKE_PATH;
 
 type Json = Record<string, unknown>;
 

@@ -119,7 +119,6 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
             enum: [...SETTINGS_ACTION_WORDS],
             description: 'list/get read; set/reset change one setting and import applies the captured import, each through recorded admission; preview_import only shows what import would apply.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           key: { type: 'string', description: 'Exact setting key.' },
           setting: { type: 'string', description: 'Alias for key.' },
           target: { type: 'string', description: 'Setting lookup text.' },

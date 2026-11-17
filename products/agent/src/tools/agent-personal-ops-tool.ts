@@ -160,7 +160,6 @@ export function createAgentPersonalOpsTool(deps: AgentPersonalOpsToolDeps): Tool
             enum: ['briefing', 'status', 'queue', 'intake', 'lane', 'read'],
             description: 'Discovery actions are read-only; live reads need current recorded admission.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           laneId: { type: 'string', enum: ['inbox', 'calendar', 'notes', 'tasks', 'reminders', 'routines', 'delivery'], description: 'Personal Ops lane id.' },
           recordId: { type: 'string', description: 'Selected inbox/calendar read operation record id.' },
           query: { type: 'string', description: 'Personal operations request or lane lookup text.' },

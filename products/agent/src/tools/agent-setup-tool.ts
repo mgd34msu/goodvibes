@@ -130,7 +130,6 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
             enum: [...SETUP_ACTION_WORDS],
             description: 'Setup action; status/item/checkpoint read. import_settings previews the shared-settings import; import (or apply_import) applies it. Effects need a current recorded admission.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           setupItemId: { type: 'string', description: 'Setup item id.' },
           itemId: { type: 'string', description: 'Alias for setupItemId.' },
           target: { type: 'string', description: 'Setup item lookup text.' },

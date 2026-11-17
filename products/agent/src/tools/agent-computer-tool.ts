@@ -122,7 +122,6 @@ export function createAgentComputerTool(deps: AgentComputerToolDeps): Tool {
             enum: ['status', 'plan', 'control', 'browser', 'open_browser', 'setup', 'mcp'],
             description: 'Computer, browser/PWA, setup, MCP, or open route. Opening a visible surface needs the owner\'s current recorded effect admission.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           target: { type: 'string', description: 'Lookup or search target.' },
           query: { type: 'string', description: 'Search text for action:"mcp". When omitted the search is for "browser desktop", so the list is filtered, not complete; pass a broader query to see more.' },
           includeParameters: { type: 'boolean', description: 'Include detailed route contracts.' },

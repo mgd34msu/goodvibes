@@ -40,7 +40,6 @@ export function createAgentSettingsImportTool(commandContext: CommandContext): T
             enum: ['preview', 'import', 'apply'],
             description: 'preview inspects sources; apply/import uses current recorded settings admission.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           confirm: confirmParameter(),
           explicitUserRequest: requestParameter(),
         },

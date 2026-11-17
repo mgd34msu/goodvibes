@@ -75,7 +75,6 @@ export function createAgentContextTool(deps: AgentContextToolDeps): Tool {
             enum: ['status', 'files', 'file', 'prompt', 'receipts', 'receipt'],
             description: 'Read project files, prompt context, or receipt history.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           contextFileId: { type: 'string', description: 'Project context file id.' },
           receiptId: { type: 'string', description: 'Prompt context receipt id.' },
           turnId: { type: 'string', description: 'Prompt context turn id.' },

@@ -77,7 +77,6 @@ export function createAgentHostTool(deps: AgentHostToolDeps): Tool {
             enum: ['status', 'capabilities', 'capability', 'services', 'service', 'methods', 'method'],
             description: 'Read host status, capabilities, services, and method posture.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           capabilityId: { type: 'string', description: 'Connected-host capability id.' },
           endpointId: { type: 'string', description: 'Service endpoint id.' },
           methodId: { type: 'string', description: 'Daemon operator method id.' },

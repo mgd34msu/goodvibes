@@ -416,7 +416,6 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
             // Not an enum: the registry enforces enums strictly and several aliases are accepted.
             description: `Read plans/queues; writes require current recorded effect admission. Actions: ${RESEARCH_ACTIONS.join(', ')}.`,
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Run or source id alias.' },
           runId: { type: 'string', description: 'Research run id.' },
           sourceId: { type: 'string', description: 'Research source id.' },

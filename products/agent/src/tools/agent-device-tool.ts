@@ -179,7 +179,6 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
             enum: ['status', 'capability', 'browser', 'open_browser', 'control', 'voice', 'provider', 'open_tts_provider', 'open_tts_voice'],
             description: 'Read device/voice posture, or open a visible route (needs the owner\'s current recorded effect admission). browser, open_browser and control are the computer tool\'s routes.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Capability, route, or provider id alias.' },
           capabilityId: { type: 'string', description: 'Device capability id.' },
           routeId: { type: 'string', description: 'Pairing route id alias.' },

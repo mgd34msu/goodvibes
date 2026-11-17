@@ -146,7 +146,6 @@ export function createAgentProcessTool(commandContext: CommandContext, registry?
             enum: ['list', 'poll', 'status', 'wait', 'log', 'output', 'kill', 'stop', 'cancel', 'write', 'start', 'capabilities', 'doctor', 'parity'],
             description: 'list/poll/log/wait observe processes. kill/start/write require current recorded effect admission; writes target a running tracked native stdin pipe.',
           },
-          processAction: { type: 'string', description: 'Alias for action.' },
           processId: { type: 'string', description: 'Tracked background process id.' },
           processSessionId: { type: 'string', description: 'Accepted as processId.' },
           sessionId: { type: 'string', description: 'Accepted as processId (not a chat session id).' },

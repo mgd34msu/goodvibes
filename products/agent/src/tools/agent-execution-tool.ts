@@ -185,7 +185,6 @@ export function createAgentExecutionTool(deps: AgentExecutionToolDeps): Tool {
             enum: ['status', 'route', 'history', 'record', 'processes', 'process_capabilities', 'process', 'recovery', 'capabilities', 'doctor', 'parity'],
             description: 'Read-only execution posture, route, history, process, or recovery view.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Generic route, record, process, or session id.' },
           routeId: { type: 'string', description: 'Alias for executionRouteId.' },
           executionRouteId: { type: 'string', description: 'Execution route id.' },

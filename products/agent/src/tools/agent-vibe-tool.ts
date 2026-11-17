@@ -140,7 +140,6 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
             enum: ['status', 'show', 'init', 'import_persona'],
             description: 'status and show read; init and import_persona write and need a current recorded admission (confirm and explicitUserRequest do not grant it).',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           scope: { type: 'string', enum: ['project', 'global'], description: 'VIBE.md scope for init/show/import.' },
           reference: { type: 'string', description: 'project, global, or path reference.' },
           path: { type: 'string', description: 'A VIBE.md location for show/import (project, global, or one of the paths status lists).' },

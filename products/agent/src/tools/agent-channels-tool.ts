@@ -71,7 +71,6 @@ export function createAgentChannelsTool(deps: AgentChannelsToolDeps): Tool {
             enum: ['status', 'channel', 'setup', 'triage', 'deliveries'],
             description: 'Read channel status, setup, triage, or receipts.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           channelId: { type: 'string', description: 'Channel id to inspect.' },
           id: { type: 'string', description: 'Alias for channelId.' },
           target: { type: 'string', description: 'Channel lookup target.' },

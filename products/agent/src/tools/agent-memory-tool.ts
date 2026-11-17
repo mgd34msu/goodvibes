@@ -165,7 +165,6 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
             enum: ['status', 'provider', 'refinement', 'run_refinement', 'curator', 'curate', 'candidate', 'list', 'search', 'get', 'create', 'update', 'review', 'stale', 'delete'],
             description: 'Read memory posture/providers/curator, run the curation pass (curate: reads new or changed records once), or operate records.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Agent-local memory record id.' },
           recordId: { type: 'string', description: 'Alias for id.' },
           providerId: { type: 'string', description: 'Embedding or external-memory provider id.' },

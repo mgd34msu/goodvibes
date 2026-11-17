@@ -111,7 +111,6 @@ export function createAgentAuditTool(deps: AgentAuditToolDeps): Tool {
             enum: ['readiness', 'item', 'evidence', 'artifact'],
             description: 'Read release inventory, one item, evidence list, or one artifact.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Alias for itemId or artifactId depending on action.' },
           itemId: { type: 'string', description: 'Release readiness item id.' },
           artifactId: { type: 'string', description: 'Release evidence artifact id.' },

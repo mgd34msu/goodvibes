@@ -79,7 +79,6 @@ export function createAgentSupportTool(deps: AgentSupportToolDeps): Tool {
             enum: ['status', 'bundle'],
             description: 'List support bundle routes or inspect one existing bundle.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Alias for bundlePath.' },
           bundlePath: { type: 'string', description: 'Workspace-relative support bundle path to inspect.' },
           target: { type: 'string', description: 'Lookup target or search text.' },

@@ -234,7 +234,6 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
             enum: [...WORKSPACE_ACTION_WORDS],
             description: 'Inspect catalogs, open UI, or run workspace actions. run, open, run_keybinding, set_keybinding, reset_keybinding and run_command need a current recorded effect admission; confirm and explicitUserRequest do not grant it.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Generic action, surface, or keybinding id.' },
           actionId: { type: 'string', description: 'Workspace action or keybinding action id.' },
           workspaceActionId: { type: 'string', description: 'Workspace action id alias.' },

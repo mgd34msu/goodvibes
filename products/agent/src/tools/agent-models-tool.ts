@@ -169,7 +169,6 @@ export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
             enum: ['status', 'route', 'local', 'providers', 'provider', 'smoke'],
             description: 'Read model/provider posture, or run a local server smoke check (smoke needs current recorded admission).',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Model route or provider id alias.' },
           modelRouteId: { type: 'string', description: 'Model route, local endpoint, or cookbook route id.' },
           routeId: { type: 'string', description: 'Model route id alias.' },

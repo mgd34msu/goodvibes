@@ -92,7 +92,6 @@ export function createAgentSecurityTool(deps: AgentSecurityToolDeps): Tool {
             enum: ['status', 'finding', 'explain'],
             description: 'Read posture, finding detail, or action policy.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Generic finding id.' },
           findingId: { type: 'string', description: 'Security finding id.' },
           toolName: { type: 'string', description: 'Model tool name for action:explain.' },

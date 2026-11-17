@@ -98,7 +98,6 @@ export function createAgentAutonomyTool(deps: AgentAutonomyToolDeps): Tool {
             enum: ['intake', 'queue', 'item', 'status'],
             description: 'Read-only autonomy intake, queue, item, or status view.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Alias for queueItemId.' },
           queueItemId: { type: 'string', description: 'Autonomy queue card id.' },
           target: { type: 'string', description: 'Lookup target or ongoing-work request.' },

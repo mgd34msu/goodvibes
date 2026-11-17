@@ -87,7 +87,6 @@ export function createAgentDelegationTool(deps: AgentDelegationToolDeps): Tool {
             enum: ['status', 'routes', 'route'],
             description: 'Read-only delegation status, route catalog, or single route inspection.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Alias for delegationRouteId.' },
           delegationRouteId: { type: 'string', description: 'Delegation route id.' },
           target: { type: 'string', description: 'Lookup target or route search text.' },

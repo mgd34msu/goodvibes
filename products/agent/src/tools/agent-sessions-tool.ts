@@ -81,7 +81,6 @@ export function createAgentSessionsTool(deps: AgentSessionsToolDeps): Tool {
             enum: ['list', 'search', 'status', 'get'],
             description: 'List/search sessions or inspect one saved session.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           id: { type: 'string', description: 'Alias for sessionId.' },
           sessionId: { type: 'string', description: 'Saved session id.' },
           target: { type: 'string', description: 'Lookup target or search text.' },

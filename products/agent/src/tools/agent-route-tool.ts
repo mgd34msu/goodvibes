@@ -84,7 +84,6 @@ export function createAgentRouteTool(commandContext: CommandContext, sources: Ag
             enum: ['plan', 'status'],
             description: 'Plan a user-task route or show route-tool usage.',
           },
-          mode: { type: 'string', description: 'Alias for action.' },
           query: { type: 'string', description: 'Plain user request to route.' },
           target: { type: 'string', description: 'Alias for query.' },
           includeParameters: { type: 'boolean', description: 'Include scoring and more catalog matches.' },

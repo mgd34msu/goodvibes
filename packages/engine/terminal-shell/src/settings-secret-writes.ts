@@ -18,9 +18,10 @@ export interface SettingsDaemonCredentialWriter {
   set(configKey: string, value: string): Promise<unknown>;
   clear(configKey: string): Promise<void>;
 }
-type SecretWriteStep = 'policy' | 'daemon' | 'store' | 'config';
+type SecretWriteStep = 'policy' | 'validate' | 'daemon' | 'store' | 'config';
 const SECRET_WRITE_FAILURE: Record<SecretWriteStep, { readonly reason: string; readonly next: string }> = {
   policy: { reason: 'the settings policy could not be read', next: 'Check the managed settings policy file, then retry.' },
+  validate: { reason: 'the value does not meet the setting\'s rule', next: 'Enter a value the setting accepts, then retry.' },
   daemon: { reason: 'the daemon refused it or could not be reached', next: 'Check that the daemon is running and this app is connected to it, then retry.' },
   store: { reason: 'the secret store could not write it', next: 'Check secret storage access and storage.secretPolicy, then retry.' },
   config: { reason: 'the setting that points at the stored value could not be saved', next: 'Check whether the setting is locked by policy, then retry.' },
@@ -30,8 +31,14 @@ const SECRET_WRITE_FAILURE: Record<SecretWriteStep, { readonly reason: string; r
  * error's status or code only. The error text itself is never shown: a store
  * or transport error may echo the credential.
  */
-function describeSecretWriteFailure(key: string, step: SecretWriteStep, error: unknown): string {
+function describeSecretWriteFailure(key: string, step: SecretWriteStep, error: unknown, typed: readonly string[] = []): string {
   const failure = SECRET_WRITE_FAILURE[step];
+  // The setting's own rule is the product's words; the typed text is removed from it before it is shown.
+  if (step === 'validate' && error instanceof Error && error.message) {
+    let rule = error.message;
+    for (const text of typed) if (text.length > 0) rule = rule.split(text).join('<value>');
+    return `The credential ${key} was not saved: ${rule.replace(/\.$/, '')}. ${failure.next}`;
+  }
   let detail = '';
   if (error && typeof error === 'object') {
     const status = (error as { readonly status?: unknown }).status;
@@ -91,6 +98,7 @@ export async function setSecretBackedSettingValue(args: {
       step = 'store';
       throw new Error('Credential storage is unavailable.');
     }
+    step = 'validate';
     configManager.validateDynamic?.(key, update.configValue);
     const scope = defaultSecretBackedScope(key);
     const medium = getSecretWriteMedium(configManager.get('storage.secretPolicy'));
@@ -113,7 +121,7 @@ export async function setSecretBackedSettingValue(args: {
         await secretsManager!.delete(update.clearSecretKey, { scope });
       } catch {
         logger.error('SettingsModal: cleared secret reference but could not delete its stored value', { key });
-        const message = 'The credential was cleared, but its stored value could not be removed. Remove it with /secrets delete.';
+        const message = `The credential was cleared, but its stored value could not be removed. Remove it with /secrets delete ${update.clearSecretKey}.`;
         args.onFailure?.(message);
         args.onError?.(message);
       }
@@ -121,7 +129,7 @@ export async function setSecretBackedSettingValue(args: {
     return true;
   } catch (error) {
     // Store/transport errors may echo credential material. Never display or log their text.
-    const message = describeSecretWriteFailure(key, step, error);
+    const message = describeSecretWriteFailure(key, step, error, [value, value.trim()]);
     logger.error('SettingsModal: failed to save secret config value', { key, step });
     args.onFailure?.(message);
     args.onError?.(message);

@@ -1,6 +1,7 @@
 import { retainCliConfig } from './cli-config-owner.js';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { isSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
@@ -17,6 +18,28 @@ import {
   containsRedactedValue,
   inspectBundle as inspect,
 } from './support-bundle-inspection.js';
+/**
+ * Settings that decide what runs without asking, what the machine exposes to
+ * the network, how it starts, and where its data and secrets live. An import
+ * leaves them as they are unless asked for by name.
+ */
+export function securityRelevantSetting(key: string): boolean {
+  return /^(permissions|sandbox|service|storage|policy|network|mcp)\./.test(key)
+    || key === 'behavior.autoApprove' || key === 'judgment.policy'
+    || /^(controlPlane|httpListener|web)\.(host|hostMode|trustProxy|trustCloudflare)$/.test(key)
+    || /^fetch\.(allowLocalhost|trustedHosts|blockedHosts)$/.test(key)
+    || key.startsWith('daemon.connectedHost.') || key === 'integrations.routeBinding'
+    || /(Path|Dir)$/.test(key);
+}
+
+/** A value as one short line; credential settings show only whether they are set. */
+function showSettingValue(key: string, value: unknown): string {
+  if (value === undefined) return '(unset)';
+  if (isSecretBearingConfigKey(key)) return value === '' || value === null ? '(empty)' : '<set>';
+  const text = typeof value === 'string' ? JSON.stringify(value) : JSON.stringify(value) ?? String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
 export interface SupportBundleRuntime {
   readonly workingDirectory: string;
   readonly homeDirectory: string;
@@ -224,8 +247,9 @@ export function createSupportBundleCommand<
     }
     if (sub === 'import') {
       const apply = runtime.cli.flags.yes === true || rest.includes('--yes');
-      const path = rest.find((token) => token !== '--yes');
-      if (!path) return { output: `Usage: ${policy.commandBase(runtime)} import <path> [--yes]`, exitCode: 2 };
+      const includeSecurity = rest.includes('--include-security');
+      const path = rest.find((token) => token !== '--yes' && token !== '--include-security');
+      if (!path) return { output: `Usage: ${policy.commandBase(runtime)} import <path> [--include-security] [--yes]`, exitCode: 2 };
       const sourcePath = shellPaths.resolveWorkspacePath(path);
       const parsed = readJsonFile(sourcePath);
       if (!parsed.ok) return { output: `Invalid bundle JSON${policy.invalidJsonSeparator}${parsed.error}`, exitCode: 1 };
@@ -244,8 +268,14 @@ export function createSupportBundleCommand<
       }
       const config = parsed.value['config'];
       if (!config || typeof config !== 'object') return { output: 'Bundle has no config object to import.', exitCode: 1 };
-      const pending: { key: ConfigKey; value: unknown }[] = [];
+      // Only values that differ from the current settings are imported. Settings
+      // that decide what runs unasked, what the machine exposes and where data
+      // lives are held back unless --include-security asks for them.
+      const current = retainCliConfig(runtime.configManager).raw;
+      const pending: { key: ConfigKey; value: unknown; from: unknown }[] = [];
+      const heldBack: { key: ConfigKey; value: unknown; from: unknown }[] = [];
       let skippedRedacted = 0;
+      let unchanged = 0;
       for (const setting of bindings.schema) {
         const value = getNestedValue(config, setting.key);
         if (value === undefined) continue;
@@ -253,10 +283,25 @@ export function createSupportBundleCommand<
           skippedRedacted++;
           continue;
         }
-        pending.push({ key: setting.key, value });
+        const from = getNestedValue(current, setting.key);
+        if (JSON.stringify(from) === JSON.stringify(value)) { unchanged++; continue; }
+        (securityRelevantSetting(setting.key) && !includeSecurity ? heldBack : pending).push({ key: setting.key, value, from });
       }
-      const redactedNote = skippedRedacted ? ` ${skippedRedacted} redacted value${skippedRedacted === 1 ? '' : 's'} skipped.` : '';
+      const redactedNote = [
+        skippedRedacted ? ` ${skippedRedacted} redacted value${skippedRedacted === 1 ? '' : 's'} skipped.` : '',
+        unchanged ? ` ${unchanged} value${unchanged === 1 ? '' : 's'} already match.` : '',
+        heldBack.length ? ` ${heldBack.length} security setting${heldBack.length === 1 ? '' : 's'} held back (add --include-security to import ${heldBack.length === 1 ? 'it' : 'them'}).` : '',
+      ].join('');
+      const describe = (entry: { key: ConfigKey; value: unknown; from: unknown }) =>
+        `  ${entry.key}: ${showSettingValue(entry.key, entry.from)} -> ${showSettingValue(entry.key, entry.value)}`;
       const count = pending.length;
+      if (count === 0) {
+        return {
+          output: [`Nothing to import: no value in the bundle differs from the current settings, apart from what was held back.${redactedNote}`,
+            ...(heldBack.length ? ['Held back (security):', ...heldBack.map(describe)] : [])].join('\n'),
+          exitCode: 0,
+        };
+      }
       if (!apply) {
         // The preview names every value the import would refuse, so one --yes run can succeed.
         const failed: { key: string; message: string }[] = [];
@@ -276,18 +321,22 @@ export function createSupportBundleCommand<
             exitCode: 1,
           };
         }
+        const security = pending.filter((entry) => securityRelevantSetting(entry.key));
+        const ordinary = pending.filter((entry) => !securityRelevantSetting(entry.key));
         return {
           output: [
-            `Refusing to import ${count} config value${count === 1 ? '' : 's'} without --yes. Nothing was changed.${redactedNote}`,
-            ...pending.map((entry) => `  would set ${entry.key}`),
-            `Usage: ${policy.commandBase(runtime)} import <path> --yes`,
+            `Refusing to import ${count} changed config value${count === 1 ? '' : 's'} without --yes. Nothing was changed.${redactedNote}`,
+            ...(security.length ? ['Security settings (current -> new):', ...security.map(describe)] : []),
+            ...(ordinary.length ? ['Other settings (current -> new):', ...ordinary.map(describe)] : []),
+            ...(heldBack.length ? ['Held back (security; add --include-security):', ...heldBack.map(describe)] : []),
+            `Usage: ${policy.commandBase(runtime)} import <path>${includeSecurity ? ' --include-security' : ''} --yes`,
           ].join('\n'),
           exitCode: 2,
         };
       }
       // One update: every value is admitted before anything is written, so a
       // bad value leaves the configuration as it was.
-      const result = runtime.configManager.setMany(pending, { kind: 'owner', surface: `${policy.commandBase(runtime)} import` });
+      const result = runtime.configManager.setMany(pending.map(({ key, value }) => ({ key, value })), { kind: 'owner', surface: `${policy.commandBase(runtime)} import` });
       if (!result.ok) {
         return {
           output: [
@@ -303,7 +352,7 @@ export function createSupportBundleCommand<
         exitCode: 0,
       };
     }
-    return { output: `Usage: ${policy.commandBase(runtime)} export [path]|inspect <path>|import <path> [--yes]`, exitCode: 2 };
+    return { output: `Usage: ${policy.commandBase(runtime)} export [path]|inspect <path>|import <path> [--include-security] [--yes]`, exitCode: 2 };
   }
   return handleBundleCommand;
 }

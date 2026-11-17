@@ -1,12 +1,15 @@
-import type { ConfigKey, ConfigManager, JudgmentFallbackSettings } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigChange, ConfigKey, ConfigManager, JudgmentFallbackSettings, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes-jev/judgment';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
 
 export type SettingsChoiceAction = 'judgment-provider' | 'judgment-model' | 'decision-policy' | 'permission-mode' | 'decision-router' | 'judgment-fallbacks';
 export interface SettingsChoiceContext {
-  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic'> };
+  readonly platform: {
+    readonly configManager: Pick<ConfigManager, 'get' | 'setMany'>;
+    /** Lists the stored credential names the reference picker offers. */
+    readonly secretsManager?: Pick<SecretsManager, 'listDetailed'> | null | undefined;
+  };
   readonly openSelection?: OpenSelection | undefined;
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
@@ -55,26 +58,28 @@ export function openSettingsChoice(
     changed(); ctx.renderRequest(); return false;
   };
   let fallbackIndex: number | null = null;
+  const existingReferenceNames = async (source: 'env' | 'secret'): Promise<readonly string[]> => {
+    if (source === 'env') {
+      return Object.keys(process.env).filter(name => process.env[name] && /(?:_API_KEY|_TOKEN|_KEY|_SECRET)$/.test(name)).sort();
+    }
+    try {
+      const records = await ctx.platform.secretsManager?.listDetailed() ?? [];
+      return [...new Set(records.filter(record => record.source !== 'env').map(record => record.key))].sort();
+    } catch {
+      return [];
+    }
+  };
   const fallbackChain = (): readonly JudgmentFallbackSettings[] => config.get('judgment.fallbacks');
   const editingFallback = () => action === 'judgment-fallbacks' && fallbackIndex !== null ? fallbackChain()[fallbackIndex] : undefined;
+  // One choice is one settings write: every key is checked first and written
+  // together, or nothing is written and the refusal says why.
   const save = (patch: ReadonlyArray<readonly [ConfigKey, unknown]>) => {
     if (!current()) return;
-    const previous = patch.map(([key]) => [key, config.get(key)] as const);
-    const written: number[] = [];
-    try {
-      for (let index = 0; index < patch.length; index++) {
-        const entry = patch[index];
-        if (!entry) continue;
-        config.setDynamic(entry[0], entry[1]); written.push(index);
-      }
-      changed(); ctx.renderRequest();
-    } catch (error) {
-      for (const index of written.reverse()) {
-        const entry = previous[index];
-        if (entry) { try { config.setDynamic(entry[0], entry[1]); } catch { /* Report the original persistence failure. */ } }
-      }
-      ctx.print('Unable to save settings: ' + summarizeError(error)); ctx.renderRequest();
-    }
+    const changes: ConfigChange[] = patch.map(([key, value]) => ({ key, value }));
+    const result = config.setMany(changes, { kind: 'owner', surface: 'settings' });
+    if (!result.ok) ctx.print(`Not saved: ${result.refusal.reason} ${result.refusal.next.join(' ')}`.trim());
+    if (result.saved.length > 0) changed();
+    ctx.renderRequest();
   };
   if (action === 'decision-policy' || action === 'permission-mode') {
     const key = action === 'decision-policy' ? 'judgment.policy' : 'permissions.mode';
@@ -122,7 +127,7 @@ export function openSettingsChoice(
           return;
         }
         save([
-          ['judgment.keySource', 'none'], ['judgment.keyName', keyName || config.get('judgment.keyName') || 'TYPESAFE_API_KEY'],
+          ['judgment.keyName', keyName || config.get('judgment.keyName') || 'TYPESAFE_API_KEY'],
           ['judgment.endpoint', endpoint], ['judgment.model', profile.model],
           ['judgment.backend', backend],
           ['judgment.keySource', keySource],
@@ -145,9 +150,20 @@ export function openSettingsChoice(
           if (source === 'official') { persist('env', officialKey); return; }
           if (source !== 'env' && source !== 'secret') return;
           const validName = (name: string) => source === 'env' ? /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) : /^[A-Za-z0-9][A-Za-z0-9_./:-]{0,255}$/.test(name);
-          open('Credential reference name — never the key value', [], {
-            allowSearch: true, customItem: query => validName(query) ? { id: query, label: `Use reference: ${query}` } : null,
-          }, reference => { if (reference) persist(source, reference.item.id); });
+          // The names that exist, read once when the picker opens: set environment
+          // variables named like a credential, or the keys in the secret store. A
+          // name that resolves to nothing is saved only by choosing "use anyway".
+          void existingReferenceNames(source).then((names) => {
+            const known = new Set(names);
+            open('Credential reference name — never the key value',
+              names.map(name => ({ id: name, label: name, detail: source === 'env' ? 'Set in this environment' : 'Stored in the secret store', primaryAction: 'select' as const })), {
+                allowSearch: true,
+                customItem: query => !validName(query) || known.has(query) ? null : {
+                  id: query, label: `Use anyway: ${query}`,
+                  detail: source === 'env' ? 'No environment variable of this name is set; decisions fail until it is.' : 'No stored secret of this name exists; decisions fail until it is stored.',
+                },
+              }, reference => { if (reference) persist(source, reference.item.id); });
+          });
         });
       });
   };

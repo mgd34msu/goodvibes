@@ -1362,8 +1362,10 @@ export class ConfigManager {
       }
     }
 
+    // A person at a command surface writes the daemon's file under the shared
+    // lock, as a single `set` does; any other writer goes through the daemon.
     const daemonChange = admitted.find(change => change.tier === 'daemon');
-    if (daemonChange && !this.daemonTierOwner) {
+    if (daemonChange && !this.daemonTierOwner && by.kind !== 'owner') {
       return refuse({ code: 'CONFIG_DAEMON_OWNED', reason: daemonOwnedRefusal(daemonChange.key).message,
         next: [`goodvibes-daemon config set ${daemonChange.key} <value>`], status: 409 });
     }

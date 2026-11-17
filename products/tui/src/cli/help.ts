@@ -219,9 +219,9 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     examples: ['control-plane status', 'control-plane status --json'],
   },
   'support-bundle': {
-    usage: ['support-bundle export [path]', 'support-bundle inspect <path>', 'support-bundle import <path> [--yes]'],
+    usage: ['support-bundle export [path]', 'support-bundle inspect <path>', 'support-bundle import <path> [--include-security] [--yes]'],
     summary:
-      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Import applies only the config values: it refuses a bundle from another product or format version, checks every value before changing any, and without --yes lists the values it would set and changes nothing (exit 2). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
+      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Import applies only the config values: it refuses a bundle from another product or format version, imports only values that differ from your settings, holds back permission, sandbox, listener, service and storage settings unless --include-security is given, applies all or nothing, and without --yes lists each change as current -> new and changes nothing (exit 2). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
     examples: ['support-bundle export goodvibes-bundle.json', 'support-bundle inspect goodvibes-bundle.json'],
   },
   acp: {

@@ -19,8 +19,6 @@ export {
   APPEND_ONLY_STORES,
   APPEND_ONLY_SWEEP_INTERVAL_MS,
   AppendOnlyRetentionScheduler,
-  assertAppendOnlyStoreRegistered,
-  isAppendOnlyStoreRegistered,
   runAppendOnlyRetentionSweep,
   runStartupAppendOnlySweep,
 } from './append-only-registry.js';

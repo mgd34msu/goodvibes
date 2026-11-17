@@ -6,10 +6,9 @@
  * 22.8 MB activity.md, unbounded agent journals). The fix is a registry: every
  * append-only store the platform writes registers here with an owner and a
  * retention policy, and a start-time janitor (runAppendOnlyRetentionSweep) owns
- * every registered path in one pass. A registry-membership check
- * (assertAppendOnlyStoreRegistered) fails LOUDLY on an unregistered id, the
- * same fail-closed discipline as the feature-gate-id and model-source checks,
- * so a new append-only store cannot ship unowned and grow forever in silence.
+ * every registered path in one pass. Nothing stops a writer that is not
+ * registered: a new append-only store is bounded only once it has an entry
+ * in APPEND_ONLY_STORES below.
  *
  * The retention engine reused here is enforceFileRetention /
  * enforceJournalDirectoryRetention (age + total-size caps over append-only
@@ -217,26 +216,6 @@ export const APPEND_ONLY_STORES: readonly AppendOnlyStoreDescriptor[] = [
     },
   },
 ];
-
-const REGISTERED_IDS: ReadonlySet<string> = new Set(APPEND_ONLY_STORES.map((store) => store.id));
-
-/** True when `id` is a registered append-only store. */
-export function isAppendOnlyStoreRegistered(id: string): boolean {
-  return REGISTERED_IDS.has(id);
-}
-
-/**
- * Fail-closed membership check: throw when `id` is not a registered append-only
- * store. Mirrors assertFeatureGateIdRegistered, an unregistered append-only
- * path is a defect (it would grow unowned), so it fails loudly.
- */
-export function assertAppendOnlyStoreRegistered(id: string, context: string): void {
-  if (REGISTERED_IDS.has(id)) return;
-  throw new Error(
-    `unknown append-only store id "${id}" (${context}); every append-only store the platform writes must be `
-    + 'registered in APPEND_ONLY_STORES with an owner and a retention policy.',
-  );
-}
 
 /** The outcome of one start-time retention sweep. */
 export interface AppendOnlySweepOutcome {

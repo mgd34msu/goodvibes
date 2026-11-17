@@ -64,8 +64,8 @@ export function isMemoryCacheRegistered(id: string): boolean {
 
 /**
  * Fail-closed membership check: throw when `id` is not a known cache class.
- * Mirrors assertAppendOnlyStoreRegistered, an unregistered cache would be
- * invisible to the governor and could grow unowned, so it fails loudly.
+ * An unregistered cache would be invisible to the governor and could grow
+ * unowned, so it fails loudly.
  */
 export function assertMemoryCacheRegistered(id: string, context: string): void {
   if (KNOWN_MEMORY_CACHE_SET.has(id)) return;

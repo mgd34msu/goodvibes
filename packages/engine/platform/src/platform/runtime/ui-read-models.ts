@@ -77,6 +77,8 @@ function createDoctorReadModel(runtimeServices: RuntimeServices): UiDoctorReadMo
       return sessionId ? surface.recoveryFile(sessionId) : undefined;
     },
     lastSessionPointerPath: surface.lastSessionPointer,
+    contextWindow: () => runtimeServices.providerRegistry.getCurrentModel().contextWindow,
+    plugins: () => runtimeServices.pluginManager.list(),
   });
   return { diagnose: (symptom) => runDoctor(symptom, context) };
 }

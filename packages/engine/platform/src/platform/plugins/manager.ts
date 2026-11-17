@@ -75,6 +75,8 @@ export interface PluginStatus {
   trustTier: PluginTrustTier;
   /** Whether this plugin is currently quarantined. */
   quarantined: boolean;
+  /** Why its last start failed, until it starts again. */
+  startFailure?: string | undefined;
 }
 
 export interface PluginManagerObserver {
@@ -211,6 +213,8 @@ export class PluginManager {
   private readonly unloading = new WeakMap<LoadedPlugin, Promise<void>>();
   private readonly ownedCalls = new Map<PluginInFlightTracker, Set<string>>();
   private readonly cleanupErrors = new Set<PluginCleanupError>();
+  /** Why each plugin's last start failed; cleared when it next starts. */
+  private readonly startFailures = new Map<string, string>();
   /** Counts calls into loaded plugins so a reload can drain them first. */
   private inFlight = new PluginInFlightTracker();
 
@@ -256,6 +260,7 @@ export class PluginManager {
     const trust = this.currentTrust();
     return discovered.map((d) => {
       const loaded = this.plugins.get(d.manifest.name);
+      const startFailure = this.startFailures.get(d.manifest.name);
       return {
         name: d.manifest.name,
         version: d.manifest.version,
@@ -265,6 +270,7 @@ export class PluginManager {
         active: loaded?.active ?? false,
         trustTier: trust.getTier(d.manifest.name),
         quarantined: this.isQuarantined(d.manifest.name),
+        ...(startFailure !== undefined ? { startFailure } : {}),
       };
     });
   }
@@ -767,9 +773,11 @@ export class PluginManager {
       onFailure: (failure) => { reason ??= failure; onFailure?.(failure); } });
     if (loaded) {
       this.acquired.add(loaded);
+      this.startFailures.delete(pluginId);
       this.emitLifecycle(pluginId, 'loaded', (bus, ctx) => emitPluginLoaded(bus, ctx, { pluginId, version: loaded.manifest.version, capabilities: [...((loaded.manifest as { capabilities?: string[] }).capabilities ?? [])] }));
       this.emitLifecycle(pluginId, 'active', (bus, ctx) => emitPluginActive(bus, ctx, { pluginId }));
     } else {
+      this.startFailures.set(pluginId, reason ?? 'the plugin did not start');
       this.emitLifecycle(pluginId, 'error', (bus, ctx) => emitPluginError(bus, ctx, { pluginId, error: reason ?? 'the plugin did not start', fatal: true }));
     }
     return loaded;
@@ -794,6 +802,7 @@ export class PluginManager {
       if (!(error instanceof PluginCleanupError)) throw error;
       this.cleanupErrors.add(error);
       const pluginId = discovered.manifest.name;
+      this.startFailures.set(pluginId, failure ?? summarizeError(error));
       this.emitLifecycle(pluginId, 'error', (bus, ctx) => emitPluginError(bus, ctx, { pluginId, error: failure ?? summarizeError(error), fatal: true }));
       return { loaded: null, cleanupError: error, ...(failure !== undefined ? { failure } : {}) };
     }

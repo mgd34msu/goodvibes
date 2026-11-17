@@ -1,7 +1,7 @@
 /**
  * Playbook: Plugin Degradation
  *
- * Plugins that failed to start, stopped, or run degraded.
+ * Plugins that failed to start, were quarantined, or are enabled and not running.
  */
 import type { Playbook } from '../types.js';
 import { safeCheck } from '../safe-check.js';
@@ -20,18 +20,20 @@ export const pluginDegradationPlaybook: Playbook = {
   checks: [
     {
       id: 'plugin.health-status',
-      label: 'Plugins in error or degraded',
-      description: 'Plugins whose last lifecycle state is error or degraded.',
+      label: 'Plugins that failed or are quarantined',
+      description: 'Plugins whose last start failed, and plugins under quarantine.',
       run: (ctx) => safeCheck(() => {
-        const { plugins } = ctx.store.getState();
-        const failing = [...plugins.plugins.values()].filter((plugin) => plugin.status === 'error' || plugin.status === 'degraded');
+        const plugins = ctx.plugins?.();
+        if (!plugins) return { passed: true, evaluated: false, summary: 'This app runs no plugins to read.', severity: 'info' };
+        const failing = plugins.filter((plugin) => plugin.startFailure !== undefined || plugin.quarantined);
+        const active = plugins.filter((plugin) => plugin.active).length;
         return {
           passed: failing.length === 0,
           summary: failing.length === 0
-            ? `${plugins.totalActive} plugin(s) active; none in error.`
-            : failing.slice(0, 5).map((plugin) => `${plugin.name}: ${plugin.status}${plugin.error ? ` (${plugin.error})` : ''}`).join('; '),
+            ? `${active} plugin(s) active; none failed or quarantined.`
+            : failing.slice(0, 5).map((plugin) => `${plugin.name}: ${plugin.quarantined ? 'quarantined' : `did not start (${plugin.startFailure})`}`).join('; '),
           severity: failing.length === 0 ? 'info' : 'error',
-          context: { failing: failing.length, active: plugins.totalActive },
+          context: { failing: failing.length, active },
         };
       }),
     },
@@ -40,9 +42,9 @@ export const pluginDegradationPlaybook: Playbook = {
       label: 'Enabled plugins not active',
       description: 'Plugins that are enabled but not running, so their tools are not offered.',
       run: (ctx) => safeCheck(() => {
-        const { plugins } = ctx.store.getState();
-        if (!plugins.initialLoadComplete) return { passed: true, summary: 'Plugins are still loading.', severity: 'info' };
-        const idle = [...plugins.plugins.values()].filter((plugin) => plugin.enabled && !plugin.active);
+        const plugins = ctx.plugins?.();
+        if (!plugins) return { passed: true, evaluated: false, summary: 'This app runs no plugins to read.', severity: 'info' };
+        const idle = plugins.filter((plugin) => plugin.enabled && !plugin.active);
         return {
           passed: idle.length === 0,
           summary: idle.length === 0 ? 'Every enabled plugin is active.' : `Enabled but not active: ${idle.slice(0, 5).map((plugin) => plugin.name).join(', ')}.`,

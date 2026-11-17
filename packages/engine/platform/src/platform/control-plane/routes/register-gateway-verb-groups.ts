@@ -94,7 +94,7 @@ import { registerVoiceSetupGatewayMethods, type VoiceSetupGatewayService } from 
 import { registerBrowserGatewayMethods } from './browser.js';
 import { composeDaemonBrowser, type BrowserCompositionDeps } from './browser-composition.js';
 import { registerCalendarGatewayMethods, type CalendarGatewayService } from './calendar.js';
-import { createDaemonCalendarGatewayService } from './calendar-composition.js';
+import { createDaemonCalendarGatewayService, type CalendarCompositionDeps } from './calendar-composition.js';
 import { registerEmailGatewayMethods, type EmailGatewayService } from './email.js';
 import { registerDaemonEmailVerbs, type EmailCompositionDeps } from './email-composition.js';
 import { readInvocationParams } from './invocation-params.js';
@@ -125,8 +125,8 @@ import { sharedWorkspaceRegisterPath } from '../../workspace/registration/shared
 
 export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps, BrowserCompositionDeps {
   readonly triggerSupervisor?: TriggerOperatorSupervisor | undefined;
-  /** SecretsManager (get/set), VAPID keypair custody lives here, never in config. */
-  readonly secretsManager: VapidSecretStore;
+  /** SecretsManager: VAPID keypair custody (create-once) and the calendar backends' credentials (read). */
+  readonly secretsManager: VapidSecretStore & CalendarCompositionDeps['secretsManager'];
   /** Filled with the owner profile store and occasions service below, which is what lets the `profile` capture tool write. Absent in a host with no agent tools. */
   readonly personalCapture?: Pick<import('../../personal-capture/index.js').PersonalCaptureHolder, 'setPort'> | undefined;
   /**
@@ -737,10 +737,12 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // is read until a diagnosis is asked for.
   if (deps.runtimeBus) {
     const approvals = deps.approvalList;
+    const models = deps.providerRegistry;
     const doctorContext = createOpsCheckContext({
       store: deps.runtimeStore,
       runtimeBus: deps.runtimeBus,
       listApprovals: approvals ? (limit) => approvals.listApprovals(limit) : undefined,
+      contextWindow: models ? () => models.getCurrentModel().contextWindow : undefined,
     });
     deps.disposal?.add('ops doctor observer', doctorContext.dispose);
     registerOpsDoctorGatewayMethod(catalog, doctorContext);

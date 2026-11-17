@@ -2,8 +2,9 @@
  * The live state a playbook's diagnostic checks read: the runtime store, the
  * time of the last runtime event (kept by one long-lived observer), the p95
  * turn-start, cancel and permission-decision latency (one SloCollector), the
- * approvals waiting on the owner, and the session recovery files when this
- * process has them. A source this process does not have is absent, and a
+ * approvals waiting on the owner, the session recovery files, the model's
+ * context window and the plugin manager's view of plugins when this process
+ * has them. A source this process does not have is absent, and a
  * check that needs it reports itself as not evaluated.
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -11,6 +12,7 @@ import type { RuntimeEventBus } from '../events/index.js';
 import type { RuntimeStore } from '../store/index.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { SloCollector } from '../perf/slo-collector.js';
+import type { PluginStatus } from '../../plugins/manager.js';
 
 /** One measured latency: its p95 over the recent window and how many samples it rests on. */
 export interface OpsLatencyReading {
@@ -42,6 +44,10 @@ export interface OpsCheckContext {
   readonly recoveryFilePath?: (() => string | undefined) | undefined;
   /** The pointer to the last session this surface had open, when it has one. */
   readonly lastSessionPointerPath?: string | undefined;
+  /** The context window of the model in use, in tokens, when this process selects models. */
+  readonly contextWindow?: (() => number | undefined) | undefined;
+  /** Every discovered plugin as the plugin manager sees it now, when this process runs plugins. */
+  readonly plugins?: (() => readonly PluginStatus[]) | undefined;
 }
 
 /** The runtime event domains whose traffic counts as "the runtime is doing something". */
@@ -73,6 +79,8 @@ export interface OpsCheckContextOptions {
   readonly listApprovals?: ((limit: number) => readonly { readonly id: string; readonly status: string; readonly createdAt: number; readonly request: { readonly tool: string } }[]) | undefined;
   readonly recoveryFilePath?: (() => string | undefined) | undefined;
   readonly lastSessionPointerPath?: string | undefined;
+  readonly contextWindow?: (() => number | undefined) | undefined;
+  readonly plugins?: (() => readonly PluginStatus[]) | undefined;
   readonly now?: (() => number) | undefined;
 }
 
@@ -101,6 +109,8 @@ export function createOpsCheckContext(options: OpsCheckContextOptions): OpsCheck
     } : {}),
     ...(options.recoveryFilePath ? { recoveryFilePath: options.recoveryFilePath } : {}),
     ...(options.lastSessionPointerPath ? { lastSessionPointerPath: options.lastSessionPointerPath } : {}),
+    ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}),
+    ...(options.plugins ? { plugins: options.plugins } : {}),
     dispose: () => { observer.dispose(); slo.dispose(); },
   };
 }

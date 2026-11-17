@@ -42,8 +42,8 @@ export const compactionFailurePlaybook: Playbook = {
       label: 'Context window use',
       description: 'The estimated size of the conversation against the model\'s context window.',
       run: (ctx) => safeCheck(() => {
-        const { conversation, model } = ctx.store.getState();
-        const window = model.contextWindow;
+        const { conversation } = ctx.store.getState();
+        const window = ctx.contextWindow?.();
         if (!window) return { passed: true, evaluated: false, summary: 'The model\'s context window is not known.', severity: 'info' };
         const share = conversation.estimatedContextTokens / window;
         return {

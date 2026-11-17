@@ -402,26 +402,30 @@ export class McpRegistry {
   }
 
   /**
-   * The tool catalog as one read: `listAllTools` lists every connected server
-   * at once, and `assertCurrent` refuses once anything the listing depended on
-   * changed (a server connected, dropped or changed its tools, a policy or
-   * quarantine change), so a caller never acts on a mixed or partial view.
+   * The tool catalog as one read: `listAllTools` lists every server connected
+   * at the capture at once, and `assertCurrent` refuses once anything the
+   * listing depended on changed (one of those servers dropped, was replaced or
+   * changed its tools, a policy or quarantine change, a configuration change),
+   * so a caller never acts on a mixed view. A server that finishes starting
+   * after the capture is not part of it and does not refuse it: its tools are
+   * listed by the next read, and the caller reports it as still starting.
    */
   captureToolCatalog(options?: McpToolCallOptions): { readonly listAllTools: () => Promise<readonly RegisteredTool[]>; readonly assertCurrent: () => void } {
     const revision = this.#revision;
-    const sources = [...this.clients].map(([name, client]) => ({ name, client, revision: client.catalogRevision, connected: client.isConnected }));
+    const sources = [...this.clients].filter(([, client]) => client.isConnected)
+      .map(([name, client]) => ({ name, client, revision: client.catalogRevision }));
     const assertCurrent = () => {
       options?.signal?.throwIfAborted(); options?.assertCurrent?.();
-      if (this.#revision !== revision || this.clients.size !== sources.length || sources.some((source) => this.clients.get(source.name) !== source.client
-        || source.client.catalogRevision !== source.revision || source.client.isConnected !== source.connected))
-        throw new Error('The MCP tool catalog changed while it was being read (a server connected, disconnected, changed its tools or its policy). List the tools again.');
+      if (this.#revision !== revision || sources.some((source) => this.clients.get(source.name) !== source.client
+        || source.client.catalogRevision !== source.revision || !source.client.isConnected))
+        throw new Error('The MCP tool catalog changed while it was being read (a listed server disconnected or changed its tools, or a server\'s policy or configuration changed). List the tools again.');
     };
     assertCurrent();
     let pending: Promise<readonly RegisteredTool[]> | undefined;
     const listAllTools = () => {
       assertCurrent();
       pending ??= (async () => {
-        const listed = await Promise.all(sources.filter((source) => source.connected).map(async (source) => {
+        const listed = await Promise.all(sources.map(async (source) => {
           const tools = await this.#loadCatalog(source.name, source.client, () => source.client.listTools(options?.signal), options?.signal);
           return tools.map((tool) => ({ qualifiedName: `mcp:${source.name}:${tool.name}`, serverName: source.name, toolName: tool.name, description: tool.description }));
         }));
@@ -1107,7 +1111,10 @@ export class McpRegistry {
       await executePolicyCheck(() => client.connect(), signal);
       assertHostCurrent(); assertProcessCurrent();
       this.permissions.registerServer(name, this.policyProfile(name, serverConfig));
-      this.clients.set(name, client); this.#revision++;
+      // A server that finishes starting does not change a catalog captured
+      // before it: that read listed the servers connected then, and the client
+      // it would replace is checked by identity there.
+      this.clients.set(name, client);
       this.connectFailures.delete(name);
       established = true;
       releaseConfiguration(); releaseConfiguration = () => {};

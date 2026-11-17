@@ -1,5 +1,5 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogSnapshot } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
+import { captureCatalogSnapshot, captureCatalogSnapshotGuard } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
@@ -36,6 +36,52 @@ type McpToolRecord = Awaited<ReturnType<McpApi['listAllTools']>>[number];
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/** Phases of a server coming up on its own: no tools are listed for it yet, and the next read may show them. */
+const PENDING_PHASES: ReadonlySet<string> = new Set(['starting', 'negotiating', 'restart-wait']);
+
+function isPending(server: McpServerRecord): boolean {
+  return !server.connected && server.phase !== undefined && PENDING_PHASES.has(server.phase);
+}
+
+function connectionWord(server: McpServerRecord): string {
+  if (server.connected) return 'connected';
+  if (server.phase === 'restart-wait') return 'reconnecting';
+  return isPending(server) ? server.phase ?? 'disconnected' : 'disconnected';
+}
+
+/**
+ * Servers still starting or reconnecting when the list was read. The Agent
+ * starts its servers in the background on the first read, so the first list
+ * is often partial; it says so and when to list again, as the engine mcp tool does.
+ */
+function pendingServersNote(servers: readonly McpServerRecord[]): Record<string, unknown> {
+  const starting = servers.filter(server => isPending(server) && server.phase !== 'restart-wait').map(server => server.name);
+  const reconnecting = servers.filter(server => isPending(server) && server.phase === 'restart-wait').map(server => server.name);
+  if (starting.length === 0 && reconnecting.length === 0) return {};
+  return {
+    ...(starting.length > 0 ? { starting } : {}),
+    ...(reconnecting.length > 0 ? { reconnecting } : {}),
+    partial: true,
+    next: reconnecting.length > 0
+      ? 'Some servers are starting or reconnecting on their own; list again after their next attempt.'
+      : 'These servers are still starting; list again in a few seconds.',
+  };
+}
+
+/**
+ * The part of a server record a read's evidence depends on: trust, role,
+ * paths, hosts, schema freshness and quarantine. Connection progress (a server
+ * finishing its start during the read) is reported as `starting`, not refused.
+ */
+function serverPolicyView(servers: readonly McpServerRecord[]): readonly Record<string, unknown>[] {
+  return servers.map(({ connected: _connected, phase: _phase, lastError: _lastError, reconnect: _reconnect,
+    protocolVersion: _protocolVersion, protocolEra: _protocolEra, transport: _transport, ...policy }) => policy);
+}
+
+function needsAttention(server: McpServerRecord): boolean {
+  return (!server.connected && !isPending(server)) || server.schemaFreshness === 'quarantined';
 }
 
 function readLimit(value: unknown, fallback: number): number {
@@ -140,7 +186,7 @@ function describeServer(
       },
     } : {
       ...(toolsRead ? { toolCount: tools.length } : {}),
-      summary: previewHarnessText(`${server.connected ? 'connected' : 'disconnected'} ${server.trustMode} ${server.schemaFreshness}`),
+      summary: previewHarnessText(`${connectionWord(server)} ${server.trustMode} ${server.schemaFreshness}`),
     }),
   };
 }
@@ -170,8 +216,9 @@ function captureMcpRead(context: McpCatalogContext, args: AgentHarnessMcpArgs, o
   request.retain(assertCatalog, 'read-catalog.mcp.catalog');
   const originalServers = listServers.call(api);
   const servers = captureCatalogSnapshot(originalServers);
+  const serverPolicy = captureCatalogSnapshotGuard(serverPolicyView(originalServers));
   const assertServers = () => {
-    assertOwner(); servers.assertCurrent(originalServers); servers.assertCurrent(listServers.call(api)); assertOwner();
+    assertOwner(); servers.assertCurrent(originalServers); serverPolicy(serverPolicyView(listServers.call(api))); assertOwner();
   };
   request.retain(assertServers, 'read-catalog.mcp.servers');
   return { request, source: { api, listTools, catalog, ownedListTools, servers: servers.captured, assertOwner } };
@@ -186,13 +233,18 @@ async function captureMcpTools(source: NonNullable<ReturnType<typeof captureMcpR
   catch (error) { source.assertOwner(); request.assertCurrent(); logger.warn('MCP tool catalog could not be read', { error: summarizeError(error) }); throw new ToolInputProjectionError('held'); }
   source.assertOwner(); request.assertCurrent();
   const tools = captureCatalogSnapshot(originalTools);
+  // A server not connected when the read began may list its tools before it
+  // ends; those were never part of the read, so only the others are compared.
+  const notConnected = new Set(source.servers.filter(server => !server.connected).map(server => server.name));
+  const settled = (list: readonly McpToolRecord[]) => list.filter(tool => !notConnected.has(tool.serverName));
+  const settledTools = captureCatalogSnapshotGuard(settled(originalTools));
   request.retain(() => { source.assertOwner(); tools.assertCurrent(originalTools); }, 'read-catalog.mcp.tools');
   return { tools: tools.captured, assertFresh: async () => {
     source.assertOwner(); request.assertCurrent();
     let current: readonly McpToolRecord[];
     try { current = await source.listTools.call(source.api); }
     catch { source.assertOwner(); request.assertCurrent(); throw new ToolInputProjectionError('held'); }
-    source.assertOwner(); tools.assertCurrent(current); request.assertCurrent(); tools.assertCurrent(current);
+    source.assertOwner(); settledTools(settled(current)); request.assertCurrent(); settledTools(settled(current));
   } };
 }
 
@@ -210,7 +262,8 @@ export function mcpServerCatalogStatus(context: McpCatalogContext): Record<strin
     modes: ['mcp_servers', 'mcp_server'],
     servers: servers.length,
     connected: servers.filter((server) => server.connected).length,
-    attention: servers.filter((server) => !server.connected || server.schemaFreshness === 'quarantined').length,
+    attention: servers.filter(needsAttention).length,
+    ...pendingServersNote(servers),
     readOnly: true,
   };
 }
@@ -234,7 +287,8 @@ export async function mcpServerSummary(context: McpCatalogContext, args: AgentHa
     return { servers: filtered.map(server => describeServer(server, { includeParameters, toolsRead: includeParameters || query.length > 0, tools: grouped.get(server.name) ?? [] })),
       returned: filtered.length, total: captured.servers.length,
       connected: captured.servers.filter(server => server.connected).length,
-      attention: captured.servers.filter(server => !server.connected || server.schemaFreshness === 'quarantined').length,
+      attention: captured.servers.filter(needsAttention).length,
+      ...pendingServersNote(captured.servers),
       ...(query ? { judgments: selected.judgments } : {}),
       policy: 'Read-only MCP server posture. Use confirmed workspace actions or slash-command mirrors for add/remove/reload/trust/role/quarantine mutations.' };
   });
@@ -258,8 +312,8 @@ export async function describeHarnessMcpServer(context: McpCatalogContext, args:
     current.assertCurrent?.();
     if (!selected) return { status: 'missing_lookup', usage: `No MCP server was selected for ${lookup.input}. Use mode:"mcp_servers" to inspect MCP server ids.` };
     const grouped = toolsByServer(captured.tools);
-    return { status: 'found', server: describeServer(selected, { includeParameters: true, tools: grouped.get(selected.name) ?? [],
-      lookup: { ...lookup, resolvedBy: exact ? 'id' : insensitive ? 'case-insensitive-id' : 'selection' } }) };
+    return { status: 'found', server: { ...describeServer(selected, { includeParameters: true, tools: grouped.get(selected.name) ?? [],
+      lookup: { ...lookup, resolvedBy: exact ? 'id' : insensitive ? 'case-insensitive-id' : 'selection' } }), ...pendingServersNote([selected]) } };
   });
   await acquired.assertFresh(); request.assertCurrent();
   return result;

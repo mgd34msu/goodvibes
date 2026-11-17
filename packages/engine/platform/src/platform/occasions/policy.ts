@@ -7,11 +7,10 @@
  * gives its switches, and for the same reason: a setting that needs a daemon
  * restart to take effect is a setting the owner will believe they changed.
  *
- * The accessor is string-keyed. The `occasions.*` keys live in the config
- * defaults tree and the flat settings surface, and the daemon adapts its
- * ConfigManager to this narrow interface, the same adaptation the check-in
- * uses, and for the same reason: the grandfathered ConfigKey union is
- * shrink-only.
+ * The accessor is string-keyed so the feature depends on a narrow get/set
+ * surface, not the whole ConfigManager. The `occasions.*` keys are ordinary
+ * ConfigKeys (fields of OccasionsConfig), and the daemon adapts its
+ * ConfigManager to this interface, the same adaptation the check-in uses.
  */
 import { OCCASIONS_CONFIG_KEYS } from './types.js';
 import { occasionsConfigDefaults } from '../config/schema-domain-occasions.js';

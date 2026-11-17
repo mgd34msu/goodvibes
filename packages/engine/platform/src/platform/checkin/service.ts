@@ -45,11 +45,11 @@ import {
 const DEFAULT_CADENCE = '0 */4 * * *';
 
 /**
- * The narrow config surface the check-in reads/writes. Intentionally string-
- * keyed rather than typed against the ConfigKey union: the checkin.* keys live
- * in the config DEFAULTS tree (schema-domain-runtime.ts) and flat settings, and
- * the daemon binds this via a small adapter over its ConfigManager, this keeps
- * the (grandfathered, shrink-only) schema-types.ts ConfigKey union untouched.
+ * The narrow config surface the check-in reads/writes. String-keyed so the
+ * check-in depends on a get/set surface, not the whole ConfigManager; the
+ * checkin.* keys are ordinary ConfigKeys (fields of CheckinConfig,
+ * schema-domain-runtime.ts), and the daemon binds this via a small adapter
+ * over its ConfigManager.
  */
 export interface CheckinConfigAccess {
   get(key: string): unknown;

@@ -2,11 +2,9 @@
  * recall-files-config.ts, TUI-local synthetic setting for the memory file
  * projection directory (`memory.projection.dir`).
  *
- * `memory.projection.dir` is not in the platform's ConfigKey union, same
- * situation as worktree.setup.commands (see worktree-setup-config.ts, which
- * this file mirrors): a brand-new top-level config section with no
- * DEFAULT_CONFIG entry, so ConfigManager.get()/set() path resolution can
- * throw for it. Read defensively; the settings-modal write path already
+ * `memory.projection.dir` is not a ConfigKey (MemoryConfig has no projection
+ * field), so it has no DEFAULT_CONFIG entry and is read defensively, as a
+ * product-owned path; the settings-modal write path already
  * degrades a resolution failure into an honest "Save failed" message.
  *
  * Default: `.goodvibes/memory/projection`, relative to the project working

@@ -225,7 +225,7 @@ Notifications are gated by `behavior.notifyOnlyWhenUnfocused` (on by default). T
 
 ### Wiring
 
-The threshold is read inside `wireTurnEventHandlers` on every `TURN_COMPLETED` event. The `behavior.notifyAfterSeconds` key is a TUI-local synthetic setting; it is not yet in the platform ConfigKey union.
+The threshold is read inside `wireTurnEventHandlers` on every `TURN_COMPLETED` event. The `behavior.notifyAfterSeconds` key is a TUI-local synthetic setting; it is not a field of the platform config interfaces, so it is not a typed `ConfigKey`.
 
 ## Related docs
 

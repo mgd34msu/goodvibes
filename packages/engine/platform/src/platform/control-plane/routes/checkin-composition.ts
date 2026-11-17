@@ -16,9 +16,8 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
     const channelDeliveryRouter = deps.channelDeliveryRouter;
     const automation = deps.automationManager;
     const sessionLister = deps.sessionLister;
-    // The checkin.* keys are string-keyed (they live in the config defaults tree,
-    // not the grandfathered ConfigKey union); adapt the daemon's ConfigManager to
-    // the check-in's string-keyed config surface.
+    // The check-in reads its checkin.* ConfigKeys through a string-keyed
+    // surface; adapt the daemon's ConfigManager to it.
     const configManager = deps.configManager;
     const onDidInvalidate = deps.configManager.onDidInvalidate.bind(configManager);
     const subscribe = configManager.subscribe?.bind(configManager);

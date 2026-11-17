@@ -319,7 +319,7 @@ export function buildSettingGroups(
 
   // Inject the memory.projection.dir synthetic entry into the storage
   // category (alongside codeIndexEnabled, both are local-storage posture
-  // settings). Not in the platform ConfigKey union, same rationale as above.
+  // settings). Not a ConfigKey (no GoodVibesConfig field), same rationale as above.
   if (storageEntries && !storageEntries.some((e) => e.setting.key === MEMORY_PROJECTION_DIR_CONFIG_KEY)) {
     storageEntries.push(buildMemoryProjectionDirSyntheticEntry(configManager));
   }
@@ -394,7 +394,7 @@ export const NOTIFY_AFTER_SECONDS_DEFAULT_SETTING = 60;
 /**
  * The synthetic ConfigSetting descriptor for behavior.notifyAfterSeconds.
  *
- * This key is TUI-local and is not yet in the platform ConfigKey union. The
+ * This key is TUI-local and is not a ConfigKey (no GoodVibesConfig field). The
  * descriptor is injected into the behavior settings group so users can
  * configure the long-task push notification threshold from /config behavior.
  *
@@ -436,7 +436,7 @@ export function buildNotifyAfterSecondsSyntheticEntry(configManager: Pick<Config
 /**
  * The synthetic ConfigSetting descriptor for behavior.budgetAlertUsd.
  *
- * This key is TUI-local and is not yet in the platform ConfigKey union, it never
+ * This key is TUI-local and is not a ConfigKey (no GoodVibesConfig field), it never
  * appeared in CONFIG_SCHEMA, so it was invisible to every schema-driven
  * inspection surface (/config, /settings-sync show <key>) even though the
  * value round-trips correctly through configManager.get/set. The descriptor
@@ -475,8 +475,8 @@ export function buildBudgetAlertUsdSyntheticEntry(configManager: Pick<ConfigMana
 // ---------------------------------------------------------------------------
 
 /**
- * The five alert-gating booleans, all TUI-local (not yet in the platform
- * ConfigKey union), all defaulting to on. Read/written generically by
+ * The five alert-gating booleans, all TUI-local (no GoodVibesConfig field,
+ * so not ConfigKeys), all defaulting to on. Read/written generically by
  * core/alert-gating.ts (readBooleanConfig) and the per-alert-class modules
  * (budget-breach-notifier.ts, approval-alert.ts, turn-event-wiring.ts,
  * long-task-notifier.ts), this is only the settings-modal-visible surface.
@@ -530,7 +530,7 @@ export function buildNotifyAlertSyntheticEntries(configManager: Pick<ConfigManag
 
 /**
  * The OSC 9 in-terminal desktop-notification toggles + the audible bell.
- * TUI-local synthetic booleans (not in the platform ConfigKey union), each carrying
+ * TUI-local synthetic booleans (no GoodVibesConfig field, so not ConfigKeys), each carrying
  * its OWN default (unlike the always-on alert toggles above): approval-wait
  * on, turn-end/agent-blocked off, bell off. Read generically by
  * core/terminal-notifier.ts (readBooleanConfig); this is only the

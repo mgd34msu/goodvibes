@@ -3,7 +3,7 @@ import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesDaemonHome, typ
 import { NOTIFICATIONS_METADATA_ONLY_KEY, NOTIFICATIONS_METADATA_ONLY_SETTING } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 // The host key is validated and registered on each Agent instance before load.
-// platform ConfigKey remains the builtin-key union; Agent uses a validated host handle.
+// platform ConfigKey covers only GoodVibesConfig fields; Agent uses a validated host handle.
 export const AGENT_NOTIFICATIONS_METADATA_ONLY_KEY = NOTIFICATIONS_METADATA_ONLY_KEY;
 export const AGENT_HOSTED_RESEARCH_SCREENING_KEY = 'tools.hostedResearchScreening';
 export type AgentHostSettingKey = typeof AGENT_NOTIFICATIONS_METADATA_ONLY_KEY | typeof AGENT_HOSTED_RESEARCH_SCREENING_KEY;

@@ -43,7 +43,7 @@ import type { ConfigKey, ConfigManager } from '../config/index.js';
 import { readBooleanConfig } from './alert-gating.js';
 
 /**
- * Host-local synthetic config key (not in the ConfigKey union) that
+ * Host-local synthetic config key (no GoodVibesConfig field, so not a ConfigKey) that
  * gates the code index's auto-build on construction. Default OFF, see this
  * module's header doc. Surfaced in /config via a synthetic entry
  * (settings-modal-data.ts) exactly like behavior.notifyAfterSeconds.

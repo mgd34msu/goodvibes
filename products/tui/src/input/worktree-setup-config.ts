@@ -5,8 +5,8 @@
  * Both are rows of the platform's settings schema (schema-domain-lists.ts).
  * They control what runs when a fresh isolated worktree is provisioned (setup
  * commands, then untracked-file carry-over), and this screen gives them a list
- * editor rather than the JSON editor other object rows get. The keys are not
- * yet arms of the platform's ConfigKey union, hence the two casts below.
+ * editor rather than the JSON editor other object rows get. Both are
+ * ConfigKeys (fields of WorktreeConfig).
  *
  * Both keys hold a JSON array of strings on disk. The settings modal's
  * inline editor is a single-line text field, so, matching the platform's own
@@ -17,8 +17,8 @@
 import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SettingEntry } from './settings-modal-types.ts';
 
-export const WORKTREE_SETUP_COMMANDS_CONFIG_KEY = 'worktree.setup.commands' as ConfigKey;
-export const WORKTREE_SETUP_CARRY_OVER_GLOBS_CONFIG_KEY = 'worktree.setup.carryOverGlobs' as ConfigKey;
+export const WORKTREE_SETUP_COMMANDS_CONFIG_KEY: ConfigKey = 'worktree.setup.commands';
+export const WORKTREE_SETUP_CARRY_OVER_GLOBS_CONFIG_KEY: ConfigKey = 'worktree.setup.carryOverGlobs';
 
 const WORKTREE_SETUP_LIST_CONFIG_KEYS: ReadonlySet<ConfigKey> = new Set([
   WORKTREE_SETUP_COMMANDS_CONFIG_KEY,

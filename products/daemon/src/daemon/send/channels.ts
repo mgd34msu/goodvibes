@@ -18,7 +18,7 @@ const DESTINATION_KEY_BY_SURFACE_ID = {
   bluebubbles: 'surfaces.bluebubbles.defaultChatGuid',
   mattermost: 'surfaces.mattermost.defaultChannelId',
   matrix: 'surfaces.matrix.defaultRoomId',
-  // Not cast: every value is checked against the real ConfigKey union, so a
+  // Not cast: every value is checked against ConfigKey (the leaf paths of GoodVibesConfig), so a
   // key that is renamed or misspelled in the schema fails the build here
   // instead of reading `undefined` at send time and reporting the channel as
   // unconfigured.

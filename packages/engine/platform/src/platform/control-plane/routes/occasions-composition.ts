@@ -154,8 +154,8 @@ export function composeOccasions(
     state,
     ...(deps.calendar === undefined ? {} : { calendar: deps.calendar }),
     // Read live, per call, so every `occasions.*` setting is a real toggle
-    // rather than a restart-only one. The keys are string-addressed because the
-    // ConfigKey union is shrink-only and this narrows to it at the boundary.
+    // rather than a restart-only one. The feature addresses its occasions.*
+    // ConfigKeys by string; this narrows them to ConfigKey at the boundary.
     config: {
       ...(deps.configManager.getConfigurationIncarnation ? { getConfigurationIncarnation: () => deps.configManager.getConfigurationIncarnation!() } : {}),
       get: (key: string): unknown => deps.configManager.get(key as ConfigKey),

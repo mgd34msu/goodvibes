@@ -168,6 +168,8 @@ export interface HostedSessionManagerOptions {
    * waiting for it are marked not deliverable, since it cannot be opened again.
    */
   readonly ownerQuestions?: import('./session-runtime.js').HostedSessionRuntimeOptions['ownerQuestions'];
+  /** The daemon's trigger supervisor, for each hosted session's `trigger` tool. */
+  readonly triggers?: import('./session-runtime.js').HostedSessionRuntimeOptions['triggers'];
   /** Whether a workspace root is acceptable. Omitted ⇒ any absolute path. */
   readonly isWorkspaceUsable?: ((workspaceRoot: string) => boolean) | undefined;
   /**
@@ -569,6 +571,7 @@ export class HostedSessionManager {
         permissionModeChanged: mode => this.savePermissionMode(sessionId, mode),
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
         ...(this.options.ownerQuestions ? { ownerQuestions: this.options.ownerQuestions } : {}),
+        ...(this.options.triggers ? { triggers: this.options.triggers } : {}),
         attended: () => this.hasAttachedClient(sessionId),
       });
       const record: HostedSessionRecord = {
@@ -908,7 +911,8 @@ export class HostedSessionManager {
   }
 
   private snapshotNative(live: LiveSession): NativeConversationContinuation {
-    const messages = this.history(live);
+    // Continuation evidence is the transcript text: role and content only.
+    const messages = this.history(live).map(({ role, content }) => ({ role, content }));
     const context = this.continuationOwner(live).capture(live.record.id, messages);
     return context;
   }
@@ -1030,10 +1034,17 @@ export class HostedSessionManager {
   private history(live: LiveSession): readonly HostedSessionHistoryMessage[] {
     const conversation = live.runtime?.conversation;
     if (!conversation) return [];
-    return conversation.getMessageSnapshot().map((message) => ({
-      role: message.role,
-      content: typeof message.content === 'string' ? message.content : JSON.stringify(message.content),
-    }));
+    return conversation.getMessageSnapshot().map((message): HostedSessionHistoryMessage => {
+      const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+      // A mirror or resumed copy keeps the model's tool history: which calls an
+      // assistant turn made and which call each tool result answers.
+      if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0) {
+        return { role: message.role, content,
+          toolCalls: message.toolCalls.map((call) => ({ id: call.id, name: call.name, arguments: call.arguments })) };
+      }
+      if (message.role === 'tool') return { role: message.role, content, callId: message.callId };
+      return { role: message.role, content };
+    });
   }
 
   /** Read a hosted session's history without attaching. */
@@ -1110,6 +1121,7 @@ export class HostedSessionManager {
         permissionModeChanged: mode => this.savePermissionMode(live.record.id, mode),
         ...(this.options.cloudflareAuthToken ? { cloudflareAuthToken: this.options.cloudflareAuthToken } : {}),
         ...(this.options.ownerQuestions ? { ownerQuestions: this.options.ownerQuestions } : {}),
+        ...(this.options.triggers ? { triggers: this.options.triggers } : {}),
         attended: () => this.hasAttachedClient(live.record.id),
       });
       live.runtime = runtime;

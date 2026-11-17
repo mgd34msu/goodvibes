@@ -114,6 +114,7 @@ export type {
   CreateHostedSessionInput,
   HostedDetachPolicy,
   HostedSessionHistoryMessage,
+  HostedSessionHistoryToolCall,
   HostedSessionLifecycleEvent,
   HostedSessionRecord,
   HostedSessionStatus,

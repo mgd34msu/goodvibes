@@ -129,6 +129,17 @@ export interface HostedSessionHistoryMessage {
   readonly role: 'user' | 'assistant' | 'system' | 'tool';
   readonly content: string;
   readonly at?: number | undefined;
+  /** The tool calls an assistant row made, so a mirror keeps the model's tool history. */
+  readonly toolCalls?: readonly HostedSessionHistoryToolCall[] | undefined;
+  /** The call a tool row answers. */
+  readonly callId?: string | undefined;
+}
+
+/** One tool call of an assistant history row. */
+export interface HostedSessionHistoryToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: Readonly<Record<string, unknown>>;
 }
 
 /** The lifecycle transitions published on the hosted-session event channel. */

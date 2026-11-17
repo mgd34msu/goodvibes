@@ -79,6 +79,14 @@ const HOSTED_SESSION_HISTORY_SCHEMA = arraySchema(objectSchema({
   role: HISTORY_ROLE_SCHEMA,
   content: STRING_SCHEMA,
   at: NUMBER_SCHEMA,
+  /** An assistant row's tool calls. */
+  toolCalls: arraySchema(objectSchema({
+    id: STRING_SCHEMA,
+    name: STRING_SCHEMA,
+    arguments: { type: 'object', additionalProperties: true },
+  }, ['id', 'name', 'arguments'])),
+  /** The call a tool row answers. */
+  callId: STRING_SCHEMA,
 }, ['role', 'content']));
 
 export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMethodDescriptor[] = [

@@ -1,4 +1,5 @@
-import { isAbsolute, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 import { WorkspaceCheckpointManager, checkpointEligibilityRefusal } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from './index.js';
@@ -285,13 +286,18 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
             if (await holds(hosted).catch(() => false)) return gatewayOf(hosted, hostedRoot);
           }
           if (await holds(daemon).catch(() => false)) return undefined;
-          // Not in an open store: the workspaces of recorded hosted sessions not opened since the daemon started.
+          // Not in an open store: the workspaces of recorded hosted sessions not
+          // opened since the daemon started. Each one's manifest file is read
+          // directly (one small read, no git, no bus subscription), and only the
+          // store that lists the id is opened, so a mistyped or stale id opens
+          // nothing.
           const unreadable: string[] = [];
           for (const recorded of sources?.hostedWorkspaces() ?? []) {
             if (!isAbsolute(recorded)) continue;
             const hostedRoot = resolve(recorded);
             if (isDaemonRoot(hostedRoot) || workspaces.has(hostedRoot)) continue;
             try {
+              if (!manifestLists(hostedRoot, sources!.homeDirectory, id)) continue;
               const hosted = acquire(hostedRoot);
               if (hosted && await holds(hosted)) return gatewayOf(hosted, hostedRoot);
             } catch (error) {
@@ -317,6 +323,29 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
   };
   byBus.set(runtimeBus, registry);
   return registry;
+}
+
+/**
+ * Whether the checkpoint manifest of a workspace not opened yet lists `id`,
+ * read from the file without opening the store: the daemon-scoped store a
+ * hosted workspace's manager uses, or the legacy in-workspace store it would
+ * migrate on first use. False when neither manifest exists (no checkpoints);
+ * throws when one exists but cannot be read, so the caller names it.
+ */
+function manifestLists(workspaceRoot: string, homeDirectory: string, id: string): boolean {
+  const scoped = createSessionSurface({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDirectory: workspaceRoot, homeDirectory }).checkpointsDir;
+  for (const dir of [scoped, join(workspaceRoot, '.goodvibes', 'checkpoints')]) {
+    let text: string;
+    try {
+      text = readFileSync(join(dir, 'index.json'), 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    const checkpoints = (JSON.parse(text) as { readonly checkpoints?: unknown }).checkpoints;
+    if (Array.isArray(checkpoints) && checkpoints.some((entry) => (entry as { readonly id?: unknown } | null)?.id === id)) return true;
+  }
+  return false;
 }
 
 /** A gateway whose every call refuses with `failure`: a known hosted session whose store cannot be opened. */

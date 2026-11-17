@@ -6,6 +6,7 @@ import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUn
 import { screenOutboundForCardMaterial, CardMaterialRefusedError } from './payments-channel-guard.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
+import { readFlag, readString } from './tool-args.js';
 
 interface AgentNotificationConfigReader {
   getCategory(category: string): unknown;
@@ -28,14 +29,6 @@ type JsonRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 'yes';
 }
 
 function configuredWebhookUrls(configManager: AgentNotificationConfigReader): readonly string[] {
@@ -109,7 +102,7 @@ export function createAgentNotifyTool(
         const message = readString(args.message);
         if (!message) return failure('message is required.');
         const urls = configuredWebhookUrls(configManager);
-        if (readBoolean(args.preview)) return output(preview(message, urls.length));
+        if (readFlag(args.preview, 'preview', false)) return output(preview(message, urls.length));
         if (urls.length === 0) {
           return failure('No Agent notification webhook targets are configured. Add one from the Channels workspace before sending notifications.');
         }

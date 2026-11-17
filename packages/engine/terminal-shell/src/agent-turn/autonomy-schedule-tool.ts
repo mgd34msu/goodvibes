@@ -6,6 +6,7 @@ import { buildAutonomySchedulePreview, parseAutonomyScheduleArgs } from './auton
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import type { AgentInProcessHost } from './in-process-host.js';
+import { readFlag, readString } from './tool-args.js';
 
 type AutonomyScheduleKind = 'at' | 'every' | 'cron';
 
@@ -32,17 +33,9 @@ function isScheduleKind(value: unknown): value is AutonomyScheduleKind {
   return typeof value === 'string' && SCHEDULE_KINDS.includes(value as AutonomyScheduleKind);
 }
 
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
 function readOptionalString(value: unknown): string | null {
   const text = readString(value);
   return text ? text : null;
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 'yes';
 }
 
 // Model-written text goes in as `--flag=value`, so a value that is itself the
@@ -81,7 +74,7 @@ function buildAutonomyScheduleArgs(rawArgs: AgentAutonomyScheduleToolArgs): read
   addOptionalArg(args, '--delivery-channel', rawArgs.deliveryChannel);
   addOptionalArg(args, '--delivery-route', rawArgs.deliveryRoute);
   addOptionalArg(args, '--delivery-webhook', rawArgs.deliveryWebhook);
-  if (readBoolean(rawArgs.disabled)) args.push('--disabled');
+  if (readFlag(rawArgs.disabled, 'disabled', false)) args.push('--disabled');
   addOptionalArg(args, '--explicit-user-request', rawArgs.explicitUserRequest);
   return args;
 }

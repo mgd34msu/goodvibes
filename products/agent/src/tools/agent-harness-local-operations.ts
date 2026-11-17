@@ -20,6 +20,7 @@ import {
   splitList,
 } from '../input/agent-workspace-editors.ts';
 import type { AgentWorkspaceAction, AgentWorkspaceLocalEditor, AgentWorkspaceLocalOperation } from '../input/agent-workspace-types.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessLocalOperationArgs {
   readonly fields?: unknown;
@@ -56,10 +57,6 @@ function output(value: unknown): HarnessResult {
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function isScalarField(entry: unknown): entry is string | number | boolean {

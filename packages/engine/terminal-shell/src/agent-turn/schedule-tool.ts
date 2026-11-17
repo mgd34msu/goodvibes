@@ -4,6 +4,7 @@ import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/r
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { randomUUID } from 'node:crypto';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { readString } from './tool-args.js';
 
 type ScheduleAction =
   | 'list'
@@ -53,10 +54,6 @@ const LIFECYCLE_ACTIONS: Readonly<Record<'run' | 'pause' | 'resume' | 'delete', 
   resume: 'automation.schedules.enable',
   delete: 'automation.schedules.delete',
 };
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readScheduleId(args: AgentScheduleToolArgs): string {
   return readString(args.scheduleId) || readString(args.jobId) || readString(args.targetId);

@@ -13,6 +13,7 @@ import {
 import { clampReadLimit } from './read-helpers.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
+import { readString } from './tool-args.js';
 
 export interface AgentResearchSourcesToolArgs {
   readonly mode?: unknown | undefined;
@@ -43,10 +44,6 @@ type AgentResearchSourcesMode = 'list' | 'search' | 'show' | 'bundle' | 'add' | 
 const MODES: readonly AgentResearchSourcesMode[] = ['list', 'search', 'show', 'bundle', 'add', 'review', 'reject', 'use', 'delete'];
 const STATUS_VALUES: readonly AgentResearchSourceStatus[] = ['candidate', 'reviewed', 'rejected', 'used'];
 const CREDIBILITY_VALUES: readonly AgentResearchSourceCredibility[] = ['unreviewed', 'low', 'medium', 'high', 'mixed'];
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readMode(value: unknown): AgentResearchSourcesMode {
   return typeof value === 'string' && MODES.includes(value as AgentResearchSourcesMode) ? value as AgentResearchSourcesMode : 'list';

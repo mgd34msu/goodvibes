@@ -26,6 +26,7 @@ import type {
   ProcessCapabilityStatus,
 } from './agent-harness-background-processes-types.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 export type {
   AgentHarnessBackgroundProcessArgs,
   BackgroundProcessResolution,
@@ -37,10 +38,6 @@ const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 const PROCESS_PARITY_METHODS = ['terminal(background=true)', 'process(list)', 'process(poll)', 'process(wait)', 'process(log)', 'process(kill)', 'process(write)', 'pty', 'sudo'] as const;
 const STDIN_WRITE_METHOD_NAMES = ['writeInput'] as const;
 const PTY_METHOD_NAMES = ['spawnPty', 'openPty', 'createPty', 'pty'] as const;
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readNumber(value: unknown, fallback: number): number {
   const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;

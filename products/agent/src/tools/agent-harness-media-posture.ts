@@ -11,6 +11,7 @@ import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { agentWakeCapabilities } from '../core/wake-provision-status.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessMediaArgs {
   readonly mediaProviderId?: unknown;
@@ -47,10 +48,6 @@ interface VoiceInteractionWorkflow {
   readonly setupRoutes: readonly string[];
   readonly evidence: Record<string, unknown>;
   readonly policy: string;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readLimit(value: unknown, fallback: number): number {

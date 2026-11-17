@@ -8,6 +8,7 @@ import { confirmParameter, requestParameter } from './effect-admission.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './personal-ops-effect-receipt.js';
+import { readFlag, readString } from './tool-args.js';
 
 function createdScheduleId(output: string | undefined): string | undefined {
   try {
@@ -41,17 +42,9 @@ function isScheduleKind(value: unknown): value is ReminderScheduleKind {
   return typeof value === 'string' && SCHEDULE_KINDS.includes(value as ReminderScheduleKind);
 }
 
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
 function readOptionalString(value: unknown): string | null {
   const text = readString(value);
   return text ? text : null;
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 'yes';
 }
 
 function addOptionalArg(args: string[], flag: string, value: unknown): void {
@@ -85,7 +78,7 @@ function buildReminderScheduleArgs(rawArgs: AgentReminderScheduleToolArgs): read
   addOptionalArg(args, '--delivery-channel', rawArgs.deliveryChannel);
   addOptionalArg(args, '--delivery-route', rawArgs.deliveryRoute);
   addOptionalArg(args, '--delivery-webhook', rawArgs.deliveryWebhook);
-  if (readBoolean(rawArgs.disabled)) args.push('--disabled');
+  if (readFlag(rawArgs.disabled, 'disabled', false)) args.push('--disabled');
 
   return args;
 }

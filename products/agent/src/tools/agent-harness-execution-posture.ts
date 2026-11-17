@@ -8,6 +8,7 @@ import { fileRecoveryCatalogStatus } from './agent-harness-file-recovery.ts';
 import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessExecutionArgs {
   readonly executionRouteId?: unknown;
@@ -49,10 +50,6 @@ interface ExecutionRoute {
   readonly recoveryRoute?: string;
   readonly safety: string;
   readonly nextStep: string;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readLimit(value: unknown, fallback: number): number {

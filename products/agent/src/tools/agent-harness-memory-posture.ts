@@ -20,6 +20,7 @@ import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/
 import { EXTERNAL_MEMORY_SETUP_STEP, externalMemoryProviders } from './agent-harness-memory-external-providers.ts';
 import type { ExternalMemoryProviderRecord, MemoryPostureProvider, MemoryProviderResolution } from './agent-harness-memory-external-providers.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type MemoryPostureStatus = 'ready' | 'needs-review' | 'empty' | 'unavailable';
 type MemoryVectorPostureStatus = 'ready' | 'attention' | 'disabled' | 'unavailable';
@@ -29,10 +30,6 @@ interface AgentHarnessMemoryPostureArgs {
   readonly query?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readLimit(value: unknown, fallback: number): number {

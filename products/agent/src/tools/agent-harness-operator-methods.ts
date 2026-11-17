@@ -7,6 +7,7 @@ import { CATALOG_PAGE_MAX, CATALOG_PAGE_SIZE, catalogEnvelope, catalogFilters, r
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 import { operatorMethodIsOutward } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-input-projector';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessOperatorMethodArgs {
   readonly methodId?: unknown;
@@ -89,10 +90,6 @@ type OperatorMethodResolution =
       readonly candidates: readonly Record<string, unknown>[];
     }
   | { readonly status: 'missing_lookup'; readonly usage: string };
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 /** The methods served over HTTP, by id; the listing is the route module's one index. */
 function operatorContractMethods(): readonly OperatorContractMethod[] {

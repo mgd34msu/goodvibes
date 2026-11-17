@@ -6,6 +6,7 @@ import type { BrowserActionLifetime, BrowserExtractField, BrowserTarget } from '
 import type { DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { captureCatalogSnapshotGuard } from './catalog-data.js';
 import { toolErrorText } from './tool-error-text.js';
+import { readString } from './tool-args.js';
 
 /**
  * The `browser` tool: real browser control through Playwright.
@@ -92,10 +93,6 @@ interface BrowserToolArgs {
   readonly timeoutMs?: unknown;
   readonly repair?: unknown;
   readonly button?: unknown;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readNumber(value: unknown): number | undefined {

@@ -8,13 +8,10 @@
  */
 import type { BackgroundProcess } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { AgentHarnessBackgroundProcessArgs } from './agent-harness-background-processes-types.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export const DEFAULT_BACKGROUND_TIMEOUT_MS = 0;
 export const MAX_BACKGROUND_TIMEOUT_MS = 2_147_483_647;
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function fieldMap(value: unknown): Readonly<Record<string, string>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};

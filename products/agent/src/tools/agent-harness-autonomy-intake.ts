@@ -3,6 +3,7 @@ import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessAutonomyIntakeArgs {
   readonly query?: unknown;
@@ -135,10 +136,6 @@ const WATCHER_PROVIDER_SOURCE_FIELDS = [
   'permissionSummary',
   'nextRoute',
 ] as const;
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function operatorMethodIds(): ReadonlySet<string> {
   const methods = getOperatorContract().operator?.methods;

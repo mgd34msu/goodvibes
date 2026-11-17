@@ -9,6 +9,7 @@ import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/pl
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { readFlag, readString } from './tool-args.js';
 
 export interface AgentResearchReportToolArgs {
   readonly runId?: unknown;
@@ -45,14 +46,6 @@ interface CitationCoverage {
   readonly pass: boolean;
 }
 
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 'yes';
-}
 
 function readList(value: unknown): readonly string[] {
   if (Array.isArray(value)) return value.map(readString).filter(Boolean);
@@ -99,7 +92,7 @@ function validateResearchReport(args: AgentResearchReportToolArgs, sources: read
     throw new Error('summary, reportMarkdown, or findings are required.');
   }
   const coverage = citationCoverage(args, sources);
-  if (readBoolean(args.requireCitationCoverage) && !coverage.pass) {
+  if (readFlag(args.requireCitationCoverage, 'requireCitationCoverage', false) && !coverage.pass) {
     throw new Error([
       `Citation coverage check failed. Missing body citations: ${coverage.missingSourceIds.join(', ') || '(none)'}. Unknown citations: ${coverage.unknownCitationIds.join(', ') || '(none)'}.`,
       `Repair suggestions: ${coverage.repairSuggestions.join(' ') || '(none)'}`,
@@ -420,7 +413,7 @@ async function saveResearchReport(
   const title = readString(args.title);
   const question = readString(args.question);
   const explicitUserRequest = readString(args.explicitUserRequest);
-  const includeVisualReport = readBoolean(args.visualReport);
+  const includeVisualReport = readFlag(args.visualReport, 'visualReport', false);
   const markdown = buildMarkdown(args, sources, includeVisualReport);
   assertWrite();
   return artifactStore.create({
@@ -634,7 +627,7 @@ export function createAgentResearchReportTool(
           `  bytes ${descriptor.sizeBytes}`,
           `  mime ${descriptor.mimeType}`,
           `  sources ${args.sources.length}`,
-          readBoolean(args.visualReport) ? '  visualReport markdown-visual-report-packet' : '',
+          readFlag(args.visualReport, 'visualReport', false) ? '  visualReport markdown-visual-report-packet' : '',
           coverage ? `  citationCoverage ${coverage.citedSourceIds.length}/${coverage.sourceCount} cited; uncited ${coverage.missingSourceIds.length}; unknown ${coverage.unknownCitationIds.length}` : '',
           coverage && coverage.repairSuggestions.length > 0 ? `  citationRepair ${coverage.repairSuggestions.join(' ')}` : '',
           ...(settled?.lines ?? []),

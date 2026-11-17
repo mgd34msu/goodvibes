@@ -6,6 +6,7 @@ import { facadeHarness } from './agent-harness-facade.ts';
 import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-data';
 import { forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentPersonalOpsAction = 'briefing' | 'status' | 'queue' | 'intake' | 'lane' | 'read';
 
@@ -35,10 +36,6 @@ interface AgentPersonalOpsToolDeps {
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function normalizePersonalOpsAction(value: unknown): AgentPersonalOpsAction | null {

@@ -6,6 +6,7 @@ import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/
 import { FileUndoConflictError } from '@goodvibes-jev/engine/platform/platform/state';
 import type { CommandContext } from '../input/command-registry.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type FileRecoveryContext = Readonly<{ workspace: Readonly<Pick<CommandContext['workspace'], 'fileUndoManager'>> & {
   readonly shellPaths?: Readonly<Pick<NonNullable<CommandContext['workspace']['shellPaths']>, 'workingDirectory'>>;
@@ -22,10 +23,6 @@ export interface AgentHarnessFileRecoveryArgs {
 type FileRecoveryAction = 'undo' | 'redo';
 
 const RECOVERY_NEXT_STEP = 'Nothing was changed. Re-inspect with execution action:"recovery", then call run_file_recovery again under current admission.';
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function recoveryActionFromArgs(args: AgentHarnessFileRecoveryArgs): FileRecoveryAction | null {
   const input = readString(args.recoveryAction || args.actionId || args.target || args.query).toLowerCase();

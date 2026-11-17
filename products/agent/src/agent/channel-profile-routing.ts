@@ -30,6 +30,7 @@ import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreCo
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 /** The daemon method that owns the routing table. */
 export const CHANNEL_ROUTING_ASSIGN_METHOD = 'channels.routing.assign';
@@ -128,10 +129,6 @@ export function channelProfileRouteFilePath(shellPaths: ShellPaths): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readOptString(value: unknown): string | undefined {

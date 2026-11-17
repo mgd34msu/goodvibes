@@ -67,6 +67,7 @@ import {
   type ProfileFieldResponse,
   type ProfileLineResponse,
 } from './profile-types.js';
+import { readString } from './tool-args.js';
 
 /**
  * The section whose lines are about people other than him. Held back from
@@ -157,10 +158,6 @@ function messageNames(message: string, phrase: string): boolean {
   if (folded.length < 2) return false;
   const escaped = folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'u').test(foldForMatch(message));
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function fail(lines: readonly string[]): ToolOutcome {

@@ -9,6 +9,7 @@ import { AGENT_TEMPLATES, AGENT_TOOL_MODES, agentOrchestrationDecisionCards } fr
 import { remoteReadModelSnapshot, type RemoteCaptureOutcomeRecord, type RemoteWorkspaceEvidenceRecord } from './agent-harness-remote-read-models.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessAgentOrchestrationArgs {
   readonly agentId?: unknown;
@@ -49,10 +50,6 @@ const REMOTE_ARTIFACT_RECEIPT_PURPOSES = new Set([
   'connected-host-remote-runner-artifact-receipt',
   'connected-host-remote-runner-closeout-receipt',
 ]);
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};

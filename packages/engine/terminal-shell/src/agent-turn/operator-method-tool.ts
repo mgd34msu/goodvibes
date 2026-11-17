@@ -14,6 +14,7 @@ import { publishOperatorMethodReceipt } from './operator-method-receipt.js';
 import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './operator-input-projector.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { readFlag, readString } from './tool-args.js';
 
 type JsonRecord = Record<string, unknown>;
 /** The response fields a result declares, as the redaction reads them. */
@@ -83,14 +84,6 @@ const WATCHER_METHOD_IDS = new Set<string>([
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true';
 }
 
 function cloneInput(input: unknown): JsonRecord {
@@ -411,7 +404,7 @@ export function createAgentOperatorMethodTool(
         return { success: false, error: `Not removed: ${String(route.payload.occasionId ?? 'this occasion')} and everything recorded against it cannot be restored, so the owner confirms once. Ask him once, then call occasions.remove again with input.confirmed:true. One question, not a negotiation.` };
       }
       const preview = summarizePreview(route);
-      if (readBoolean(args.dryRun)) {
+      if (readFlag(args.dryRun, 'dryRun', false)) {
         try {
           const output = await stringifyOutput({ preview, dryRun: true }, { declaredFields: operatorResultFields(methodSnapshot), signal: options?.signal, assertCurrent: () => {
             options?.signal?.throwIfAborted(); assertCurrentToolInvocation(rawArgs, options);

@@ -8,6 +8,7 @@ import { readRemotePublisherOutcomeKind, readRemotePublisherSchemaStatus } from 
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { certificationRecords, firstAcross, publishedModelRoute, redactReadModelText, safeNullablePreview, safePreview, stringList } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface RemoteCaptureOutcomeRecord {
   readonly operationProvenance?: 'classic';
@@ -133,10 +134,6 @@ const WORKSPACE_METHODS = [
 
 function readObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {};
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readNumber(value: unknown): number {

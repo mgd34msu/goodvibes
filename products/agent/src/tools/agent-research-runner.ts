@@ -4,16 +4,13 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { AgentResearchRunRegistry, type AgentResearchRunRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-run-registry';
 import { AgentResearchSourceRegistry, researchSourceReportLine, type AgentResearchSourceRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-source-registry';
 import type { AgentResearchToolArgs } from './agent-research-tool.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type ToolResult = Awaited<ReturnType<Tool['execute']>>;
 type Dispatch = (child: Tool, args: Record<string, unknown>, assertSource?: () => void) => Promise<ToolResult>;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readNumber(value: unknown, fallback: number, max: number): number {

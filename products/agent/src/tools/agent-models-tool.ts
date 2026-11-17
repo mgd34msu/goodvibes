@@ -4,6 +4,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentModelsAction =
   | 'status'
@@ -33,10 +34,6 @@ type AgentModelsToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function normalizeModelsAction(value: unknown): AgentModelsAction | null {

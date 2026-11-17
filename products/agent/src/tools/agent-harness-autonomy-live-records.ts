@@ -13,6 +13,7 @@ import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-t
 import { researchCheckpointRoute, researchRouteString } from './agent-harness-research-catalog-source.ts';
 import type { UiAutomationSnapshot, UiTasksSnapshot, UiControlPlaneSnapshot } from '../runtime/ui-read-models.ts';
 import type { AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, SnapshotReader } from './agent-harness-autonomy-queue-types.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 export interface AutonomyLiveRecordBundle {
   readonly tasks: readonly AutonomyQueueLiveRecord[];
   readonly approvals: readonly AutonomyQueueLiveRecord[];
@@ -190,10 +191,6 @@ function formatEpochMs(value: number | undefined): string | undefined {
 function formatTimeFragment(label: string, value: number | undefined): string {
   const formatted = formatEpochMs(value);
   return formatted ? `${label} ${formatted}` : '';
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 const WATCHER_RECEIPT_PURPOSES = new Set([

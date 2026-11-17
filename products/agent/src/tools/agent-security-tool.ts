@@ -3,6 +3,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { explainAgentPolicyDecision } from './agent-policy-explanation.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentSecurityAction = 'status' | 'finding' | 'explain';
 
@@ -29,10 +30,6 @@ function error(message: string): { readonly success: false; readonly error: stri
 
 function output(value: unknown): { readonly success: true; readonly output: string } {
   return { success: true, output: JSON.stringify(value, null, 2) };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 const UNKNOWN_SECURITY_ACTION = 'Unknown security action. Use one of: status, finding, explain.';

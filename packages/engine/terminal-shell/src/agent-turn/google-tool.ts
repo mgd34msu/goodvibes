@@ -5,6 +5,7 @@ import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/e
 import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './personal-ops-effect-receipt.js';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostSelection } from './connected-host-client.js';
+import { readString } from './tool-args.js';
 /**
  * The `google` tool: Gmail and the owner's calendar.
  *
@@ -208,10 +209,6 @@ function failure(message: string): ToolOutput {
 
 function ok(output: string): ToolOutput {
   return { success: true, output };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readNumber(value: unknown, fallback: number): number {

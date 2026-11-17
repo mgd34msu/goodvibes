@@ -9,6 +9,7 @@ import { createAgentSettingsImportTool } from './agent-settings-import-tool.ts';
 import { executeAdmittedAgentSettingsImport } from './agent-settings-import-admission.ts';
 import { readSettingsAction, SETTINGS_ACTION_WORDS } from './agent-settings-action.ts';
 import { confirmParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentSettingsToolArgs {
   readonly action?: unknown;
@@ -33,10 +34,6 @@ interface AgentSettingsToolDeps extends HarnessFacadeDeps {
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function compactArgs(entries: Record<string, unknown>): Record<string, unknown> {

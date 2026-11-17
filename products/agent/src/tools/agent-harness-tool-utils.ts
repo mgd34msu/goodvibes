@@ -10,9 +10,8 @@ import { inventoryDisclosure, withInventoryDisclosure } from '@goodvibes-jev/eng
  */
 export { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
 
-export function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
+export { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export function settingLookupArgs(args: AgentHarnessToolArgs) {
   return {

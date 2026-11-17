@@ -4,6 +4,7 @@ import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-t
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessDelegationArgs {
   readonly delegationRouteId?: unknown;
@@ -58,10 +59,6 @@ interface DelegationDecisionCard {
   readonly requiredFields: readonly string[];
   readonly supervision: readonly string[];
   readonly confirmationBoundary: string;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readLimit(value: unknown, fallback: number): number {

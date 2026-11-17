@@ -12,6 +12,7 @@ import {
   type WorkPlanTaskPatch,
 } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { readString } from './tool-args.js';
 
 /** The slice of the project work plan this tool uses. */
 export type AgentWorkPlanStore = Pick<ProjectWorkPlan, 'projectRoot' | 'snapshot' | 'get' | 'add' | 'update' | 'setStatus' | 'remove' | 'clearCompleted'>;
@@ -55,10 +56,6 @@ function isAction(value: unknown): value is AgentWorkPlanAction {
 
 function isStatus(value: unknown): value is WorkPlanItemStatus {
   return typeof value === 'string' && WORK_PLAN_STATUSES.some(status => status === value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function failure(error: string): { readonly success: false; readonly error: string } {

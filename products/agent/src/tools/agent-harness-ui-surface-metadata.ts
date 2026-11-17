@@ -14,6 +14,7 @@ import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.
 import { isKnownAgentWorkspaceCategory } from '../input/agent-workspace-navigation.ts';
 import type { AgentHarnessUiSurfaceArgs, UiSurfaceDefinition, UiSurfaceLookup, UiSurfaceResolution } from './agent-harness-ui-surface-types.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 export type { AgentHarnessUiSurfaceArgs } from './agent-harness-ui-surface-types.ts';
 
 function agentHarnessModes(...modes: readonly string[]): string { return `agent_harness ${modes.map((mode) => `mode:"${mode}"`).join(', ')}`; }
@@ -21,8 +22,6 @@ function agentHarnessModes(...modes: readonly string[]): string { return `agent_
 function settingsActions(...actions: readonly string[]): string { return `settings ${actions.map((action) => `action:"${action}"`).join('|')}`; }
 
 function hostActions(...actions: readonly string[]): string { return `host ${actions.map((action) => `action:"${action}"`).join('|')}`; }
-
-function readString(value: unknown): string { return typeof value === 'string' ? value.trim() : ''; }
 
 function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);

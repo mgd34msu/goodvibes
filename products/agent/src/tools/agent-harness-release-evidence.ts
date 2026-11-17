@@ -7,6 +7,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 import { RELEASE_EVIDENCE_ORIGIN, RELEASE_PACKAGE_ROOT } from './agent-harness-release-readiness.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 const RELEASE_EVIDENCE_ARTIFACTS = [
   {
@@ -96,10 +97,6 @@ export type ReleaseEvidenceArtifactResolution =
     readonly total?: number;
     readonly usage?: string;
   };
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 100);

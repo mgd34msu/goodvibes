@@ -13,16 +13,13 @@ import {
   type ResearchVisualReportRecord,
 } from './agent-harness-research-live-read-models.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessResearchWorkflowArgs {
   readonly query?: unknown;
   readonly target?: unknown;
   readonly runId?: unknown;
   readonly includeParameters?: unknown;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function fallbackTitle(question: string): string {

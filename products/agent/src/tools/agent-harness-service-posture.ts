@@ -9,6 +9,7 @@ import {
   type CliServicePosture,
 } from '../cli/service-posture.ts';
 import type { RuntimeEndpointId } from '../cli/endpoints.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessServicePostureArgs {
   readonly endpointId?: unknown;
@@ -25,10 +26,6 @@ type ServiceEndpointResolution =
   | { readonly status: 'missing_lookup'; readonly usage: string };
 
 const SERVICE_ENDPOINT_IDS: readonly RuntimeEndpointId[] = ['controlPlane', 'httpListener', 'web'];
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function resolveHomeDirectory(context: CommandContext): string {
   return context.workspace.shellPaths?.homeDirectory

@@ -6,6 +6,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
 import { explainAgentToolPolicyInvocation } from './agent-tool-policy-guard.ts';
 import { computeApprovalPosture, readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 /** `decided_at_call`: nothing settles it in advance; the decision model (or the owner) decides when the call is made. */
 type PolicyExplanationStatus = 'allowed' | 'denied' | 'owner_decides' | 'decided_at_call' | 'not_evaluated';
@@ -29,10 +30,6 @@ const SECRET_KEY_RE = /(?:api[_-]?key|token|secret|password|authorization|auth|b
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readToolArgs(args: AgentPolicyExplainArgs): Record<string, unknown> {

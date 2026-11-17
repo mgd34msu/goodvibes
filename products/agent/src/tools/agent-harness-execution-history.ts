@@ -6,6 +6,7 @@ import type { AgentExecutionRecord, AgentExecutionRouteKind, AgentExecutionStatu
 import { fileRecoveryCatalogStatus } from './agent-harness-file-recovery.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessExecutionHistoryArgs {
   readonly executionRecordId?: unknown;
@@ -30,10 +31,6 @@ type VerificationObservation = { readonly status: 'settled'; readonly verificati
   | { readonly status: 'held' }
   | { readonly status: 'not-evaluated'; readonly provenance: 'classic' };
 type VerificationObservations = ReadonlyMap<string, VerificationObservation>;
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);

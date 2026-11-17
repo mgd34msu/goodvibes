@@ -10,12 +10,9 @@ import { autonomyLiveNativeFacts, captureAutonomyLiveRecords, controlAvailable, 
 import { watcherReadModelLiveRecords, watcherReadModelNativeFacts, watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
 import type { AgentHarnessAutonomyQueueArgs, AutonomyQueueItem, AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, AutonomyQueueResolution, AutonomyQueueStatus } from './agent-harness-autonomy-queue-types.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 export type { AutonomyQueueResolution } from './agent-harness-autonomy-queue-types.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 200);

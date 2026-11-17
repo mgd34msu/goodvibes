@@ -52,6 +52,7 @@ import { requireConfirmedAction, type EffectResult } from './agent-harness-tool-
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection, type DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 /**
  * The connected-host caller for the comms modes, or null when this shell has
@@ -201,10 +202,6 @@ export interface AgentHarnessCommsArgs {
   readonly query?: unknown;
   readonly itemIds?: unknown;
   readonly labels?: unknown;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readOptString(value: unknown): string | undefined {

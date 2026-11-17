@@ -5,6 +5,7 @@ import { planAgentTaskRoute, type AgentTaskRouteSources } from './agent-route-pl
 import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentRouteAction = 'plan' | 'status';
 
@@ -15,10 +16,6 @@ interface AgentRouteToolArgs {
   readonly target?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function normalizeRouteAction(value: unknown): AgentRouteAction | null {

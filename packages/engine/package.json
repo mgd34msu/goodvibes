@@ -4127,6 +4127,11 @@
       "types": "./terminal-shell/dist/agent-turn/surface.d.ts",
       "import": "./terminal-shell/dist/agent-turn/surface.js"
     },
+    "./terminal-shell/agent-turn/tool-args": {
+      "bun": "./terminal-shell/src/agent-turn/tool-args.ts",
+      "types": "./terminal-shell/dist/agent-turn/tool-args.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/tool-args.js"
+    },
     "./terminal-shell/agent-turn/vibe-file": {
       "bun": "./terminal-shell/src/agent-turn/vibe-file.ts",
       "types": "./terminal-shell/dist/agent-turn/vibe-file.d.ts",

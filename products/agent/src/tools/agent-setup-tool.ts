@@ -6,6 +6,7 @@ import { createSetupSmokeReferenceCapture, resolveSetupSmokeNativeEvidence } fro
 import { runSetupInstallSmoke } from './agent-harness-setup-posture.ts';
 import { effectOutput, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { readFlag, readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentSetupAction =
   | 'status'
@@ -41,14 +42,6 @@ interface AgentSetupToolDeps {
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || (typeof value === 'string' && ['true', 'yes', 'apply', 'run'].includes(value.trim().toLowerCase()));
 }
 
 function normalizeSetupAction(value: unknown): AgentSetupAction | null {
@@ -211,7 +204,7 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
       }
       if (action === 'import_settings' || action === 'apply_import') {
         return run('import_goodvibes_settings', {
-          action: action === 'apply_import' || readBoolean(args.confirm) ? 'apply' : 'preview',
+          action: action === 'apply_import' || readFlag(args.confirm, 'confirm', false) ? 'apply' : 'preview',
           ...confirmedArgs(args),
         });
       }

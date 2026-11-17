@@ -1,5 +1,6 @@
 import { agentAccountsWriteGuard, createAgentAccountsInputProjector } from './accounts-admission.js';
 import { toolErrorText } from './tool-error-text.js';
+import { readString } from './tool-args.js';
 /**
  * The `accounts` tool: the durable record of every account the agent created.
  *
@@ -44,10 +45,6 @@ function failure(message: string): ToolOutput {
 
 function ok(output: string): ToolOutput {
   return { success: true, output };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function renderAccount(account: AgentAccountRecord): string {

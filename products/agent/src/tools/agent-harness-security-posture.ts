@@ -7,6 +7,7 @@ import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessSecurityArgs {
   readonly query?: unknown;
@@ -86,10 +87,6 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
     workspaceActionIds: ['voice-bundle-export', 'voice-bundle-inspect'],
   },
 ];
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);

@@ -11,6 +11,7 @@ import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-t
 import { assertActorMayMarkReviewed } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-authority';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { readFlag, readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentVibeAction = 'status' | 'show' | 'init' | 'import_persona';
 
@@ -41,14 +42,6 @@ function output(value: unknown): { readonly success: true; readonly output: stri
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || (typeof value === 'string' && ['true', 'yes', 'use', 'review', 'apply', 'run'].includes(value.trim().toLowerCase()));
 }
 
 function normalizeVibeAction(value: unknown): AgentVibeAction | null {
@@ -187,7 +180,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
             importProjectPersona: 'vibe action:"import_persona" scope:"project" use:true (the owner reviews it with /personas review <id>)',
             promptContext: 'context action:"prompt" includeParameters:true',
           },
-          ...(readBoolean(args.includeParameters) ? { searchedPaths: snapshot.searchedPaths } : {}),
+          ...(readFlag(args.includeParameters, 'includeParameters', false) ? { searchedPaths: snapshot.searchedPaths } : {}),
         });
       }
 
@@ -217,7 +210,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
       if (action === 'init') {
         const scope = readScope(args);
         const effects = agentLocalStateWrite(rawArgs, options);
-        const result = initVibeFile(shellPaths, { scope, force: readBoolean(args.force), ...effects });
+        const result = initVibeFile(shellPaths, { scope, force: readFlag(args.force, 'force', false), ...effects });
         return output({
           status: result.created ? 'created' : 'already_exists',
           action: 'vibe_init',
@@ -241,7 +234,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
         const name = readString(args.name) || source.name;
         const description = readString(args.description) || source.description;
         // Marking it reviewed is the owner's; refused before anything is written.
-        if (readBoolean(args.review)) {
+        if (readFlag(args.review, 'review', false)) {
           try { assertActorMayMarkReviewed('model', 'persona', name); }
           catch (refused) { const shaped = readRefusal(refused); if (!shaped) throw refused; return error(`Nothing was imported. ${formatRefusal(shaped)}`); }
         }
@@ -256,7 +249,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
           source: 'imported',
           provenance: `Imported VIBE.md (${source.scope}): ${source.path}`,
           // Made active in the same write when asked.
-          active: readBoolean(args.use),
+          active: readFlag(args.use, 'use', false),
         });
         return output({
           status: 'imported',
@@ -268,7 +261,7 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
             name: created.name,
             description: created.description,
             reviewState: created.reviewState,
-            active: readBoolean(args.use),
+            active: readFlag(args.use, 'use', false),
           },
           routes: {
             inspectPersona: `agent_local_registry domain:"persona" action:"get" id:"${created.id}"`,

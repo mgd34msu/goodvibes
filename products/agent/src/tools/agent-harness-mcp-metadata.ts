@@ -5,6 +5,7 @@ import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import type { McpApi } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type McpCatalogContext = {
   readonly clients?: { readonly mcpApi?: Pick<McpApi, 'listServerSecurity' | 'listAllTools' | 'captureToolCatalog'> };
@@ -33,10 +34,6 @@ type McpServerResolution =
 
 type McpServerRecord = ReturnType<McpApi['listServerSecurity']>[number];
 type McpToolRecord = Awaited<ReturnType<McpApi['listAllTools']>>[number];
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 /** Phases of a server coming up on its own: no tools are listed for it yet, and the next read may show them. */
 const PENDING_PHASES: ReadonlySet<string> = new Set(['starting', 'negotiating', 'restart-wait']);

@@ -38,6 +38,7 @@ import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { AgentChannelDeliveryInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils/lifecycle-machine';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn/daemon-operator-client';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export const CHANNEL_DRAFTS_LIST_METHOD = 'channels.drafts.list';
 export const CHANNEL_DRAFTS_GET_METHOD = 'channels.drafts.get';
@@ -189,10 +190,6 @@ export function channelDraftFilePath(shellPaths: ShellPaths): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readOptString(value: unknown): string | undefined {

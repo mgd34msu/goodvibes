@@ -8,6 +8,7 @@ import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { certificationRecords, firstAcross, publishedModelRoute, safeNullablePreview, safePreview, stringList } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface ResearchLiveRecordCertification {
   readonly schemaStatus: 'certified' | 'legacy';
@@ -102,10 +103,6 @@ const VISUAL_METHODS = ['listVisualReports', 'listReportSurfaces', 'listReports'
 
 function readObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readNumber(value: unknown): number | null {

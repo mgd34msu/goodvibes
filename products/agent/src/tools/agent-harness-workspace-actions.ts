@@ -15,6 +15,7 @@ import { describeLocalWorkspaceModelExecution } from './agent-harness-local-oper
 import { describeWorkspaceEditorModelExecution, workspaceEditorRouteHint } from './agent-harness-workspace-editor-execution.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 import { readOffset } from './agent-harness-tool-utils.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export { AGENT_WORKSPACE_CATEGORIES };
 
@@ -60,10 +61,6 @@ export type WorkspaceActionResolution =
     readonly input: string;
     readonly candidates: readonly { readonly actionId: string; readonly categoryId: string; readonly label: string; readonly command?: string }[];
   };
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 
 function readFieldMap(value: unknown): Readonly<Record<string, string>> {

@@ -15,6 +15,7 @@ import {
 import { agentChannelDeliveryReceiptPath, recordAgentChannelDeliveryReceipt } from './channel-delivery-receipts.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
+import { readFlag } from './tool-args.js';
 
 export interface AgentChannelSendToolArgs {
   readonly message?: unknown | undefined;
@@ -48,10 +49,6 @@ function sendStillAdmitted(args: Record<string, unknown>, options: ToolExecuteOp
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 'yes';
 }
 
 function failure(error: string): { readonly success: false; readonly error: string } {
@@ -127,7 +124,7 @@ export function createAgentChannelSendTool(
       } catch (error) {
         return failure(toolErrorText(error));
       }
-      if (readBoolean(args.preview)) {
+      if (readFlag(args.preview, 'preview', false)) {
         return output(formatAgentChannelDeliveryPreview(preview, channelDeliveryRouter.listStrategies().length));
       }
       const ledger = getSessionUntrustedContentLedger();

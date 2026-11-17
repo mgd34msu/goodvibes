@@ -7,6 +7,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { backgroundProcessSummary, describeBackgroundProcess, runBackgroundProcessAction } from './agent-harness-background-processes.ts';
 import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ingress';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { readFlag, readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 const READ_ONLY_PROCESS_ACTIONS = new Set(['list', 'status', 'poll', 'log', 'output', 'capabilities', 'doctor', 'parity']);
 
@@ -75,14 +76,6 @@ function processOutcome(result: EffectResult): { readonly success: boolean; read
 const PROCESS_ACTION_WORDS = ['list', 'poll', 'status', 'wait', 'log', 'output', 'kill', 'stop', 'cancel', 'write', 'start', 'capabilities', 'doctor', 'parity'] as const;
 const PROCESS_ACTION_ALIASES = new Set<string>([...PROCESS_ACTION_WORDS, 'spawn', 'run']);
 
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || (typeof value === 'string' && value.trim().toLowerCase() === 'true');
-}
-
 function readProcessAction(args: AgentProcessToolArgs): string {
   const action = readString(args.action) || readString(args.processAction);
   if (action) return action.toLowerCase();
@@ -122,7 +115,7 @@ export function createAgentTerminalTool(commandContext: CommandContext, registry
     },
     execute: async (args: Record<string, unknown>, options) => {
       const input = args as AgentTerminalToolArgs;
-      if (!readBoolean(input.background)) {
+      if (!readFlag(input.background, 'background', false)) {
         return error('terminal is the tracked-background adapter. Use exec for bounded foreground shell commands, or call terminal with background:true. Launch requires current recorded effect admission.');
       }
       return processOutcome(await runBackgroundProcessAction(commandContext, {

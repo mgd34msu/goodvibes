@@ -14,6 +14,7 @@ import type {
   ReviewerReadinessCheck,
   ReviewerReadinessChecklist,
 } from './agent-harness-document-ops-types.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 export type {
   DocumentOpsLaneId,
   DocumentOpsLaneResolution,
@@ -31,10 +32,6 @@ const LANE_IDS: readonly DocumentOpsLaneId[] = [
   'artifact_browser',
   'model_compare',
 ];
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 const MODEL_COMPARE_ACTION_IDS = [
   'document-run-compare',

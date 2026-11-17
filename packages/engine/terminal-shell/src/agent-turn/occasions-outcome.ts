@@ -20,9 +20,7 @@ export interface AgentOccasionsToolDeps {
 }
 
 /** Trimmed, or empty. An absent argument and a whitespace one are the same thing. */
-export function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
+export { readString } from './tool-args.js';
 
 /** A finite number, or nothing. A non-numeric value is absent, never zero. */
 export function readNumber(value: unknown): number | undefined {

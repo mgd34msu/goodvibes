@@ -6,6 +6,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessMemoryRefinementArgs {
   readonly query?: unknown;
@@ -61,10 +62,6 @@ interface KnowledgeRefinementService {
 const ATTENTION_STATES = new Set(['blocked', 'failed']);
 // The most tasks one read asks the service for; counts above this are labelled.
 const TASK_READ_CAP = 1_000;
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readStringArray(value: unknown): readonly string[] {
   if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string').map((entry) => entry.trim()).filter(Boolean);

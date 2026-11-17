@@ -15,6 +15,7 @@ import { isCertifiedResearchLiveRecord, researchLiveReadModelSnapshot } from './
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessResearchBriefingArgs {
   readonly query?: unknown;
@@ -40,10 +41,6 @@ interface ResearchBriefingItem {
 }
 
 
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 50);

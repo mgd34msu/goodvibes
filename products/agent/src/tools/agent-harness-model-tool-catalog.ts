@@ -6,6 +6,7 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import { fullToolDefinition } from './tool-definition-compaction.ts';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessModelToolCatalogArgs {
   readonly query?: unknown;
@@ -21,10 +22,6 @@ type ModelToolLookupSource = 'toolName' | 'target' | 'query';
 export type HarnessModelToolResolution =
   | { readonly status: 'found'; readonly tool: Record<string, unknown> }
   | { readonly status: 'ambiguous'; readonly input: string; readonly candidates: readonly Record<string, unknown>[] };
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);

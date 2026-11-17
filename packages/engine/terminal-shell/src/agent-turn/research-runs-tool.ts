@@ -13,6 +13,7 @@ import {
 } from './research-run-registry.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
+import { readString } from './tool-args.js';
 
 export interface AgentResearchRunsToolArgs {
   readonly mode?: unknown | undefined;
@@ -66,10 +67,6 @@ const MODES: readonly AgentResearchRunsMode[] = [
 ];
 const STATUS_VALUES: readonly AgentResearchRunStatus[] = ['planned', 'running', 'paused', 'blocked', 'cancelled', 'completed', 'failed'];
 const PHASE_VALUES: readonly AgentResearchRunPhase[] = ['planning', 'searching', 'reading', 'synthesizing', 'reviewing', 'reporting'];
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readMode(value: unknown): AgentResearchRunsMode {
   return typeof value === 'string' && MODES.includes(value as AgentResearchRunsMode) ? value as AgentResearchRunsMode : 'list';

@@ -130,9 +130,8 @@ export const PURPOSE_MODEL_COMPARE_ROUTE_DECISION = 'agent-model-compare-route-d
 export const PURPOSE_MODEL_COMPARE_HANDOFF = 'agent-model-compare-handoff';
 export const PURPOSE_MODEL_COMPARE_HANDOFF_ARCHIVE = 'agent-model-compare-handoff-archive';
 
-export function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
+export { readString } from './tool-args.js';
+import { readString } from './tool-args.js';
 
 export function readBoolean(value: unknown): boolean {
   return value === true || value === 'true' || value === 'yes';

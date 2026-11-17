@@ -6,11 +6,8 @@ import { localRegistryRoute, MIN_PROMPT_MEMORY_CONFIDENCE, missingRequirementCou
 import type { LearningCandidateCollection, LearningCuratorNativeContext } from './learning-curator-source.js';
 import type { AgentHarnessLearningCuratorArgs, LearningCandidate, LearningCandidateResolution, LearningConsolidationBatchPlan, LearningPromptPlan } from './learning-curator-types.js';
 import { clampReadLimit } from './read-helpers.js';
+import { readString } from './tool-args.js';
 export type { LearningCandidate, LearningCandidateResolution, LearningConsolidationDiff, LearningConsolidationFields, LearningConsolidationPlan } from './learning-curator-types.js';
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 200);

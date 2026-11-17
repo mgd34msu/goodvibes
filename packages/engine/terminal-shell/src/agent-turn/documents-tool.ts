@@ -13,6 +13,7 @@ import {
 } from './document-registry.js';
 import { clampReadLimit } from './read-helpers.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { readFlag, readString } from './tool-args.js';
 
 export type AgentDocumentsToolMode = 'list' | 'show' | 'create' | 'update' | 'review' | 'comment' | 'resolveComment' | 'suggest' | 'acceptSuggestion' | 'rejectSuggestion' | 'export' | 'insertArtifact' | 'attachArtifact';
 
@@ -49,19 +50,10 @@ function isMode(value: unknown): value is AgentDocumentsToolMode {
   return typeof value === 'string' && MODES.some(mode => mode === value);
 }
 
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
 function readStringList(value: unknown): readonly string[] {
   if (typeof value === 'string') return value.split(/[,\n]/).map((entry) => entry.trim()).filter(Boolean);
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === 'string').map((entry) => entry.trim()).filter(Boolean);
-}
-
-function readBoolean(value: unknown, fallback = false): boolean {
-  if (value === undefined || value === null || readString(value) === '') return fallback;
-  return value === true || value === 'true' || value === 'yes';
 }
 
 function readLimit(value: unknown, fallback: number): number {
@@ -423,7 +415,7 @@ async function insertArtifactIntoDocument(
   const document = registry.get(documentId);
   if (!document) throw new Error(`Unknown Agent document ${documentId}.`);
   const expectedRevision = registry.revisionOf(document.id);
-  const includeContent = readBoolean(args.includeContent, true);
+  const includeContent = readFlag(args.includeContent, 'includeContent', true);
   const placement = readPlacement(args.placement);
   const loaded = await loadArtifactForInsert(artifactStore, artifactId, includeContent);
   assertCurrent();
@@ -573,7 +565,7 @@ export function createAgentDocumentsTool(
         if (mode === 'show') {
           const document = registry.get(requireDocumentId(args));
           if (!document) return failure(`Unknown Agent document ${readString(args.documentId)}.`);
-          return output(formatShow(document, readBoolean(args.includeVersions, true) ? registry.versions(document.id) : undefined));
+          return output(formatShow(document, readFlag(args.includeVersions, 'includeVersions', true) ? registry.versions(document.id) : undefined));
         }
         if (mode === 'create') {
           assertCurrent();

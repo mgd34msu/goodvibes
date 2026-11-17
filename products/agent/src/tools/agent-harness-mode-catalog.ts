@@ -4,6 +4,7 @@ import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/e
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { RELEASE_PACKAGE_ROOT } from './agent-harness-release-readiness.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export type AgentHarnessMode = typeof AGENT_HARNESS_MODES[number];
 
@@ -183,10 +184,6 @@ export const HARNESS_MODE_DESCRIPTORS: readonly HarnessModeDescriptor[] = [
  */
 export const HARNESS_READ_MODES: readonly AgentHarnessMode[] = Object.freeze(
   HARNESS_MODE_DESCRIPTORS.filter((descriptor) => descriptor.kind !== 'effect').map((descriptor) => descriptor.id));
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 /** Required parameters the handlers themselves enforce, where the descriptor's parameter list alone cannot say. */
 const EXPLICIT_REQUIRED_PARAMETERS: Readonly<Partial<Record<AgentHarnessMode, readonly string[]>>> = {

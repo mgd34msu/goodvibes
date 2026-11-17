@@ -5,6 +5,7 @@ import { isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
 import type { ToolCapability, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type BrowserControlStatus = 'ready' | 'attention' | 'setup-needed';
 /** A capability row: `unavailable` when no registered tool declares it, whatever else is configured. */
@@ -96,10 +97,6 @@ type McpServerRecord = ReturnType<NonNullable<NonNullable<CommandContext['client
  * must not become a browser-control provider because of its name.
  */
 const BROWSER_CONTROL_MCP_ROLES = new Set(['browser']);
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function quoteRouteValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');

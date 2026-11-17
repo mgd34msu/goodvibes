@@ -6,6 +6,7 @@ import { buildScheduleEditPreview, parseScheduleEditArgs, scheduleEditKindFromVa
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import type { AgentInProcessHost } from './in-process-host.js';
+import { readString } from './tool-args.js';
 
 export interface AgentScheduleEditToolArgs {
   readonly scheduleId?: unknown;
@@ -20,10 +21,6 @@ export interface AgentScheduleEditToolArgs {
   readonly successCriteria?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readOptionalString(value: unknown): string | null {

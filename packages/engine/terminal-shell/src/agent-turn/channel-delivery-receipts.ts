@@ -3,6 +3,7 @@ import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/r
 import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonStoreSpec } from './store-file.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from './channel-delivery.js';
+import { readString } from './tool-args.js';
 
 export type AgentChannelDeliveryReceiptSource = 'command' | 'model-tool';
 export type AgentChannelDeliveryReceiptStatus = 'sent';
@@ -50,10 +51,6 @@ const MESSAGE_PREVIEW_LIMIT = 120;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readNumber(value: unknown): number | null {

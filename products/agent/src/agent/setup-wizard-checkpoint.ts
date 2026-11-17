@@ -2,6 +2,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { writeStoreFile } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export type AgentSetupWizardCheckpointSource = 'workspace' | 'harness';
 
@@ -34,10 +35,6 @@ const CHECKPOINT_VERSION = 1;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function isCheckpointSource(value: unknown): value is AgentSetupWizardCheckpointSource {

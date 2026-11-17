@@ -15,6 +15,7 @@ import { deviceLiveReadModelSnapshot, deviceLiveRecordsFor, SENSOR_DEVICE_CAPABI
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
 import { formatHttpOrigin, isWildcardBindHost, probeStableHostInputs, stableUrlHostForBindHost, type StableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessPairingArgs {
   readonly pairingRouteId?: unknown;
@@ -71,10 +72,6 @@ interface DeviceCapabilityMap {
   };
   readonly capabilities: readonly DeviceCapability[];
   readonly policy: string;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readLimit(value: unknown, fallback: number): number {

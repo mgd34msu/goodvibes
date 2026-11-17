@@ -11,6 +11,7 @@ import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-t
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 export interface AgentHarnessCliArgs {
   readonly query?: unknown;
@@ -26,10 +27,6 @@ interface CliCommandLookup {
   readonly source: 'cliCommand' | 'command' | 'commandName' | 'target' | 'query' | 'default';
   readonly input: string;
   readonly resolvedBy: 'invocation' | 'command-name' | 'default' | 'search';
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function readLimit(value: unknown, fallback: number): number {

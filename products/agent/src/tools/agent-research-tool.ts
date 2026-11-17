@@ -11,6 +11,7 @@ import { createAgentResearchRunsTool } from '@goodvibes-jev/engine/terminal-shel
 import { runAdmittedResearchRunner, runPublicSearch } from './agent-research-runner.ts';
 import { createAgentResearchSourcesTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/research-sources-tool';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn/effect-admission';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn/tool-args';
 
 type AgentResearchAction =
   | 'briefing'
@@ -111,10 +112,6 @@ interface AgentResearchToolDeps {
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
 }
 
 function normalizeResearchAction(value: unknown): AgentResearchAction | null {

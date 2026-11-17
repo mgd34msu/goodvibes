@@ -12,6 +12,7 @@ import {
 } from './media-generation.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
+import { readFlag, readString } from './tool-args.js';
 
 export interface AgentMediaGenerateToolArgs {
   readonly prompt?: unknown | undefined;
@@ -24,14 +25,6 @@ export interface AgentMediaGenerateToolArgs {
   readonly confirm?: unknown | undefined;
   readonly explicitUserRequest?: unknown | undefined;
   readonly preview?: unknown | undefined;
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function readBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 'yes';
 }
 
 /** The provider's own handles for a pending job, as strings; null when the value is not that shape. */
@@ -127,7 +120,7 @@ export function createAgentMediaGenerateTool(
         if (args.waitSeconds !== undefined && (typeof args.waitSeconds !== 'number' || !Number.isFinite(args.waitSeconds) || args.waitSeconds < 0)) {
           return failure('waitSeconds must be a number of seconds, 0 or more.');
         }
-        if (readBoolean(args.preview)) return output(`Agent media collection preview\n  provider ${providerId}\n  task ${taskId}\n  nothing new is paid for`);
+        if (readFlag(args.preview, 'preview', false)) return output(`Agent media collection preview\n  provider ${providerId}\n  task ${taskId}\n  nothing new is paid for`);
         try {
           const assertCurrent = () => {
             executionOptions?.signal?.throwIfAborted();
@@ -144,7 +137,7 @@ export function createAgentMediaGenerateTool(
         }
       }
       if (!prompt) return failure('prompt is required (or taskId to collect a pending job).');
-      if (readBoolean(args.preview)) return output(preview(args, generationProviderCount));
+      if (readFlag(args.preview, 'preview', false)) return output(preview(args, generationProviderCount));
       try {
         const ledger = getSessionUntrustedContentLedger();
         const ledgerCurrent = () => JSON.stringify([ledger.getPublicationRevision(), ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);

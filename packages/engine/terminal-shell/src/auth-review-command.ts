@@ -4,7 +4,7 @@ import { commandRefusal } from './command-confirmation.js';
 import { buildAuthInspectionSnapshot, inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 interface AuthReviewContext {
-  throw commandRefusal(message: string): void;
+  print(message: string): void;
 }
 export function createAuthReviewHandler<Context extends AuthReviewContext>(policy: {
   readonly review: (snapshot: Awaited<ReturnType<typeof buildAuthInspectionSnapshot>>, providers: string[]) => string[];
@@ -17,7 +17,7 @@ export function createAuthReviewHandler<Context extends AuthReviewContext>(polic
     if (sub !== 'review' && sub !== 'show' && sub !== 'repair') return false;
     const provider = args[1];
     if (sub !== 'review' && !provider) {
-      ctx.print(`Usage: /auth ${sub} <provider>`);
+      throw commandRefusal(`Usage: /auth ${sub} <provider>`);
     }
     try {
       if (sub === 'review') {

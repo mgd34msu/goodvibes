@@ -571,8 +571,12 @@ async function exportArtifactArchive(
     }
   }
 
+  // Each artifact's own source is checked while it is read and written, and
+  // every one of them once more before the archive is moved into place: one
+  // check per artifact plus one pass, not every earlier artifact again per step.
   const sources: Array<() => void> = [];
-  const check = () => { assertCurrent(); for (const source of sources) source(); target.assertCurrent(); };
+  const admitted = () => { assertCurrent(); target.assertCurrent(); };
+  const check = () => { admitted(); for (const source of sources) source(); };
   check();
   await mkdir(dirname(resolvedPath), { recursive: true });
   check();
@@ -590,7 +594,7 @@ async function exportArtifactArchive(
   try {
     for (let index = 0; index < artifactIds.length; index += 1) {
       if (signal?.aborted) throw new Error(`Archive export cancelled after ${index} of ${artifactIds.length} artifacts; nothing was written to ${resolvedPath}.`);
-      check();
+      admitted();
       const source = await store.readContent(artifactIds[index]!);
       assertCurrent();
       assertAgentArtifactBytes(source.record, source.buffer);
@@ -599,7 +603,7 @@ async function exportArtifactArchive(
       const relativePath = `artifacts/${packageArtifactFilename(source.record, index, usedFilenames)}`;
       // One artifact's bytes are held at a time; they are written before the next is read.
       await zip.add(relativePath, source.buffer, { mimeType: source.record.mimeType });
-      await manifest.add(source.record, relativePath, source.buffer.byteLength, { signal, assertCurrent: check });
+      await manifest.add(source.record, relativePath, source.buffer.byteLength, { signal, assertCurrent: () => { admitted(); assertSource(); } });
     }
     for (const document of packageDocuments(manifest)) await zip.add(document.path, document.buffer);
     archiveBytes = await zip.finish();

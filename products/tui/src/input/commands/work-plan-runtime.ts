@@ -1,9 +1,9 @@
 import type { CommandRegistry } from '../command-registry.ts';
-import type { WorkPlanItemStatus, WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { summarizeWorkPlanCounts, type ProjectWorkPlan, type ProjectWorkPlanCounts, type ProjectWorkPlanTaskStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { openModalCommand } from './runtime-services.ts';
 import { RefusalError, readRefusal, refusal, toRefusal } from '@goodvibes-jev/engine/errors';
 
-const STATUS_COMMANDS: Record<string, WorkPlanItemStatus> = {
+const STATUS_COMMANDS: Record<string, ProjectWorkPlanTaskStatus> = {
   pending: 'pending',
   todo: 'pending',
   start: 'in_progress',
@@ -20,7 +20,7 @@ const STATUS_COMMANDS: Record<string, WorkPlanItemStatus> = {
   cancelled: 'cancelled',
 };
 
-function getStore(ctx: import('../command-registry.ts').CommandContext): WorkPlanStore | null {
+function getStore(ctx: import('../command-registry.ts').CommandContext): ProjectWorkPlan | null {
   return ctx.workspace.workPlanStore ?? null;
 }
 
@@ -29,16 +29,21 @@ function openWorkPlanModal(ctx: import('../command-registry.ts').CommandContext)
   openModalCommand(ctx, 'work-plan-modal');
 }
 
-function formatList(store: WorkPlanStore): string {
-  const items = store.listItems();
-  if (items.length === 0) return 'Work plan is empty. Add one with /work-plan add <title>.';
+async function formatList(store: ProjectWorkPlan): Promise<string> {
+  const plan = await store.snapshot();
+  if (plan.tasks.length === 0) return 'Work plan is empty. Add one with /work-plan add <title>.';
   return [
-    `Work Plan (${items.length})`,
-    ...items.map((item) => {
+    `Work Plan (${summarizeWorkPlanCounts(plan.counts)})`,
+    ...plan.tasks.map((item) => {
       const owner = item.owner ? ` @${item.owner}` : '';
-      return `  ${item.id}  ${item.status.padEnd(11)} ${item.title}${owner}`;
+      return `  ${item.taskId}  ${item.status.padEnd(11)} ${item.title}${owner}`;
     }),
   ].join('\n');
+}
+
+/** The plan line an edit prints: counted in the edit's own transaction. */
+function planLine(counts: ProjectWorkPlanCounts): string {
+  return ` Plan: ${summarizeWorkPlanCounts(counts)}.`;
 }
 
 /**
@@ -91,7 +96,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
     description: 'Track a persistent workspace-scoped work plan',
     usage: '[panel|list|show|export|add <title> [--owner name] [--source label] [--notes text]|edit <id> [<new title>] [--owner name] [--source label] [--notes text]|cycle <id>|done <id>|start <id>|in_progress <id>|block <id>|fail <id>|cancel <id>|pending <id>|remove <id>|clear-done]',
     argsHint: '[panel|add|list|done]',
-    handler(args, ctx) {
+    async handler(args, ctx) {
       const store = getStore(ctx);
       if (!store) {
         throw new RefusalError(refusal({ code: 'WORK_PLAN_UNAVAILABLE', state: 'nothing was changed', reason: 'The work plan store is not available in this runtime' }));
@@ -104,17 +109,17 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           return;
         }
         if (subcommand === 'list') {
-          ctx.print(formatList(store));
+          ctx.print(await formatList(store));
           return;
         }
         if (subcommand === 'show' || subcommand === 'markdown') {
-          ctx.print(store.toMarkdown());
+          ctx.print(store.toMarkdown(await store.snapshot()));
           return;
         }
         if (subcommand === 'export') {
-          // Writes the plan's markdown beside the JSON store and reports the
-          // path; the Work Plan modal's `x` closes the modal and runs this.
-          const { path } = store.exportMarkdown();
+          // Writes the plan's checklist as Markdown and reports the path; the
+          // Work Plan modal's `x` closes the modal and runs this.
+          const { path } = await store.exportMarkdown();
           ctx.print(`Exported work plan markdown to ${path}`);
           return;
         }
@@ -133,9 +138,9 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
             source: parsed.source ?? 'manual',
             ...(parsed.notes ? { notes: parsed.notes } : {}),
           };
-          const item = store.addItem(parsed.title, addOptions);
+          const { task, counts } = await store.add(parsed.title, addOptions);
           openWorkPlanModal(ctx);
-          ctx.print(`Added work plan item ${item.id}.`);
+          ctx.print(`Added work plan item ${task.taskId}.${planLine(counts)}`);
           return;
         }
         if (subcommand === 'edit' || subcommand === 'update') {
@@ -155,16 +160,15 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           };
           if (Object.keys(patch).length === 0) {
             const line = `Usage: /work-plan ${subcommand} <id> [<new title>] [--owner name] [--source label] [--notes text]`;
-            const items = args.length === 2 ? store.listItems() : [];
-            const matches = items.filter((item) => item.id.startsWith(id));
-            const target = items.find((item) => item.id === id) ?? (matches.length === 1 ? matches[0]! : null);
-            if (!target) throw usage(args.length === 2 ? `No work plan item matches ${id}` : line);
+            if (args.length !== 2) throw usage(line);
+            const target = await store.get(id).catch(() => null);
+            if (!target) throw usage(`No work plan item matches ${id}`);
             ctx.print(line);
-            offerDraft(ctx, `/work-plan edit ${target.id} ${target.title}`);
+            offerDraft(ctx, `/work-plan edit ${target.taskId} ${target.title}`);
             return;
           }
-          const item = store.updateItem(id, patch);
-          ctx.print(`Updated work plan item ${item.id}: ${item.title}`);
+          const { task } = await store.update(id, patch);
+          ctx.print(`Updated work plan item ${task.taskId}: ${task.title}`);
           return;
         }
         if (subcommand === 'remove' || subcommand === 'delete' || subcommand === 'rm') {
@@ -172,13 +176,14 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           if (!id) {
             throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
-          const item = store.removeItem(id);
-          ctx.print(`Removed work plan item ${item.id}: ${item.title}`);
+          const { deletedTask, counts } = await store.remove(id);
+          ctx.print(`Removed work plan item ${deletedTask.taskId}: ${deletedTask.title}.${planLine(counts)}`);
           return;
         }
         if (subcommand === 'clear-done' || subcommand === 'clear-completed') {
-          const count = store.clearCompleted();
-          ctx.print(`Cleared ${count} completed/cancelled work plan item${count === 1 ? '' : 's'}.`);
+          const result = await store.clearCompleted();
+          const count = result.clearedTaskIds?.length ?? 0;
+          ctx.print(`Cleared ${count} completed/cancelled work plan item${count === 1 ? '' : 's'}.${count > 0 ? planLine(result.counts) : ''}`);
           return;
         }
         if (subcommand === 'cycle' || subcommand === 'toggle') {
@@ -186,8 +191,8 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           if (!id) {
             throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
-          const item = store.cycleItemStatus(id);
-          ctx.print(`Updated ${item.id}: ${item.status}.`);
+          const { task, counts } = await store.cycle(id);
+          ctx.print(`Updated ${task.taskId}: ${task.status}.${planLine(counts)}`);
           return;
         }
         const status = STATUS_COMMANDS[subcommand];
@@ -196,8 +201,8 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
           if (!id) {
             throw usage(`Usage: /work-plan ${subcommand} <id>`);
           }
-          const item = store.setItemStatus(id, status);
-          ctx.print(`Updated ${item.id}: ${item.status}.`);
+          const { task, counts } = await store.setStatus(id, status);
+          ctx.print(`Updated ${task.taskId}: ${task.status}.${planLine(counts)}`);
           return;
         }
         throw usage(`Unknown work-plan subcommand: ${subcommand}`);

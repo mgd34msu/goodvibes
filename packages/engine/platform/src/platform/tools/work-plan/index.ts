@@ -2,59 +2,61 @@ import type { Tool } from '../../types/tools.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import { summarizeError } from '../../utils/error-display.js';
 import {
-  WORK_PLAN_STATUSES,
-  type WorkPlanItem,
-  type WorkPlanItemStatus,
-  type WorkPlanStore,
-} from '../../workflow/work-plan-store.js';
+  WORK_PLAN_TASK_STATUSES,
+  isWorkPlanTaskStatus,
+  summarizeWorkPlanCounts,
+  type ProjectWorkPlan,
+} from '../../knowledge/project-planning/work-plan.js';
+import type { ProjectWorkPlanCounts, ProjectWorkPlanTask } from '../../knowledge/project-planning/types.js';
 import { WORK_PLAN_TOOL_SCHEMA, type WorkPlanToolInput } from './schema.js';
 
 /** The slice of the project work plan the tool uses. */
-export type WorkPlanToolStore = Pick<WorkPlanStore, 'getActivePlan' | 'addItem' | 'updateItem' | 'setItemStatus' | 'removeItem' | 'clearCompleted'>
-  & Partial<Pick<WorkPlanStore, 'lastWriteSummary'>>;
+export type WorkPlanToolStore = Pick<ProjectWorkPlan, 'snapshot' | 'add' | 'update' | 'setStatus' | 'remove' | 'clearCompleted'>;
+
+export interface WorkPlanToolOptions {
+  /** The session the tool runs in; recorded on the items it adds. Resolved per call. */
+  readonly resolveSessionId?: (() => string | undefined) | undefined;
+}
 
 const SOURCE = 'agent';
-
-function isStatus(value: unknown): value is WorkPlanItemStatus {
-  return typeof value === 'string' && (WORK_PLAN_STATUSES as readonly string[]).includes(value);
-}
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function itemView(item: WorkPlanItem) {
+function itemView(task: ProjectWorkPlanTask) {
   return {
-    id: item.id,
-    title: item.title,
-    status: item.status,
-    ...(item.owner ? { owner: item.owner } : {}),
-    ...(item.notes ? { notes: item.notes } : {}),
-    updatedAt: item.updatedAt,
+    id: task.taskId,
+    title: task.title,
+    status: task.status,
+    ...(task.owner ? { owner: task.owner } : {}),
+    ...(task.notes ? { notes: task.notes } : {}),
+    updatedAt: task.updatedAt,
   };
 }
 
 /**
  * A change answers with the item it changed and one line on where the plan
- * stands, taken from the write itself; `list` is how the model reads the plan.
+ * stands, counted in the edit's own transaction; `list` is how the model reads
+ * the plan.
  */
-function changed(store: WorkPlanToolStore, result: Record<string, unknown>): string {
-  const plan = store.lastWriteSummary?.();
-  return JSON.stringify(plan ? { ...result, plan } : result);
+function changed(counts: ProjectWorkPlanCounts, result: Record<string, unknown>): string {
+  return JSON.stringify({ ...result, plan: summarizeWorkPlanCounts(counts) });
 }
 
 /**
- * The model's checklist is the project work plan: the same items the user
- * sees in the work plan view (/plan) and that contracts link to. Items are
- * kept per project across sessions and restarts.
+ * The model's checklist is the project work plan: the same task rows the user
+ * sees in the work plan view (/work-plan), that contracts link to and that the
+ * operator's projectPlanning.workPlan methods serve. Kept per project across
+ * sessions and restarts.
  */
-export function createWorkPlanTool(store: WorkPlanToolStore): Tool {
+export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanToolOptions = {}): Tool {
   return {
     definition: {
       name: 'work_plan',
       description: 'Keep the project work plan: a checklist of work items with status, owner and notes that the user sees in the work plan view and that lasts across sessions.'
         + ' Use it to plan multi-step work and to track who is doing what (owner: an agent id, a cohort name or the user); give spawned workers their brief through the agent tool (context and successCriteria).'
-        + ` Statuses: ${WORK_PLAN_STATUSES.join(', ')}.`,
+        + ` Statuses: ${WORK_PLAN_TASK_STATUSES.join(', ')}.`,
       parameters: toRecord(WORK_PLAN_TOOL_SCHEMA),
       category: 'write',
       readModes: { field: 'action', values: ['list'] },
@@ -67,57 +69,61 @@ export function createWorkPlanTool(store: WorkPlanToolStore): Tool {
       try {
         switch (input.action) {
           case 'list': {
-            const plan = store.getActivePlan();
+            if (input.status !== undefined && !isWorkPlanTaskStatus(input.status)) return { success: false, error: `Unknown status "${input.status}". Use one of: ${WORK_PLAN_TASK_STATUSES.join(', ')}.` };
+            const plan = await store.snapshot(input.status ? { status: input.status } : {});
             const counts: Record<string, number> = {};
-            for (const item of plan.items) counts[item.status] = (counts[item.status] ?? 0) + 1;
-            return { success: true, output: JSON.stringify({ planId: plan.id, count: plan.items.length, counts, items: plan.items.map(itemView) }) };
+            for (const status of WORK_PLAN_TASK_STATUSES) if (plan.counts[status] > 0) counts[status] = plan.counts[status];
+            return { success: true, output: JSON.stringify({ revision: plan.revision, count: plan.counts.total, counts, items: plan.tasks.map(itemView) }) };
           }
           case 'add': {
             const title = text(input.title);
             if (!title) return { success: false, error: 'add requires "title".' };
-            if (input.status !== undefined && !isStatus(input.status)) return { success: false, error: `Unknown status "${input.status}". Use one of: ${WORK_PLAN_STATUSES.join(', ')}.` };
-            const owner = text(input.owner), notes = text(input.notes);
-            const item = store.addItem(title, {
+            if (input.status !== undefined && !isWorkPlanTaskStatus(input.status)) return { success: false, error: `Unknown status "${input.status}". Use one of: ${WORK_PLAN_TASK_STATUSES.join(', ')}.` };
+            const sessionId = options.resolveSessionId?.();
+            const result = await store.add(title, {
               source: SOURCE,
               ...(input.status ? { status: input.status } : {}),
-              ...(owner ? { owner } : {}),
-              ...(notes ? { notes } : {}),
+              ...(text(input.owner) ? { owner: text(input.owner) } : {}),
+              ...(text(input.notes) ? { notes: text(input.notes) } : {}),
+              ...(sessionId ? { sessionId } : {}),
             });
-            return { success: true, output: changed(store, itemView(item)) };
+            return { success: true, output: changed(result.counts, itemView(result.task)) };
           }
           case 'update': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'update requires "id".' };
             const title = text(input.title), owner = text(input.owner), notes = text(input.notes);
             if (!title && owner === undefined && notes === undefined) return { success: false, error: 'update requires at least one of "title", "owner" or "notes". Nothing was changed.' };
-            const item = store.updateItem(id, {
+            const result = await store.update(id, {
               ...(title ? { title } : {}),
               ...(owner !== undefined ? { owner } : {}),
               ...(notes !== undefined ? { notes } : {}),
             });
-            return { success: true, output: changed(store, itemView(item)) };
+            return { success: true, output: changed(result.counts, itemView(result.task)) };
           }
           case 'set_status': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'set_status requires "id".' };
-            if (!isStatus(input.status)) return { success: false, error: `set_status requires "status", one of: ${WORK_PLAN_STATUSES.join(', ')}.` };
-            return { success: true, output: changed(store, itemView(store.setItemStatus(id, input.status))) };
+            if (!isWorkPlanTaskStatus(input.status)) return { success: false, error: `set_status requires "status", one of: ${WORK_PLAN_TASK_STATUSES.join(', ')}.` };
+            const result = await store.setStatus(id, input.status);
+            return { success: true, output: changed(result.counts, itemView(result.task)) };
           }
           case 'remove': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'remove requires "id".' };
-            const item = store.removeItem(id);
-            return { success: true, output: changed(store, { removed: item.id, title: item.title }) };
+            const result = await store.remove(id);
+            return { success: true, output: changed(result.counts, { removed: result.deletedTask.taskId, title: result.deletedTask.title }) };
           }
           case 'clear_completed': {
-            const cleared = store.clearCompleted();
-            return { success: true, output: cleared > 0 ? changed(store, { cleared }) : JSON.stringify({ cleared }) };
+            const result = await store.clearCompleted();
+            const cleared = result.clearedTaskIds?.length ?? 0;
+            return { success: true, output: cleared > 0 ? changed(result.counts, { cleared }) : JSON.stringify({ cleared }) };
           }
           default:
             return { success: false, error: `Unknown action "${String((args as { action?: unknown }).action)}". Use list, add, update, set_status, remove or clear_completed.` };
         }
       } catch (err) {
-        // Unknown or ambiguous id, a busy plan file: the store's message names it and nothing was changed.
+        // Unknown or ambiguous id, a store still opening: the message names it and nothing was changed.
         return { success: false, error: `Work plan not changed: ${summarizeError(err)}` };
       }
     },

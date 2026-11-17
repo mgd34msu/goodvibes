@@ -70,7 +70,7 @@ import type { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsServic
 import type { KeybindingsManager } from '../input/keybindings.ts';
 import type { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import type { ProjectWorkPlan } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { WorkspaceTrustManager, WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 export interface RuntimeServicesOptions {
@@ -203,7 +203,7 @@ export interface RuntimeServices {
   readonly homeGraphService: HomeGraphService;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: WorkPlanStore;
+  readonly workPlanStore: ProjectWorkPlan;
   readonly memoryStore: MemoryStore;
   readonly memoryRegistry: MemoryRegistry;
   /** Host-vs-client memory access: local until bootstrap.ts activates it for an adopted 'external' daemon (mirrors sessionSpine). */

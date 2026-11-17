@@ -27,6 +27,7 @@ import {
   KnowledgeSemanticService,
   KnowledgeStore,
   ProjectPlanningService,
+  ProjectWorkPlan,
   createConfiguredPlanningStore,
   configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
@@ -36,7 +37,7 @@ import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/p
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { RuntimeEventBus } from './index.js';
-import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { join } from 'node:path';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { AsyncDisposalRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { createNativeWorkLedgerOwner, type NativeWorkLedgerOwner } from './work-ledger-composition.js';
@@ -72,7 +73,8 @@ export interface KnowledgeServices {
   readonly homeGraphService: HomeGraphService;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: WorkPlanStore;
+  /** The project work plan: the planning service's task rows for this project, also served by projectPlanning.workPlan.*. */
+  readonly workPlanStore: ProjectWorkPlan;
   /** Trusted host-local authority; the runtime exposes only its service. */
   readonly workLedgerOwner: NativeWorkLedgerOwner;
 }
@@ -102,15 +104,15 @@ export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeS
   agentKnowledgeService.attachRuntimeBus(runtimeBus);
   const homeGraphService = new HomeGraphService(homeGraphKnowledgeStore, artifactStore, { semanticService: homeGraphSemanticService, admitExpensiveWork });
   deps.ownership.ownUntilRegistered('home graph service', () => homeGraphService.dispose());
-  const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(knowledgeStore, configManager, deps.workingDirectory, { waitForStartup: () => knowledgeService.whenReady() });
+  const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(knowledgeStore, configManager, deps.workingDirectory, { waitForStartup: () => knowledgeService.whenReady(), runtimeBus });
   const workLedgerOwner = createNativeWorkLedgerOwner({ projectId: projectPlanningProjectId, knowledgeStore });
   deps.ownership.registry.add('native work ledger', workLedgerOwner.close);
-  const workPlanStore = new WorkPlanStore({
-    homeDirectory: deps.homeDirectory,
-    surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
+  const workPlanStore = new ProjectWorkPlan({
+    service: projectPlanningService,
     projectId: projectPlanningProjectId,
     projectRoot: deps.workingDirectory,
-    source: GOODVIBES_DAEMON_SURFACE_ROOT,
+    surface: GOODVIBES_DAEMON_SURFACE_ROOT,
+    exportDirectory: join(deps.homeDirectory, '.goodvibes', GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans'),
   });
   return {
     knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore,

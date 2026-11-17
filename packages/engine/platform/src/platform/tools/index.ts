@@ -771,7 +771,7 @@ export function registerAllTools(
     }),
   );
   // The model's checklist is the project work plan the user sees; a host with its own work plan tool leaves this out.
-  if (deps.workPlan) registerTool(createWorkPlanTool(deps.workPlan));
+  if (deps.workPlan) registerTool(createWorkPlanTool(deps.workPlan, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
   if (mcpRegistry) {
     registerTool(createMcpTool(mcpRegistry));
   }

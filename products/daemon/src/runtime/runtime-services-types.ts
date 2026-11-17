@@ -55,7 +55,7 @@ import type { McpRegistry } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ArchivableProcessRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/fleet';
-import type { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import type { ProjectWorkPlan } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { WorkLedgerService } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import type { DaemonHandlerSurfaces } from '../daemon/handlers/index.js';
 import type { ClusterGroupComposition } from './cluster-group-composition.js';
@@ -175,7 +175,7 @@ export interface RuntimeServices {
   readonly homeGraphService: HomeGraphService;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: WorkPlanStore;
+  readonly workPlanStore: ProjectWorkPlan;
   /** Native project ledger; actor issuance stays in trusted host composition. */
   readonly workLedger: WorkLedgerService;
   readonly memoryStore: MemoryStore;

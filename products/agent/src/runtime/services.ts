@@ -127,6 +127,7 @@ import {
   KnowledgeSemanticService,
   KnowledgeStore,
   ProjectPlanningService,
+  ProjectWorkPlan,
   createConfiguredPlanningStore,
   assertConfiguredProjectContextReady,
   configureKnowledgeArtifactReferences,
@@ -223,7 +224,6 @@ import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-j
 import { type LocalhostFetchApproval } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/localhost-fetch-approval';
 import { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { WorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
-import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { AgentExecutionLedger } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { VERSION } from '../version.ts';
 import { ClientBuildGuard } from './client-build-compatibility.ts';
@@ -618,7 +618,8 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   readonly homeGraphService: PlatformCompanionGraphService;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: WorkPlanStore;
+  /** The project work plan: the planning service's task rows for this project. */
+  readonly workPlanStore: ProjectWorkPlan;
   readonly memoryStore: MemoryStore;
   readonly memoryRegistry: MemoryRegistry;
   /**
@@ -1460,15 +1461,15 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     workingDirectory,
     {
       waitForStartup: () => agentKnowledgeService.whenReady(),
+      runtimeBus: options.runtimeBus,
     },
   );
-  const workPlanStore = new WorkPlanStore({
-    homeDirectory,
-    // This product's storage scope: the plan lands beside the rest of the
-    // Agent's state at <home>/.goodvibes/agent/work-plans/.
-    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+  // The Agent's todo list, its workers' work_plan and /workplan all keep these rows.
+  const workPlanStore = new ProjectWorkPlan({
+    service: projectPlanningService,
     projectId: projectPlanningProjectId,
     projectRoot: workingDirectory,
+    surface: GOODVIBES_AGENT_SURFACE_ROOT,
   });
   const voiceProviders = new VoiceProviderRegistry();
   // The managed voice root also resolves the engine `/voice setup` installs, so

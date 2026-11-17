@@ -1,6 +1,5 @@
-import type { WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { summarizeWorkPlanCounts, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createAgentWorkPlanTool } from '../../tools/agent-work-plan-tool.ts';
-import { captureAgentExportPath } from '../../tools/agent-artifact-effect.ts';
 import { isDirectOwnerCommandContext, type CommandRegistry } from '../command-registry.ts';
 
 const LOCAL_STATUS: Readonly<Record<string, WorkPlanItemStatus>> = {
@@ -35,7 +34,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
       if ((action === 'show' || action === 'list') && args.length <= 1) input = { action: 'list' };
       else if (action === 'markdown' && args.length === 1) {
         ctx.print('Local todos only; local done is not native verified completion.');
-        ctx.print(store.toMarkdown().split('\n').map(clean).join('\n'));
+        ctx.print(store.toMarkdown(await store.snapshot()).split('\n').map(clean).join('\n'));
         return;
       } else if (action === 'add' && args[1]?.trim()) {
         const fields: Record<string, string> = {};
@@ -62,28 +61,20 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
       if (!isDirectOwnerCommandContext(ctx, 'workplan')) {
         ctx.print('Local work-plan edits require a fresh terminal owner command.'); return;
       }
-      const root = captureAgentExportPath(store.homeDirectory, store.homeDirectory);
-      let target = captureAgentExportPath(store.homeDirectory, store.filePath);
-      const assertOwner = () => {
-        if (!isDirectOwnerCommandContext(ctx, 'workplan') || ctx.workspace?.workPlanStore !== store) throw new Error('Local work-plan owner changed.');
-        root.assertCurrent();
-      };
-      const effects = { assertCurrent() { assertOwner(); target.assertCurrent(); },
-        onEffect() { assertOwner(); target = captureAgentExportPath(store.homeDirectory, store.filePath); } };
-      effects.assertCurrent();
+      // Each edit is one transaction on the plan's rows; its answer carries the plan's counts.
       if (input.action === 'create') {
-        const item = store.addItem(input.title, { owner: input.owner, source: input.source, notes: input.notes }, effects);
-        ctx.print(`Created local todo ${clean(item.id)}: ${clean(item.title)}. No native work was submitted or executed.`);
+        const { task, counts } = await store.add(input.title, { owner: input.owner, source: input.source, notes: input.notes });
+        ctx.print(`Created local todo ${clean(task.taskId)}: ${clean(task.title)}. Plan: ${summarizeWorkPlanCounts(counts)}. No native work was submitted or executed.`);
       } else if (input.action === 'set_status') {
-        const item = store.setItemStatus(input.id, input.status, effects);
-        ctx.print(`Local todo ${clean(item.id)} is ${clean(item.status)}. Local done is not native verified completion.`);
+        const { task, counts } = await store.setStatus(input.id, input.status);
+        ctx.print(`Local todo ${clean(task.taskId)} is ${clean(task.status)}. Plan: ${summarizeWorkPlanCounts(counts)}. Local done is not native verified completion.`);
       } else if (input.action === 'remove') {
-        const item = store.removeItem(input.id, effects);
-        ctx.print(`Removed local todo ${clean(item.id)}.`);
+        const { deletedTask, counts } = await store.remove(input.id);
+        ctx.print(`Removed local todo ${clean(deletedTask.taskId)}. Plan: ${summarizeWorkPlanCounts(counts)}.`);
       } else {
-        ctx.print(`Cleared ${store.clearCompleted(effects)} completed/cancelled local todos.`);
+        const result = await store.clearCompleted();
+        ctx.print(`Cleared ${result.clearedTaskIds?.length ?? 0} completed/cancelled local todos.`);
       }
-      effects.assertCurrent();
     },
   });
 }

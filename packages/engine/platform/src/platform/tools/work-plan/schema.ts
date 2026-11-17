@@ -1,4 +1,4 @@
-import { WORK_PLAN_STATUSES } from '../../workflow/work-plan-store.js';
+import { WORK_PLAN_TASK_STATUSES } from '../../knowledge/project-planning/work-plan.js';
 
 /** The work_plan tool's input. */
 export const WORK_PLAN_TOOL_SCHEMA = {
@@ -7,7 +7,7 @@ export const WORK_PLAN_TOOL_SCHEMA = {
     action: {
       type: 'string',
       enum: ['list', 'add', 'update', 'set_status', 'remove', 'clear_completed'],
-      description: 'list the items; add one; update its title, owner or notes; set_status; remove one; clear_completed removes finished items.',
+      description: 'list the items; add one; update its title, owner or notes; set_status; remove one; clear_completed removes done and cancelled items.',
     },
     id: {
       type: 'string',
@@ -19,8 +19,8 @@ export const WORK_PLAN_TOOL_SCHEMA = {
     },
     status: {
       type: 'string',
-      enum: [...WORK_PLAN_STATUSES],
-      description: '(add, set_status) The item status. add defaults to pending.',
+      enum: [...WORK_PLAN_TASK_STATUSES],
+      description: '(add, set_status) The item status. add defaults to pending. (list) Show only items in this status.',
     },
     owner: {
       type: 'string',

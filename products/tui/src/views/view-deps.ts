@@ -14,9 +14,8 @@ import type { Orchestrator, SessionMemoryStore } from '@goodvibes-jev/engine/pla
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { HookActivityTracker, HookDispatcher, HookWorkbench } from '@goodvibes-jev/engine/platform/platform/hooks';
 import type { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
-import type { ProjectPlanningService, KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import type { ProjectPlanningService, ProjectWorkPlan, KnowledgeApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { SessionChangeTracker } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
 import type { PolicyRuntimeState, SandboxSessionRegistry } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { PluginsModalManager } from './modals/plugins-modal.ts';
@@ -57,7 +56,7 @@ export type ResolvedBuiltinViewDeps = BuiltinViewDeps & {
   readonly sessionMemoryStore: SessionMemoryStore;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: WorkPlanStore;
+  readonly workPlanStore: ProjectWorkPlan;
   readonly policyRuntimeState: PolicyRuntimeState;
 };
 

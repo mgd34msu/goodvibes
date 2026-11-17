@@ -99,7 +99,7 @@ export interface TerminalCommandWorkspaceUiServices {
   bookmarkManager?: import('@goodvibes-jev/engine/platform/platform/bookmarks').BookmarkManager;
   projectPlanningService?: import('@goodvibes-jev/engine/platform/platform/knowledge').ProjectPlanningService;
   projectPlanningProjectId?: string;
-  workPlanStore?: import('@goodvibes-jev/engine/platform/platform/workflow').WorkPlanStore;
+  workPlanStore?: import('@goodvibes-jev/engine/platform/platform/knowledge').ProjectWorkPlan;
 }
 
 export interface TerminalCommandPlatformConfigServices {

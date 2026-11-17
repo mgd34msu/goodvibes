@@ -26,6 +26,7 @@ import {
   KnowledgeSemanticService,
   KnowledgeStore,
   ProjectPlanningService,
+  ProjectWorkPlan,
   createConfiguredPlanningStore,
   configureKnowledgeArtifactReferences,
   createProviderBackedKnowledgeSemanticLlm,
@@ -35,7 +36,7 @@ import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/p
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
-import { WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { join } from 'node:path';
 import type { AsyncDisposalRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { registerTerminalKnowledgeDrains } from '@goodvibes-jev/engine/terminal-shell/bootstrap-lifecycle';
 
@@ -69,7 +70,8 @@ export interface KnowledgeServices {
   readonly homeGraphService: HomeGraphService;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: WorkPlanStore;
+  /** The project work plan: the planning service's task rows for this project. */
+  readonly workPlanStore: ProjectWorkPlan;
 }
 
 /** Construct the knowledge/wiki + home-graph stack with governor backpressure wired in. */
@@ -97,13 +99,13 @@ export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeS
   deps.ownership.add('agent knowledge service', () => agentKnowledgeService.dispose());
   agentKnowledgeService.attachRuntimeBus(runtimeBus);
   const homeGraphService = new HomeGraphService(homeGraphKnowledgeStore, artifactStore, { semanticService: homeGraphSemanticService, admitExpensiveWork });
-  const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(knowledgeStore, configManager, deps.workingDirectory, { waitForStartup: () => knowledgeService.whenReady() });
-  const workPlanStore = new WorkPlanStore({
-    homeDirectory: deps.homeDirectory,
+  const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(knowledgeStore, configManager, deps.workingDirectory, { waitForStartup: () => knowledgeService.whenReady(), runtimeBus });
+  const workPlanStore = new ProjectWorkPlan({
+    service: projectPlanningService,
     projectId: projectPlanningProjectId,
     projectRoot: deps.workingDirectory,
-    surfaceRoot: 'tui',
-    source: 'tui',
+    surface: 'tui',
+    exportDirectory: join(deps.homeDirectory, '.goodvibes', 'tui', 'work-plans'),
   });
   return {
     knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore,

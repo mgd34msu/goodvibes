@@ -4,9 +4,8 @@ import { withModelReadingSource } from './agent-harness-model-reading-source.ts'
 import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 import type { AgentNoteRecord } from '../agent/note-registry.ts';
 import { type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
-import type { WorkPlanItem } from '@goodvibes-jev/engine/platform/platform/workflow';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { acquireLearningCuratorSource, type LearningRecord, type LearningCuratorSource, type LearningCandidateCollection, type LearningCuratorNativeContext } from './agent-harness-learning-curator-source.ts';
+import { acquireLearningCuratorSource, type LearningRecord, type LearningCuratorSource, type LearningCandidateCollection, type LearningCuratorNativeContext, type LearningWorkItem as WorkPlanItem } from './agent-harness-learning-curator-source.ts';
 import { readLearningGrade, readLearningProposalTarget, readLearningMemoryClass } from './agent-harness-learning-curator-readings.ts';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';

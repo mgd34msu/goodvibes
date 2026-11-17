@@ -150,8 +150,8 @@ project row in one transaction, so a write does not grow with the history. A
 row written by an earlier build (format 2: the whole ledger in one row) is read
 as before and stored in the new form on its next write. Legacy source metadata remains
 unchanged and is never converted into authority or verification. Old binaries
-refuse schema v2. No automatic WorkPlanStore import or duplicate editable mirror
-is created.
+refuse schema v2. The work plan's task rows are not copied into the ledger and no
+duplicate editable mirror is created.
 
 All KnowledgeStore initialization, ordinary saves, batches and ledger writes
 share the canonical database `.knowledge-lock`. The existing pending save queue

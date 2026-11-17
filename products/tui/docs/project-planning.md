@@ -74,15 +74,15 @@ The command surface (aliases `/wp`, `/todo`, `/workplan`):
 | `/work-plan edit <id> [<new title>] [--owner name] [--source label] [--notes text]` | Edit an item's title or fields; `/work-plan edit <id>` alone puts the command with the item's current title back in an empty composer |
 | `/work-plan list` | Print the plan as a list |
 | `/work-plan show` (alias `markdown`) | Print the plan rendered as Markdown |
-| `/work-plan export` | Write that same Markdown rendering to a file next to the JSON store |
+| `/work-plan export` | Write that same Markdown rendering to a file under `~/.goodvibes/tui/work-plans/` and print its path |
 | `/work-plan done\|start\|in_progress\|block\|fail\|cancel\|pending <id>` | Set an item's status directly |
 | `/work-plan cycle <id>` (alias `toggle`) | Advance the item to its next status |
 | `/work-plan remove <id>` | Remove an item |
 | `/work-plan clear-done` | Clear completed (done/cancelled) items |
 
-The TUI stores work-plan state under `~/.goodvibes/tui/work-plans/` and renders it in the `Work Plan` modal. Each project's plan is one file named from its exact project ID and root, so different projects never share a plan because their names look alike, and opening a plan costs the same however many projects you have used. Plans saved by an earlier build are moved to their new names, with every item, the first time the store opens; older files with unreadable or missing project metadata stay where they are, and the modal and `/work-plan show` name them once for recovery. Two GoodVibes programs editing the same project's plan take turns, so neither overwrites the other's change. A plan file with items this version cannot read in full, such as an unknown status written by a newer build, is copied aside before it is rewritten, and the Work Plan modal and `/work-plan show` name the copy.
+The work plan is the project's task list in the knowledge database: each item is its own row, the same rows the model keeps with the `work_plan` tool, a spawned worker keeps with its own `work_plan`, contracts link their units to, and the daemon serves through the `projectPlanning.workPlan.*` methods. An edit writes only the item it changes, in one transaction, so two GoodVibes programs editing the same project's plan never overwrite each other, and each edit prints one line on where the plan stands. An item can be named by its id or by a unique start of it. Plan files written by earlier builds under `~/.goodvibes/tui/work-plans/` are not read; their items do not appear in the plan.
 
-Terminal items (done or cancelled) age out automatically once they pass a time and count bound; open, in-progress, blocked, and failed items are never reclaimed. Anything a sweep removes is recorded on the plan as a housekeeping note rather than deleted silently, and an assigned plan file that is unreadable (for example torn by a crash) is quarantined alongside the original rather than overwritten, so the list can still be recovered by hand.
+Finished items stay until you clear them with `/work-plan clear-done` (or `c` in the modal); failed and blocked items are never cleared by it.
 
 The modal's keys:
 

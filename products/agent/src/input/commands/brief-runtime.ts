@@ -1,7 +1,7 @@
 import type { AutomationJob } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../agent-workspace-snapshot.ts';
-import { WORK_PLAN_STATUSES, type WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 
 type StatusCounts = Record<WorkPlanItemStatus, number>;
 
@@ -19,11 +19,10 @@ function reason(error: unknown): string {
 function workPlanCounts(ctx: CommandContext): WorkPlanReading {
   const counts = Object.fromEntries(WORK_PLAN_STATUSES.map((status) => [status, 0])) as StatusCounts;
   try {
-    const items = ctx.workspace?.workPlanStore?.listItems?.() ?? [];
-    for (const item of items) {
-      counts[item.status] += 1;
-    }
-    return { total: items.length, counts };
+    const plan = ctx.workspace?.workPlanStore?.snapshotNow();
+    if (!plan) return { total: 0, counts };
+    for (const status of WORK_PLAN_STATUSES) counts[status] = plan.counts[status];
+    return { total: plan.counts.total, counts };
   } catch (error) {
     return { unavailable: reason(error) };
   }

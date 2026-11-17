@@ -9,7 +9,6 @@ import { KnowledgeStore } from '../store.js';
 import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, REGULAR_KNOWLEDGE_DB_FILE, type KnowledgeStoreConfig } from '../store-config.js';
 import { normalizeSpaceComponent } from '../spaces.js';
 import { inspectPersistedPlanningProjects, type PersistedPlanningProjects } from './persisted-projects.js';
-import { inspectWorkPlanProjects } from './persisted-work-plan-projects.js';
 import { ProjectIdentityRegistry, ProjectIdentityUnavailableError, type RegisteredProjectIdentity } from './project-registry.js';
 export interface ConfiguredProjectInspection { readonly registration: 'registered' | 'unregistered'; readonly projectId: string | null }
 interface PreparedProject {
@@ -61,20 +60,16 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
   const sources = new Map<string, PersistedPlanningProjects>();
   for (const path of paths) { const source = await inspectPersistedPlanningProjects(path, current); current(); sources.set(path, source); }
   const selectedPath = join(workspace.configDirectory, file), source = sources.get(selectedPath)!;
-  const plans = [join(workspace.configDirectory, 'work-plans')];
-  if (home) for (const surface of ['tui', 'agent', 'daemon']) plans.push(join(home, '.goodvibes', surface, 'work-plans'));
-  const ownership = [...new Set(plans)].map(path => ({ path, inspection: inspectWorkPlanProjects(path, workspace.directory!) }));
-  const known = new Set(ownership.flatMap(plan => plan.inspection.projectIds));
+  // Work-plan files of earlier builds are not read: the work plan is task rows in the knowledge store.
   const originalSourcesCurrent = () => {
     current(); registered?.assertCurrent();
     for (const selected of sources.values()) selected.assertInitialImage();
-    for (const plan of ownership) assertWorkPlanOwnershipCurrent(plan, workspace.directory!);
   };
   originalSourcesCurrent();
-  const associatedProjectId = registered?.projectId ?? (known.size === 1 ? [...known][0] : undefined);
-  const old = previousDefault(workingDirectory, [...sources.values()].flatMap(selected => selected.projectIds).concat([...known]), associatedProjectId);
-  if ((registered && old !== null && old !== registered.projectId) || (!registered && old === null && known.size > 1)) throw new ProjectIdentityUnavailableError();
-  const previous = old ?? [...known][0] ?? null;
+  const associatedProjectId = registered?.projectId;
+  const old = previousDefault(workingDirectory, [...sources.values()].flatMap(selected => selected.projectIds), associatedProjectId);
+  if (registered && old !== null && old !== registered.projectId) throw new ProjectIdentityUnavailableError();
+  const previous = old;
   if (!registered) {
     if (!activate) { originalSourcesCurrent(); return Object.freeze({ registration: previous === null ? 'unregistered' : 'registered', projectId: previous }); }
     registered = await registry.activate(physicalWorkspace.canonical, previous, config.getNativeDataWriter(), originalSourcesCurrent); current();
@@ -88,15 +83,6 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
   }
   originalSourcesCurrent();
   return Object.freeze({ registration: 'registered', projectId: registered.projectId });
-}
-/** Another surface sharing the home may save a work plan between inspection and this check.
- * Re-inspect once: if the workspace's owning projects are unchanged the new listing is
- * equally valid, so only a real ownership change is refused. */
-function assertWorkPlanOwnershipCurrent(plan: { readonly path: string; inspection: ReturnType<typeof inspectWorkPlanProjects> }, workspace: string): void {
-  try { plan.inspection.assertCurrent(); return; } catch (error) { if (!(error instanceof ProjectIdentityUnavailableError)) throw error; }
-  const next = inspectWorkPlanProjects(plan.path, workspace), before = plan.inspection.projectIds;
-  if (next.projectIds.length !== before.length || next.projectIds.some((id, index) => id !== before[index])) throw new ProjectIdentityUnavailableError();
-  plan.inspection = next;
 }
 function requirePreparedProject(config: ConfigManager, file: string): PreparedProject {
   selectedFile(file); const prepared = preparations.get(config)?.get(file); if (!prepared) throw new ProjectIdentityUnavailableError(); prepared.assertCurrent(); prepared.source.assertInitialImage();

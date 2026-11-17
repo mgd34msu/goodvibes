@@ -3,11 +3,17 @@ import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/en
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { agentLocalStateWrite, assertAgentLocalStateCurrent, createAgentLocalStateInputProjector } from './agent-local-state-admission.ts';
 import {
-  WORK_PLAN_STATUSES,
-  type WorkPlanItem,
-  type WorkPlanItemStatus,
-  type WorkPlanStore,
-} from '@goodvibes-jev/engine/platform/platform/workflow';
+  WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES,
+  summarizeWorkPlanCounts,
+  type ProjectWorkPlan,
+  type ProjectWorkPlanCounts,
+  type ProjectWorkPlanTask as WorkPlanItem,
+  type ProjectWorkPlanTaskStatus as WorkPlanItemStatus,
+  type WorkPlanTaskPatch,
+} from '@goodvibes-jev/engine/platform/platform/knowledge';
+
+/** The slice of the project work plan this tool uses. */
+export type AgentWorkPlanStore = Pick<ProjectWorkPlan, 'projectRoot' | 'snapshot' | 'get' | 'add' | 'update' | 'setStatus' | 'remove' | 'clearCompleted'>;
 
 export type AgentWorkPlanAction =
   | 'list'
@@ -62,10 +68,9 @@ function output(text: string): { readonly success: true; readonly output: string
   return { success: true, output: text };
 }
 
-/** The changed item's lines plus one line on where the plan stands, taken from the write itself. */
-function changedOutput(store: WorkPlanStore, lines: readonly string[]): { readonly success: true; readonly output: string } {
-  const plan = store.lastWriteSummary?.();
-  return output([...lines, ...(plan ? [`  plan ${plan}`] : [])].join('\n'));
+/** The changed item's lines plus one line on where the plan stands, counted in the edit's own transaction. */
+function changedOutput(counts: ProjectWorkPlanCounts, lines: readonly string[]): { readonly success: true; readonly output: string } {
+  return output([...lines, `  plan ${summarizeWorkPlanCounts(counts)}`].join('\n'));
 }
 
 function requireId(args: AgentWorkPlanToolArgs): string {
@@ -94,7 +99,7 @@ function formatItem(item: WorkPlanItem): string {
   const owner = item.owner ? ` owner ${item.owner}` : '';
   const source = item.source ? ` source=${item.source}` : '';
   const completed = item.completedAt ? ` completed ${new Date(item.completedAt).toISOString()}` : '';
-  return `${item.id}  ${formatStatus(item.status)}${owner}${source}${completed}  ${item.title}`;
+  return `${item.taskId}  ${formatStatus(item.status)}${owner}${source}${completed}  ${item.title}`;
 }
 
 function routeArg(value: string): string {
@@ -116,8 +121,8 @@ function nextRouteLine(id: string, route: string): string {
 function workPlanNextRouteLines(item: WorkPlanItem): readonly string[] {
   return [
     '  nextRoutes',
-    nextRouteLine('markDone', workPlanRoute('set_status', item.id, 'done')),
-    nextRouteLine('markBlocked', workPlanRoute('set_status', item.id, 'blocked')),
+    nextRouteLine('markDone', workPlanRoute('set_status', item.taskId, 'done')),
+    nextRouteLine('markBlocked', workPlanRoute('set_status', item.taskId, 'blocked')),
   ];
 }
 
@@ -126,7 +131,7 @@ function formatItemDetail(item: WorkPlanItem): string {
     formatItem(item),
     `created ${new Date(item.createdAt).toISOString()}`,
     `updated ${new Date(item.updatedAt).toISOString()}`,
-    ...(item.linked ? [`linked ${Object.entries(item.linked).map(([key, value]) => `${key} ${String(value)}`).join(', ')}`] : []),
+    ...(linkedText(item) ? [`linked ${linkedText(item)}`] : []),
     '',
     item.notes || '(no notes)',
     '',
@@ -134,18 +139,12 @@ function formatItemDetail(item: WorkPlanItem): string {
   ].join('\n');
 }
 
-function resolveItem(store: WorkPlanStore, idOrPrefix: string): WorkPlanItem {
-  const needle = idOrPrefix.trim();
-  if (!needle) throw new Error('id is required.');
-  const items = store.listItems();
-  const exact = items.find((item) => item.id === needle);
-  if (exact) return exact;
-  const matches = items.filter((item) => item.id.startsWith(needle));
-  if (matches.length === 1) return matches[0]!;
-  if (matches.length > 1) {
-    throw new Error(`Work plan item id "${needle}" is ambiguous. Matches ${matches.map((item) => item.id).join(', ')}`);
-  }
-  throw new Error(`Work plan item not found ${needle}`);
+function linkedText(item: WorkPlanItem): string {
+  return [
+    item.agentId ? `agentId ${item.agentId}` : '',
+    item.contractId ? `contractId ${item.contractId}` : '',
+    item.sessionId ? `sessionId ${item.sessionId}` : '',
+  ].filter(Boolean).join(', ');
 }
 
 const DEFAULT_LIST_LIMIT = 20;
@@ -158,23 +157,17 @@ function readListLimit(value: unknown): number {
   return Math.min(Math.trunc(limit), MAX_LIST_LIMIT);
 }
 
-function listOutput(store: WorkPlanStore, filter?: WorkPlanItemStatus, limit = DEFAULT_LIST_LIMIT): string {
-  const plan = store.getActivePlan();
-  const counts = new Map<WorkPlanItemStatus, number>(WORK_PLAN_STATUSES.map((status) => [status, 0]));
-  for (const item of plan.items) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
-  const matching = filter ? plan.items.filter((item) => item.status === filter) : plan.items;
+async function listOutput(store: AgentWorkPlanStore, filter?: WorkPlanItemStatus, limit = DEFAULT_LIST_LIMIT): Promise<string> {
+  const plan = await store.snapshot(filter ? { status: filter } : {});
+  const counts = plan.counts;
+  const matching = plan.tasks;
   const lines = [
     'Agent todo list',
-    plan.registration === 'unregistered' && !plan.id ? '  plan not saved; adding the first item creates it' : `  plan ${plan.id}`,
-    `  project ${plan.projectRoot}`,
-    `  items ${plan.items.length}; pending ${counts.get('pending') ?? 0}; active ${counts.get('in_progress') ?? 0}; blocked ${counts.get('blocked') ?? 0}; done ${counts.get('done') ?? 0}; failed ${counts.get('failed') ?? 0}; cancelled ${counts.get('cancelled') ?? 0}`,
+    `  plan revision ${plan.revision}`,
+    `  project ${store.projectRoot}`,
+    `  items ${counts.total}; pending ${counts.pending}; active ${counts.in_progress}; blocked ${counts.blocked}; done ${counts.done}; failed ${counts.failed}; cancelled ${counts.cancelled}`,
   ];
-  if (plan.housekeeping?.recoveryRequired) lines.push('Saved local plan is unreadable; this inspection left the file unchanged. The next create or update moves it aside to a recovery copy next to it and starts a fresh plan; nothing is deleted.');
-  if (plan.housekeeping?.preservedUnverifiedQuarantines) lines.push(`${plan.housekeeping.preservedUnverifiedQuarantines} unverified historical recovery path(s) were preserved for inspection.`);
-  if (plan.unassignedPlanPaths?.length) {
-    lines.push('Preserved work-plan files could not be assigned to a project. Inspect these before recovering their items:', ...plan.unassignedPlanPaths);
-  }
-  if (plan.items.length === 0) {
+  if (counts.total === 0) {
     lines.push('', 'No local work plan items.');
     return lines.join('\n');
   }
@@ -187,7 +180,7 @@ function listOutput(store: WorkPlanStore, filter?: WorkPlanItemStatus, limit = D
   return lines.join('\n');
 }
 
-function updatePatch(args: AgentWorkPlanToolArgs): Parameters<WorkPlanStore['updateItem']>[1] {
+function updatePatch(args: AgentWorkPlanToolArgs): WorkPlanTaskPatch {
   const status = readOptionalStatus(args.status);
   return {
     ...(args.title !== undefined ? { title: requireTitle(args) } : {}),
@@ -198,7 +191,7 @@ function updatePatch(args: AgentWorkPlanToolArgs): Parameters<WorkPlanStore['upd
   };
 }
 
-export function createAgentWorkPlanTool(store: WorkPlanStore): Tool {
+export function createAgentWorkPlanTool(store: AgentWorkPlanStore): Tool {
   return {
     definition: {
       name: 'agent_work_plan',
@@ -228,65 +221,68 @@ export function createAgentWorkPlanTool(store: WorkPlanStore): Tool {
       options?.signal?.throwIfAborted(); assertCurrentToolExecution(rawArgs, options);
       if (!isAction(args.action)) return failure(`Unknown agent_work_plan action. Valid values ${ACTIONS.join(', ')}.`);
       if (args.action === 'list' || args.action === 'get') {
-        const result = args.action === 'list' ? listOutput(store, readOptionalStatus(args.status), readListLimit(args.limit)) : formatItemDetail(resolveItem(store, requireId(args)));
+        const result = args.action === 'list' ? await listOutput(store, readOptionalStatus(args.status), readListLimit(args.limit)) : formatItemDetail(await store.get(requireId(args)));
         assertAgentLocalStateCurrent(rawArgs, options); return output(result);
       }
-      const effects = agentLocalStateWrite(rawArgs, options);
+      // The registry-issued write authority is checked once, before the one transaction that writes.
+      agentLocalStateWrite(rawArgs, options);
       if (args.action === 'create') {
-        const item = store.addItem(requireTitle(args), {
+        const { task, counts } = await store.add(requireTitle(args), {
           status: readOptionalStatus(args.status) ?? 'pending',
           owner: readString(args.owner) || 'agent',
           source: readString(args.source) || 'main-conversation',
           notes: readString(args.notes) || undefined,
-        }, effects);
-        return changedOutput(store, [
+        });
+        return changedOutput(counts, [
           'Created Agent todo',
-          `  id ${item.id}`,
-          `  title ${item.title}`,
+          `  id ${task.taskId}`,
+          `  title ${task.title}`,
         ]);
       }
       if (args.action === 'update') {
         const patch = updatePatch(args);
         if (Object.keys(patch).length === 0) return failure('Nothing to update: give at least one of title, status, owner, source or notes.');
-        const item = store.updateItem(requireId(args), patch, effects);
-        return changedOutput(store, [
+        const { task, counts } = await store.update(requireId(args), patch);
+        return changedOutput(counts, [
           'Updated Agent todo',
-          `  id ${item.id}`,
-          `  title ${item.title}`,
+          `  id ${task.taskId}`,
+          `  title ${task.title}`,
         ]);
       }
       if (args.action === 'set_status') {
         const status = readOptionalStatus(args.status);
         if (!status) throw new Error('status is required.');
-        const item = store.setItemStatus(requireId(args), status, effects);
-        return changedOutput(store, [
+        const { task, counts } = await store.setStatus(requireId(args), status);
+        return changedOutput(counts, [
           'Set Agent todo status',
-          `  id ${item.id}`,
-          `  status ${formatStatus(item.status)}`,
-          `  title ${item.title}`,
+          `  id ${task.taskId}`,
+          `  status ${formatStatus(task.status)}`,
+          `  title ${task.title}`,
         ]);
       }
       if (args.action === 'remove') {
-        const item = store.removeItem(requireId(args), effects);
-        return changedOutput(store, [
+        const { deletedTask, counts } = await store.remove(requireId(args));
+        return changedOutput(counts, [
           'Removed Agent todo',
-          `  id ${item.id}`,
-          `  title ${item.title}`,
+          `  id ${deletedTask.taskId}`,
+          `  title ${deletedTask.title}`,
         ]);
       }
-      const count = store.clearCompleted(effects);
+      const result = await store.clearCompleted();
+      const count = result.clearedTaskIds?.length ?? 0;
       const cleared = [
         `Cleared ${count} done or cancelled Agent todos`,
         `  count ${count}`,
       ];
-      return count > 0 ? changedOutput(store, cleared) : output(cleared.join('\n'));
+      return count > 0 ? changedOutput(result.counts, cleared) : output(cleared.join('\n'));
     },
   };
 }
 
-export function registerAgentWorkPlanTool(registry: ToolRegistry, store: WorkPlanStore): void {
-  // The store's home and plan file are fixed when it is built, so the target needs no re-check.
+export function registerAgentWorkPlanTool(registry: ToolRegistry, store: AgentWorkPlanStore): void {
+  // The plan is rows in the knowledge database, not a file this tool names: the projection screens a
+  // write for secret-like text and binds the registry's write authority; there is no file target to hold.
   registry.register(createAgentWorkPlanTool(store), { inputProjection: createAgentLocalStateInputProjector(() => ({
-    targets: [{ root: store.homeDirectory, path: store.filePath, access: 'write' }], assertDescriptors: () => {},
+    targets: [], assertDescriptors: () => {},
   }), args => args.action === 'list' || args.action === 'get') });
 }

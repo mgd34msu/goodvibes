@@ -10,12 +10,39 @@ import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarize
 import type { AgentWorkspaceLocalLibraryItem } from '../input/agent-workspace-types.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { captureWorkPlanItems, WorkPlanStore } from '@goodvibes-jev/engine/platform/platform/workflow';
+import { captureWorkPlanTasks, ProjectWorkPlan, type ProjectWorkPlanTask } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, captureCatalogMethods, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import { discoverVibeFiles } from '../agent/vibe-file.ts';
 import type { LocalLearningCandidateDomain, LearningCandidate } from './agent-harness-learning-curator-types.ts';
+
+/** A work-plan task as the curator reads it: the row's fields under the record id the readings use. */
+export interface LearningWorkItem {
+  readonly id: string;
+  readonly title: string;
+  readonly status: ProjectWorkPlanTask['status'];
+  readonly owner?: string | undefined;
+  readonly source?: string | undefined;
+  readonly notes?: string | undefined;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly completedAt?: number | undefined;
+}
+
+function learningWorkItem(task: ProjectWorkPlanTask): LearningWorkItem {
+  return {
+    id: task.taskId,
+    title: task.title,
+    status: task.status,
+    ...(task.owner ? { owner: task.owner } : {}),
+    ...(task.source ? { source: task.source } : {}),
+    ...(task.notes ? { notes: task.notes } : {}),
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    ...(task.completedAt !== undefined ? { completedAt: task.completedAt } : {}),
+  };
+}
 
 export interface LearningRecord {
   readonly item: AgentWorkspaceLocalLibraryItem;
@@ -23,7 +50,7 @@ export interface LearningRecord {
 }
 
 export interface LearningCuratorNativeContext {
-  readonly workspace?: Pick<CommandContext['workspace'], 'shellPaths'> & { readonly workPlanStore?: Pick<NonNullable<CommandContext['workspace']['workPlanStore']>, 'listItems'> };
+  readonly workspace?: Pick<CommandContext['workspace'], 'shellPaths'> & { readonly workPlanStore?: Pick<NonNullable<CommandContext['workspace']['workPlanStore']>, 'snapshotNow'> };
   readonly clients?: { readonly agentKnowledgeApi?: { readonly memory?: Pick<MemoryApi, 'getAll'> } };
   readonly session?: {
     readonly sessionManager?: Pick<NonNullable<CommandContext['session']['sessionManager']>, 'list' | 'load'>
@@ -100,13 +127,14 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   };
   const assertReadingBackends = () => { assertNative(); for (const guard of retained) guard(); assertNative(); };
   assertNative();
-  // One read of the plan; later reads compare the plan file's revision (one lstat) and
-  // refuse with the work plan named when it changed.
-  const nativeWorkItems = work instanceof WorkPlanStore ? captureWorkPlanItems(work) : undefined;
-  const readWorkItems = () => {
-    if (!nativeWorkItems) return work?.listItems() ?? [];
+  // One read of the plan's rows; later reads compare the plan's revision (one indexed
+  // statement) and refuse with the work plan named when an edit committed since.
+  const nativeWorkItems = work instanceof ProjectWorkPlan ? captureWorkPlanTasks(work) : undefined;
+  const nativeLearningItems = nativeWorkItems?.tasks.map(learningWorkItem);
+  const readWorkItems = (): readonly LearningWorkItem[] => {
+    if (!nativeWorkItems || !nativeLearningItems) return (work?.snapshotNow().tasks ?? []).map(learningWorkItem);
     nativeWorkItems.assertCurrent();
-    return nativeWorkItems.items;
+    return nativeLearningItems;
   };
   // Parsing every saved session on each currentness check grows with the number of sessions.
   // When no session file changed (same fingerprint, which a save always changes), the last

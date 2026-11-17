@@ -1,6 +1,7 @@
 import { discoverRoutines, type DiscoveredRoutineRecord } from '../../agent/routine-discovery.ts';
 import { AgentRoutineRegistry, evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
+import { assertActorMayEnable, assertActorMayMarkReviewed, type RegistryActor } from '@goodvibes-jev/engine/terminal-shell/agent-turn/review-authority';
 import { buildAgentSkillRequirements, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import {
   buildRoutineSchedulePreview,
@@ -39,6 +40,11 @@ function parseRoutineArgs(args: readonly string[]): ParsedAgentLocalLibraryArgs 
 function splitList(value: string | undefined): readonly string[] {
   if (!value) return [];
   return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+}
+
+/** Who the command acts for: the owner typing it, or the model running it. */
+function actorOf(ctx: CommandContext): RegistryActor {
+  return ctx.invokedByModel === true ? 'model' : 'owner';
 }
 
 function registryFromContext(ctx: CommandContext): AgentRoutineRegistry {
@@ -188,6 +194,7 @@ async function importDiscoveredRoutine(args: readonly string[], ctx: CommandCont
     ].join('\n'));
     return;
   }
+  if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'routine', discovered.name, 'fresh');
   const routine = routineRegistry.create({
     name: discovered.name,
     description: discovered.description || `Imported routine from ${discovered.origin} markdown file.`,
@@ -351,6 +358,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
     if (sub === 'create') {
       const parsed = parseRoutineArgs(args.slice(1));
       const steps = parsed.flags.get('steps')?.trim() || parsed.rest.join(' ').trim();
+      if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'routine', requiredFlag(parsed.flags, 'name'), 'fresh');
       const routine = routineRegistry.create({
         name: requiredFlag(parsed.flags, 'name'),
         description: requiredFlag(parsed.flags, 'description'),
@@ -402,10 +410,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
       if (!id) {
         throw commandRefusal(`Usage: /routines ${sub} <id>`);
       }
-      if (sub === 'enable' && ctx.invokedByModel === true && routineRegistry.get(id)?.reviewState !== 'reviewed') {
-        ctx.print(`Not enabled: Agent routine ${id} has not been reviewed, and only the owner typing the command can enable an unreviewed routine. Next: ask the owner to run /routines show ${id}, then /routines review ${id}.`);
-        return;
-      }
+      if (sub === 'enable') assertActorMayEnable(actorOf(ctx), 'routine', id, routineRegistry.get(id)?.reviewState);
       const routine = routineRegistry.setEnabled(id, sub === 'enable');
       ctx.print(formatRoutineReceipt(`${sub === 'enable' ? 'Enabled' : 'Disabled'} Agent routine`, routine));
       return;
@@ -461,10 +466,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
       if (!id) {
         throw commandRefusal('Usage: /routines review <id>');
       }
-      if (ctx.invokedByModel === true) {
-        ctx.print(`Not reviewed: Agent routine ${id} is unchanged. Marking a routine reviewed is the owner's decision that its steps may run, and this request came from the model, the route content it just read could steer. Next: ask the owner to run /routines review ${id}.`);
-        return;
-      }
+      assertActorMayMarkReviewed(actorOf(ctx), 'routine', id);
       const routine = routineRegistry.markReviewed(id);
       ctx.print(formatRoutineReceipt('Reviewed Agent routine', routine));
       return;

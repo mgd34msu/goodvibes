@@ -187,11 +187,20 @@ function boundedProgress(value: unknown, fallback = 0): number {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 }
 
-function checkpointId(at: string, count: number): string {
+/**
+ * The id of the checkpoint after `checkpoints`. The suffix only grows: it is
+ * one past the newest checkpoint's own suffix (or the count, for ids written
+ * before), so it stays unique once the run holds its most checkpoints and
+ * the count stops growing.
+ */
+function nextCheckpointId(at: string, checkpoints: readonly AgentResearchRunCheckpoint[]): string {
   // The clock digits stay readable; the card screen skips a digit run that
   // hangs off a word by `-`, as `cp-` does here.
   const instant = at.replace(/[^0-9]/g, '').slice(0, 14);
-  return `cp-${instant}-${(count + 1).toString(36)}`;
+  const newest = checkpoints.at(-1)?.id;
+  const suffix = newest === undefined ? Number.NaN : Number.parseInt(newest.slice(newest.lastIndexOf('-') + 1), 36);
+  const previous = Number.isSafeInteger(suffix) ? Math.max(suffix, checkpoints.length) : checkpoints.length;
+  return `cp-${instant}-${(previous + 1).toString(36)}`;
 }
 
 function assertRunContentSafe(fields: readonly string[]): void {
@@ -624,7 +633,7 @@ export class AgentResearchRunRegistry {
       const nextStatus = finalStatus ?? (run.status === 'planned' ? 'running' : run.status);
       this.assertMove(run, nextStatus);
       const checkpoint: AgentResearchRunCheckpoint = {
-        id: checkpointId(timestamp, run.checkpoints.length),
+        id: nextCheckpointId(timestamp, run.checkpoints),
         at: timestamp,
         phase: finalPhase,
         status: nextStatus,

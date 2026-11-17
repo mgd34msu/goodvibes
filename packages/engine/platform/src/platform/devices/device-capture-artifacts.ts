@@ -1,9 +1,7 @@
-/** Retained paired-device captures. Fresh bytes use their original native file
- * observation, not a content digest. Earlier saved v1 checksum rows verify that
- * published pin once when their bytes are adopted into v2. */
-import { createHash } from 'node:crypto';
+/** Retained paired-device captures. Bytes are bound by their original native
+ * file observation, not a content digest. */
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, chmodSync, openSync, unlinkSync, writeFile, type BigIntStats } from 'node:fs';
+import { closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, chmodSync, unlinkSync, writeFile, type BigIntStats } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { PersistentStore } from '../state/persistent-store.js';
 import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from '../artifacts/storage-ownership.js';
@@ -20,8 +18,6 @@ export interface DeviceCaptureArtifact {
   readonly mediaType: string;
   readonly fileName: string;
   readonly byteLength: number;
-  /** Compatibility metadata from an actual earlier saved capture. */
-  readonly sha256?: string | undefined;
   readonly capturedAt: number;
   readonly expiresAt: number;
   readonly workId?: string | undefined;
@@ -44,7 +40,7 @@ export const DEFAULT_DEVICE_ARTIFACT_POLICY: DeviceArtifactPolicy = { retentionM
  * wait is never spent on a dead process.
  */
 const INDEX_LOCK_WAIT_MS = 2_000;
-interface SavedArtifact extends DeviceCaptureArtifact { readonly sourceObservation?: string }
+interface SavedArtifact extends DeviceCaptureArtifact { readonly sourceObservation: string }
 interface PendingCapture { readonly id: string; readonly fileName: string; readonly sourceIdentity: string; readonly capturedAt: number }
 const pendingIdentity = (entry: BigIntStats): string => {
   if (!entry.isFile() || entry.nlink !== 1n || (entry.mode & 0o777n) !== 0o600n) throw new Error('Pending device capture source is unavailable');
@@ -70,14 +66,11 @@ function validateArtifact(value: unknown): SavedArtifact | null {
     || typeof row.kind !== 'string' || !ARTIFACT_KINDS.includes(row.kind as DeviceArtifactKind)
     || typeof row.byteLength !== 'number' || !Number.isSafeInteger(row.byteLength) || row.byteLength < 0
     || typeof row.capturedAt !== 'number' || !Number.isFinite(row.capturedAt) || typeof row.expiresAt !== 'number' || !Number.isFinite(row.expiresAt)
-    || row.sha256 !== undefined && (typeof row.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(row.sha256))
-    || row.sourceObservation !== undefined && (typeof row.sourceObservation !== 'string' || !row.sourceObservation || row.sourceObservation.length > 1024)
-    || row.sourceObservation === undefined && row.sha256 === undefined) return null;
+    || typeof row.sourceObservation !== 'string' || !row.sourceObservation || row.sourceObservation.length > 1024) return null;
   return { id: row.id, nodeId: row.nodeId, capabilityId: row.capabilityId, kind: row.kind as DeviceArtifactKind,
     mediaType: typeof row.mediaType === 'string' && row.mediaType ? row.mediaType : 'application/octet-stream', fileName: row.fileName,
     byteLength: row.byteLength, capturedAt: row.capturedAt, expiresAt: row.expiresAt,
-    ...(typeof row.sha256 === 'string' ? { sha256: row.sha256 } : {}),
-    ...(typeof row.sourceObservation === 'string' ? { sourceObservation: row.sourceObservation } : {}),
+    sourceObservation: row.sourceObservation,
     ...(typeof row.workId === 'string' && row.workId ? { workId: row.workId } : {}), ...(typeof row.reason === 'string' && row.reason ? { reason: row.reason } : {}) };
 }
 const publicArtifact = (row: SavedArtifact): DeviceCaptureArtifact => { const { sourceObservation: _source, ...artifact } = row; return artifact; };
@@ -265,32 +258,17 @@ export class DeviceCaptureArtifactStore {
   pathFor(artifact: DeviceCaptureArtifact): string { if (!CAPTURE_FILE.test(artifact.fileName)) throw new Error('Invalid device capture filename'); return join(this.directory, artifact.fileName); }
   private adopt(row: SavedArtifact, mutation: Mutation, needBytes: boolean): { row: SavedArtifact; bytes?: Uint8Array } {
     mutation.current(); const path = this.pathFor(row);
-    if (row.sourceObservation !== undefined) {
-      mutation.owner.assertImported(path, row.sourceObservation);
-      if (!needBytes) return { row };
-      const bytes = readFileObservation(path).bytes; mutation.current(); mutation.owner.assertImported(path, row.sourceObservation);
-      if (bytes.byteLength !== row.byteLength) throw new Error('Device capture size changed'); return { row, bytes };
-    }
-    const original = readFileObservation(path), stat = lstatSync(path, { bigint: true });
-    // This branch is exclusively an actual saved v1 checksum contract. Fresh
-    // captures never hash; after adoption the v2 row uses native observations.
-    if (!row.sha256 || original.bytes.byteLength !== row.byteLength || createHash('sha256').update(original.bytes).digest('hex') !== row.sha256) throw new Error('Saved device capture checksum mismatch');
-    mutation.current(); if (fileObservationIdentity(path) !== original.physical) throw new Error('Saved device capture source changed');
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    try { const opened = fstatSync(fd, { bigint: true }); if (opened.dev !== stat.dev || opened.ino !== stat.ino || opened.size !== stat.size || opened.mtimeNs !== stat.mtimeNs || opened.ctimeNs !== stat.ctimeNs || fileObservationIdentity(path) !== original.physical) throw new Error('Saved device capture source changed');
-      fchmodSync(fd, 0o600); fsyncSync(fd);
-      const after = fstatSync(fd, { bigint: true });
-      if (after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs) throw new Error('Saved device capture changed during adoption');
-    } finally { closeSync(fd); }
-    mutation.current(); const sourceObservation = mutation.owner.importedStamp(path);
-    return { row: { ...row, sourceObservation }, ...(needBytes ? { bytes: original.bytes } : {}) };
+    mutation.owner.assertImported(path, row.sourceObservation);
+    if (!needBytes) return { row };
+    const bytes = readFileObservation(path).bytes; mutation.current(); mutation.owner.assertImported(path, row.sourceObservation);
+    if (bytes.byteLength !== row.byteLength) throw new Error('Device capture size changed'); return { row, bytes };
   }
   private retire(row: SavedArtifact, mutation: Mutation, removed?: () => void): void {
-    const path = this.pathFor(row); mutation.current(); mutation.owner.assertImported(path, row.sourceObservation ?? '');
+    const path = this.pathFor(row); mutation.current(); mutation.owner.assertImported(path, row.sourceObservation);
     const sourceIdentity = pendingIdentity(lstatSync(path, { bigint: true }));
     if (mutation.pending.has(row.id)) throw new Error('Device capture retirement conflicts with pending custody');
     mutation.pending.set(row.id, { id: row.id, fileName: row.fileName, sourceIdentity, capturedAt: row.capturedAt });
-    mutation.remove(path, () => mutation.owner.assertImported(path, row.sourceObservation ?? ''), () => {
+    mutation.remove(path, () => mutation.owner.assertImported(path, row.sourceObservation), () => {
       mutation.pending.delete(row.id); removed?.();
     });
   }
@@ -304,7 +282,7 @@ export class DeviceCaptureArtifactStore {
       const row = adopted.row;
       if (row.expiresAt <= this.now()) { this.retire(row, mutation);
         return { next: rows.filter(row => row !== original), result: { ok: false as const, reason: 'expired' as const } }; }
-      mutation.retain(() => mutation.owner.assertImported(this.pathFor(row), row.sourceObservation ?? ''));
+      mutation.retain(() => mutation.owner.assertImported(this.pathFor(row), row.sourceObservation));
       if (!adopted.bytes) throw new Error('Device capture read did not acquire bytes');
       return { next: rows.map(candidate => candidate === original ? row : candidate), result: { ok: true as const, artifact: publicArtifact(row), bytes: adopted.bytes } };
     });
@@ -353,7 +331,7 @@ export class DeviceCaptureArtifactStore {
       }
       surviving.sort((a, b) => a.capturedAt - b.capturedAt); const overflow = Math.max(0, surviving.length - policy.maxArtifacts), kept = surviving.slice(overflow);
       for (const row of surviving.slice(0, overflow)) remove(row, 'count-cap', true);
-      for (const row of kept) mutation.retain(() => mutation.owner.assertImported(this.pathFor(row), row.sourceObservation ?? ''));
+      for (const row of kept) mutation.retain(() => mutation.owner.assertImported(this.pathFor(row), row.sourceObservation));
       for (const pending of interrupted) {
         if (mutation.preserved.has(pending.fileName)) { mutation.complete(pending.id); continue; }
         if (known.has(pending.fileName)) throw new Error('Pending device capture conflicts with retained history');

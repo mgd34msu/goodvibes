@@ -122,6 +122,21 @@ function expandTypedReferences(text: string, projectRoot: string, contextReferen
         return `${prefix}${fileBlock}${suffix}`;
     });
 }
+/**
+ * Says, once, that a bracketed paste over the size limit was not inserted:
+ * the tokenizer drops it whole, so without this line the paste just does not
+ * appear. A host calls it after each tokenizer feed.
+ */
+export function reportDroppedPaste(
+    tokenizer: { takeDroppedPaste(): { readonly chars: number; readonly limit: number } | undefined },
+    conversation: { log(text: string): void } | null,
+    requestRender: () => void,
+): void {
+    const dropped = tokenizer.takeDroppedPaste();
+    if (!dropped) return;
+    conversation?.log(`Paste of ${dropped.chars.toLocaleString('en-US')} characters was not inserted: it is over the ${dropped.limit.toLocaleString('en-US')}-character limit. Save it to a file and attach that instead (@path in the prompt).`);
+    requestRender();
+}
 export const MARKER_REGEX = /\[(TEXT|IMAGE): [^\]]+\]/g;
 export const IMAGE_PREFIXES: {
     prefix: string;

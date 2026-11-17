@@ -8,6 +8,7 @@ import {
 import { resolveFooterTarget } from '../renderer/footer-targets.ts';
 import { SurfacePointer } from './surface-pointer.ts';
 import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import { reportDroppedPaste } from '@goodvibes-jev/engine/terminal-shell/input-content';
 import { createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   cleanupMarkerRegistryForHandler,
@@ -471,6 +472,7 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       context.requestRender = bufferedRequestRender;
       context.handleHostPairingToken = (token) => this.hostPairing?.handleToken(token) ?? false;
       const tokens = this.tokenizer.feed(data);
+      reportDroppedPaste(this.tokenizer, this.conversationManager, bufferedRequestRender);
       if (tokens.some((token) => token.type === 'mouse')) {
         let pending: typeof tokens = [];
         for (const token of tokens) {

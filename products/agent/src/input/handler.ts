@@ -9,6 +9,7 @@ import '@goodvibes-jev/engine/terminal-shell/composer-controller';
 import 'node:fs';
 import 'node:path';
 import { InputTokenizer, type InputToken } from '@goodvibes-jev/engine/platform/platform/core';
+import { reportDroppedPaste } from '@goodvibes-jev/engine/terminal-shell/input-content';
 import {
   cleanupMarkerRegistryForHandler,
   executeBlockActionForHandler,
@@ -567,6 +568,7 @@ export class InputHandler extends TerminalInputHandlerState {
       context.requestRender = bufferedRequestRender;
       context.handleSetupPairingToken = (token) => this.setupPairing?.handleToken(token) ?? false;
       feedInputTokens(context, this.tokenizer.feed(data));
+      reportDroppedPaste(this.tokenizer, this.conversationManager, bufferedRequestRender);
     } finally {
       renderBuffer.release();
       this.requestRender = immediateRequestRender;

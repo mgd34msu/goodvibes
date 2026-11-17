@@ -158,6 +158,12 @@ export interface DecisionLog {
   recordWithNotes?(entry: NewDecisionEntry, notes: readonly DecisionNote[]): DecisionId;
   /** Appends a note to an answered entry without replacing earlier notes. Throws when there is no answered entry with that id or the write fails. */
   attach(id: string, note: DecisionNote): void;
+  /**
+   * Optional on older/custom logs. Queues a note for a batched, unsynced write
+   * shortly after; never throws, and calls `onUnrecorded` for a note that was
+   * not written. Reads through the same log see queued notes.
+   */
+  attachLater?(id: string, note: DecisionNote, onUnrecorded: () => void): void;
   get(id: string): DecisionEntry | undefined;
   query(query?: DecisionQuery): readonly DecisionEntry[];
   /** Optional on older/custom logs. Same filters, ordering and limit as query,

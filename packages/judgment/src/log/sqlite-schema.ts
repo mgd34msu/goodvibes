@@ -106,6 +106,23 @@ export type Params = Readonly<Record<string, SqlValue>>;
 /** Every row one statement yields. */
 export const rowsOf = <T>(db: Database, sql: string, params: Params = {}): T[] => db.query(sql).all(params) as T[];
 
+/**
+ * A second connection to an opened log, at synchronous FULL, for the writes
+ * that must be on disk when they return. A log in memory has one connection.
+ */
+export function openSyncedWriter(path: string, opened: Database): Database {
+  if (path === ':memory:' || path === '') return opened;
+  const db = new (bunDatabase())(path, { strict: true });
+  try {
+    db.exec('PRAGMA busy_timeout = 1000;');
+    db.exec('PRAGMA synchronous = FULL;');
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
 /** Opens the log file. A file with no tables yet is new and gets the schema; any other file must carry this schema version. */
 export function openLog(path: string): Database {
   const Ctor = bunDatabase();
@@ -114,9 +131,9 @@ export function openLog(path: string): Database {
   // wait for one another instead of discarding an otherwise valid judgment.
   try {
     db.exec('PRAGMA busy_timeout = 1000;');
-    // Entries commit with a synced write-ahead log; notes and pruning switch
-    // to NORMAL for their own statement (see sqlite.ts).
-    db.exec('PRAGMA synchronous = FULL;');
+    // This connection writes batched notes and pruning unsynced; entries go
+    // through the synced writer (openSyncedWriter, sqlite.ts).
+    db.exec('PRAGMA synchronous = NORMAL;');
     try { db.exec('PRAGMA journal_mode = WAL;'); }
     catch (error) {
       // Journal-mode changes can bypass SQLite's busy handler during a

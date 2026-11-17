@@ -264,12 +264,17 @@ function projectResult<Q extends Questions>(questions: Q, expectedModel: string,
 export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, options: DecisionLogOptions | (() => Date) = {}): JudgmentPort {
   const { now = () => new Date(), onUnrecordedNote } = typeof options === 'function' ? { now: options } : options;
   let unrecordedNotes = 0;
+  const unrecorded = (): void => {
+    unrecordedNotes += 1;
+    try { onUnrecordedNote?.(unrecordedNotes); } catch { /* a listener cannot turn finished work into a failure */ }
+  };
+  // Readings and actions describe work already done: they are batched into
+  // one unsynced write per turn where the log can, so a reading costs its
+  // entry and a share of one statement.
   const note = (id: string, value: DecisionNote): void => {
+    if (log.attachLater) { log.attachLater(id, value, unrecorded); return; }
     try { log.attach(id, value); }
-    catch {
-      unrecordedNotes += 1;
-      try { onUnrecordedNote?.(unrecordedNotes); } catch { /* a listener cannot turn finished work into a failure */ }
-    }
+    catch { unrecorded(); }
   };
   return {
     get model() { return inner.model; },

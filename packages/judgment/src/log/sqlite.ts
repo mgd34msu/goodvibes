@@ -2,7 +2,7 @@ import type { Database, Statement } from 'bun:sqlite';
 import type { JsonValue } from '../port/types.ts';
 import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionRetention, DecisionSummary, DecisionTruth, DecisionVolumeEntry, NewDecisionEntry } from './types.ts';
 import { decisionVolumeRow, type DecisionVolumeRow } from './volume-row.ts';
-import { COLUMNS, NOTES_TABLE, TABLE, openLog, rowsOf, type Params } from './sqlite-schema.ts';
+import { COLUMNS, NOTES_TABLE, TABLE, openLog, openSyncedWriter, rowsOf, type Params } from './sqlite-schema.ts';
 
 /** What reading an entry back needs from its row. */
 interface Row {
@@ -59,6 +59,16 @@ const SQL = {
   /** A note attaches only to an answered entry; one statement, so it needs no transaction. */
   append: `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload)
     SELECT $id, $kind, $payload WHERE EXISTS (SELECT 1 FROM ${TABLE} WHERE ${ID_IS} AND status = 'answered')`,
+  /**
+   * Many notes in one statement, in the order given; a note whose entry is
+   * not answered is left out. Returns the decision of each note written.
+   */
+  appendMany: `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload)
+    SELECT json_extract(note.value, '$.id'), json_extract(note.value, '$.kind'), json_extract(note.value, '$.payload')
+    FROM json_each($notes) AS note
+    WHERE EXISTS (SELECT 1 FROM ${TABLE} WHERE id = json_extract(note.value, '$.id') AND status = 'answered')
+    ORDER BY note.key
+    RETURNING decision_id`,
   /** The time of the entry at a position from the newest; the row cap keeps entries from it on. */
   nthNewest: `SELECT at FROM ${TABLE} ORDER BY at DESC LIMIT 1 OFFSET $offset`,
   /** Entries the retention rule no longer keeps, oldest first; an entry with a truth note always stays. */
@@ -131,34 +141,47 @@ function filterFor(query: DecisionQuery): { where: string[]; params: Params } {
   return { where: active.map(({ name }) => FILTERS[name]), params: Object.fromEntries(active.map(({ name, value }) => [name, value])) };
 }
 
+/** A note waiting for the next batched write, and who hears if it is not written. */
+interface PendingNote {
+  readonly id: string;
+  readonly kind: NoteColumn;
+  readonly payload: string;
+  readonly onUnrecorded: () => void;
+}
+
 /**
  * A decision log in a SQLite file (or `:memory:`), created on first use.
- * An entry commits with the write-ahead log synced, because a caller acts on
- * the answer it records. A later note and pruning commit at NORMAL: after a
- * power loss the newest notes can be missing, never an entry, and the file
- * is never damaged.
+ *
+ * Two connections, each with its sync mode set once at open, so no write
+ * switches modes:
+ * - Synced (FULL): every entry, an entry written with its notes, and a note
+ *   attached directly (truth notes: owner corrections, outcomes, calibration
+ *   fixtures). A caller acts on the answer an entry records, and contract and
+ *   work-ledger proofs read entries back by id later, so an entry is on disk
+ *   before `record` returns.
+ * - Unsynced (NORMAL): readings and action notes written through
+ *   `attachLater`, batched into one statement per turn, and pruning. After a
+ *   power loss the newest of these can be missing, never an entry, and the
+ *   file is never damaged; the next synced commit also makes them durable.
  */
 export class SqliteDecisionLog implements DecisionLog, Disposable {
   readonly #db: Database;
+  /** The synced writer; the same connection when the log is in memory. */
+  readonly #synced: Database;
   /** The writing statements, prepared once. */
   readonly #insert: Statement;
   readonly #append: Statement;
-  readonly #unsynced: Statement;
-  readonly #synced: Statement;
+  readonly #appendMany: Statement;
+  #pending: PendingNote[] = [];
+  #flushQueued = false;
 
   constructor(path: string) {
     this.#db = openLog(path);
-    this.#insert = this.#db.prepare(SQL.insert);
-    this.#append = this.#db.prepare(SQL.append);
-    this.#unsynced = this.#db.prepare('PRAGMA synchronous = NORMAL');
-    this.#synced = this.#db.prepare('PRAGMA synchronous = FULL');
-  }
-
-  /** Runs one write at synchronous NORMAL, then returns the connection to FULL. */
-  #withoutSync<T>(write: () => T): T {
-    this.#unsynced.run();
-    try { return write(); }
-    finally { this.#synced.run(); }
+    try { this.#synced = openSyncedWriter(path, this.#db); }
+    catch (error) { this.#db.close(); throw error; }
+    this.#insert = this.#synced.prepare(SQL.insert);
+    this.#append = this.#synced.prepare(SQL.append);
+    this.#appendMany = this.#db.prepare(SQL.appendMany);
   }
 
   record(entry: NewDecisionEntry): DecisionId {
@@ -169,7 +192,7 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
 
   recordWithNotes(entry: NewDecisionEntry, notes: readonly DecisionNote[]): DecisionId {
     const id = Bun.randomUUIDv7() as DecisionId;
-    this.#db.transaction(() => {
+    this.#synced.transaction(() => {
       this.#insert.run(toParams(id, entry));
       for (const note of notes) this.#note(id, note);
     }).immediate();
@@ -177,7 +200,44 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   }
 
   attach(id: string, note: DecisionNote): void {
-    this.#withoutSync(() => this.#note(id, note));
+    this.flushNotes();
+    this.#note(id, note);
+  }
+
+  /**
+   * Queues a note for the batched write at the end of this turn: one
+   * statement for every note queued in the turn, unsynced. Never throws; a
+   * note that cannot be written (its entry is not answered, or the write
+   * fails) calls `onUnrecorded`. Every read and write of this log writes the
+   * queue first, so this log never reads without its own notes.
+   */
+  attachLater(id: string, note: DecisionNote, onUnrecorded: () => void): void {
+    let payload: string;
+    try { payload = codecFor(note.kind).write(note); }
+    catch { onUnrecorded(); return; }
+    this.#pending.push({ id, kind: note.kind, payload, onUnrecorded });
+    if (this.#flushQueued) return;
+    this.#flushQueued = true;
+    queueMicrotask(() => this.flushNotes());
+  }
+
+  /** Writes the queued notes now, in one statement. */
+  flushNotes(): void {
+    this.#flushQueued = false;
+    if (this.#pending.length === 0) return;
+    const batch = this.#pending;
+    this.#pending = [];
+    let written: Set<string>;
+    try {
+      const rows = this.#appendMany.all({ notes: JSON.stringify(batch.map(({ id, kind, payload }) => ({ id, kind, payload }))) }) as { decision_id: string }[];
+      written = new Set(rows.map(row => row.decision_id));
+    } catch {
+      written = new Set();
+    }
+    for (const note of batch) {
+      if (written.has(note.id)) continue;
+      try { note.onUnrecorded(); } catch { /* a listener cannot turn finished work into a failure */ }
+    }
   }
 
   #note(id: string, note: DecisionNote): void {
@@ -189,33 +249,38 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
     if (!Number.isSafeInteger(rule.batch) || rule.batch < 1 || !Number.isSafeInteger(rule.maxEntries) || rule.maxEntries < 1) {
       throw new RangeError('Decision log retention needs a positive batch and entry cap.');
     }
+    this.flushNotes();
     const capped = rowsOf<{ readonly at: string }>(this.#db, SQL.nthNewest, { offset: rule.maxEntries - 1 })[0]?.at;
     const cutoff = capped !== undefined && capped > rule.before ? capped : rule.before;
-    return this.#withoutSync(() => this.#db.transaction(() => {
+    return this.#db.transaction(() => {
       const ids = rowsOf<{ readonly id: string }>(this.#db, SQL.expired, { cutoff, limit: rule.batch }).map(row => row.id);
       if (ids.length === 0) return 0;
       const list = JSON.stringify(ids);
       this.#db.query(SQL.deleteNotes).run({ ids: list });
       this.#db.query(SQL.deleteEntries).run({ ids: list });
       return ids.length;
-    }).immediate());
+    }).immediate();
   }
 
   /** Hands the space freed by pruning back from the write-ahead log. */
   checkpoint(): void {
+    this.flushNotes();
     this.#db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
   }
 
   get(id: string): DecisionEntry | undefined {
+    this.flushNotes();
     return this.#entries(SQL.matching([ID_IS]), { id, limit: 1 })[0];
   }
 
   query(query: DecisionQuery = {}): readonly DecisionEntry[] {
+    this.flushNotes();
     const { where, params } = filterFor(query);
     return this.#entries(SQL.matching(where), { ...params, limit: query.limit ?? 1000 });
   }
 
   queryIds(query: DecisionQuery = {}): readonly DecisionId[] {
+    this.flushNotes();
     const { where, params } = filterFor(query);
     return rowsOf<{ readonly id: DecisionId }>(this.#db, SQL.matchingIds(where), { ...params, limit: query.limit ?? 1000 })
       .map(row => row.id);
@@ -226,6 +291,7 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
     const limit = query.limit ?? 1000;
     // The monitor uses one sentinel row beyond its configured 100k maximum.
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100_001) throw new RangeError('Decision volume query requires a bounded limit.');
+    this.flushNotes();
     const { where, params } = filterFor(query);
     return rowsOf<DecisionVolumeRow>(this.#db, SQL.volume(where), { ...params, limit }).map(decisionVolumeRow);
   }
@@ -245,6 +311,10 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   }
 
   [Symbol.dispose](): void {
-    this.#db.close();
+    try { this.flushNotes(); }
+    finally {
+      if (this.#synced !== this.#db) this.#synced.close();
+      this.#db.close();
+    }
   }
 }

@@ -1,5 +1,5 @@
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { builtinTriggerSupervisorMethodDescriptors } from './method-catalog-trigger-supervisor.js';
+import { builtinTriggerOperationMethodDescriptors, builtinTriggerSupervisorMethodDescriptors } from './method-catalog-trigger-supervisor.js';
 import { builtinDelegatedInboundMethodDescriptors } from './method-catalog-delegated-inbound.js';
 import { builtinGatewayNativeHostedTurnMethodDescriptors } from './method-catalog-native-hosted-turn.js';
 import { builtinGatewayNativeConversationIntakeMethodDescriptors } from './method-catalog-native-intake.js';
@@ -161,6 +161,7 @@ export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayChannelMethodDescriptors,
   ...builtinGatewayHomeAssistantMethodDescriptors,
   ...builtinTriggerSupervisorMethodDescriptors,
+  ...builtinTriggerOperationMethodDescriptors,
   ...builtinGatewayChannelTestMethodDescriptors,
   ...builtinGatewayCostMethodDescriptors,
   ...builtinGatewayPermissionRuleMethodDescriptors,

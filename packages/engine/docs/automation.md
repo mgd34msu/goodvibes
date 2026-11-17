@@ -330,6 +330,16 @@ trigger runs a long-lived command and fires on matching output lines, and a
 when its rule holds. A trigger may run a command the owner approved in
 advance (an action grant); only the owner registers grants.
 
+An agent creates, lists, cancels and resets triggers and reads their runs with
+the `trigger` tool (actions `create`, `list`, `history`, `cancel`, `reset`), in
+daemon-hosted sessions, in the TUI and the Agent (which use the daemon's
+supervisor) and in the workers they start. The owner does the same with
+`/triggers list | history <id> | create <json> | cancel <id> | reset <id>`, and
+approves a command a trigger may run with `/triggers grant <id> <command>
+[args...]` (`/triggers grants` lists them). Operators call
+`watchers.triggers.list`, `.history`, `.create`, `.cancel`, `.reset`,
+`.grant.list` and the owner-only `.grant.register`.
+
 Triggers are saved in `triggers.db` under the selected surface directory, one
 row per trigger: a check writes that one trigger's row, whatever the number of
 triggers. An observation keeps at most a 512-character sample of the result

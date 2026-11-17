@@ -852,6 +852,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     overflowHandler,
     sandboxSessionRegistry,
     workflowServices: workflow,
+    // Workers can leave a watcher behind them ("tell me when this build exits") on this process's supervisor.
+    ...(triggerManager ? { triggers: triggerManager } : {}),
   };
   agentOrchestrator.setDependencies(agentToolDependencies);
 

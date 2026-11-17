@@ -107,6 +107,8 @@ export interface HostedSessionCompositionInput {
   readonly cloudflareAuthToken?: (() => string | null) | undefined;
   /** The daemon's owner inbox; each hosted session's `query` tool asks there. */
   readonly ownerQuestions?: HostedSessionManagerOptions['ownerQuestions'];
+  /** The daemon's trigger supervisor; each hosted session's `trigger` tool uses it. */
+  readonly triggers?: HostedSessionManagerOptions['triggers'];
 }
 
 /** The default prompt: what this session is, stated plainly. */
@@ -168,6 +170,7 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     ...(input.spine === undefined ? {} : { spine: input.spine }),
     ...(input.cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken: input.cloudflareAuthToken }),
     ...(input.ownerQuestions === undefined ? {} : { ownerQuestions: input.ownerQuestions }),
+    ...(input.triggers === undefined ? {} : { triggers: input.triggers }),
     isWorkspaceUsable: input.options.isWorkspaceUsable ?? isExistingDirectory,
     allowedWorkspaceRoots: () => allowedWorkspaceRoots(input.shellPaths.workingDirectory, sharedWorkspaceRegisterPath(input.shellPaths)),
   });
@@ -219,6 +222,7 @@ export function composeHostedSessionsForFacade(
     spine: runtimeServices.sessionBroker,
     ...(cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken }),
     ...(runtimeServices.ownerInbox === undefined ? {} : { ownerQuestions: runtimeServices.ownerInbox }),
+    ...(runtimeServices.triggerManager === undefined ? {} : { triggers: runtimeServices.triggerManager }),
   });
   // Hand the broker's idle reaper a way to ask this engine whether a hosted
   // session is mid-turn. Without it the reaper judges a hosted session only by

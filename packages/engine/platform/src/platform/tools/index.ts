@@ -55,6 +55,7 @@ import { createTaskTool } from './task/index.js';
 import { createWorkPlanTool, type WorkPlanToolStore } from './work-plan/index.js';
 import { createMcpTool } from './mcp/index.js';
 import { createQueryTool } from './query/index.js';
+import { createTriggerTool } from '../triggers/trigger-tool.js';
 import { createRemoteTool } from './remote-trigger/index.js';
 import { createReplTool } from './repl/index.js';
 import { createCapturedReplTool } from './repl/captured.js';
@@ -404,6 +405,12 @@ export function registerAllTools(
     ownerQuestions?: import('./query/index.js').QuestionInbox | (() => import('./query/index.js').QuestionInbox) | undefined;
     /** The project work plan the `work_plan` tool keeps (the store the work plan view shows). Absent: no `work_plan` tool. */
     workPlan?: WorkPlanToolStore | undefined;
+    /**
+     * The trigger supervisor the `trigger` tool creates, lists, cancels and resets
+     * triggers on: the one in this process, or the host's (`remoteTriggerOperations`)
+     * for an app that leaves triggers to the daemon. Absent: no `trigger` tool.
+     */
+    triggers?: import('../triggers/manager.js').TriggerManager | import('../triggers/operations.js').TriggerOperations | undefined;
     capturedRegistry?: import('./registry-tool/captured-source.js').CapturedRegistryContext | undefined;
     /**
      * Settable holder for the context_accounting tool's session source. The tool
@@ -777,6 +784,8 @@ export function registerAllTools(
   );
   // The model's checklist is the project work plan the user sees; a host with its own work plan tool leaves this out.
   if (deps.workPlan) registerTool(createWorkPlanTool(deps.workPlan, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
+  // "Tell me when this build exits", "watch this log", "check this URL every minute": supervised by the host, not this turn.
+  if (deps.triggers) registerTool(createTriggerTool(deps.triggers, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
   if (mcpRegistry) {
     registerTool(createMcpTool(mcpRegistry));
   }

@@ -18,6 +18,8 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import type { RuntimeServices } from './services.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { agentOwnerQuestions } from './client/owner-questions.ts';
+import { createAgentDaemonVerbCaller } from './client/daemon-verbs.ts';
+import { remoteTriggerOperations } from '@goodvibes-jev/engine/platform/platform/triggers';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 
 /**
@@ -75,6 +77,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     secretsManager: services.secretsManager,
     // The query tool's questions go to the connected host's owner inbox; answers come back into this conversation.
     ownerQuestions: () => agentOwnerQuestions(services, { configManager, homeDirectory }, resolveSessionId),
+    // The trigger tool works on the connected host's supervisor: the Agent leaves triggers to the daemon.
+    triggers: remoteTriggerOperations(createAgentDaemonVerbCaller({ configManager, homeDirectory })),
     // and counts the daemon's own token as the Worker operator token, as the daemon's status route does.
     cloudflareAuthToken: () => readDaemonOperatorToken(homeDirectory),
     execPromptAnswerHandler: services.execPromptAnswerHandler,

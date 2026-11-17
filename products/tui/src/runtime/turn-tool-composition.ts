@@ -6,6 +6,8 @@ import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platfor
 import { createSandboxExecAsk, sandboxExecAskDepsFromRuntime } from '../permissions/sandbox-exec-gate.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { terminalOwnerQuestions } from './client/owner-questions.ts';
+import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
+import { remoteTriggerOperations } from '@goodvibes-jev/engine/platform/platform/triggers';
 import { controlSurfacesFor } from './control-surfaces.ts';
 import type { RuntimeServices } from './services.ts';
 
@@ -26,6 +28,8 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
   return registerAllTools(toolRegistry, {
     // The query tool's questions go to the daemon's owner inbox; answers come back into this conversation.
     ownerQuestions: () => terminalOwnerQuestions(services, options.resolveSessionId),
+    // The trigger tool works on the daemon's supervisor: this terminal leaves triggers to the daemon.
+    triggers: remoteTriggerOperations(createDaemonVerbCaller({ configManager: services.configManager, homeDirectory: () => services.shellPaths.homeDirectory })),
     controlSurfaces: controlSurfacesFor(services),
     // A keyed state file is reclaimed only once no saved conversation carries its session id.
     isSessionResumable: (sessionToken) => services.sessionManager.has(sessionToken),

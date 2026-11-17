@@ -121,6 +121,8 @@ export interface HostedSessionRuntimeOptions {
    * Absent: no `query`.
    */
   readonly ownerQuestions?: HostedOwnerQuestions | undefined;
+  /** The daemon's trigger supervisor; the session's `trigger` tool creates and manages triggers on it. Absent: no `trigger` tool. */
+  readonly triggers?: import('../triggers/manager.js').TriggerManager | undefined;
   /**
    * What this run's exec tool may do, when the caller decides per session
    * rather than per floor. Omitted ⇒ the floor's own decider, and
@@ -275,6 +277,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
 
   const registeredTools = registerAllTools(toolRegistry, {
     ...(ownerQuestions ? { ownerQuestions } : {}),
+    ...(options.triggers ? { triggers: options.triggers } : {}),
     // Shared per WORKSPACE, deliberately: two sessions editing one tree must
     // agree about the file they both just wrote (see workspace-floor.ts).
     fileCache: services.fileCache,

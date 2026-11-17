@@ -143,7 +143,6 @@ try {
       const missingBody: unknown = await missingMessages.json();
       assert.ok(isJsonRecord(missingBody));
       assert.equal(missingBody.code, 'SESSION_NOT_FOUND', 'The native producer must provide the existing structural refusal');
-      assert.equal(Object.hasOwn(missingBody, 'errorRef'), false, 'A known missing session needs no semantic refusal reference');
 
       const listed = await invoke(page, 'sessions.list');
       assert.ok(Array.isArray(listed.sessions), 'The final list must contain session records');

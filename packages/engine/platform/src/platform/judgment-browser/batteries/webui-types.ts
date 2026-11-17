@@ -9,23 +9,10 @@ export type WebuiReadResult<T> =
 
 
 export const WEBUI_READER_LIMITS = Object.freeze({
-  errorBytes: 4096, statusChars: 256, queryChars: 256,
+  statusChars: 256, queryChars: 256,
   candidateCount: 64, titleChars: 256, groupChars: 128,
   keywordCount: 16, keywordChars: 64, concurrency: 4,
 });
-
-export const REFUSAL_ITEMS = ['session_not_found', 'session_closed', 'session_active', 'session_not_local', 'method_unknown'] as const;
-export type DaemonRefusalItem = typeof REFUSAL_ITEMS[number];
-export type DaemonRefusalValue = Readonly<Record<DaemonRefusalItem, boolean>>;
-
-/** Already resolved by the server. Never accept this as the browser request schema. */
-export interface ResolvedDaemonRefusal {
-  readonly methodId: string;
-  readonly status?: number;
-  readonly code?: string;
-  readonly category?: 'network' | 'authentication';
-  readonly message: string;
-}
 
 export const BADGE_TONES = ['ok', 'warning', 'bad', 'neutral'] as const;
 export const LIBRARY_DOT_TONES = ['ok', 'warn', 'bad', 'info', 'idle'] as const;

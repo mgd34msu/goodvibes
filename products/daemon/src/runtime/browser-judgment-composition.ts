@@ -10,9 +10,8 @@ const text = (value: unknown): string => typeof value === 'string' ? value.trim(
 
 /**
  * The daemon's configured Jev service owns these fixed WebUI purposes:
- * interpreting an authenticated canonical daemon failure, deciding a reply
- * prefix the reply-marker rule does not know, finding speech seams in a host
- * chat message and matching an undeclared provider to a model catalog. This is
+ * finding speech seams in a host chat message and matching an undeclared
+ * provider to a model catalog. This is
  * the same settings-owned route and metadata-only decision log used by the
  * engine. Read scopes and browser text never grant an arbitrary destination,
  * prompt, source category, or retention store.
@@ -87,13 +86,9 @@ export function composeBrowserJudgment(input: {
       if (closed || route.revision !== revision || !sources.length) return false;
       // Explicit source/purpose allowlist. Reference ownership is independently
       // proved by the source owner before this product policy is consulted.
-      return battery === 'webui.errors.daemon-refusal'
-        ? sources.length === 1 && sources[0] === 'daemon-error'
-        : battery === 'webui.models.catalog-provider-match'
-          ? sources.length === 1 && sources[0] === 'provider-catalog-ids'
-          : battery === 'webui.voice.speech-seams'
-            ? sources.length === 1 && sources[0] === 'chat-speech'
-            : battery === 'webui.mail.reply-subject' && sources.length === 1 && sources[0] === 'mail-subject';
+      return battery === 'webui.models.catalog-provider-match'
+        ? sources.length === 1 && sources[0] === 'provider-catalog-ids'
+        : battery === 'webui.voice.speech-seams' && sources.length === 1 && sources[0] === 'chat-speech';
     },
   });
   input.disposal.add('browser judgment transport', async () => {

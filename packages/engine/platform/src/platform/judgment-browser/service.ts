@@ -4,8 +4,7 @@ import { activateClassicFallback, isClassicOperation, withConfiguredDecisionMode
 import type { JudgmentPort, JudgmentResult, Questions } from '@goodvibes-jev/judgment/decisions';
 import {
   BrowserJudgmentError, BROWSER_JUDGMENT_LIMITS as LIMIT, parseBrowserJudgmentRequest, captureBrowserJudgmentJson, missingScopes,
-  type AuthenticatedPrincipal, type BrowserJudgmentRequest,
-  type BrowserJudgmentErrorSource, type BrowserJudgmentChatSessions,
+  type AuthenticatedPrincipal, type BrowserJudgmentRequest, type BrowserJudgmentChatSessions,
 } from '@goodvibes-jev/engine/daemon-api';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { BrowserJudgmentReferences } from './references.js';
@@ -22,8 +21,6 @@ export interface BrowserJudgmentServiceOptions {
   readonly currentRoute: () => BrowserJudgmentRoute | undefined;
   /** Server policy only. Read access/reference possession never implies outbound clearance. */
   readonly authorize: (input: BrowserJudgmentAuthorization) => boolean;
-  /** The trusted runtime owner issues bounded snapshots from canonical failures. */
-  readonly issueErrorReference?: (input: BrowserJudgmentErrorSource) => string | undefined;
   readonly bindChatSessions?: (source: BrowserJudgmentChatSessions) => () => void;
 }
 type Evidence = Pick<JudgmentResult<Questions>, 'decisionId' | 'model' | 'requestedModel' | 'usage' | 'latencyMs'>;
@@ -51,11 +48,6 @@ export class BrowserJudgmentService {
   #close: Promise<void> | undefined;
   readonly #providerCalls = new BrowserJudgmentCallLimit(8, LIMIT.totalRuns * 4);
   constructor(private readonly options: BrowserJudgmentServiceOptions) {}
-
-  issueErrorReference(input: BrowserJudgmentErrorSource): string | undefined {
-    if (this.#closing) return undefined;
-    return this.options.issueErrorReference?.(input);
-  }
 
   bindChatSessions(source: BrowserJudgmentChatSessions): () => void {
     if (this.#closing) throw new BrowserJudgmentError('JUDGMENT_SHUTTING_DOWN');
@@ -225,11 +217,9 @@ export class BrowserJudgmentService {
         const outcomes = Object.values(projected.readings).map((reading) => reading.outcome);
         if (projected.status === 'held' && projected.compoundOutcome !== undefined) outcomes.push(projected.compoundOutcome);
         const outcome = outcomes.includes('escalate') ? 'escalate' : outcomes.includes('confirm') ? 'confirm' : 'act';
-        // The minimum compound outcome is an adapter instruction, not a second wire
-        // outcome. Structural facts stay visible and never masquerade as readings.
+        // The minimum compound outcome is an adapter instruction, not a second wire outcome.
         const wireProjection = projected.status === 'held'
-          ? { status: projected.status, reason: projected.reason, readings: projected.readings,
-              ...(projected.structuralBasis === undefined ? {} : { structuralBasis: projected.structuralBasis }) }
+          ? { status: projected.status, reason: projected.reason, readings: projected.readings }
           : projected;
         response = { protocolVersion: 1, requestId: request.requestId, battery: request.battery, batteryVersion: request.batteryVersion, ...wireProjection, outcome, evidence };
         if (new TextEncoder().encode(JSON.stringify(response)).byteLength > LIMIT.bodyBytes) throw new BrowserJudgmentError('JUDGMENT_INVALID_RESPONSE');

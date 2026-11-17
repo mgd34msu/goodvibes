@@ -108,7 +108,6 @@ export function errorBodySchema(knownCodes: readonly string[]): JsonSchema {
       operation: { type: 'string' },
       phase: { type: 'string' },
       requestId: { type: 'string' },
-      errorRef: { type: 'string', description: 'Opaque server-owned failure receipt.' },
       providerCode: { type: 'string' },
       providerType: { type: 'string' },
       retryAfterMs: { type: 'number', description: 'Present when retrying later can succeed.' },

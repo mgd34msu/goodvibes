@@ -30,8 +30,6 @@ export interface JsonErrorResponseOptions {
    * Pass `true` only for admin/operator-authenticated callers.
    */
   readonly isPrivileged?: boolean | undefined;
-  /** Trusted issuer output only. A thrown value's errorRef is never forwarded; requires an authenticated privileged response. */
-  readonly errorRef?: string | undefined;
   /**
    * What Jev read in the error's wording. Without it the category comes from
    * structure alone; {@link readErrorResponseBody} supplies it.
@@ -283,13 +281,7 @@ export function buildErrorResponseBody(
   options: JsonErrorResponseOptions = {},
 ): StructuredDaemonErrorBody {
   const isPrivileged = options.isPrivileged === true;
-  const suppliedReference = isPrivileged ? options.errorRef : undefined;
-  const errorRef = typeof suppliedReference === 'string'
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(suppliedReference)
-    ? suppliedReference : undefined;
-  const body = captureErrorBodyFields(buildUnreferencedErrorResponseBody(error, options, isPrivileged));
-  if (errorRef !== undefined) Object.defineProperty(body, 'errorRef', { value: errorRef, enumerable: true });
-  return Object.freeze(body);
+  return Object.freeze(captureErrorBodyFields(buildUnreferencedErrorResponseBody(error, options, isPrivileged)));
 }
 
 /** Only documented scalar fields enter the owned wire body. No supplied serialization hook is copied or called. */

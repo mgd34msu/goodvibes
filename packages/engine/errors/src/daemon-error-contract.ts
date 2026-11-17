@@ -80,8 +80,6 @@ export interface StructuredDaemonErrorBody {
   readonly operation?: string | undefined;
   readonly phase?: string | undefined;
   readonly requestId?: string | undefined;
-  /** Opaque server-owned historical failure receipt; possession grants no read or outbound permission. */
-  readonly errorRef?: string | undefined;
   readonly providerCode?: string | undefined;
   readonly providerType?: string | undefined;
   readonly retryAfterMs?: number | undefined;

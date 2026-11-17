@@ -225,9 +225,14 @@ export class AutomationDeliveryManager {
     run: AutomationRun,
     body: string,
     targets: readonly AutomationDeliveryTarget[],
-    options: { readonly reply?: boolean } = {},
+    options: {
+      readonly reply?: boolean;
+      /** What this text announces about the run; a surface that suppresses repeats keys on it with the run id. */
+      readonly kind?: 'result' | 'failure-notice';
+    } = {},
   ): Promise<readonly AutomationDeliveryAttempt[]> {
     const reply = options.reply === true;
+    const announces = `automation:${run.id}:${options.kind ?? 'result'}`;
     if (!this.isEnabled()) return [];
     await this.routeBindings.start();
     const resolvedTargets = this.resolveTargets(targets).filter((entry) => this.isTargetEnabled(entry.target));
@@ -267,7 +272,7 @@ export class AutomationDeliveryManager {
         try { this.syncAttempt(attempt, run, 'started', reply); }
         catch (error) { logger.warn('Delivery started but its start could not be reported', { deliveryId, error: summarizeError(error) }); }
         try {
-          const responseId = await this.sendTarget(resolved, body, job, run);
+          const responseId = await this.sendTarget(resolved, body, job, run, announces);
           if (resolved.binding?.id && responseId) {
             try {
               await this.routeBindings.captureReplyTarget(resolved.binding.id, responseId, resolved.binding.threadId);
@@ -351,6 +356,7 @@ export class AutomationDeliveryManager {
     body: string,
     job: AutomationJob,
     run: AutomationRun,
+    announces: string,
   ): Promise<string | undefined> {
     return this.deliveryRouter.deliver({
       target: resolved.target,
@@ -360,6 +366,7 @@ export class AutomationDeliveryManager {
       runId: run.id,
       status: run.status,
       includeLinks: job.delivery.includeLinks,
+      announces,
       ...(run.result !== undefined ? { attachments: this.attachableArtifacts(run) } : {}),
       ...(run.agentId ? { agentId: run.agentId } : {}),
       ...(resolved.binding ? { binding: resolved.binding } : {}),

@@ -171,13 +171,16 @@ export async function deliverNtfyApprovalUpdate(
   );
   const priority = resolveNtfyDefaultPriority(deps.configManager.get('surfaces.ntfy.defaultPriority'));
   try {
-    await ntfy.publish(topic, `${isPending ? 'Approval required' : `Approval ${approval.status}`}: ${summary}`, {
+    // Suppressed only as a repeat of this approval at this status: two
+    // approvals with the same tool and summary are two notifications.
+    const outcome = await ntfy.publish(topic, `${isPending ? 'Approval required' : `Approval ${approval.status}`}: ${summary}`, {
       title: approval.request.tool,
       ...(priority === undefined ? {} : { priority }),
       ...(webUrl ? { click: webUrl } : {}),
+      announces: `approval:${approval.id}:${approval.status}`,
       markGoodVibesOrigin: true,
     });
-    return { delivered: true };
+    return outcome === 'suppressed' ? { delivered: true, suppressed: true } : { delivered: true };
   } catch (error) {
     logger.warn('ntfy approval update failed', { approvalId: approval.id, topic, error: summarizeError(error) });
     return failed(error);

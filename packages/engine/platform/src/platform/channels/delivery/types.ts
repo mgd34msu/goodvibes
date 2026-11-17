@@ -48,6 +48,13 @@ export interface ChannelDeliveryRequest extends DeliveryLifetime {
   readonly includeLinks: boolean;
   /** Explicit repeated sends bypass notification deduplication; absent preserves existing behavior. */
   readonly allowDuplicate?: boolean | undefined;
+  /**
+   * The identity of what this message announces (`automation:<runId>:result`,
+   * `approval:<id>:pending`, `agent:<id>:final:1`). A surface that suppresses
+   * repeats does so on this identity, so two different announcements with the
+   * same words are both sent. Absent: the surface compares the text.
+   */
+  readonly announces?: string | undefined;
   readonly attachments?: readonly ArtifactReference[] | undefined;
   readonly binding?: ChannelDeliveryRouteBinding | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
@@ -73,6 +80,11 @@ export interface ChannelDeliveryResult {
   readonly omittedChars?: number | undefined;
   /** How many messages the body went out as, when it was longer than one message on the surface. */
   readonly parts?: number | undefined;
+  /**
+   * True when nothing new was sent: the same announcement (`announces`) went
+   * to this target moments ago, so the recipient already has it.
+   */
+  readonly suppressed?: boolean | undefined;
 }
 
 export interface ChannelDeliveryStrategy {

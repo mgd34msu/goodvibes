@@ -441,14 +441,14 @@ export class DaemonSurfaceDeliveryHelper {
         pending: { ...pending, ...(announces ? { announces } : {}) },
         metadata: { notice: true, ...(announces ? { announces } : {}) },
       });
-      if (rendered?.delivered) return { delivered: true };
+      if (rendered?.delivered) return rendered.metadata.suppressed === true ? { delivered: true, suppressed: true } : { delivered: true };
       if (rendered) {
         return refuse('delivery-failed', String(rendered.metadata.reason ?? 'channel-reported-not-delivered'));
       }
       // No plugin is registered for this surface, so there is no render path to
       // use. Fall back to the direct per-surface push, which throws by name for
       // any surface it does not implement.
-      await this.deliverSurfaceProgress(pending, text);
+      await this.deliverSurfaceProgress({ ...pending, ...(announces ? { announces } : {}) }, text);
       return { delivered: true };
     } catch (error) {
       return refuse('delivery-failed', summarizeError(error));

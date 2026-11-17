@@ -27,7 +27,10 @@ export async function renderBuiltinChannelEvent(
 ): Promise<ChannelRenderResult> {
   const router = context.deps.deliveryRouter;
   const binding = request.routeId ? context.deps.routeBindings.getBinding(request.routeId) : undefined;
-  const responseId = await router.deliver({
+  const announces = typeof request.metadata.announces === 'string' && request.metadata.announces
+    ? request.metadata.announces
+    : undefined;
+  const result = await router.deliverWithReceipt({
     target: buildDeliveryTarget(surface, request, binding),
     body: request.text,
     title: request.title,
@@ -37,6 +40,7 @@ export async function renderBuiltinChannelEvent(
     ...(request.sessionId ? { sessionId: request.sessionId } : {}),
     status: renderStatus(request),
     includeLinks: request.phase !== 'progress',
+    ...(announces ? { announces } : {}),
     ...(binding ? { binding: surface === 'webhook' ? withoutCallbackUrl(toDeliveryRouteBinding(binding)) : toDeliveryRouteBinding(binding) } : {}),
     metadata: {
       phase: request.phase,
@@ -45,6 +49,7 @@ export async function renderBuiltinChannelEvent(
       eventKinds: request.events.map((event) => event.kind),
     },
   });
+  const responseId = result.responseId;
   return {
     delivered: true,
     ...(responseId ? { responseId } : {}),
@@ -53,6 +58,8 @@ export async function renderBuiltinChannelEvent(
       surface,
       phase: request.phase,
       via: 'channel-delivery-router',
+      // The same announcement already reached this target; nothing new went out.
+      ...(result.suppressed ? { suppressed: true } : {}),
     },
   };
 }
@@ -77,6 +84,7 @@ export async function notifyBuiltinApprovalViaRouter(
     runId: binding.runId ?? approval.id,
     status,
     includeLinks: true,
+    announces: `approval:${approval.id}:${approval.status}`,
     binding: toDeliveryRouteBinding(binding),
   });
 }

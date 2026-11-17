@@ -161,6 +161,12 @@ export interface PendingSurfaceReply {
   readonly conversationId?: string | undefined;
   readonly messageId?: string | undefined;
   readonly replyToMessageId?: string | undefined;
+  /**
+   * The identity of what this message announces (`agent:<id>:final:1`,
+   * `proposal:<id>`). A surface that suppresses repeats keys on it, so two
+   * different messages with the same words are both delivered.
+   */
+  readonly announces?: string | undefined;
 }
 
 /**
@@ -181,7 +187,14 @@ export type SurfaceNoticeRefusal =
 
 /** The outcome of one surface notice. Never a bare boolean, see above. */
 export type SurfaceNoticeDelivery =
-  | { readonly delivered: true }
+  | {
+    readonly delivered: true;
+    /**
+     * Nothing new was sent: the same announcement went to this target moments
+     * ago, so the recipient already has it.
+     */
+    readonly suppressed?: true | undefined;
+  }
   | {
     readonly delivered: false;
     readonly reason: SurfaceNoticeRefusal;

@@ -268,6 +268,7 @@ export class ChannelDeliveryRouter {
           ...(receipt.threadId === undefined ? {} : { threadId: receipt.threadId }) }) }),
         ...(outcome.sent > 1 ? { parts: outcome.sent } : {}),
         ...(outcome.truncated ? { truncated: true, ...(outcome.omittedChars > 0 ? { omittedChars: outcome.omittedChars } : {}) } : {}),
+        ...(result.suppressed === true ? { suppressed: true } : {}),
       });
     } catch (error) {
       // A refused credential is not served again: the next send resolves it afresh.
@@ -314,7 +315,14 @@ export class ChannelDeliveryRouter {
     let sent = 1;
     for (let index = 1; index < parts.length; index += 1) {
       try {
-        const result = await strategy.deliver({ ...request, body: parts[index]!, attachments: undefined });
+        // Each part is its own announcement, so a surface that suppresses
+        // repeats by identity does not take part two for part one.
+        const result = await strategy.deliver({
+          ...request,
+          body: parts[index]!,
+          attachments: undefined,
+          ...(request.announces ? { announces: `${request.announces}:part${index + 1}` } : {}),
+        });
         sent += 1;
         if (result.truncated) return { truncated: true, omittedChars: result.omittedChars ?? 0, sent };
       } catch (error) {

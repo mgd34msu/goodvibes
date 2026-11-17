@@ -115,6 +115,7 @@ export async function deliverSurfaceProgress(
     await ntfy.publish(topic, progress.slice(0, 300), {
       title: `Agent ${pending.agentId}`,
       ...ntfyPriority(deps),
+      ...(pending.announces ? { announces: pending.announces } : {}),
       markGoodVibesOrigin: true,
     });
     return;
@@ -207,6 +208,7 @@ export async function deliverNtfyAgentReply(
     ...(sessionLink
       ? { click: sessionLink, actions: [`view,${pending.sessionId ? 'Session' : 'Open app'},${sessionLink}`] }
       : {}),
+    ...(pending.announces ? { announces: pending.announces } : {}),
     markGoodVibesOrigin: true,
   });
 }

@@ -256,11 +256,11 @@ export function maybeDeliverAutomationFailureNotice(
   const message = buildFailureNoticeMessage(job, run);
   void (async () => {
     const attempts = primary.length > 0
-      ? await deliveryManager.deliverText(job, run, message, primary)
+      ? await deliveryManager.deliverText(job, run, message, primary, { kind: 'failure-notice' })
       : [];
     const delivered = attempts.some((attempt) => attempt.status === 'sent');
     if (!delivered && fallback.length > 0) {
-      await deliveryManager.deliverText(job, run, message, fallback);
+      await deliveryManager.deliverText(job, run, message, fallback, { kind: 'failure-notice' });
     }
   })().catch((error) => {
     logger.warn('AutomationManager: failure notice delivery failed', {

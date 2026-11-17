@@ -309,8 +309,9 @@ export function createNtfyDeliveryStrategy(
       // address, omit the click target rather than shipping a dead link.
       const baseUrlHint = resolveReachableBaseUrl(configManager, 'off-host');
       const primaryAttachment = attachments[0]!;
-      await ntfy.publish(topic, appendAttachmentSummary(request.body, attachments), {
+      const outcome = await ntfy.publish(topic, appendAttachmentSummary(request.body, attachments), {
         title: request.target.label ?? titleFromBody(request.body),
+        ...(request.announces ? { announces: request.announces } : {}),
         ...priorityOption(configManager.get('surfaces.ntfy.defaultPriority')),
         ...(request.includeLinks && baseUrlHint ? { click: `${baseUrlHint}/api/control-plane/web` } : {}),
         ...(primaryAttachment?.contentUrl ? { attach: primaryAttachment.contentUrl } : {}),
@@ -320,7 +321,7 @@ export function createNtfyDeliveryStrategy(
         assertCurrent: request.assertCurrent,
         withPublication: request.withPublication,
       });
-      return success(topic);
+      return outcome === 'suppressed' ? { ...success(topic), suppressed: true } : success(topic);
     },
   };
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { assertSynchronousCurrent, daemonReadingPort } from './reading-lifetime.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import type { CallOptions } from '@goodvibes-jev/judgment/decisions';
@@ -794,6 +795,7 @@ export class DaemonSurfaceActionHelper {
         pending.topic,
         message.trim() || '(empty response)',
         pending.title ?? 'GoodVibes chat',
+        `ntfy:${pending.messageId}:reply`,
       );
     } catch (error) {
       logger.warn('DaemonSurfaceActionHelper: failed to publish ntfy chat reply', {
@@ -883,7 +885,11 @@ export class DaemonSurfaceActionHelper {
     readonly topic: string;
     readonly body: string;
     readonly title?: string | undefined;
+    readonly messageId?: string | undefined;
   }): Promise<{ readonly sessionId: string; readonly messageId: string; readonly delivered: boolean; readonly error?: string }> {
+    // What the reply announces: the answer to this inbound message. Two
+    // messages answered with the same words are two notifications.
+    const replyIdentity = `ntfy:${input.messageId ?? randomUUID()}`;
     const manager = this.context.companionChatManager;
     if (!manager) {
       return {
@@ -917,7 +923,7 @@ export class DaemonSurfaceActionHelper {
         });
       }
       sessionId = session.id;
-      void this.runNtfyRemoteChatTurn(manager, sessionId, input).catch((error: unknown) => {
+      void this.runNtfyRemoteChatTurn(manager, sessionId, input, replyIdentity).catch((error: unknown) => {
         logger.warn('DaemonSurfaceActionHelper: ntfy remote chat turn failed', {
           sessionId,
           topic: input.topic,
@@ -932,7 +938,7 @@ export class DaemonSurfaceActionHelper {
     } catch (error) {
       const errorMessage = summarizeError(error);
       try {
-        await this.publishNtfyReply(input.topic, `Error: ${errorMessage}`, input.title ?? 'GoodVibes ntfy');
+        await this.publishNtfyReply(input.topic, `Error: ${errorMessage}`, input.title ?? 'GoodVibes ntfy', `${replyIdentity}:error`);
       } catch (publishError) {
         logger.warn('DaemonSurfaceActionHelper: failed to publish ntfy remote chat error', {
           topic: input.topic,
@@ -956,6 +962,7 @@ export class DaemonSurfaceActionHelper {
       readonly body: string;
       readonly title?: string | undefined;
     },
+    replyIdentity: string,
   ): Promise<void> {
     try {
       // No `ownerDirect`: an ntfy topic is a channel, so the untrusted-content window stays open (security/turn-boundary.ts).
@@ -968,11 +975,11 @@ export class DaemonSurfaceActionHelper {
       const response = result.response?.trim();
       const resultError = result.error ?? (response ? undefined : 'No response from ntfy remote chat');
       const outbound = response || `Error: ${resultError}`;
-      await this.publishNtfyReply(input.topic, outbound, input.title ?? 'GoodVibes ntfy');
+      await this.publishNtfyReply(input.topic, outbound, input.title ?? 'GoodVibes ntfy', `${replyIdentity}:reply`);
     } catch (error) {
       const errorMessage = summarizeError(error);
       try {
-        await this.publishNtfyReply(input.topic, `Error: ${errorMessage}`, input.title ?? 'GoodVibes ntfy');
+        await this.publishNtfyReply(input.topic, `Error: ${errorMessage}`, input.title ?? 'GoodVibes ntfy', `${replyIdentity}:error`);
       } catch (publishError) {
         logger.warn('DaemonSurfaceActionHelper: failed to publish ntfy remote chat error', {
           topic: input.topic,
@@ -993,7 +1000,8 @@ export class DaemonSurfaceActionHelper {
     return postHomeAssistantSurfaceChatMessage(this.context, input);
   }
 
-  private async publishNtfyReply(topic: string, message: string, title: string): Promise<void> {
+  /** `announces` names what the reply answers, so ntfy suppresses only a repeat of the same reply. */
+  private async publishNtfyReply(topic: string, message: string, title: string, announces: string): Promise<void> {
     if (!topic || !message.trim()) return;
     const ntfy = new NtfyIntegration(
       String(this.context.configManager.get('surfaces.ntfy.baseUrl') || 'https://ntfy.sh'),
@@ -1003,6 +1011,7 @@ export class DaemonSurfaceActionHelper {
     await ntfy.publish(topic, message, {
       title,
       ...(priority === undefined ? {} : { priority }),
+      announces,
       markGoodVibesOrigin: true,
     });
   }

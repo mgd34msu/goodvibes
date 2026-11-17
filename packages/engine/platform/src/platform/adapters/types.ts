@@ -169,6 +169,8 @@ export interface SurfaceAdapterContext {
     readonly topic: string;
     readonly body: string;
     readonly title?: string | undefined;
+    /** The inbound ntfy message id; the reply announces itself as the answer to it. */
+    readonly messageId?: string | undefined;
   }) => Promise<NtfyRemoteChatResult>;
   readonly postHomeAssistantChatMessage?: (input: {
     readonly body: string;

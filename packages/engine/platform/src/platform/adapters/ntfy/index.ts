@@ -261,6 +261,7 @@ async function handleNtfyRemoteChatPayload(
     topic,
     body: message,
     title: typeof body.title === 'string' ? body.title : 'GoodVibes ntfy',
+    ...(typeof body.id === 'string' && body.id ? { messageId: body.id } : {}),
   });
   return Response.json({
     acknowledged: true,

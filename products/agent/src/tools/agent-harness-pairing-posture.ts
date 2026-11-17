@@ -1,5 +1,4 @@
 import { relative } from 'node:path';
-import * as nativeOs from 'node:os';
 import type { CommandContext } from '../input/command-registry.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointConfigReader } from '../cli/endpoints.ts';
@@ -15,6 +14,7 @@ import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
 import { deviceLiveReadModelSnapshot, deviceLiveRecordsFor, SENSOR_DEVICE_CAPABILITY_IDS, type DeviceLiveCapabilityRecord } from './agent-harness-device-live-read-models.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn/read-helpers';
+import { formatHttpOrigin, isWildcardBindHost, probeStableHostInputs, stableUrlHostForBindHost, type StableHostInputs } from '@goodvibes-jev/engine/platform/platform/pairing';
 
 export interface AgentHarnessPairingArgs {
   readonly pairingRouteId?: unknown;
@@ -123,29 +123,32 @@ function readConfigStringArray(context: CommandContext, key: string): readonly s
   }
 }
 
-/** Bind the original local interface observation before the route's first await.
- * This is an observed address, not a claim about future OS publications. */
-/** The address a pairing QR advertises, read once: a wildcard bind advertises the first external IPv4 address. */
-export function capturePairingAdvertisement(config: RuntimeEndpointConfigReader) {
-  const controlPlane = resolveRuntimeEndpointBinding(config, 'controlPlane');
-  const web = resolveRuntimeEndpointBinding(config, 'web');
-  let interfaces: ReturnType<typeof nativeOs.networkInterfaces> | undefined;
-  if ([controlPlane.host, web.host].some(host => host === '0.0.0.0' || host === '::')) {
-    try { interfaces = nativeOs.networkInterfaces(); } catch { interfaces = undefined; }
-  }
-  let address = '127.0.0.1';
-  for (const entries of Object.values(interfaces ?? {})) {
-    const selected = entries?.find(entry => entry.family === 'IPv4' && !entry.internal);
-    if (selected) { address = selected.address; break; }
-  }
-  return Object.freeze({ address, source: interfaces ?? null });
+/**
+ * The facts a wildcard-bound endpoint's advertised host is chosen from, read
+ * once before the route's first await: the engine's stable-host inputs, the
+ * same ones the printed pairing link uses. Null when neither endpoint is
+ * wildcard-bound, since an explicit bind host is advertised as it is.
+ */
+export function capturePairingHostInputs(config: RuntimeEndpointConfigReader): StableHostInputs | null {
+  const wildcard = (['controlPlane', 'web'] as const).some(id => isWildcardBindHost(resolveRuntimeEndpointBinding(config, id).host));
+  return wildcard ? Object.freeze({ ...probeStableHostInputs() }) : null;
 }
 
-function urlHostForBindHost(host: string, networkAddress: string): string {
-  if (host === '0.0.0.0' || host === '::') return networkAddress;
-  const bound = host || '127.0.0.1';
-  // An IPv6 literal needs brackets to be a URL host.
-  return bound.includes(':') && !bound.startsWith('[') ? `[${bound}]` : bound;
+/**
+ * Where another device reaches an endpoint, by the engine's one stable-host
+ * rule: the host, what kind of host it is (a Tailscale or `.local` name that
+ * survives a lease change, or an interface address that may not be the one a
+ * phone can reach), and for a name the routable address beside it.
+ */
+function advertisedEndpoint(bindHost: string, port: number, inputs: StableHostInputs | null): Record<string, unknown> & { readonly url: string } {
+  const resolved = stableUrlHostForBindHost(bindHost, () => inputs ?? probeStableHostInputs());
+  return {
+    advertisedHost: resolved.host,
+    hostKind: resolved.kind,
+    hostStable: resolved.stable,
+    url: formatHttpOrigin(resolved.host, port),
+    ...(resolved.alternateHost ? { alternateUrl: formatHttpOrigin(resolved.alternateHost, port) } : {}),
+  };
 }
 
 function lookupFromArgs(args: AgentHarnessPairingArgs): { readonly source: PairingLookupSource; readonly input: string } | null {
@@ -307,12 +310,11 @@ function homeRelativeLabel(home: string, absolute: string): string {
   return inside === '' || inside.startsWith('..') ? '<outside the home directory>' : `<home>/${inside.split('\\').join('/')}`;
 }
 
-function pairingState(context: CommandContext, networkAddress: string): Record<string, unknown> {
+function pairingState(context: CommandContext, hostInputs: StableHostInputs | null): Record<string, unknown> {
   const shellPaths = requireShellPaths(context);
   const configManager = requirePlatform(context).configManager;
   const tokenRecord = readConnectedHostOperatorToken(shellPaths.homeDirectory);
   const binding = resolveRuntimeEndpointBinding(configManager, 'controlPlane');
-  const host = urlHostForBindHost(binding.host, networkAddress);
   return {
     surface: GOODVIBES_AGENT_PAIRING_SURFACE,
     endpoint: {
@@ -320,9 +322,8 @@ function pairingState(context: CommandContext, networkAddress: string): Record<s
       // null when the setting could not be read, which is not the same as disabled.
       enabled: readConfigBooleanOrNull(context, 'controlPlane.enabled'),
       bindHost: binding.host,
-      advertisedHost: host,
       port: binding.port,
-      url: `http://${host}:${binding.port}`,
+      ...advertisedEndpoint(binding.host, binding.port, hostInputs),
     },
     token: {
       present: Boolean(tokenRecord.token),
@@ -375,15 +376,14 @@ function liveDeviceEvidence(records: readonly DeviceLiveCapabilityRecord[]): Rec
   return records.length > 0 ? { liveRecords: records.slice(0, 5) } : undefined;
 }
 
-async function buildDeviceCapabilityMap(context: CommandContext, browserPosture: BrowserControlPosture, options: CatalogRankingOptions, networkAddress: string): Promise<DeviceCapabilityMap> {
+async function buildDeviceCapabilityMap(context: CommandContext, browserPosture: BrowserControlPosture, options: CatalogRankingOptions, hostInputs: StableHostInputs | null): Promise<DeviceCapabilityMap> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const state = pairingState(context, networkAddress);
+  const state = pairingState(context, hostInputs);
   const hasToken = tokenPresent(state);
   const controlPlaneReady = endpointEnabled(state) && hasToken;
   const webEnabled = readConfigBooleanOrNull(context, 'web.enabled');
   const webBinding = resolveRuntimeEndpointBinding(requirePlatform(context).configManager, 'web');
-  const webHost = urlHostForBindHost(webBinding.host, networkAddress);
-  const webUrl = `http://${webHost}:${webBinding.port}`;
+  const webUrl = advertisedEndpoint(webBinding.host, webBinding.port, hostInputs).url;
   const voiceEnabled = readConfigBooleanOrNull(context, 'ui.voiceEnabled');
   const voiceReadiness = buildAgentWorkspaceVoiceMediaReadiness({
     context,
@@ -658,12 +658,12 @@ export async function pairingPostureCatalogStatus(context: CommandContext, optio
   const native = captureCatalogNativeFacts(context, 'pairing');
   const caller = captureAsyncHarnessInput({}, options, true);
   const childOptions = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
-  const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager);
+  const hostInputs = capturePairingHostInputs(requirePlatform(context).configManager);
   const browserPosture = await browserControlPosture(context, context.extensions?.toolRegistry, childOptions);
   caller.assertCurrent();
-  const deviceMap = await buildDeviceCapabilityMap(context, browserPosture, childOptions, advertisement.address);
+  const deviceMap = await buildDeviceCapabilityMap(context, browserPosture, childOptions, hostInputs);
   caller.assertCurrent();
-  const result = await withModelReadingSource({ nativeProviders: native.providerEvidence, deviceMap, advertisementSource: advertisement.source, state: pairingState(context, advertisement.address) }, childOptions, async (captured, current) => {
+  const result = await withModelReadingSource({ nativeProviders: native.providerEvidence, deviceMap, hostInputs, state: pairingState(context, hostInputs) }, childOptions, async (captured, current) => {
     const state = captured.state;
     const result = {
       modes: ['pairing_posture', 'pairing_route'],
@@ -683,15 +683,15 @@ export async function pairingPostureSummary(context: CommandContext, rawArgs: Ag
   const native = captureCatalogNativeFacts(context, 'pairing');
   const caller = captureAsyncHarnessInput(rawArgs, options, true), args = caller.args;
   const childOptions = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
-  const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager);
+  const hostInputs = capturePairingHostInputs(requirePlatform(context).configManager);
   const browserPosture = await browserControlPosture(context, context.extensions?.toolRegistry, childOptions);
   caller.assertCurrent();
   const query = readString(args.query);
   const includeParameters = args.includeParameters === true;
   const routes = pairingRoutes();
-  const deviceMap = await buildDeviceCapabilityMap(context, browserPosture, childOptions, advertisement.address);
+  const deviceMap = await buildDeviceCapabilityMap(context, browserPosture, childOptions, hostInputs);
   caller.assertCurrent();
-  const result = await withModelReadingSource({ nativeProviders: native.providerEvidence, routes, deviceMap, args, advertisementSource: advertisement.source, state: pairingState(context, advertisement.address) }, childOptions, async (captured, current) => {
+  const result = await withModelReadingSource({ nativeProviders: native.providerEvidence, routes, deviceMap, args, hostInputs, state: pairingState(context, hostInputs) }, childOptions, async (captured, current) => {
     const sourceOptions = current;
     const limit = readLimit(args.limit, 100);
     const matchingRoutes = await browserDeviceCatalogMatches(routes, query, route => ({
@@ -744,10 +744,10 @@ export async function describeHarnessPairingRoute(context: CommandContext, rawAr
     const found = async (route: PairingRoute, resolvedBy: string): Promise<PairingResolution> => {
       let deviceCapabilityMap: DeviceCapabilityMap | undefined;
       if (route.id === 'device-capability-map') {
-        const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager);
+        const hostInputs = capturePairingHostInputs(requirePlatform(context).configManager);
         const browserPosture = await browserControlPosture(context, context.extensions?.toolRegistry, current);
         current.assertCurrent?.();
-        deviceCapabilityMap = await buildDeviceCapabilityMap(context, browserPosture, current, advertisement.address);
+        deviceCapabilityMap = await buildDeviceCapabilityMap(context, browserPosture, current, hostInputs);
         current.assertCurrent?.();
       }
       const result: PairingResolution = { status: 'found', route: describeRoute(route, { includeParameters: true,

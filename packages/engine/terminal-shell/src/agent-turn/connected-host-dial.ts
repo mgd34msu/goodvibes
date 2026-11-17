@@ -16,9 +16,9 @@
  * NOT for advertised addresses. A URL handed to ANOTHER machine, a pairing QR
  * code, a phone-facing web link, must resolve a wildcard to this host's LAN
  * address, never to loopback, because loopback on the phone is the phone. Those
- * sites keep their own `urlHostForBindHost` helpers, which resolve through
- * getLocalNetworkIp() on purpose. This module is client-dial-side only, and it
- * never rewrites the bind config itself.
+ * sites resolve through the engine's `stableUrlHostForBindHost` on purpose.
+ * This module is client-dial-side only, and it never rewrites the bind config
+ * itself.
  */
 
 /** The interface a wildcard-bound listener answers on locally. */

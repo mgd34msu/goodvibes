@@ -1,6 +1,6 @@
 import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
-import { getLocalNetworkIp } from '@goodvibes-jev/engine/terminal-shell/cli-environment';
+import { stableUrlHostForBindHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import {
   splitCommandOption,
   readOptionValue,
@@ -74,9 +74,12 @@ function connectHostForBindHost(host: string): string {
   return host || '127.0.0.1';
 }
 
+/**
+ * Where another machine dials (a pairing QR code, a phone-facing link): the
+ * engine's stable-host rule, the same one the daemon and the Agent print.
+ */
 export function urlHostForBindHost(host: string): string {
-  if (host === '0.0.0.0' || host === '::') return getLocalNetworkIp();
-  return host || '127.0.0.1';
+  return stableUrlHostForBindHost(host).host;
 }
 
 /**
@@ -95,6 +98,7 @@ export async function withDaemonSettingsRoute<T>(
   const detach = config.attachDaemonRoute({
     reachable: () => daemonConfig.reachable(),
     write: (key, value) => daemonConfig.set(key, value),
+    writeMany: (changes) => daemonConfig.setMany(changes),
     ...(daemonConfig.reset ? { reset: (key: string) => daemonConfig.reset!(key) } : {}),
   });
   try {

@@ -300,6 +300,16 @@ const names = [...new Set<GoodVibesCliCommand>(['tui', ...Object.values(COMMAND_
  */
 const options = (...names: readonly string[]): readonly CommandOptionSpec[] =>
   names.map((name) => ({ tokens: [`--${name}`], takesValue: false }));
+/** Options that always take the next word as their value, so a missing value is refused here. */
+const valued = (...names: readonly string[]): readonly CommandOptionSpec[] =>
+  names.map((name) => ({ tokens: [`--${name}`], takesValue: true }));
+// `routines promote` (parseRoutineSchedulePromotionArgs): the schedule, its target and its delivery.
+const ROUTINE_PROMOTE_OPTIONS = [
+  ...valued('cron', 'every', 'at', 'timezone', 'provider', 'model',
+    'delivery-channel', 'deliver-channel', 'delivery-route', 'deliver-route',
+    'delivery-webhook', 'deliver-webhook', 'delivery-link', 'deliver-link'),
+  ...options('disabled'),
+];
 const KNOWLEDGE_OPTIONS = [
   ...options('allow-private-hosts', 'connector', 'content', 'folder', 'home', 'input', 'kind', 'limit', 'mode', 'path', 'review', 'tags', 'title', 'wrfc', 'yes',
     'browser', 'browsers', 'since-days', 'source-kind', 'source-kinds', 'sources'),
@@ -312,8 +322,8 @@ const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptio
   profiles: options('description', 'include-vibe', 'name', 'persona', 'profile-name', 'replace', 'routines', 'skills', 'starter', 'starter-id', 'template', 'template-id', 'yes'),
   personas: options('body', 'description', 'name', 'provenance', 'tags', 'triggers', 'use', 'yes'),
   skills: options('description', 'enabled', 'name', 'procedure', 'provenance', 'requires-command', 'requires-commands', 'requires-env', 'skills', 'tags', 'triggers', 'yes'),
-  memory: options('by', 'cls', 'confidence', 'detail', 'file', 'label', 'limit', 'reason', 'review-state', 'scope', 'semantic', 'tags', 'task', 'turn', 'vector', 'yes'),
-  routines: options('description', 'enabled', 'name', 'requires-command', 'requires-commands', 'requires-env', 'steps', 'tags', 'triggers', 'yes'),
+  memory: options('by', 'cls', 'confidence', 'detail', 'file', 'label', 'limit', 'reason', 'review-state', 'scope', 'semantic', 'session', 'tags', 'task', 'turn', 'vector', 'yes'),
+  routines: [...options('description', 'enabled', 'name', 'requires-command', 'requires-commands', 'requires-env', 'steps', 'tags', 'triggers', 'yes'), ...ROUTINE_PROMOTE_OPTIONS],
   ci: options('delivery-channel', 'pr', 'ref', 'trigger-fix-session', 'yes'),
   principals: options('channel', 'clear-identities', 'identity', 'kind', 'name', 'value', 'yes'),
   'owner-profile': options('said', 'section', 'text', 'yes'),
@@ -330,6 +340,8 @@ const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptio
   secrets: options('user', 'project', 'secure', 'plaintext', 'stdin'),
   pair: options('name'),
   import: options('apply', 'apply-permissions'),
+  // `bundle import <path> --yes [--include-security]` (the shared support-bundle command).
+  bundle: options('yes', 'include-security'),
 };
 const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, FlagField>[] = [
   {

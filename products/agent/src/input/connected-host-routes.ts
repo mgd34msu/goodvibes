@@ -75,15 +75,17 @@ export async function readConnectedHostMethod(
   input: Record<string, unknown> = {},
   options: { readonly timeoutMs?: number } = {},
 ): Promise<ConnectedHostRouteResult> {
-  // Display readers take each field defensively, so the answer is not walked against the schema.
-  const host = createConnectedHost(selectionFor(context), { validateResponses: false });
-  // Method ids here come from callers as strings; the client checks the id against the contract.
-  const invoke = host.invoke as unknown as (methodId: string, input: unknown, options?: ConnectedHostInvokeOptions) => Promise<unknown>;
   try {
+    // Display readers take each field defensively, so the answer is not walked against the schema.
+    const host = createConnectedHost(selectionFor(context), { validateResponses: false });
+    // Method ids here come from callers as strings; the client checks the id against the contract.
+    const invoke = host.invoke as unknown as (methodId: string, input: unknown, options?: ConnectedHostInvokeOptions) => Promise<unknown>;
     const body = await invoke(methodId, input, options.timeoutMs === undefined ? {} : { deadlineMs: options.timeoutMs });
     return { ok: true, route: methodId, body };
   } catch (error) {
-    if (!isHostFailure(error)) throw error;
+    // Not a failure the host reported (resolving the host from settings threw,
+    // or the method id is not in the contract): still a reading that says why.
+    if (!isHostFailure(error)) return localFailure(context, methodId, error);
     const next = error.refusal.next[0];
     return {
       ok: false,
@@ -94,6 +96,22 @@ export async function readConnectedHostMethod(
       ...(error.source === undefined ? {} : { source: error.source }),
     };
   }
+}
+
+function localFailure(context: CommandContext, methodId: string, error: unknown): ConnectedHostRouteFailure {
+  let baseUrl = '(not resolved)';
+  try {
+    baseUrl = resolveConnectedHostConnection(context).baseUrl;
+  } catch {
+    // The same settings read that failed; the message below names the cause.
+  }
+  return {
+    ok: false,
+    route: methodId,
+    kind: 'connected_host_error',
+    baseUrl,
+    message: `the call was not sent: ${error instanceof Error ? error.message : String(error)}; next: check the connected-host settings with /settings, then try again`,
+  };
 }
 
 export function formatConnectedHostRouteFailure(

@@ -21,14 +21,20 @@ export interface RetainedOperatorConnectionPolicy {
   readonly fetchImpl?: OperatorApiClientOptions['fetchImpl'];
 }
 
-/** Why a retained connection could not open or ended, each with its own next step. */
-export type RetainedOperatorConnectionFailure = 'not-paired' | 'source-changed' | 'closed';
+/**
+ * Why a retained connection could not open or ended, each with its own next step.
+ * `unavailable`: opening failed for another reason (a credential or pairing file could
+ * not be read, the host address is not usable); `source-changed` is only a selection or
+ * credential that changed after the connection opened.
+ */
+export type RetainedOperatorConnectionFailure = 'not-paired' | 'source-changed' | 'unavailable' | 'closed';
 
 export class RetainedOperatorConnectionError extends Error {
   constructor(readonly reason: RetainedOperatorConnectionFailure) {
     super(reason === 'not-paired' ? 'No paired host is selected for this terminal.'
       : reason === 'source-changed' ? 'The selected host or its credential changed.'
-        : 'The operator connection is closed.');
+        : reason === 'unavailable' ? 'The connection to the selected host could not be opened.'
+          : 'The operator connection is closed.');
     this.name = 'RetainedOperatorConnectionError';
   }
 }
@@ -39,9 +45,12 @@ export class RetainedOperatorConnectionError extends Error {
  * "reopen /payments pending".
  */
 export function describeRetainedConnectionFailure(error: unknown, again: string): string {
-  const reason = error instanceof RetainedOperatorConnectionError ? error.reason : 'source-changed';
+  const reason = error instanceof RetainedOperatorConnectionError ? error.reason : 'unavailable';
   if (reason === 'not-paired') return `No host is paired with this terminal. Pair it (/setup pair in the Agent, /host pair in the terminal app), then ${again}.`;
   if (reason === 'closed') return `The view closed before the host answered. Nothing more was sent; ${again}.`;
+  if (reason === 'unavailable') {
+    return `The connection to the selected host could not be opened: its pairing or credential file could not be read, or its address is not usable. Nothing was sent; check the pairing (/setup pair in the Agent, /host pair in the terminal app), then ${again}.`;
+  }
   return `The selected host or its credential changed while this was open. Nothing more was sent; ${again} to use the current one.`;
 }
 
@@ -72,7 +81,7 @@ export class RetainedOperatorConnection {
     this.owner = policy.owner();
     this.home = policy.home();
     this.incarnation = this.owner.getConfigurationIncarnation();
-    let reason: RetainedOperatorConnectionFailure = 'source-changed';
+    let reason: RetainedOperatorConnectionFailure = 'unavailable';
     try {
       if (policy.signal.aborted) { reason = 'closed'; throw new RetainedOperatorConnectionError(reason); }
       this.environment = [...(policy.environment?.() ?? [])];

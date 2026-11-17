@@ -380,7 +380,8 @@ export class AgentWorkspace {
   }
 
   hasPromptDispatch(): boolean {
-    return Boolean(this.context?.submitInput && this.dispatchPrompt);
+    // A workspace prompt is sent as written (submitTurn), never read as composer input.
+    return Boolean(this.context?.submitTurn && this.dispatchPrompt);
   }
 
   dispatchWorkspaceCommand(command: string, behavior?: 'inline' | 'compose' | 'exit', displayCommand?: string): void {

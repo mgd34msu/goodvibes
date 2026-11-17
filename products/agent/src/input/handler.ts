@@ -547,7 +547,7 @@ export class InputHandler extends TerminalInputHandlerState {
     // The owner's field text (a document body, a URL) is not composer input:
     // `@model:` or a leading `!` in it is sent, not acted on.
     if (this.submitTurn) this.submitTurn(prompt);
-    else context.submitInput?.(prompt);
+    else context.submitTurn?.(prompt);
     this.requestRender();
   }
   public handleModelPickerCommit(): boolean {

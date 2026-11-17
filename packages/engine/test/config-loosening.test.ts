@@ -79,8 +79,9 @@ test('an agent write that widens the sandbox or loosens a payments key is refuse
   expect(config.revisionSource.revision()).toBe(revision);
   const disk = reopened();
   for (const row of LOOSENING) {
-    expect(config.get(row.key as ConfigKey)).toEqual(before.get(row.key));
-    expect(disk.get(row.key as ConfigKey)).toEqual(before.get(row.key));
+    const saved: unknown = before.get(row.key);
+    expect(config.get(row.key as ConfigKey) as unknown).toEqual(saved);
+    expect(disk.get(row.key as ConfigKey) as unknown).toEqual(saved);
   }
 });
 

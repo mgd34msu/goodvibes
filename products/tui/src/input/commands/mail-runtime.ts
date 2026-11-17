@@ -161,9 +161,10 @@ const USAGE = [
   '  /mail list [n]              list the n most recent messages (default 15)',
   '  /mail read <uid>            open one message',
   '  /mail draft <to | subject | body>   save a draft to the account',
-  '  /mail send [--again] <to | subject | body>   shows the message and asks once, then sends',
+  '  /mail send [--yes] [--again] <to | subject | body>   shows the message and asks once, then sends',
   '',
-  '  The body is everything after the second |, pipes included. --again goes before the recipient.',
+  '  The body is everything after the second |, pipes included. --yes and --again go before the recipient;',
+  '  the same words inside the subject or body are sent as text.',
 ].join('\n');
 
 export function registerMailRuntimeCommands(registry: CommandRegistry): void {
@@ -173,7 +174,9 @@ export function registerMailRuntimeCommands(registry: CommandRegistry): void {
     description: 'Mail over the daemon: connection status, inbox, read, draft, send',
     usage: '[status|list|read|draft|send] …',
     argsHint: '[status|list <n>|read <uid>|draft|send]',
-    subcommands: { status: '', list: '[n]', read: '<uid>', draft: '<to | subject | body>', send: '[--again] <to | subject | body>' },
+    subcommands: { status: '', list: '[n]', read: '<uid>', draft: '<to | subject | body>', send: '[--yes] [--again] <to | subject | body>' },
+    // --yes counts only before the recipient: the same word in a subject or body is text.
+    leadingFlagsOnly: true,
     confirm(args) {
       if ((args[0] ?? '').toLowerCase() !== 'send') return undefined;
       const parsed = parseComposeArgs(splitLeadingFlags(args.slice(1), COMPOSE_FLAGS).text);

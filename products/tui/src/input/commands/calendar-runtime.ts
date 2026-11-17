@@ -156,8 +156,9 @@ const USAGE = [
   '  /calendar status            connection status only',
   '  /calendar list [n]          the next n events (default 20)',
   '  /calendar get <id>          open one event',
-  '  /calendar create [--again] <title | start | end>   shows the event and asks once, then creates it',
+  '  /calendar create [--yes] [--again] <title | start | end>   shows the event and asks once, then creates it',
   '',
+  '  --yes and --again go before the title; the same words inside the title are text.',
   '  Times are ISO-8601, e.g. 2026-08-01T14:00:00Z or 2026-08-01T09:00:00-05:00;',
   '  a time without a zone is read in this machine\'s zone, which the question names.',
 ].join('\n');
@@ -169,7 +170,9 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     description: 'Calendar over the daemon: connection status, agenda, event detail, create',
     usage: '[status|list|get|create] …',
     argsHint: '[status|list <n>|get <id>|create]',
-    subcommands: { status: '', list: '[n]', get: '<id>', create: '[--again] <title | start | end>' },
+    subcommands: { status: '', list: '[n]', get: '<id>', create: '[--yes] [--again] <title | start | end>' },
+    // --yes counts only before the title: the same word inside the title is text.
+    leadingFlagsOnly: true,
     confirm(args) {
       if ((args[0] ?? '').toLowerCase() !== 'create') return undefined;
       const plan = planEventCreate(args.slice(1));

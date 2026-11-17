@@ -7,7 +7,8 @@
  *   set <field> <value> [--yes]                   Set a mailbox setting; --yes required for the password
  *   check [n]                                     List up to n unread inbox summaries (default 10);
  *                                                  includes a 2-line body preview of the newest message
- *   send <to> <subject words> -- <body words> --yes  Send a plain-text email; preview without --yes
+ *   send --yes <to> <subject words> -- <body words>  Send a plain-text email; preview without --yes
+ *                                                  (--yes before the recipient; inside the text it is text)
  *
  * Settable fields (email-settings.ts), each a `surfaces.email.*` setting, the
  * mailbox the daemon reads too:
@@ -27,7 +28,7 @@ import { getSessionUntrustedContentLedger } from '../../trust/untrusted-content.
 import { describeSenderClaim, type DisplayedSenderConfidence } from '../../agent/untrusted-content.ts';
 import type { CommandContext } from '../command-registry.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripLeadingYesFlag, stripYesFlag } from './confirmation.ts';
 import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { nodeEmailTransport } from '@goodvibes-jev/engine/platform/platform/email/node';
 import { requireSecretsManager, requireShellPaths } from './runtime-services.ts';
@@ -340,12 +341,13 @@ async function handleSend(
   args: readonly string[],
   ctx: CommandContext,
 ): Promise<void> {
-  const parsed = stripYesFlag(args);
+  // --yes is read only before the recipient: the same word in the subject or body is text and is sent.
+  const parsed = stripLeadingYesFlag(args, 0);
   const remaining = [...parsed.rest];
 
   const sendArgs = parseSendArgs(remaining);
   if (!sendArgs) {
-    throw commandRefusal('Usage: /email send <to> <subject words...> [-- <body words...>] --yes\nRecipient and subject are required.');
+    throw commandRefusal('Usage: /email send --yes <to> <subject words...> [-- <body words...>]\nRecipient and subject are required; --yes goes before the recipient.');
   }
 
   const { to, subject, body } = sendArgs;
@@ -356,10 +358,10 @@ async function handleSend(
       `  to: ${to}`,
       `  subject: ${subject}`,
       `  body: ${body || '(empty)'}`,
-      '  policy: this is a preview; rerun with --yes to send',
+      '  policy: this is a preview; rerun with --yes before the recipient to send',
     ];
     ctx.print(lines.join('\n'));
-    requireYesFlag(ctx, `send email to ${to}`, `/email send ${to} ${subject}${body ? ` -- ${body}` : ''} --yes`);
+    requireYesFlag(ctx, `send email to ${to}`, `/email send --yes ${to} ${subject}${body ? ` -- ${body}` : ''}`);
     return;
   }
 
@@ -402,7 +404,7 @@ export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
     effect: 'external-network',
     aliases: [],
     description: 'Direct IMAP/SMTP email: configure, check inbox, or send a confirmed message',
-    usage: 'status | config | set <key> <value> [--yes] | check [n] | send <to> <subject...> [-- <body...>] --yes',
+    usage: 'status | config | set <key> <value> [--yes] | check [n] | send --yes <to> <subject...> [-- <body...>]',
     argsHint: 'status|config|set|check|send',
     async handler(args, ctx) {
       const sub = (args[0] ?? 'status').trim().toLowerCase();
@@ -433,7 +435,7 @@ export function registerEmailRuntimeCommands(registry: CommandRegistry): void {
           return;
         }
 
-        throw commandRefusal('Usage: /email status | config | set <key> <value> [--yes] | check [n] | send <to> <subject...> [-- <body...>] --yes');
+        throw commandRefusal('Usage: /email status | config | set <key> <value> [--yes] | check [n] | send --yes <to> <subject...> [-- <body...>]');
       } catch (err) {
         // MIN-3: print config/validation errors as plain language, never a raw exception
         if (readRefusal(err)) throw err;

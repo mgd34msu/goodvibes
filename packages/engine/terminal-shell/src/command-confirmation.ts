@@ -39,6 +39,30 @@ export function stripYesFlag(args: readonly string[]): ConfirmationArgs {
   return { rest, yes };
 }
 
+/**
+ * `--yes` for a line whose tail is free text (a mail body, an event title):
+ * read only among the `--` words before the first field, so the same word in
+ * the text is text and is sent as typed. The first `skip` words (the
+ * subcommand) are passed over; the first later word that is not a flag ends
+ * the flags.
+ */
+export function stripLeadingYesFlag(args: readonly string[], skip = 1): ConfirmationArgs {
+  const rest: string[] = [];
+  let yes = false;
+  let index = 0;
+  for (; index < args.length; index += 1) {
+    const token = args[index]!;
+    if (index >= skip && !token.startsWith('--')) break;
+    if (token === '--yes') {
+      yes = true;
+      continue;
+    }
+    rest.push(token);
+  }
+  for (; index < args.length; index += 1) rest.push(args[index]!);
+  return { rest, yes };
+}
+
 /** Refuses a line that needs `--yes`: nothing was done, and the usage says how to confirm it. */
 export function requireYesFlag(_ctx: CommandConfirmationContext, action: string, usage: string): never {
   throw commandRefusal(`Refusing to ${action} without --yes.`, `Usage: ${usage}`, 'CONFIRMATION_REQUIRED');
@@ -67,6 +91,11 @@ export interface ConfirmableCommand<Context> {
    * that is reversible, a read, or incomplete (the handler prints its usage).
    */
   readonly confirm?: ((args: readonly string[], context: Context) => CommandConfirmation | undefined) | undefined;
+  /**
+   * The line's tail is free text: `--yes` counts only right after the
+   * subcommand, before the first field (stripLeadingYesFlag), never inside the text.
+   */
+  readonly leadingFlagsOnly?: boolean | undefined;
 }
 
 /** The surface a confirmation is asked on. */
@@ -91,7 +120,7 @@ export function withOwnerConfirmation<Context extends ConfirmationHost, Command 
   return {
     ...command,
     async handler(args: string[], context: Context): Promise<void> {
-      const { rest, yes } = stripYesFlag(args);
+      const { rest, yes } = command.leadingFlagsOnly === true ? stripLeadingYesFlag(args) : stripYesFlag(args);
       const question = confirm(rest, context);
       if (!question) {
         await handler(args, context);
@@ -102,8 +131,9 @@ export function withOwnerConfirmation<Context extends ConfirmationHost, Command 
         return;
       }
       if (!context.confirm) {
+        const where = command.leadingFlagsOnly === true ? ` right after /${command.name}${rest[0] ? ` ${rest[0]}` : ''}` : '';
         throw commandRefusal(`${question.title.replace(/\?$/, '')}: not done. ${question.detail}`,
-          context.invokedByModel === true ? 'Ask the owner to type the same line with --yes.' : 'This surface cannot ask; type the same line with --yes to confirm it.',
+          context.invokedByModel === true ? `Ask the owner to type the same line with --yes${where}.` : `This surface cannot ask; type the same line with --yes${where} to confirm it.`,
           'CONFIRMATION_REQUIRED');
       }
       const answered = await context.confirm({ title: question.title, body: question.detail, confirmLabel: question.confirmLabel, tone: 'danger' });

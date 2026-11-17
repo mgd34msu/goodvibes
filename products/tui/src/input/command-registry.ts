@@ -415,7 +415,7 @@ export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
  * argument hint for each subcommand; `confirm` names the lines that cannot be
  * undone or change access, which the registry asks about once before running.
  */
-export type SlashCommand = TerminalSlashCommand<CommandContext> & CommandSubcommandHints & Pick<ConfirmableCommand<CommandContext>, 'confirm'>;
+export type SlashCommand = TerminalSlashCommand<CommandContext> & CommandSubcommandHints & Pick<ConfirmableCommand<CommandContext>, 'confirm' | 'leadingFlagsOnly'>;
 const platformCommands = createTerminalCommandRegistry<CommandContext>({ commonNames: COMMON_COMMAND_NAMES });
 export class CommandRegistry extends platformCommands.CommandRegistry {
   /**

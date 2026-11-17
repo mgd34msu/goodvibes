@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
 import { fetchModelContextWindows } from '@goodvibes-jev/engine/platform/platform/discovery';
 import type { CustomProviderConfig, ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
-import type { SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { findCredentialScopeDeclaration, listDaemonOwnedSecretKeys, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { formatProviderModel } from '@goodvibes-jev/engine/platform/platform/providers/provider-model';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
@@ -21,6 +21,15 @@ export interface LocalProviderCommandContext {
 }
 export function customProviderKeyName(providerName: string): string {
   return `${providerName.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}_API_KEY`;
+}
+/**
+ * The custom provider's key slot when it is a credential the platform itself
+ * declares (a built-in provider's or a service's key): storing a custom key
+ * there would overwrite that credential, and removing the provider would delete it.
+ */
+function platformCredentialSlot(providerName: string): string | undefined {
+  const slot = customProviderKeyName(providerName);
+  return findCredentialScopeDeclaration(slot) !== null || listDaemonOwnedSecretKeys().has(slot) ? slot : undefined;
 }
 function validProviderName(name: string): boolean {
   return /^[a-zA-Z0-9_-]+$/.test(name);
@@ -232,6 +241,13 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
             );
             return;
           }
+          const platformSlot = platformCredentialSlot(name);
+          if (platformSlot) {
+            context.print(
+              `Provider '${name}' was not added: its API key would be stored as ${platformSlot}, which is the key of a built-in provider or service, so adding it would overwrite that key and removing it would delete it. Choose another name, for example /provider add ${name}-local ${baseURL}${confirmationSuffix}.`,
+            );
+            return;
+          }
           const sharing = keySlotOwner(directory, name);
           if (sharing) {
             context.print(
@@ -274,6 +290,11 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           }
           // The key belongs to this provider alone (an add refuses a name that maps to a key slot in use).
           const keyName = customProviderKeyName(name);
+          if (platformCredentialSlot(name)) {
+            // A provider file made by hand, or before add refused such names: the key is a built-in one and stays.
+            context.print(`Provider '${name}' removed. Its key slot ${keyName} belongs to a built-in provider or service, so the stored key was kept. The file watcher will deregister it shortly.`);
+            return;
+          }
           try {
             await services.requireSecretsManager(context).delete(keyName, { scope: 'daemon' });
           } catch (error) {

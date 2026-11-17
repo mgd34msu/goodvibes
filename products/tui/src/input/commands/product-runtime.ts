@@ -217,7 +217,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
             `Bridge Runner ${runnerId}`,
             `  template: ${contract.template}`,
             `  trustClass: ${contract.trustClass}`,
-            `  transport: ${contract.sourceTransport}/${contract.transport.state}`,
+            `  transport: ${contract.transport ? `${contract.sourceTransport}/${contract.transport.state}` : 'none (local runner in this process)'}`,
             `  tools: ${runnerToolsText(contract)}`,
             `  pool: ${contract.poolId ?? '(unassigned)'}`,
           ].join('\n'),

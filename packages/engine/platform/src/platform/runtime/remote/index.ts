@@ -52,6 +52,7 @@ export {
   RemoteSupervisor,
 } from './supervisor.js';
 export type {
+  RemoteLocalRunnerSnapshot,
   RemoteSupervisorSnapshot,
 } from './supervisor.js';
 export {

@@ -94,8 +94,8 @@ class RemoteModalSurface implements ConfigModalSurface {
 
     const contractRows = contracts.map((ct) => ({
       id: `${RUNNER_ROW}${ct.runnerId}`,
-      label: `${statusGlyph(stateTone(ct.transport.state))} ${pad(ct.runnerId, 20)} ${pad(ct.transport.state.toUpperCase(), 14)} ${ct.template ?? ''}`,
-      style: toneStyle(stateTone(ct.transport.state)),
+      label: `${statusGlyph(stateTone(ct.transport?.state ?? 'local'))} ${pad(ct.runnerId, 20)} ${pad((ct.transport?.state ?? 'local').toUpperCase(), 14)} ${ct.template ?? ''}`,
+      style: toneStyle(stateTone(ct.transport?.state ?? 'local')),
     }));
 
     // Runners that need attention first; each runner's steps are selectable rows.

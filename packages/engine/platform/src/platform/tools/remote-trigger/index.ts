@@ -24,7 +24,7 @@ function summarizeContract(contract: ReturnType<RemoteRunnerRegistry['listContra
     sourceTransport: contract.sourceTransport,
     trustClass: contract.trustClass,
     template: contract.template,
-    transportState: contract.transport.state,
+    transportState: contract.transport?.state ?? 'local',
     toolCount: contract.capabilityCeiling.allowedTools.length,
     reviewMode: contract.capabilityCeiling.reviewMode,
     communicationLane: contract.capabilityCeiling.communicationLane,

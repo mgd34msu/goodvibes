@@ -33,12 +33,12 @@ export function buildRemoteSessionStateSnapshot(input: {
   return Object.freeze({
     runnerId: input.runnerId,
     label: input.label,
-    transportState: connection?.transportState ?? contract?.transport.state ?? 'disconnected',
+    transportState: connection?.transportState ?? contract?.transport?.state ?? 'disconnected',
     ...(connection?.taskId ?? contract?.taskId ? { taskId: connection?.taskId ?? contract?.taskId } : {}),
-    messageCount: connection?.messageCount ?? contract?.transport.messageCount ?? 0,
-    errorCount: connection?.errorCount ?? contract?.transport.errorCount ?? 0,
-    ...(connection?.lastError ?? contract?.transport.lastError
-      ? { lastError: connection?.lastError ?? contract?.transport.lastError }
+    messageCount: connection?.messageCount ?? contract?.transport?.messageCount ?? 0,
+    errorCount: connection?.errorCount ?? contract?.transport?.errorCount ?? 0,
+    ...(connection?.lastError ?? contract?.transport?.lastError
+      ? { lastError: connection?.lastError ?? contract?.transport?.lastError }
       : {}),
     heartbeat: input.heartbeat,
     negotiation: input.negotiation,

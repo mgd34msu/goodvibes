@@ -8,13 +8,27 @@ import { deriveRemoteNegotiation, type RemoteNegotiationSnapshot } from './negot
 import { deriveRemoteRecoveryActions, type RemoteRecoveryAction } from './recovery.js';
 import { buildRemoteSessionStateSnapshot, type RemoteSessionStateSnapshot } from './session-state.js';
 
+/** A runner with no transport: a local sub-agent or orchestration node. */
+export interface RemoteLocalRunnerSnapshot {
+  readonly runnerId: string;
+  readonly label: string;
+  readonly template: string;
+  readonly taskId?: string | undefined;
+  readonly parentAgentId?: string | undefined;
+  readonly orchestrationGraphId?: string | undefined;
+}
+
 export interface RemoteSupervisorSnapshot {
   readonly capturedAt: number;
   readonly totalConnections: number;
   readonly activeConnections: number;
+  /** Sessions whose transport is degraded or whose heartbeat is not fresh. */
   readonly degradedConnections: number;
   readonly pools: readonly RemoteRunnerPool[];
+  /** Runners with a transport; each has a heartbeat and recovery steps. */
   readonly sessions: readonly RemoteSessionStateSnapshot[];
+  /** Runners with no transport, which have no heartbeat to report. */
+  readonly localRunners: readonly RemoteLocalRunnerSnapshot[];
 }
 
 function stateIsDegraded(state: string): boolean {
@@ -30,11 +44,22 @@ export class RemoteSupervisor {
     const pools = this.remoteRegistry.listPools();
     const contracts = this.remoteRegistry.listContracts();
     const connections = [...state.acp.connections.values()];
+    const connected = new Set(connections.map((connection) => connection.agentId));
     const runnerIds = new Set<string>([
-      ...connections.map((connection) => connection.agentId),
-      ...contracts.map((contract) => contract.runnerId),
+      ...connected,
+      ...contracts.filter((contract) => contract.transport).map((contract) => contract.runnerId),
     ]);
     const sessions = [...runnerIds].map((runnerId) => this.describeRunner(runnerId, connections, contracts));
+    const localRunners = contracts
+      .filter((contract) => !contract.transport && !connected.has(contract.runnerId))
+      .map((contract): RemoteLocalRunnerSnapshot => Object.freeze({
+        runnerId: contract.runnerId,
+        label: contract.label,
+        template: contract.template,
+        ...(contract.taskId ? { taskId: contract.taskId } : {}),
+        ...(contract.parentAgentId ? { parentAgentId: contract.parentAgentId } : {}),
+        ...(contract.orchestrationGraphId ? { orchestrationGraphId: contract.orchestrationGraphId } : {}),
+      }));
     return Object.freeze({
       capturedAt: Date.now(),
       totalConnections: connections.length,
@@ -42,6 +67,7 @@ export class RemoteSupervisor {
       degradedConnections: sessions.filter((session) => stateIsDegraded(session.transportState) || session.heartbeat.status !== 'fresh').length,
       pools,
       sessions,
+      localRunners,
     });
   }
 

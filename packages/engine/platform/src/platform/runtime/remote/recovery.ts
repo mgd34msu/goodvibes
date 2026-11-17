@@ -18,27 +18,27 @@ export function deriveRemoteRecoveryActions(
   const runnerId = contract?.runnerId ?? connection?.agentId ?? 'selected';
   const taskId = connection?.taskId ?? contract?.taskId;
 
-  if (connection?.lastError || contract?.transport.lastError) {
+  if (connection?.lastError || contract?.transport?.lastError) {
     actions.push({
       id: 'review-health',
       label: 'Review remote health',
       command: '/health review',
-      reason: connection?.lastError ?? contract?.transport.lastError ?? 'Remote transport reported an error.',
+      reason: connection?.lastError ?? contract?.transport?.lastError ?? 'Remote transport reported an error.',
     });
   }
   if (heartbeat?.status === 'stale') {
     actions.push({
-      id: 'reconnect',
-      label: 'Reinspect remote runtime',
+      id: 'inspect',
+      label: 'Inspect the remote connection',
       command: `/remote show ${runnerId}`,
       reason: heartbeat.detail,
     });
   }
   if (taskId) {
     actions.push({
-      id: 'resume',
-      label: 'Resume bound remote task',
-      command: `/task status ${taskId}`,
+      id: 'task',
+      label: 'Show the bound task',
+      command: `/tasks show ${taskId}`,
       reason: `Remote session is still bound to task ${taskId}.`,
     });
   }

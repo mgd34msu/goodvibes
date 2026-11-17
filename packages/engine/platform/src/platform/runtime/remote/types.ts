@@ -48,7 +48,12 @@ export interface RemoteRunnerContract {
   readonly workspaceRoot?: string | undefined;
   readonly createdAt: number;
   readonly lastUpdatedAt: number;
-  readonly transport: {
+  /**
+   * The runner's connection. Absent for a runner that has none: a local
+   * sub-agent or orchestration node runs in this process, so it has no
+   * transport, heartbeat or reconnect to report.
+   */
+  readonly transport?: {
     readonly state: DaemonTransportState;
     readonly connectedAt?: number | undefined;
     readonly messageCount: number;
@@ -73,7 +78,8 @@ export interface RemoteRunnerEvidenceSummary {
   readonly toolCallCount: number;
   readonly messageCount: number;
   readonly errorCount: number;
-  readonly transportState: DaemonTransportState;
+  /** Absent for a runner with no transport (see RemoteRunnerContract.transport). */
+  readonly transportState?: DaemonTransportState | undefined;
   readonly connectedAt?: number | undefined;
   readonly lastError?: string | undefined;
   readonly hasKnowledgeInjections: boolean;

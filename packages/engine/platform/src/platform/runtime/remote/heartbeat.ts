@@ -12,7 +12,7 @@ export function deriveRemoteHeartbeat(
   connection?: AcpConnection | null,
   contract?: RemoteRunnerContract | null,
 ): RemoteHeartbeatSnapshot {
-  const lastSeenAt = connection?.connectedAt ?? contract?.transport.connectedAt;
+  const lastSeenAt = connection?.connectedAt ?? contract?.transport?.connectedAt;
   if (!lastSeenAt) {
     return {
       status: 'offline',
@@ -20,7 +20,7 @@ export function deriveRemoteHeartbeat(
     };
   }
   const ageMs = Math.max(0, Date.now() - lastSeenAt);
-  const state = connection?.transportState ?? contract?.transport.state;
+  const state = connection?.transportState ?? contract?.transport?.state;
   if (state === 'terminal_failure' || state === 'disconnected') {
     return {
       status: 'offline',

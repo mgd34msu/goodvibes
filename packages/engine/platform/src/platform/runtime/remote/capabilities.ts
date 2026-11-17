@@ -34,7 +34,7 @@ export function deriveRemoteCapabilities(
 ): RemoteCapabilitySnapshot[] {
   const tools = new Set(contract?.capabilityCeiling.allowedTools ?? []);
   const writeScope = contract?.capabilityCeiling.writeScope ?? [];
-  const transportState = connection?.transportState ?? contract?.transport.state ?? 'disconnected';
+  const transportState = connection?.transportState ?? contract?.transport?.state ?? 'disconnected';
   const workspaceRoot = contract?.workspaceRoot;
 
   return [

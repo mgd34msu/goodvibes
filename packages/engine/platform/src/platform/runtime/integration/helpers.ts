@@ -420,8 +420,9 @@ export class IntegrationHelperService {
           executionProtocol: contract.capabilityCeiling.executionProtocol,
           reviewMode: contract.capabilityCeiling.reviewMode,
           communicationLane: contract.capabilityCeiling.communicationLane,
-          transportState: contract.transport.state,
-          ...(contract.transport.lastError ? { lastError: contract.transport.lastError } : {}),
+          // A local runner (sub-agent or graph node in this process) has no transport.
+          transportState: contract.transport?.state ?? 'local',
+          ...(contract.transport?.lastError ? { lastError: contract.transport.lastError } : {}),
         })),
         artifactEntries: artifacts.map((artifact) => ({
           id: artifact.id,

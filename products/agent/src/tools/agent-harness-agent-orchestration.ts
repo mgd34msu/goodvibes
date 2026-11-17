@@ -247,6 +247,8 @@ function remoteRunnerId(record: Record<string, unknown>): string {
 
 function transportState(contract: Record<string, unknown>): string {
   const transport = contract.transport;
+  // A local runner (sub-agent or graph node in this process) has no transport.
+  if (transport === undefined) return 'local';
   return transport && typeof transport === 'object' ? readString((transport as Record<string, unknown>).state) || 'unknown' : 'unknown';
 }
 

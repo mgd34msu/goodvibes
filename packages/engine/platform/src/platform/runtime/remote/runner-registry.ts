@@ -44,8 +44,10 @@ function missingField(value: Record<string, unknown>, fields: Readonly<Record<st
 
 function contractProblem(value: unknown, prefix: string): string | null {
   if (!isObject(value)) return `${prefix || 'contract'} (object)`;
-  const missing = missingField(value, { id: 'string', runnerId: 'string', label: 'string', template: 'string', capabilityCeiling: 'object', transport: 'object', createdAt: 'number', lastUpdatedAt: 'number' }, prefix);
+  const missing = missingField(value, { id: 'string', runnerId: 'string', label: 'string', template: 'string', capabilityCeiling: 'object', createdAt: 'number', lastUpdatedAt: 'number' }, prefix);
   if (missing) return missing;
+  // A local runner's contract has no transport; one that is present must be readable.
+  if (value['transport'] !== undefined && !isObject(value['transport'])) return `${prefix}transport (object)`;
   return missingField(value['capabilityCeiling'] as Record<string, unknown>, { allowedTools: 'array', capabilityCeilingTools: 'array', successCriteria: 'array', requiredEvidence: 'array', writeScope: 'array' }, `${prefix}capabilityCeiling.`);
 }
 
@@ -107,8 +109,7 @@ function buildEvidenceSummary(agent: AgentRecord, connection?: AcpConnection): R
     toolCallCount: agent.toolCallCount,
     messageCount: connection?.messageCount ?? 0,
     errorCount: connection?.errorCount ?? 0,
-    transportState: connection?.transportState ?? 'disconnected',
-    connectedAt: connection?.connectedAt,
+    ...(connection ? { transportState: connection.transportState, connectedAt: connection.connectedAt } : {}),
     lastError: connection?.lastError ?? agent.error,
     hasKnowledgeInjections: (agent.knowledgeInjections?.length ?? 0) > 0,
   });
@@ -137,13 +138,17 @@ function buildContract(agent: AgentRecord, workspaceRoot: string | undefined, co
     workspaceRoot: workspaceRoot ?? existing?.workspaceRoot,
     createdAt: agent.startedAt,
     lastUpdatedAt: agent.completedAt ?? Date.now(),
-    transport: Object.freeze({
-      state: connection?.transportState ?? 'disconnected',
-      connectedAt: connection?.connectedAt,
-      messageCount: connection?.messageCount ?? 0,
-      errorCount: connection?.errorCount ?? 0,
-      lastError: connection?.lastError,
-    }),
+    ...(connection
+      ? {
+          transport: Object.freeze({
+            state: connection.transportState,
+            connectedAt: connection.connectedAt,
+            messageCount: connection.messageCount,
+            errorCount: connection.errorCount,
+            lastError: connection.lastError,
+          }),
+        }
+      : {}),
   });
 }
 
@@ -238,11 +243,11 @@ function buildArtifactFromStore(
     }),
     evidence: Object.freeze({
       toolCallCount: 0,
-      messageCount: connection?.messageCount ?? contract.transport.messageCount,
-      errorCount: connection?.errorCount ?? contract.transport.errorCount,
-      transportState: connection?.transportState ?? contract.transport.state,
-      connectedAt: connection?.connectedAt ?? contract.transport.connectedAt,
-      lastError: connection?.lastError ?? contract.transport.lastError,
+      messageCount: connection?.messageCount ?? contract.transport?.messageCount ?? 0,
+      errorCount: connection?.errorCount ?? contract.transport?.errorCount ?? 0,
+      transportState: connection?.transportState ?? contract.transport?.state,
+      connectedAt: connection?.connectedAt ?? contract.transport?.connectedAt,
+      lastError: connection?.lastError ?? contract.transport?.lastError,
       hasKnowledgeInjections: false,
     }),
     knowledgeInjections: Object.freeze([]),

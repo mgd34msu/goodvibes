@@ -133,6 +133,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  review artifacts: ${artifacts.length}`,
           `  supervisor sessions: ${supervisor.sessions.length}`,
           `  degraded sessions: ${supervisor.degradedConnections}`,
+          `  local runners (no transport): ${supervisor.localRunners.length}`,
         ];
         if (activeConnections.length > 0) {
           lines.push('  connections:');
@@ -143,7 +144,13 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         if (contracts.length > 0) {
           lines.push('  contracts:');
           for (const contract of contracts.slice(0, 12)) {
-            lines.push(`    ${contract.runnerId}  ${contract.template}  ${contract.transport.state}  ${contract.capabilityCeiling.executionProtocol}/${runnerReviewText(contract)}`);
+            lines.push(`    ${contract.runnerId}  ${contract.template}  ${contract.transport?.state ?? 'local'}  ${contract.capabilityCeiling.executionProtocol}/${runnerReviewText(contract)}`);
+          }
+        }
+        if (supervisor.localRunners.length > 0) {
+          lines.push('  local runners (sub-agents and graph nodes in this process):');
+          for (const runner of supervisor.localRunners.slice(0, 12)) {
+            lines.push(`    ${runner.runnerId}  ${runner.template}  ${runner.label}${runner.taskId ? `  task ${runner.taskId}` : ''}`);
           }
         }
         ctx.print(lines.join('\n'));
@@ -157,7 +164,10 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           ? snapshot.sessions.find((entry) => entry.runnerId === runnerId)
           : snapshot.sessions[0];
         if (!selected) {
-          ctx.print(runnerId ? `Unknown remote supervisor session: ${runnerId}` : 'No remote supervisor sessions are currently tracked.');
+          const local = runnerId ? snapshot.localRunners.find((entry) => entry.runnerId === runnerId) : undefined;
+          ctx.print(local
+            ? `${runnerId} is a local runner (${local.template}) in this process; it has no transport or heartbeat. /remote contract ${runnerId} shows its contract.`
+            : runnerId ? `Unknown remote supervisor session: ${runnerId}` : 'No remote supervisor sessions are currently tracked.');
           return;
         }
         ctx.print([
@@ -440,7 +450,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  pool: ${contract.poolId ?? '(none)'}`,
           `  trustClass: ${contract.trustClass}`,
           `  template: ${contract.template}`,
-          `  transport: ${contract.transport.state}`,
+          `  transport: ${contract.transport?.state ?? 'none (local runner in this process)'}`,
           `  tools: ${runnerToolsText(contract)}`,
           `  protocol: ${contract.capabilityCeiling.executionProtocol}`,
           `  reviewMode: ${runnerReviewText(contract)}`,

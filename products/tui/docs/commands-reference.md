@@ -361,7 +361,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | `/panel` | `/panels` | `[<name> \| open <name> [--target <id>[:<kind>]] \| list]` | Open a view by its old pane name (fleet, tokens, git, …) in its modal; /panel list shows where each goes |
 | `/prev-error` | `/pe` | None | Jump to the previous error message in the conversation |
 | `/profiles` | None | None | Browse and load config profiles |
-| `/settings` | `/cfg-ui` | `[category\|key]` | Open the fullscreen configuration workspace, at that category or setting; other text becomes the settings search and is reported |
+| `/settings` | `/cfg-ui` | None | Open the fullscreen configuration workspace |
 | `/tool` | None | `verify <name> \| verify-all \| contract show <name>` | Verify registered tool contracts |
 
 ## Owner Profile

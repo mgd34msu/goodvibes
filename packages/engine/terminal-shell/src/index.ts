@@ -81,6 +81,7 @@ export {
 
 export {
   CLUSTER_SUBCOMMANDS,
+  describeIrreversibleClusterCommand,
   isClusterSubcommand,
   parseClusterCommand,
   runClusterCommand,

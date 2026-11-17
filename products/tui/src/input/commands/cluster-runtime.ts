@@ -12,7 +12,12 @@
  * shared caller already reports for any non-interactive invocation.
  */
 import { resolveDaemonHomeDir } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { runClusterCommand, CLUSTER_SUBCOMMANDS } from '@goodvibes-jev/engine/terminal-shell';
+import {
+  CLUSTER_SUBCOMMANDS,
+  describeIrreversibleClusterCommand,
+  parseClusterCommand,
+  runClusterCommand,
+} from '@goodvibes-jev/engine/terminal-shell';
 import type { CommandRegistry } from '../command-registry.ts';
 
 /** Subcommand → argument hint, surfaced as the operator types. */
@@ -34,11 +39,28 @@ export function registerClusterRuntimeCommands(registry: CommandRegistry): void 
     name: 'cluster',
     description: 'Share inbound channel work with your other goodvibes machines on this network',
     usage: `[${CLUSTER_SUBCOMMANDS.join('|')}]: status is the default; `
-      + 'add --host/--port/--token to reach a daemon on another machine',
+      + 'add --host https://<machine> (or a base URL), --port, --token to reach a daemon on another machine',
     argsHint: `[${CLUSTER_SUBCOMMANDS.join('|')}]`,
     subcommands: CLUSTER_SUBCOMMAND_ARG_HINTS,
+    confirm(args) {
+      const parsed = parseClusterCommand(args);
+      if (parsed.errors.length > 0) return undefined;
+      const irreversible = describeIrreversibleClusterCommand(parsed);
+      if (irreversible === null) return undefined;
+      const sentence = irreversible.charAt(0).toUpperCase() + irreversible.slice(1);
+      return {
+        title: `Run cluster ${parsed.subcommand}${parsed.positional ? ` ${parsed.positional}` : ''}${parsed.now ? ' --now' : ''}?`,
+        detail: `${sentence}. It cannot be undone.`,
+        confirmLabel: parsed.subcommand === 'rotate' ? 'Rotate' : parsed.subcommand === 'forget' ? 'Forget' : 'Leave',
+      };
+    },
     async handler(args, ctx) {
-      const argv = args.length === 0 ? ['status'] : args;
+      // The registry has already asked the owner for an irreversible line (or
+      // the owner typed --yes), so the shared caller is told it was confirmed.
+      const base = args.length === 0 ? ['status'] : args;
+      const argv = describeIrreversibleClusterCommand(parseClusterCommand(base)) !== null && !base.includes('--yes')
+        ? [...base, '--yes']
+        : base;
       const result = await runClusterCommand({
         argv,
         configManager: ctx.platform.configManager,

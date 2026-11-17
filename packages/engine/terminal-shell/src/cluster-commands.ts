@@ -267,8 +267,12 @@ async function askSecretOnStdin(question: string, toStderr = false): Promise<str
   }
 }
 
-/** What a verb is about to do that cannot be undone, or null for one that can be repeated safely. */
-function describeIrreversible(parsed: ParsedClusterCommand): string | null {
+/**
+ * What a verb is about to do that cannot be undone, or null for one that can be
+ * repeated safely. The CLI asks with it at the terminal; `/cluster` asks with it
+ * through the slash-command confirmation.
+ */
+export function describeIrreversibleClusterCommand(parsed: ParsedClusterCommand): string | null {
   switch (parsed.subcommand) {
     case 'leave': return 'this removes this machine from its group';
     case 'forget': return `this removes ${parsed.positional ?? 'that machine'} from the group and replaces the group key immediately`;
@@ -308,7 +312,7 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
   const call = async <T>(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown): Promise<DaemonVerbOutcome<T>> =>
     printableAnswer(await callDaemonVerb<T>(resolved.target, path, { method, ...(body === undefined ? {} : { body }) }, input.fetchImpl ?? fetch));
 
-  const irreversible = describeIrreversible(parsed);
+  const irreversible = describeIrreversibleClusterCommand(parsed);
   if (irreversible !== null && !parsed.yes) {
     // Only a person at a terminal can be asked; a script, a --json run or a slash command must say --yes.
     const answer = isTerminal && !parsed.json

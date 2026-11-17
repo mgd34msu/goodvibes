@@ -214,9 +214,9 @@ GOODVIBES_DAEMON_TOKEN=<token> goodvibes \
   --config controlPlane.port=3421
 ```
 
-See "Connecting the TUI to an already-running daemon" in
-[Deployment and services](deployment-and-services.md) for how the token is
-installed and confirmed on each side.
+The variable applies to that run only; see "Connecting the TUI to an
+already-running daemon" in [Deployment and services](deployment-and-services.md)
+for how each side uses it and how to keep the connection across runs.
 
 ## Step 8: validate the finished setup
 

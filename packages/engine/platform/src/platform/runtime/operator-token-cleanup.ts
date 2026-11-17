@@ -9,17 +9,12 @@
  * that function and it is inspected on the next boot.
  *
  * `resolveDaemonCompanionToken` is the read side: which token this process
- * authenticates to its daemon with, honoring a non-interactive override.
+ * authenticates to its daemon with, honoring a per-process override.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { getOrCreateCompanionToken } from '../pairing/companion-token.js';
 import type { CompanionPairingResult } from '../pairing/companion-token.js';
-import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
-import { logger } from '../utils/logger.js';
-import { summarizeError } from '../utils/error-display.js';
 
 /**
  * The absolute operator-tokens.json paths a workspace may hold from an older
@@ -40,87 +35,28 @@ export function workspaceOperatorTokenCandidates(
 }
 
 /**
- * External-daemon adoption: resolve the operator/companion token this process
- * uses to authenticate with its daemon, honoring `GOODVIBES_DAEMON_TOKEN` as a
- * non-interactive override.
- *
- * Without the override, the only way to make a surface adopt an already-running
- * external daemon that used an out-of-band or explicit token (rather than one
- * derived from `getOrCreateCompanionToken` under a *shared* home directory) is
- * to hand-write `<daemonHomeDir>/operator-tokens.json` before startup, no env
- * var or flag equivalent exists.
+ * Resolve the operator/companion token this process authenticates to its
+ * daemon with: the home's own record (`getOrCreateCompanionToken`, minted on
+ * first use), or `GOODVIBES_DAEMON_TOKEN` when set.
  *
  * `GOODVIBES_DAEMON_TOKEN` is the same env var the daemon honors for its own
- * bearer token, and the same one an outside prober falls back to when reaching
- * a daemon's HTTP surface. Reusing the name means one env var configures both
- * sides of an adopted-daemon setup, start the daemon with
- * `GOODVIBES_DAEMON_TOKEN=<token>` and point the surface at it with the same
- * `GOODVIBES_DAEMON_TOKEN=<token>` plus its control-plane host/port, instead of
- * a second, per-product flag.
+ * bearer token, so one variable configures both sides of an adopted-daemon
+ * setup. It applies to this process only: the home's record is never rewritten
+ * with it, so a run pointed once at another daemon leaves the local daemon and
+ * every other surface on their own token. A token that should be remembered
+ * for a daemon elsewhere is saved by the "connect to an existing daemon" action,
+ * beside that daemon's address (the terminal's connected-daemon credentials).
  *
- * When the override is set and does not already match the on-disk record, the
- * file is rewritten so the override becomes durable for this home directory (an
- * existing peerId is kept when present, so companion-pairing identity does not
- * needlessly churn). Falls back to the existing `getOrCreateCompanionToken`
- * behavior, read the existing file, or mint a fresh random token, when the
- * override is unset.
- *
- * @param daemonHomeDir - The daemon home whose token record is read/written.
- * @param peerName - The companion peer name minted under when no override is
- * set; the calling product's own name, so two products sharing a home mint
- * distinguishable peers.
- * @param explicitToken - Takes precedence over `GOODVIBES_DAEMON_TOKEN` when
- * provided. Used by an onboarding "connect to an existing daemon" action (a
- * pasted token) so it shares this exact persistence logic with the env-var path
- * instead of duplicating it.
+ * @param daemonHomeDir - The daemon home whose token record is read.
+ * @param peerName - The companion peer name minted under when the home has no
+ * record yet; the calling product's own name, so two products sharing a home
+ * mint distinguishable peers.
  */
 export function resolveDaemonCompanionToken(
   daemonHomeDir: string,
   peerName: string,
-  explicitToken?: string,
 ): CompanionPairingResult {
-  const override = explicitToken?.trim() || process.env.GOODVIBES_DAEMON_TOKEN?.trim();
-  if (!override) return getOrCreateCompanionToken(peerName, { daemonHomeDir });
-
-  const tokenPath = join(daemonHomeDir, 'operator-tokens.json');
-  let existingPeerId: string | undefined;
-  let existingCreatedAt: number | undefined;
-  if (existsSync(tokenPath)) {
-    try {
-      const record = JSON.parse(readFileSync(tokenPath, 'utf-8')) as {
-        token?: unknown;
-        peerId?: unknown;
-        createdAt?: unknown;
-      };
-      if (typeof record.token === 'string' && record.token === override) {
-        return {
-          token: override,
-          peerId: typeof record.peerId === 'string' ? record.peerId : randomBytes(12).toString('hex'),
-          createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now(),
-        };
-      }
-      if (typeof record.peerId === 'string') existingPeerId = record.peerId;
-      if (typeof record.createdAt === 'number') existingCreatedAt = record.createdAt;
-    } catch {
-      // Malformed on-disk record, fall through and rewrite it with the override.
-    }
-  }
-
-  const record: CompanionPairingResult = {
-    token: override,
-    peerId: existingPeerId ?? randomBytes(12).toString('hex'),
-    createdAt: existingCreatedAt ?? Date.now(),
-  };
-  try {
-    // Atomic like the companion-token writer: a reader of this shared file must
-    // never see a truncated record, or it quarantines it and mints a new token.
-    writeJsonFileAtomic(tokenPath, record, { mode: 0o600, mkdirp: true, trailingNewline: false });
-  } catch (error) {
-    // The override still applies for this process, but it will not be durable.
-    logger.warn('The daemon token override could not be saved to the operator token store', {
-      path: tokenPath,
-      error: summarizeError(error),
-    });
-  }
-  return record;
+  const own = getOrCreateCompanionToken(peerName, { daemonHomeDir });
+  const override = process.env.GOODVIBES_DAEMON_TOKEN?.trim();
+  return override ? { ...own, token: override } : own;
 }

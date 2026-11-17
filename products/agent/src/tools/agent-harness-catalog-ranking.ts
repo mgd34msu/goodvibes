@@ -6,12 +6,6 @@ import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platfor
 import type { Ranked, Rerank } from '@goodvibes-jev/judgment';
 import { isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
 
-const ownDescriptor = Object.getOwnPropertyDescriptor;
-const prototypeOf = Object.getPrototypeOf;
-const ownKeys = Reflect.ownKeys;
-const isProxy = nodeTypes.isProxy;
-const NativeWeakSet = WeakSet, nativeWeakSetHas = WeakSet.prototype.has, nativeWeakSetAdd = WeakSet.prototype.add;
-const nativeApply = Reflect.apply, nativeIsFrozen = Object.isFrozen;
 
 export interface CatalogRankingOptions {
   readonly signal?: AbortSignal | undefined;
@@ -96,220 +90,40 @@ export function captureCatalogSnapshotGuard(source: unknown): (current: unknown)
   return compileCatalogSnapshotGuard(captureCatalogData(source));
 }
 
+/**
+ * Compare fresh plain data with a captured copy: the same keys in the same
+ * order and equal values, as JSON-shaped data. A frozen graph that matched
+ * once cannot change, so it is not compared again. The data is the program's
+ * own (catalog rows, store records, captured arguments); nothing here guards
+ * against code in this process replacing built-ins or properties.
+ */
 function compileCatalogSnapshotGuard(captured: unknown): (current: unknown) => void {
-  const mint = {};
-  class Snapshot {
-    readonly #source: unknown;
-    readonly #object: boolean;
-    readonly #array: boolean;
-    readonly #length: number;
-    readonly #id: number;
-    readonly #slots: Record<string, { readonly enumerable: boolean; readonly value: Snapshot } | null | undefined> = { __proto__: null };
-    readonly #keys: Record<string, string | null | undefined> = { __proto__: null };
-    readonly #enumerableKeys: Record<string, string | null | undefined> = { __proto__: null };
-    #count = 0;
-    #enumerableCount = 0;
-
-    constructor(token: object, source: unknown, array: boolean, length: number, id: number) {
-      if (token !== mint) throw new ToolInputProjectionError('held');
-      this.#source = source;
-      this.#object = source !== null && typeof source === 'object';
-      this.#array = array;
-      this.#length = length;
-      this.#id = id;
-    }
-
-    static compile(value: unknown): (current: unknown) => void {
-      const snapshots = new WeakMap<object, number>();
-      const nodes: Record<string, Snapshot | null | undefined> = { __proto__: null };
-      let nextId = 0;
-      const snapshot = (entry: unknown): Snapshot => {
-        if (entry === null || typeof entry !== 'object') return new Snapshot(mint, entry, false, 0, nextId++);
-        const index = snapshots.get(entry);
-        if (index !== undefined) {
-          if (typeof index !== 'number') throw new ToolInputProjectionError('held');
-          const existing = nodes[index];
-          if (!existing || existing.#source !== entry) throw new ToolInputProjectionError('held');
-          return existing;
-        }
-        const array = Array.isArray(entry);
-        const result = new Snapshot(mint, entry, array, array ? entry.length : 0, nextId++);
-        nodes[result.#id] = result;
-        snapshots.set(entry, result.#id);
-        for (const key of ownKeys(entry)) {
-          if (typeof key !== 'string') throw new ToolInputProjectionError('invalid');
-          if (array && key === 'length') continue;
-          const descriptor = ownDescriptor(entry, key);
-          if (!descriptor || !('value' in descriptor)) throw new ToolInputProjectionError('invalid');
-          if (!array && descriptor.enumerable) result.#enumerableKeys[result.#enumerableCount++] = key;
-          result.#keys[result.#count++] = key;
-          result.#slots[key] = { enumerable: descriptor.enumerable === true, value: snapshot(descriptor.value) };
-        }
-        return result;
-      };
-      const original = snapshot(value);
-      const immutableMatches = new NativeWeakSet<object>();
-      return current => {
-        // Only a whole graph already compared with this exact snapshot can be
-        // reused. Frozen parents with mutable descendants never enter the cache.
-        if (current !== null && typeof current === 'object' && nativeApply(nativeWeakSetHas, immutableMatches, [current])) return;
-        let immutable = true;
-        const budget = { nodes: 0, characters: 0, slots: 0 };
-        const ancestors = new Set<object>();
-        class Observation {
-          readonly #current: object;
-          readonly #snapshot: Snapshot;
-          constructor(token: object, source: object, expected: Snapshot) {
-            if (token !== mint) throw new ToolInputProjectionError('held');
-            this.#current = source;
-            this.#snapshot = expected;
-          }
-          static snapshot(entry: Observation, source: object): Snapshot {
-            if (entry === null || typeof entry !== 'object' || !(#current in entry) || entry.#current !== source) throw new ToolInputProjectionError('held');
-            return entry.#snapshot;
-          }
-        }
-        const readObservation = Observation.snapshot;
-        const copies = new WeakMap<object, number>();
-        const observations: Record<string, Observation | null | undefined> = { __proto__: null };
-        let nextObservation = 0;
-        const compared: Record<string, Record<string, true | null | undefined> | null | undefined> = { __proto__: null };
-        const changed = (): never => { throw new ToolInputProjectionError('held'); };
-        const equal = (left: Snapshot, right: Snapshot): void => {
-          if (left === right) return;
-          if (!left.#object || !right.#object) {
-            if (left.#object !== right.#object || !Object.is(left.#source, right.#source)) changed();
-            return;
-          }
-          if (left.#array !== right.#array || left.#length !== right.#length || left.#count !== right.#count) changed();
-          if (left.#enumerableCount !== right.#enumerableCount) changed();
-          for (let index = 0; index < left.#enumerableCount; index++) {
-            if (left.#enumerableKeys[index] !== right.#enumerableKeys[index]) changed();
-          }
-          const leftKey = left.#id, rightKey = right.#id;
-          let matches = compared[leftKey];
-          if (matches?.[rightKey]) return;
-          if (!matches) { matches = { __proto__: null }; compared[leftKey] = matches; }
-          matches[rightKey] = true;
-          for (let index = 0; index < left.#count; index++) {
-            const key = left.#keys[index];
-            if (typeof key !== 'string') return changed();
-            const slot = left.#slots[key], other = right.#slots[key];
-            if (!slot || !other || other.enumerable !== slot.enumerable) return changed();
-            equal(slot.value, other.value);
-          }
-        };
-        const compare = (entry: unknown, expected: Snapshot, depth: number): void => {
-          if (++budget.nodes > 100_000 || depth > 64) changed();
-          if (typeof entry === 'string') {
-            budget.characters += entry.length;
-            if (budget.characters > 1_000_000) changed();
-          } else if (entry !== null && entry !== undefined && typeof entry !== 'boolean'
-            && (typeof entry !== 'number' || !Number.isFinite(entry)) && typeof entry !== 'object') changed();
-          if (entry === null || typeof entry !== 'object') {
-            if (typeof entry === 'number' && !Number.isFinite(entry)) changed();
-            if (expected.#object || !Object.is(entry, expected.#source)) changed();
-            return;
-          }
-          if (isProxy(entry) || ancestors.has(entry) || !expected.#object) return changed();
-          if (!nativeIsFrozen(entry)) immutable = false;
-          const existing = copies.get(entry);
-          if (existing !== undefined) {
-            if (typeof existing !== 'number') return changed();
-            const observation = observations[existing];
-            if (!observation) return changed();
-            equal(readObservation(observation, entry), expected); return;
-          }
-          const array = Array.isArray(entry), prototype: unknown = prototypeOf(entry);
-          if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) changed();
-          // Inspect each own descriptor once. No getters or proxy traps can
-          // run here, and unsupported descriptors still retire the complete
-          // comparison before it can certify equality.
-          const keys = ownKeys(entry);
-          if (ownDescriptor(entry, 'toJSON') || array && ownDescriptor(entry, 'constructor')) changed();
-          const length: unknown = array ? ownDescriptor(entry, 'length')?.value : 0;
-          if (typeof length !== 'number' || !Number.isInteger(length) || length < 0 || length > 20_000) return changed();
-          if (array && (budget.slots += length) > 100_000) changed();
-          if (array !== expected.#array || length !== expected.#length || keys.length !== expected.#count + (array ? 1 : 0)) changed();
-          ancestors.add(entry);
-          try {
-            let enumerableIndex = 0;
-            for (const key of keys) {
-              if (typeof key !== 'string') return changed();
-              if (array && key === 'length') continue;
-              budget.characters += key.length;
-              if (budget.characters > 1_000_000) changed();
-              const descriptor = ownDescriptor(entry, key), slot = expected.#slots[key];
-              if (!descriptor || !('value' in descriptor) || !slot || descriptor.enumerable !== slot.enumerable) return changed();
-              if (!array && descriptor.enumerable && key !== expected.#enumerableKeys[enumerableIndex++]) changed();
-              compare(descriptor.value, slot.value, depth + 1);
-            }
-            const index = nextObservation++;
-            observations[index] = new Observation(mint, entry, expected);
-            copies.set(entry, index);
-          } finally { ancestors.delete(entry); }
-        };
-        compare(current, original, 0);
-        if (immutable && current !== null && typeof current === 'object') nativeApply(nativeWeakSetAdd, immutableMatches, [current]);
-      };
-    }
-  }
-  return Snapshot.compile(captured);
+  const matchedFrozen = new WeakSet<object>();
+  return current => {
+    if (current !== null && typeof current === 'object' && matchedFrozen.has(current)) return;
+    if (!sameCatalogData(captured, current, 0)) throw new ToolInputProjectionError('held');
+    if (current !== null && typeof current === 'object' && Object.isFrozen(current)) matchedFrozen.add(current);
+  };
 }
 
-/** Compare descriptors before touching a previously acquired backend again.
- * The installed recording port's stable model getter is the sole accessor.
- * A frozen object can never change its own slots or prototype, so a slot (and
- * each prototype link) whose whole lookup path was frozen at capture is proven
- * once, here, and is not compared again. Only mutable paths stay live. */
-function catalogBackendSlots(subject: object, keys: readonly string[], modelGetter = false) {
-  const chain: object[] = [];
-  let owner: object | null = subject;
-  while (owner) {
-    if (isProxy(owner) || chain.length >= 64) throw new ToolInputProjectionError('held');
-    chain.push(owner); owner = prototypeOf(owner);
+function sameCatalogData(left: unknown, right: unknown, depth: number): boolean {
+  if (Object.is(left, right)) return true;
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object' || depth > 64) return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const leftKeys = Object.keys(left), rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  for (let index = 0; index < leftKeys.length; index++) {
+    const key = leftKeys[index]!;
+    if (key !== rightKeys[index]) return false;
+    if (!sameCatalogData((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key], depth + 1)) return false;
   }
-  const frozen = chain.map(link => nativeIsFrozen(link));
-  const fields = keys.map(key => {
-    let depth = 0;
-    for (; depth < chain.length; depth++) {
-      const descriptor = ownDescriptor(chain[depth]!, key);
-      if (descriptor) {
-        if (!('value' in descriptor) && (!modelGetter || key !== 'model' || typeof descriptor.get !== 'function' || descriptor.set)) throw new ToolInputProjectionError('held');
-        return { key, owner: chain[depth], descriptor, depth, immutable: frozen.slice(0, depth + 1).every(Boolean) };
-      }
-    }
-    return { key, owner: undefined, descriptor: undefined, depth, immutable: frozen.every(Boolean) };
-  });
-  const live = fields.filter(field => !field.immutable);
-  // A prototype link matters only on the path a live slot is resolved through.
-  const links = [...new Set(live.flatMap(field => chain.map((_link, index) => index).filter(index => index < field.depth && !frozen[index])))];
-  return { chain, links, fields, live };
+  return true;
 }
-function assertCatalogBackendSlots(before: ReturnType<typeof catalogBackendSlots>): void {
-  for (const index of before.links) {
-    const owner = before.chain[index];
-    if (!owner || prototypeOf(owner) !== (before.chain[index + 1] ?? null)) throw new ToolInputProjectionError('held');
-  }
-  for (const field of before.live) {
-    let owner: object | undefined, descriptor: PropertyDescriptor | undefined;
-    for (const candidate of before.chain) {
-      descriptor = ownDescriptor(candidate, field.key);
-      if (descriptor) { owner = candidate; break; }
-    }
-    if (field.owner !== owner || field.descriptor?.value !== descriptor?.value
-      || field.descriptor?.get !== descriptor?.get || field.descriptor?.set !== descriptor?.set
-      || field.descriptor?.enumerable !== descriptor?.enumerable || field.descriptor?.configurable !== descriptor?.configurable
-      || field.descriptor?.writable !== descriptor?.writable) throw new ToolInputProjectionError('held');
-  }
-}
-/** Returned for slots proven unchangeable at capture; there is nothing left to compare. */
+
+/** Kept for callers that still name the methods they use; a method of the program's own objects is not re-checked. */
 const immutableCatalogSlots = (): void => {};
-/** Retain descriptor and prototype identity without invoking replacement accessors. */
-export function captureCatalogMethods(subject: object, keys: readonly string[]): () => void {
-  const names = [...keys];
-  const captured = catalogBackendSlots(subject, names);
-  return captured.links.length === 0 && captured.live.length === 0 ? immutableCatalogSlots : () => assertCatalogBackendSlots(captured);
+export function captureCatalogMethods(_subject: object, _keys: readonly string[]): () => void {
+  return immutableCatalogSlots;
 }
 /** One guard for many retained slots; slots proven unchangeable cost nothing per boundary. */
 export function combineCatalogGuards(guards: readonly (() => void)[]): () => void {

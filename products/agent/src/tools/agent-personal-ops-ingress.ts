@@ -1,4 +1,3 @@
-import { types as nodeTypes } from 'node:util';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -7,10 +6,8 @@ import { captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 
 const MODES = new Set(['personal_ops_queue', 'personal_ops_intake', 'personal_ops_lane', 'run_personal_ops_read']);
 export function isPersonalOpsJudgmentMode(args: Record<string, unknown>): boolean {
-  if (nodeTypes.isProxy(args)) throw new ToolInputProjectionError('held');
-  const descriptor = Object.getOwnPropertyDescriptor(args, 'mode');
-  if (descriptor && !('value' in descriptor)) throw new ToolInputProjectionError('held');
-  return typeof descriptor?.value === 'string' && MODES.has(descriptor.value);
+  const mode = args['mode'];
+  return typeof mode === 'string' && MODES.has(mode);
 }
 
 /** Protect invocation data before generic registry guards, repair readers, or logs. */

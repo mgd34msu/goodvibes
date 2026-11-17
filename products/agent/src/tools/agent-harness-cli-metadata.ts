@@ -7,7 +7,6 @@ import {
   parseGoodVibesCli,
 } from '../cli/parser.ts';
 import { describeCliCommandPolicy } from './agent-harness-metadata.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { shellSplit } from '@goodvibes-jev/engine/platform/platform/utils';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
@@ -110,28 +109,19 @@ function describeCliCommand(command: GoodVibesCliCommand, lookup?: CliCommandLoo
   };
 }
 
+/** The CLI command table is static: described once per process and frozen. */
+let cliCommandCatalog: readonly { readonly name: GoodVibesCliCommand; readonly descriptor: Record<string, unknown> }[] | undefined;
+function cliCommands() {
+  cliCommandCatalog ??= captureCatalogData(listGoodVibesCliCommands().filter(command => command !== 'unknown').map(name => ({ name, descriptor: describeCliCommand(name) })));
+  return cliCommandCatalog;
+}
+
 function captureCliSources(args: AgentHarnessCliArgs, options: CatalogRankingOptions) {
-  const signal = options.signal, owner = options.sourceOwner, outerCurrent = options.assertCurrent;
-  const retainCurrent = options.retainCurrent, preserved = options.requirePreservedSource;
-  signal?.throwIfAborted(); outerCurrent?.();
-  const readCommands = () => listGoodVibesCliCommands().filter(command => command !== 'unknown').map(name => ({ name, descriptor: describeCliCommand(name) }));
-  const commands = captureCatalogData(readCommands());
-  const input = captureCatalogData(args);
-  const revision = JSON.stringify({ commands, input });
-  const assertBinding = () => {
-    if (options.signal !== signal || options.sourceOwner !== owner || options.assertCurrent !== outerCurrent
-      || options.retainCurrent !== retainCurrent || options.requirePreservedSource !== preserved) throw new ToolInputProjectionError('held');
-    signal?.throwIfAborted();
-  };
-  const assertSource = () => {
-    assertBinding();
-    if (JSON.stringify(captureCatalogData({ commands: readCommands(), input: args })) !== revision) throw new ToolInputProjectionError('stale');
-  };
-  const assertCurrent = () => { assertBinding(); outerCurrent?.(); assertSource(); };
+  const signal = options.signal, outerCurrent = options.assertCurrent;
+  // A static table and a frozen copy of the arguments cannot change; "still wanted" is the signal and the caller's check.
+  const assertCurrent = () => { signal?.throwIfAborted(); outerCurrent?.(); };
   assertCurrent();
-  retainCurrent?.(assertSource, 'agent.harness.cli-commands.sources');
-  assertCurrent();
-  return { commands, input, assertCurrent };
+  return { commands: cliCommands(), input: captureCatalogData(args), assertCurrent };
 }
 
 async function rankCliCommands(sources: ReturnType<typeof captureCliSources>, query: string, options: CatalogRankingOptions) {

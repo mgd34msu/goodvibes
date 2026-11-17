@@ -1,11 +1,10 @@
 import { agentDaemonConfigClientRevision } from '../config/daemon-config-routing.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
-import { types as nodeTypes } from 'node:util';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry, type ToolExecutionEffect } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureModelReadingInput, assertModelReadingInputCurrent, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { isAgentWorkspaceSettingsImportPreview } from './agent-settings-import-admission.ts';
 import { createPersonalOpsInputProjector } from './agent-personal-ops-ingress.ts';
 import { createChannelDraftReferenceCapture } from './agent-channel-draft-reference.ts';
@@ -72,14 +71,10 @@ export function retainHarnessCatalogCurrent(args: object): (guard: () => void, k
 
 /** Only read data routing descriptors, before screening the complete original. */
 export function catalogRoutingInput(input: Record<string, unknown>): Record<string, unknown> {
-  if (!input || typeof input !== 'object' || nodeTypes.isProxy(input)
-    || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) throw new ToolInputProjectionError('invalid');
+  if (!input || typeof input !== 'object') throw new ToolInputProjectionError('invalid');
   const result: Record<string, unknown> = {};
   for (const key of ['mode', 'action', 'query', 'target', 'command', 'commandName', 'methodId', 'toolName', 'key', 'setting']) {
-    const descriptor = Object.getOwnPropertyDescriptor(input, key);
-    if (!descriptor && Object.getPrototypeOf(input) !== null && Object.hasOwn(Object.prototype, key)) throw new ToolInputProjectionError('invalid');
-    if (descriptor && !('value' in descriptor)) throw new ToolInputProjectionError('invalid');
-    if (descriptor) result[key] = descriptor.value;
+    if (Object.hasOwn(input, key)) result[key] = input[key];
   }
   return result;
 }
@@ -94,51 +89,18 @@ export function isHarnessCatalogQuery(input: Record<string, unknown>): boolean {
     && typeof routing.query === 'string' && routing.query.trim().length > 0;
 }
 
-/** Avoid invoking any registration's replaced definition/name accessor. */
-function registeredTool(registry: ToolRegistry, name: string): Tool | undefined {
-  for (const tool of registry.list()) {
-    if (nodeTypes.isProxy(tool)) throw new ToolInputProjectionError('invalid');
-    let owner: object | null = tool;
-    let definition: unknown;
-    for (let depth = 0; owner && depth < 64; depth++) {
-      if (nodeTypes.isProxy(owner)) throw new ToolInputProjectionError('invalid');
-      const descriptor = Object.getOwnPropertyDescriptor(owner, 'definition');
-      if (descriptor) {
-        if (!('value' in descriptor)) throw new ToolInputProjectionError('invalid');
-        definition = descriptor.value; break;
-      }
-      owner = Object.getPrototypeOf(owner) as object | null;
-    }
-    if (!definition || typeof definition !== 'object' || nodeTypes.isProxy(definition)) throw new ToolInputProjectionError('invalid');
-    const descriptor = Object.getOwnPropertyDescriptor(definition, 'name');
-    if (!descriptor || !('value' in descriptor)) throw new ToolInputProjectionError('invalid');
-    if (descriptor.value === name) return tool;
-  }
-  return undefined;
-}
-
 function catalogContextGuard(registry: ToolRegistry, context?: CommandContext, settings = false): () => void {
-  const assertPlatform = settings && context ? captureCatalogMethods(context, ['platform']) : () => {};
-  assertPlatform();
   const platform = settings ? context?.platform : undefined;
-  const assertConfigHolder = platform ? captureCatalogMethods(platform, ['configManager']) : () => {};
-  assertConfigHolder();
   const config = platform?.configManager;
-  const assertConfigMethods = config ? captureCatalogMethods(config, ['getConfigurationIncarnation']) : () => {};
-  const assertSettings = () => { assertPlatform(); assertConfigHolder(); assertConfigMethods(); };
-  assertSettings();
   const incarnation = config?.getConfigurationIncarnation();
-  assertSettings();
   const clientRevision = settings ? agentDaemonConfigClientRevision() : undefined;
   const session = modelReadingServicePath(context, ['session', 'runtime']);
   const sessionId = modelReadingServicePath(session, ['sessionId']);
   const owner = agentResearchSourceOwner(registry);
   const api = modelReadingServicePath(context, ['clients', 'mcpApi']) ?? modelReadingServicePath(context, ['extensions', 'mcpRegistry']);
   return () => {
-    assertSettings();
     const currentConfig = settings ? context?.platform.configManager : undefined;
     const currentIncarnation = config?.getConfigurationIncarnation();
-    assertSettings();
     if ((settings && (currentConfig !== config || currentIncarnation !== incarnation || agentDaemonConfigClientRevision() !== clientRevision))
       || modelReadingServicePath(context, ['session', 'runtime']) !== session || modelReadingServicePath(session, ['sessionId']) !== sessionId
       || agentResearchSourceOwner(registry) !== owner
@@ -289,17 +251,17 @@ export function protectHarnessCatalogTool(tool: Tool, registry: ToolRegistry, se
     if (!selected(input)) return tool.execute(input, options);
     const routing = catalogRoutingInput(input);
     const previewInspection = routing.mode === 'run_workspace_action' && isAgentWorkspaceSettingsImportPreview(input);
-    const assertOptions = previewInspection && options ? captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']) : () => {};
     if (!admissionOf(options) && !projectionGuards.has(input)) { publicationGuards.set(input, new RetainedGuards()); }
     const guard = harnessCatalogExecutionGuard(input, options);
-    const registration = registeredTool(registry, tool.definition.name);
+    // The tool's registration, read once by name (no scan of every registered tool).
+    const registration = registry.definitionOf(tool.definition.name);
     const assertContext = catalogContextGuard(registry, context, tool.definition.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting'
       || previewInspection);
     const assertRegistrationCurrent = () => {
       assertContext();
-      if (registeredTool(registry, tool.definition.name) !== registration) throw new ToolInputProjectionError('stale');
+      if (registry.definitionOf(tool.definition.name) !== registration) throw new ToolInputProjectionError('stale');
     };
-    const assertCurrent = () => { assertOptions(); guard(); assertOptions(); assertRegistrationCurrent(); assertOptions(); };
+    const assertCurrent = () => { guard(); assertRegistrationCurrent(); };
     assertCurrent();
     if (projectionGuards.has(input)) {
       // Forwarding already invokes this exact input's execution/projection

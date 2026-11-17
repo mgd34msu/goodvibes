@@ -204,16 +204,13 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
     execute: async (rawArgs, options) => {
       const assertCatalogExecution = harnessCatalogExecutionGuard(rawArgs, options);
       const signal = modelReadingServicePath(options, ['signal']) as AbortSignal | undefined;
-      // Inspect the routing descriptor without invoking a caller accessor. Full
-      // judgment validation belongs to explanation input, not unrelated local
-      // harness routes (which retain their own credential/redaction handling).
-      const modeDescriptor = Object.getOwnPropertyDescriptor(rawArgs, 'mode');
-      const args = (!modeDescriptor || !('value' in modeDescriptor) || modeDescriptor.value === 'policy_explain'
+      // Full judgment validation belongs to explanation input, not unrelated
+      // local harness routes (which keep their own credential/redaction handling).
+      const routedMode = (rawArgs as Record<string, unknown>)['mode'];
+      const args = (routedMode === undefined || routedMode === 'policy_explain'
         ? snapshotJudgmentInput(rawArgs)
         : rawArgs) as AgentHarnessToolArgs;
-      // Dispatch only on the inspected value. A Proxy must not switch routes
-      // by returning a different mode from a subsequent property read.
-      const dispatchMode = snapshotJudgmentInput(modeDescriptor && 'value' in modeDescriptor ? modeDescriptor.value : undefined);
+      const dispatchMode = snapshotJudgmentInput(routedMode);
       if (!isMode(dispatchMode)) {
         const requested = String(dispatchMode).toLowerCase();
         const suggestions = AGENT_HARNESS_MODES

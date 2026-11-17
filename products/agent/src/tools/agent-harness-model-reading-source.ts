@@ -23,57 +23,9 @@ import { contextWindowFor, modelRegistryKey } from './agent-harness-model-catalo
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { RetainedGuards } from './agent-harness-retained-guards.ts';
 
-const scalarBindingGlobal = globalThis;
-const scalarBindingObject = Object;
-const scalarBindingReflect = Reflect;
-const scalarBindingArray = Array;
-const scalarBindingArrayPrototype = Array.prototype;
-const scalarBindingObjectPrototype = Object.prototype;
-const scalarBindingFunctionPrototype = Function.prototype;
-const scalarBindingFunctionCall = Function.prototype.call;
-const scalarBindingIteratorKey: typeof Symbol.iterator = Symbol.iterator;
-const scalarBindingIteratorPrototype = Object.getPrototypeOf([][scalarBindingIteratorKey]());
-const scalarBindingNext = scalarBindingIteratorPrototype.next;
-const scalarBindingDescriptor = Object.getOwnPropertyDescriptor;
-const scalarBindingPrototype = Object.getPrototypeOf;
-const scalarBindingIs = Object.is;
-const scalarBindingHasOwn = Object.hasOwn;
-const scalarBindingIterator = Array.prototype[scalarBindingIteratorKey];
-const scalarBindingPush = Array.prototype.push;
-const scalarBindingDefine = Object.defineProperty;
-function scalarBindingCurrent(): boolean {
-  const data = (owner: object, key: PropertyKey, value: unknown): boolean => {
-    const descriptor = scalarBindingDescriptor(owner, key);
-    return descriptor !== undefined && scalarBindingHasOwn(descriptor, 'value') && descriptor.value === value;
-  };
-  return data(scalarBindingGlobal, 'Object', scalarBindingObject)
-    && data(scalarBindingGlobal, 'Reflect', scalarBindingReflect) && data(scalarBindingGlobal, 'Array', scalarBindingArray)
-    && data(scalarBindingObject, 'getOwnPropertyDescriptor', scalarBindingDescriptor)
-    && data(scalarBindingObject, 'getPrototypeOf', scalarBindingPrototype) && data(scalarBindingObject, 'is', scalarBindingIs)
-    && data(scalarBindingObject, 'hasOwn', scalarBindingHasOwn)
-    && data(scalarBindingArrayPrototype, scalarBindingIteratorKey, scalarBindingIterator) && data(scalarBindingArrayPrototype, 'push', scalarBindingPush)
-    && data(scalarBindingObject, 'defineProperty', scalarBindingDefine)
-    && data(scalarBindingFunctionPrototype, 'call', scalarBindingFunctionCall)
-    && data(scalarBindingIteratorPrototype, 'next', scalarBindingNext)
-    && scalarBindingPrototype(scalarBindingObjectPrototype) === null
-    && scalarBindingDescriptor(scalarBindingObjectPrototype, 'get') === undefined
-    && scalarBindingDescriptor(scalarBindingObjectPrototype, 'set') === undefined
-    && scalarBindingDescriptor(scalarBindingObjectPrototype, 'value') === undefined
-    && scalarBindingDescriptor(scalarBindingObjectPrototype, 'writable') === undefined
-    && scalarBindingDescriptor(scalarBindingObjectPrototype, 'enumerable') === undefined
-    && scalarBindingDescriptor(scalarBindingObjectPrototype, 'configurable') === undefined;
-}
-
-const consumeNativePromise = Promise.prototype.then;
-const originalCopyGet = WeakMap.prototype.get;
-const originalCopySet = WeakMap.prototype.set;
-const applyNativeOperation = Reflect.apply;
-const checkNativeSignal = AbortSignal.prototype.throwIfAborted;
-const addNativeSignalListener = EventTarget.prototype.addEventListener;
-const removeNativeSignalListener = EventTarget.prototype.removeEventListener;
 function assertReadingRestriction(callback: (() => unknown) | undefined): void {
   if (callback === undefined) return;
-  if (typeof callback !== 'function' || nodeTypes.isProxy(callback)) throw new ToolInputProjectionError('held');
+  if (typeof callback !== 'function') throw new ToolInputProjectionError('held');
   assertProjectionCurrent(callback);
 }
 
@@ -87,13 +39,11 @@ export interface ModelReadingOptions {
 
 /** Inspect every descriptor, including fields consumers do not display. */
 function captureModelReadingData<T>(value: T): T {
-  if (Object.getOwnPropertyDescriptor(WeakMap.prototype, 'get')?.value !== originalCopyGet
-    || Object.getOwnPropertyDescriptor(WeakMap.prototype, 'set')?.value !== originalCopySet) throw new ToolInputProjectionError('held');
   const budget = { nodes: 0, characters: 0, slots: 0 };
   const ancestors = new Set<object>();
   const copies = new WeakMap<object, object>();
-  const getCopy = (entry: object): object | undefined => applyNativeOperation(originalCopyGet, copies, [entry]);
-  const setCopy = (entry: object, copy: object): void => { applyNativeOperation(originalCopySet, copies, [entry, copy]); };
+  const getCopy = (entry: object): object | undefined => copies.get(entry);
+  const setCopy = (entry: object, copy: object): void => { copies.set(entry, copy); };
   const arrays: { readonly length: number; readonly keys: readonly string[] }[] = [];
   const invalid = (): never => { throw new ToolInputProjectionError('invalid'); };
   const capture = (entry: unknown, depth: number): unknown => {
@@ -179,82 +129,42 @@ export function captureModelArtifactClockSources(value: readonly ArtifactDescrip
   return { native, reading: native.map(artifact => captureModelArtifactClockSource(artifact).reading) };
 }
 
-/** Compare every original slot with its captured data without rebuilding JSON.
- * The snapshot has already passed complete structural and privacy capture. */
-const snapshotWeakMap = WeakMap;
-const snapshotSet = Set;
-const snapshotWeakGet = WeakMap.prototype.get;
-const snapshotWeakSet = WeakMap.prototype.set;
-const snapshotSetHas = Set.prototype.has;
-const snapshotSetAdd = Set.prototype.add;
-const snapshotSetDelete = Set.prototype.delete;
-const snapshotApply = Reflect.apply;
-const snapshotOwnKeys = Reflect.ownKeys;
-const snapshotDescriptors = Object.getOwnPropertyDescriptors;
-const snapshotIsFrozen = Object.isFrozen;
-const snapshotIsArray = Array.isArray;
-const snapshotIsProxy = nodeTypes.isProxy;
-
-export function captureModelReadingSnapshotGuard(captured: unknown, exactDescriptors = false): (value: unknown) => void {
-  type Snapshot = { readonly kind: 'value'; readonly value: unknown }
-    | { readonly kind: 'object'; readonly array: boolean; readonly prototype: unknown;
-      readonly slots: readonly { readonly key: string; readonly snapshot: Snapshot; readonly descriptor: PropertyDescriptor }[] };
-  const changed = (): never => { throw new ToolInputProjectionError('held'); };
-  let capturedNodes = 0;
-  const capture = (value: unknown, depth: number): Snapshot => {
-    if (++capturedNodes > 20_000 || depth > 64) changed();
-    if (value === null || typeof value !== 'object') return { kind: 'value', value };
-    if (snapshotIsProxy(value)) changed();
-    const descriptors = snapshotDescriptors(value);
-    const slots = snapshotOwnKeys(descriptors).map(key => {
-      if (typeof key !== 'string') return changed();
-      const descriptor = descriptors[key];
-      if (!descriptor || !('value' in descriptor)) return changed();
-      return { key, snapshot: capture(descriptor.value, depth + 1), descriptor };
-    });
-    return { kind: 'object', array: snapshotIsArray(value), prototype: scalarBindingPrototype(value), slots };
-  };
-  const original = capture(captured, 0);
-  const immutableMatches = new snapshotWeakMap<object, Set<Snapshot>>();
+/**
+ * A check that plain data still equals what it was when captured: the same
+ * keys and equal values. The data is copied at capture, so a later change to
+ * the original is seen; a frozen value that matched once is not compared
+ * again. It compares data, not the program's own built-ins or descriptors.
+ */
+export function captureModelReadingSnapshotGuard(captured: unknown, _exactDescriptors = false): (value: unknown) => void {
+  const original = copyPlainData(captured, 0);
+  const matchedFrozen = new WeakSet<object>();
   return value => {
-    let nodes = 0;
-    const ancestors = new snapshotSet<object>();
-    const compare = (current: unknown, snapshot: Snapshot, depth: number): boolean => {
-      if (++nodes > 20_000 || depth > 64) changed();
-      if (snapshot.kind === 'value') {
-        if (!scalarBindingIs(current, snapshot.value)) changed();
-        return true;
-      }
-      if (current === null || typeof current !== 'object') return changed();
-      // A complete match of a recursively frozen native tree remains exact:
-      // neither its slots nor any descendant's prototype can subsequently change.
-      const matched = snapshotApply(snapshotWeakGet, immutableMatches, [current]) as Set<Snapshot> | undefined;
-      if (matched && snapshotApply(snapshotSetHas, matched, [snapshot])) return true;
-      if (snapshotIsProxy(current) || snapshotApply(snapshotSetHas, ancestors, [current])) return changed();
-      if (snapshotIsArray(current) !== snapshot.array) changed();
-      const prototype: unknown = scalarBindingPrototype(current);
-      if (snapshot.array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) changed();
-      if (exactDescriptors && prototype !== snapshot.prototype) changed();
-      if (snapshotOwnKeys(current).length !== snapshot.slots.length) changed();
-      snapshotApply(snapshotSetAdd, ancestors, [current]);
-      let immutable = snapshotIsFrozen(current);
-      try {
-        for (const slot of snapshot.slots) {
-          const descriptor = scalarBindingDescriptor(current, slot.key);
-          if (!descriptor || !('value' in descriptor)) return changed();
-          if (exactDescriptors && (descriptor.enumerable !== slot.descriptor.enumerable
-            || descriptor.configurable !== slot.descriptor.configurable || descriptor.writable !== slot.descriptor.writable)) changed();
-          immutable = compare(descriptor.value, slot.snapshot, depth + 1) && immutable;
-        }
-      } finally { snapshotApply(snapshotSetDelete, ancestors, [current]); }
-      if (immutable) {
-        const matches = matched ?? new snapshotSet<Snapshot>();
-        snapshotApply(snapshotSetAdd, matches, [snapshot]); snapshotApply(snapshotWeakSet, immutableMatches, [current, matches]);
-      }
-      return immutable;
-    };
-    compare(value, original, 0);
+    if (value !== null && typeof value === 'object' && matchedFrozen.has(value)) return;
+    if (!samePlainData(original, value, 0)) throw new ToolInputProjectionError('held');
+    if (value !== null && typeof value === 'object' && Object.isFrozen(value)) matchedFrozen.add(value);
   };
+}
+
+function copyPlainData(value: unknown, depth: number): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (depth > 64) throw new ToolInputProjectionError('held');
+  if (Array.isArray(value)) return value.map(entry => copyPlainData(entry, depth + 1));
+  const copy: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) copy[key] = copyPlainData((value as Record<string, unknown>)[key], depth + 1);
+  return copy;
+}
+
+function samePlainData(expected: unknown, current: unknown, depth: number): boolean {
+  if (Object.is(expected, current)) return true;
+  if (expected === null || current === null || typeof expected !== 'object' || typeof current !== 'object' || depth > 64) return false;
+  if (Array.isArray(expected) !== Array.isArray(current)) return false;
+  const keys = Object.keys(expected);
+  if (keys.length !== Object.keys(current).length) return false;
+  for (const key of keys) {
+    if (!Object.hasOwn(current, key)) return false;
+    if (!samePlainData((expected as Record<string, unknown>)[key], (current as Record<string, unknown>)[key], depth + 1)) return false;
+  }
+  return true;
 }
 
 /** Whole semantic values are batched, never truncated or split inside strings.
@@ -308,69 +218,42 @@ export function screeningBatches(captured: unknown, serialized: string): readonl
   return batches;
 }
 
-/** A projection is authority to use these exact captured facts, never to rewrite identity. */
+/**
+ * A projection is authority to use these exact captured facts, never to
+ * rewrite identity. The source is captured once into a frozen copy, screened
+ * by the source owner, and handed to `consume`. "Still wanted" is the call's
+ * signal plus the caller's check; the screening owner's projection must still
+ * equal what it screened. The copy cannot change, so it is not compared again.
+ */
 export async function withModelReadingSource<T, R>(source: T, options: ModelReadingOptions,
   consume: (captured: T, options: ModelReadingOptions) => Promise<R>): Promise<R> {
-  const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
-  const assertSerialization = captureCatalogMethods(JSON, ['stringify']);
-  const objectPrototype = Object.prototype, arrayPrototype = Array.prototype;
-  const assertNoSerializer = (): void => {
-    assertSerialization();
-    if (Object.getPrototypeOf(objectPrototype) !== null || Object.getPrototypeOf(arrayPrototype) !== objectPrototype
-      || Object.getOwnPropertyDescriptor(objectPrototype, 'toJSON') !== undefined
-      || Object.getOwnPropertyDescriptor(arrayPrototype, 'toJSON') !== undefined) throw new ToolInputProjectionError('held');
-  };
-  assertOptions(); assertNoSerializer();
   const signal = options.signal, originalAssert = options.assertCurrent, originalRetain = options.retainCurrent;
-  const signalMethods = signal ? captureCatalogMethods(signal, ['throwIfAborted', 'addEventListener', 'removeEventListener']) : () => {};
-  const checkSignal = (): void => { signalMethods(); if (signal) Reflect.apply(checkNativeSignal, signal, []); };
-  const assertSynchronous = (callback: (() => unknown) | undefined): void => {
-    assertReadingRestriction(callback);
-    assertOptions(); assertNoSerializer();
-  };
-  if (originalRetain !== undefined && (typeof originalRetain !== 'function' || nodeTypes.isProxy(originalRetain))) throw new ToolInputProjectionError('held');
-  checkSignal(); assertSynchronous(originalAssert); checkSignal();
+  const checkSignal = (): void => { signal?.throwIfAborted(); };
+  checkSignal(); assertReadingRestriction(originalAssert);
   const captured = snapshotJudgmentEvidence(captureModelReadingData(source)) as T;
-  const assertSourceSnapshot = captureModelReadingSnapshotGuard(captured);
   const serialized = JSON.stringify(captured);
   if (typeof serialized !== 'string') throw new ToolInputProjectionError('held');
   const batches = screeningBatches(captured, serialized);
-  // One guard per key: a later reading of the same source replaces the earlier
-  // guard only after that guard still holds, so no check is dropped unproven.
+  // One guard per key: a later reading of the same source replaces the earlier one.
   const retained = new RetainedGuards();
   const retainCurrent = (guard: () => void, key?: string) => {
-    assertOptions();
-    if (typeof guard !== 'function' || nodeTypes.isProxy(guard)) throw new ToolInputProjectionError('held');
+    if (typeof guard !== 'function') throw new ToolInputProjectionError('held');
     retained.add(guard, key);
-    assertSynchronous(originalRetain ? () => originalRetain(guard, key) : undefined);
-    assertOptions();
+    assertReadingRestriction(originalRetain ? () => originalRetain(guard, key) : undefined);
   };
-  // Native results still depend on the complete original source after this
-  // function releases its privacy receipt. Retain data/cancellation ownership,
-  // without retaining a receipt whose lifetime ends in the finally block.
-  retainCurrent(() => {
-    assertOptions(); assertNoSerializer();
-    // Cleanup has finished using the borrowed listener/method slots. Their
-    // later replacement cannot hide cancellation or require invoking a getter.
-    if (signal) applyNativeOperation(checkNativeSignal, signal, []);
-    assertSourceSnapshot(source);
-  }, 'model-reading.native-source');
   const owner = options.sourceOwner;
   if (!owner) throw new ToolInputProjectionError('unavailable');
-  const assertOwnerMethods = captureCatalogMethods(owner, ['capture', 'screen', 'project', 'release']);
-  const capture = owner.capture, screen = owner.screen, project = owner.project, releaseHandle = owner.release;
-  retainCurrent(assertOwnerMethods, 'model-reading.owner-methods');
   const handles: ProtectedSource[] = [];
   const receipts: { readonly receipt: SourceScreeningReceipt; readonly parts: readonly string[] }[] = [];
   let released = false, releasing: Promise<void> | undefined;
   const release = (): Promise<void> => {
     if (releasing) return releasing;
-    released = true; signal && Reflect.apply(removeNativeSignalListener, signal, ['abort', abort]);
+    released = true; signal?.removeEventListener('abort', abort);
     // Every handle gets its release attempt, and a failed release is logged, never
     // thrown: cleanup failing must not replace a reading that already succeeded
     // or the error that ended it.
     releasing = Promise.resolve().then(async () => {
-      const outcomes = await Promise.allSettled(handles.map(handle => Promise.resolve().then(() => releaseHandle.call(owner, handle))));
+      const outcomes = await Promise.allSettled(handles.map(handle => Promise.resolve().then(() => owner.release(handle))));
       for (const outcome of outcomes) {
         if (outcome.status === 'rejected') logger.warn('A protected model-reading source could not be released', { error: summarizeError(outcome.reason) });
       }
@@ -378,42 +261,29 @@ export async function withModelReadingSource<T, R>(source: T, options: ModelRead
     return releasing;
   };
   const abort = () => { void release().catch(() => {}); };
-  // What a borrowed callback could have changed: the options slots, the owner's
-  // methods, the serializer and the abort state. Checked around each foreign call.
-  const assertFence = () => {
-    assertOptions(); assertOwnerMethods(); assertNoSerializer();
-    if (options.signal !== signal || options.sourceOwner !== owner || options.assertCurrent !== originalAssert || options.retainCurrent !== originalRetain) throw new ToolInputProjectionError('held');
-    checkSignal();
-  };
   const assertPublicationCurrent = () => {
-    assertFence(); assertSynchronous(originalAssert);
-    // Retained guards are this reader's own closures; the fence after the batch
-    // covers what they could have changed.
+    checkSignal(); assertReadingRestriction(originalAssert);
     for (const guard of retained.values()) assertReadingRestriction(guard);
-    assertFence();
-    assertSourceSnapshot(source);
   };
   const assertCurrent = () => {
     assertPublicationCurrent();
     if (released) throw new ToolInputProjectionError('held');
-    // The owner's projection is the only foreign call after the caller's check,
-    // so the caller is asked again only when a projection actually ran.
+    // The owner's projection must still be what it screened.
     for (const { receipt, parts } of receipts) {
-      const projection = project.call(owner, receipt);
+      const projection = owner.project(receipt);
       if (projection.length !== parts.length || projection.some((part, index) => part !== parts[index])) throw new ToolInputProjectionError('held');
     }
-    if (receipts.length) assertSynchronous(originalAssert);
-    assertFence();
   };
   try {
-    signal && Reflect.apply(addNativeSignalListener, signal, ['abort', abort, { once: true }]);
+    signal?.addEventListener('abort', abort, { once: true });
     assertCurrent();
-    for (const batch of batches) { assertCurrent(); handles.push(capture.call(owner, batch)); }
+    for (const batch of batches) { checkSignal(); handles.push(owner.capture(batch)); }
     for (const [index, handle] of handles.entries()) {
-      assertCurrent(); const screened = await screen.call(owner, handle, { signal, assertCurrent }); assertCurrent();
+      const screened = await owner.screen(handle, { signal, assertCurrent }); checkSignal();
       const receipt = requireSettledScreeningReceipt(screened);
-      receipts.push({ receipt, parts: batches[index]! }); assertCurrent();
+      receipts.push({ receipt, parts: batches[index]! });
     }
+    assertCurrent();
     const result = await consume(captured, { ...options, assertCurrent, retainCurrent });
     assertCurrent(); return result;
   } finally { await release(); assertPublicationCurrent(); }
@@ -568,7 +438,7 @@ export function modelReadingOptions(context: CommandContext, registry?: ToolRegi
   };
   const configRevision = configIncarnation();
   const assertSourceCurrent = () => {
-    if (signal) applyNativeOperation(checkNativeSignal, signal, []); for (const guard of holderGuards) guard(); readSources.assertCurrent();
+    if (signal) signal.throwIfAborted(); for (const guard of holderGuards) guard(); readSources.assertCurrent();
     if (agentResearchSourceOwner(registry) !== sourceOwner || path(context, ['session', 'runtime']) !== session || slot(session, 'sessionId') !== sessionId
       || path(context, ['clients', 'providerApi']) !== api || path(context, ['provider', 'providerRegistry']) !== provider || path(context, ['platform', 'config']) !== config
       || path(context, ['platform', 'configManager']) !== manager || path(context, ['platform', 'artifactStore']) !== artifact || path(context, ['platform', 'readModels']) !== readModels)
@@ -585,7 +455,7 @@ export function modelReadingOptions(context: CommandContext, registry?: ToolRegi
   if (retainCurrent !== undefined && (typeof retainCurrent !== 'function' || nodeTypes.isProxy(retainCurrent))) throw new ToolInputProjectionError('held');
   assertReadingRestriction(retainCurrent ? () => retainCurrent(assertSourceCurrent, 'model-reading.native-source') : undefined);
   const options = { sourceOwner, signal, retainCurrent, assertCurrent() {
-    if (signal) applyNativeOperation(checkNativeSignal, signal, []); assertReadingRestriction(assertExecution); assertSourceCurrent();
+    if (signal) signal.throwIfAborted(); assertReadingRestriction(assertExecution); assertSourceCurrent();
   } };
   setModelReadingSources(options, { context, source: readSources });
   return options;
@@ -669,7 +539,7 @@ export async function withModelReadingContext<T>(context: CommandContext, invoca
   consume: (context: CommandContext, options: ModelReadingOptions) => Promise<T>): Promise<T> {
   const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
   const signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertCurrent = () => { assertOptions(); if (signal) applyNativeOperation(checkNativeSignal, signal, []); assertReadingRestriction(callerCurrent); assertOptions(); if (signal) applyNativeOperation(checkNativeSignal, signal, []); };
+  const assertCurrent = () => { assertOptions(); if (signal) signal.throwIfAborted(); assertReadingRestriction(callerCurrent); assertOptions(); if (signal) signal.throwIfAborted(); };
   assertCurrent();
   const originalInvocation = captureModelReadingInput(invocation);
   const originalSources = getModelReadingSources(options);
@@ -747,10 +617,10 @@ export async function withModelReadingContext<T>(context: CommandContext, invoca
         getKnownContextWindowForModel: (model: unknown) => captured.contextWindows.find(entry => entry.registryKey === modelRegistryKey(model))?.value ?? null,
         getContextWindowForModel: (model: unknown) => captured.contextWindows.find(entry => entry.registryKey === modelRegistryKey(model))?.value ?? null } },
       platform: { readModels: {}, artifactStore: store ? { list: () => nativeArtifacts, ...(readContent ? { readContent: async (id: string) => {
-          if (scoped.signal) applyNativeOperation(checkNativeSignal, scoped.signal, []); assertProjectionCurrent(scoped.assertCurrent);
+          if (scoped.signal) scoped.signal.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent);
           if (!captured.artifacts.some(artifact => artifact.id === id)) throw new ToolInputProjectionError('held');
           const content = await readContent.call(store, id);
-          if (scoped.signal) applyNativeOperation(checkNativeSignal, scoped.signal, []); assertProjectionCurrent(scoped.assertCurrent); return content;
+          if (scoped.signal) scoped.signal.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent); return content;
         } } : {}) } : undefined,
         configManager: { get: (key: string) => captured.config[key] } }, clients: { operator: {} } };
     for (const entry of captured.readModels) setPath(projected, entry.keys, entry.data);
@@ -777,10 +647,8 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
   const ancestors = new Set<object>();
   type ProducerCopy = { readonly view: object; readonly data: unknown };
   const copies = new WeakMap<object, ProducerCopy>();
-  if (Object.getOwnPropertyDescriptor(WeakMap.prototype, 'get')?.value !== originalCopyGet
-    || Object.getOwnPropertyDescriptor(WeakMap.prototype, 'set')?.value !== originalCopySet) throw new ToolInputProjectionError('held');
-  const getCopy = (entry: object): ProducerCopy | undefined => applyNativeOperation(originalCopyGet, copies, [entry]);
-  const setCopy = (entry: object, copy: ProducerCopy): void => { applyNativeOperation(originalCopySet, copies, [entry, copy]); };
+  const getCopy = (entry: object): ProducerCopy | undefined => copies.get(entry);
+  const setCopy = (entry: object, copy: ProducerCopy): void => { copies.set(entry, copy); };
   let nodes = 0;
   const held = (): never => { throw new ToolInputProjectionError('held'); };
   const invalid = (): never => { throw new ToolInputProjectionError('invalid'); };
@@ -864,7 +732,7 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
             assertCurrent();
             const original: unknown = child.call(value);
             if (nodeTypes.isPromise(original)) {
-              void consumeNativePromise.call(original, undefined, () => {}); return held();
+              void (original as Promise<unknown>).then(undefined, () => {}); return held();
             }
             binding();
             const captured = capture(original, `${sourcePath}.${key}()`, depth + 1);
@@ -876,7 +744,7 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
               binding(); matches(captureReadModelData(original, false));
               const current: unknown = child.call(value);
               if (nodeTypes.isPromise(current)) {
-                void consumeNativePromise.call(current, undefined, () => {}); held();
+                void (current as Promise<unknown>).then(undefined, () => {}); held();
               }
               binding(); matches(captureReadModelData(current, false));
             });
@@ -935,14 +803,14 @@ export function captureCatalogProducerSources(context: unknown, paths: readonly 
       guards.push(() => { binding(); const current = Reflect.ownKeys(read); if (current.length !== keys.length || current.some((key, index) => key !== keys[index])) held(); });
       views.set(root.name, () => {
         assertCurrent(); const original: unknown = read(); binding();
-        if (nodeTypes.isPromise(original)) { void consumeNativePromise.call(original, undefined, () => {}); return held(); }
+        if (nodeTypes.isPromise(original)) { void (original as Promise<unknown>).then(undefined, () => {}); return held(); }
         const captured = capture(original, `${root.name}()`, 0);
         results.push({ path: `${root.name}()`, data: captured.data });
         const matches = captureModelReadingSnapshotGuard(captureReadModelData(original, false));
         guards.push(() => {
           binding(); matches(captureReadModelData(original, false));
           const current: unknown = read(); binding();
-          if (nodeTypes.isPromise(current)) { void consumeNativePromise.call(current, undefined, () => {}); held(); }
+          if (nodeTypes.isPromise(current)) { void (current as Promise<unknown>).then(undefined, () => {}); held(); }
           matches(captureReadModelData(current, false));
         });
         assertCurrent(); return captured.view;
@@ -1195,12 +1063,12 @@ export function captureCatalogNativeFacts(context: unknown, family: 'media' | 'p
     const flushScalars = (): void => {
       if (selectedChecks.length === 0) return;
       const originals = selectedChecks;
-      const group = scalarBindingCurrent() ? captureConfigSelectedScalars(manager, selectedScalars) : undefined;
+      const group = captureConfigSelectedScalars(manager, selectedScalars);
       selectedScalars = []; selectedChecks = [];
       observations.push(() => {
-        if (group && scalarBindingCurrent()) {
+        if (group) {
           try {
-            if (group(() => { assertBindings(); if (!scalarBindingCurrent()) held(); })) return;
+            if (group(() => { assertBindings(); })) return;
           } catch (error) { if (error instanceof JudgmentAuthorityRetiredError) held(); throw error; }
         }
         for (const check of originals) check();
@@ -1211,8 +1079,8 @@ export function captureCatalogNativeFacts(context: unknown, family: 'media' | 'p
       const capture = captureCatalogSnapshot(original);
       const check = () => { assertBindings(); capture.assertCurrent(original); const current: unknown = get.call(manager, key); assertBindings(); capture.assertCurrent(current); };
       if (original === null || original === undefined || typeof original === 'string' || typeof original === 'number' || typeof original === 'boolean') {
-        scalarBindingDefine(selectedScalars, selectedScalars.length, { value: { key, value: original }, writable: true, enumerable: true, configurable: true });
-        scalarBindingDefine(selectedChecks, selectedChecks.length, { value: check, writable: true, enumerable: true, configurable: true });
+        selectedScalars.push({ key, value: original });
+        selectedChecks.push(check);
       } else {
         flushScalars(); observations.push(check);
       }
@@ -1294,12 +1162,12 @@ export function catalogReadingOptions(context: CommandContext, registry: ToolReg
   }
   const sourceOwner = agentResearchSourceOwner(registry);
   const assertSourceCurrent = (): void => {
-    if (signal) applyNativeOperation(checkNativeSignal, signal, []); for (const guard of guards) guard();
+    if (signal) signal.throwIfAborted(); for (const guard of guards) guard();
     if (agentResearchSourceOwner(registry) !== sourceOwner) throw new ToolInputProjectionError('held');
   };
   if (typeof retainCurrent !== 'function' || nodeTypes.isProxy(retainCurrent)) throw new ToolInputProjectionError('held');
   assertSourceCurrent(); assertReadingRestriction(() => retainCurrent(assertSourceCurrent, 'agent.catalog.native-invocation-source')); assertSourceCurrent();
-  return { signal, sourceOwner, retainCurrent, assertCurrent() { if (signal) applyNativeOperation(checkNativeSignal, signal, []); assertReadingRestriction(assertExecution); assertSourceCurrent(); } };
+  return { signal, sourceOwner, retainCurrent, assertCurrent() { if (signal) signal.throwIfAborted(); assertReadingRestriction(assertExecution); assertSourceCurrent(); } };
 }
 
 // A daemon home override outside the home may not exist yet; the capture root must, so an absent token stays an observation.

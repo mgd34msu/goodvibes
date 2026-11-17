@@ -98,12 +98,14 @@ export async function openNativeIntake(
     const auth = await platformClient.operator.invoke("control.auth.current", {}, current);
     check();
     current.throwIfAborted();
-    // The daemon states which credential this browser holds; a paired device is `device-token`.
+    // The daemon states which credential this browser holds: a paired device is
+    // `device-token`; the operator token on the daemon's own machine is `local`.
     const credential = (auth as { readonly credential?: unknown }).credential;
+    const owner = credential === "device-token" || credential === "local";
     if (
       !auth.authenticated ||
       !auth.admin ||
-      credential !== "device-token" ||
+      !owner ||
       !auth.principalId ||
       auth.principalId.length > 200 ||
       !(
@@ -122,9 +124,9 @@ export async function openNativeIntake(
         authority === "turn" ? "Native conversation delivery" : authority === "execution" ? "Native execution" : "Native requests";
       throw Object.assign(
         new Error(
-          credential === "device-token"
-            ? `${feature} needs owner access with ${scopes}; this pairing does not hold it. Pair this browser again with those scopes (Settings, Devices and pairing), then retry.`
-            : `${feature} runs only for a paired device. Pair this browser (Settings, Devices and pairing), then retry.`
+          owner
+            ? `${feature} needs owner access with ${scopes}; this credential does not hold it. Pair this browser again with those scopes (Settings, Devices and pairing), then retry.`
+            : `${feature} runs from the daemon's own machine or a paired device. Open the web app on that machine with its operator token, or pair this browser (Settings, Devices and pairing), then retry.`
         ),
         { code: "PAIRED_OWNER_REQUIRED" }
       );

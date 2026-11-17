@@ -49,7 +49,7 @@ const AUTHENTICATED_PRINCIPAL_KIND_SCHEMA = enumSchema(['user', 'bot', 'service'
 
 export const CONTROL_AUTH_CURRENT_MODE_SCHEMA = enumSchema(['anonymous', 'invalid', 'session', 'shared-token']);
 /** Which credential the caller presented, as the daemon's authenticator read it; null when none authenticated. */
-export const CONTROL_AUTH_CURRENT_CREDENTIAL_SCHEMA = enumSchema(['local', 'shared-token', 'device-token', 'user-session']);
+export const CONTROL_AUTH_CURRENT_CREDENTIAL_SCHEMA = enumSchema(['local', 'shared-token', 'device-token', 'agent', 'user-session']);
 export const TELEMETRY_VIEW_SCHEMA = enumSchema(['safe', 'raw']);
 export const TELEMETRY_SEVERITY_SCHEMA = enumSchema(['debug', 'info', 'warn', 'error']);
 

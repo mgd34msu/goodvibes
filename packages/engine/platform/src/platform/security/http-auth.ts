@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { UserAuthManager } from './user-auth.js';
-import type { AuthenticatedNativePairingToken, SettingsPairingAuthority, NativeContinuationGrant, NativeContinuationAuthority } from '../pairing/pairing-token-store.js';
+import type { AuthenticatedNativePairingToken, SettingsPairingAuthority, NativeContinuationGrant, NativeContinuationAuthority, NativeCredential } from '../pairing/pairing-token-store.js';
 import type { RevisionSource } from '../utils/revision.js';
 
 export const OPERATOR_SESSION_COOKIE_NAME = 'goodvibes_session';
@@ -17,6 +17,8 @@ export type AuthenticatedOperatorRequest =
       readonly tokenId: string;
       /** The user-visible device name for this token. */
       readonly name: string;
+      /** Set when the pairing is the Agent's credential for the calls it makes on the owner's behalf. */
+      readonly client?: 'agent' | undefined;
     }
   | {
       readonly kind: 'session';
@@ -27,9 +29,15 @@ export type AuthenticatedOperatorRequest =
       readonly expiresAt: number;
     };
 
-/** The credential kind a request context reports for an authenticated operator request. */
-export function credentialKindOf(authenticated: AuthenticatedOperatorRequest): 'shared-token' | 'device-token' | 'user-session' {
-  return authenticated.kind === 'pairing-token' ? 'device-token' : authenticated.kind === 'session' ? 'user-session' : authenticated.kind;
+/**
+ * The credential kind a request context reports for an authenticated operator
+ * request. The operator token presented from the daemon's own machine
+ * (`loopback`) is `local`: the credential the apps there already hold.
+ */
+export function credentialKindOf(authenticated: AuthenticatedOperatorRequest, loopback = false): 'local' | 'shared-token' | 'device-token' | 'agent' | 'user-session' {
+  if (authenticated.kind === 'pairing-token') return authenticated.client === 'agent' ? 'agent' : 'device-token';
+  if (authenticated.kind === 'session') return 'user-session';
+  return loopback ? 'local' : 'shared-token';
 }
 
 /** Why a credential the daemon knows is refused, in the refusal shape: what holds, why, and what to do. */
@@ -61,7 +69,7 @@ export interface NativeExecutionAuthority {
  * tokens are configured (only the shared token / user sessions authenticate).
  */
 export interface PairingTokenAuthenticator {
-  issueNativeContinuation?(token: string, expected: NativeContinuationAuthority, binding: string, assertCurrent: () => void, sourceBinding?: string): NativeContinuationGrant;
+  issueNativeContinuation?(credential: NativeCredential, expected: NativeContinuationAuthority, binding: string, assertCurrent: () => void, sourceBinding?: string): NativeContinuationGrant;
   revokeNativeContinuation?(grant: NativeContinuationGrant): void;
   /** Additive strict SETTINGS path; never substituted with native authority. */
   captureSettingsAuthority?(input: { readonly kind: 'shared-token' }
@@ -71,10 +79,16 @@ export interface PairingTokenAuthenticator {
   /** True while settings authority is held by a store read or owner-write fault. */
   readonly settingsAuthorityFaulted?: boolean;
   /** Optional for legacy authenticators; absence explicitly refuses native execution. */
-  authenticateNative?(token: string): AuthenticatedNativePairingToken | null;
-  withNativeAuthority?<T>(token: string, expected: AuthenticatedNativePairingToken,
+  authenticateNative?(credential: NativeCredential): AuthenticatedNativePairingToken | null;
+  /**
+   * The native authority of the owner's own machine, made once and kept: the
+   * transport asks for it only after it established the local credential.
+   * Absent: the local credential has no native authority.
+   */
+  ensureLocalNativeOwner?(): AuthenticatedNativePairingToken | null;
+  withNativeAuthority?<T>(credential: NativeCredential, expected: AuthenticatedNativePairingToken,
     operation: (assertCurrent: () => AuthenticatedNativePairingToken) => T | Promise<T>): Promise<T>;
-  authenticate(token: string): { readonly id: string; readonly name: string } | null;
+  authenticate(token: string): { readonly id: string; readonly name: string; readonly client?: 'agent' | undefined } | null;
   /** Whether the legacy single shared token has been revoked. */
   isLegacyRevoked(): boolean;
   /**
@@ -168,7 +182,8 @@ export function authenticateOperatorToken(
   // matches here; a revoked one misses (revocation honored on the next request).
   const pairing = context.pairingTokens?.authenticate(normalized);
   if (pairing) {
-    return { kind: 'pairing-token', token: normalized, tokenId: pairing.id, name: pairing.name };
+    return { kind: 'pairing-token', token: normalized, tokenId: pairing.id, name: pairing.name,
+      ...(pairing.client === 'agent' ? { client: 'agent' as const } : {}) };
   }
 
   // Then the legacy shared token, unless it has been revoked. The revocation is

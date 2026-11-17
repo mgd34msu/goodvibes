@@ -3,8 +3,8 @@ import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contra
 type CurrentAuth = OperatorMethodOutput<'control.auth.current'>;
 
 /**
- * The credential the host says the caller presented (`shared-token`,
- * `device-token`, `user-session` or `local`). Read from the host's answer,
+ * The credential the host says the caller presented (`local`, `shared-token`,
+ * `device-token`, `agent` or `user-session`). Read from the host's answer,
  * never inferred from a principal's name.
  */
 export function currentAuthCredential(auth: CurrentAuth): string | null {
@@ -12,9 +12,14 @@ export function currentAuthCredential(auth: CurrentAuth): string | null {
     return typeof credential === 'string' ? credential : null;
 }
 
-/** Shared-token migration authority, verified by the selected host before minting a device token. */
+/**
+ * Shared-token migration authority, verified by the selected host before
+ * minting a device token: the operator token, from the daemon's own machine
+ * (`local`) or from elsewhere.
+ */
 export function isHostPairingBootstrapPrincipal(auth: CurrentAuth): boolean {
-    return auth.authenticated === true && auth.admin === true && currentAuthCredential(auth) === 'shared-token'
+    const credential = currentAuthCredential(auth);
+    return auth.authenticated === true && auth.admin === true && (credential === 'shared-token' || credential === 'local')
         && Array.isArray(auth.scopes)
         && auth.scopes.some(scope => scope === '*' || scope === 'write:control-plane');
 }
@@ -74,7 +79,28 @@ export function isPairedOperatorPrincipal(auth: CurrentAuth, scopes: readonly st
         && scopes.every(scope => auth.scopes.includes('*') || auth.scopes.includes(scope));
 }
 
-/** The live authority required by native intake. */
+/** A paired device holding the native work scopes: what a completed pairing verifies. */
 export function isNativePairedPrincipal(auth: CurrentAuth, expectedPrincipalId?: string | undefined): auth is CurrentAuth & { readonly principalId: string } {
     return isPairedOperatorPrincipal(auth, ['read:work-ledger', 'write:work-ledger'], expectedPrincipalId);
+}
+
+/**
+ * Live owner authority for owner-only work, with operation-specific scopes:
+ * a paired device, or an app on the daemon's own machine presenting the
+ * operator token it already holds (`local`), which needs no pairing.
+ */
+export function isOwnerOperatorPrincipal(auth: CurrentAuth, scopes: readonly string[], expectedPrincipalId?: string | undefined): auth is CurrentAuth & {
+    readonly principalId: string;
+} {
+    const credential = currentAuthCredential(auth);
+    return auth.authenticated === true && auth.admin === true && (credential === 'device-token' || credential === 'local')
+        && typeof auth.principalId === 'string' && auth.principalId.length > 0 && auth.principalId.length <= 200
+        && (expectedPrincipalId === undefined || auth.principalId === expectedPrincipalId)
+        && Array.isArray(auth.scopes)
+        && scopes.every(scope => auth.scopes.includes('*') || auth.scopes.includes(scope));
+}
+
+/** The live authority native intake and submission require: the owner's own machine or a paired device. */
+export function isNativeOwnerPrincipal(auth: CurrentAuth, expectedPrincipalId?: string | undefined): auth is CurrentAuth & { readonly principalId: string } {
+    return isOwnerOperatorPrincipal(auth, ['read:work-ledger', 'write:work-ledger'], expectedPrincipalId);
 }

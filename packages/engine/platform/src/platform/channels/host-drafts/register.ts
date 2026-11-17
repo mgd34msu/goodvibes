@@ -11,7 +11,7 @@
  * registered with handler:undefined). This module NEVER re-declares any of
  * them, it looks each up via catalog.get(id) (inside registerCatalogHandler)
  * and re-registers with the wrapped handler. Manual save/delete retain explicit
- * confirmation. An autonomous call goes through `runNativeMutation`, which
+ * confirmation. A call made with the Agent's credential goes through `runNativeMutation`, which
  * checks the paired owner; its write is a compare-and-set on the row it read.
  *
  * SECURITY: the message body is encrypted at rest. `list` answers a fixed
@@ -27,7 +27,7 @@ import { createAtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerError } from '../../control-plane/host-handlers.js';
 import { registerCatalogHandlers } from '../../control-plane/host-handlers.js';
 import { assertConfirmed } from '../../control-plane/host-handlers.js';
-import { requestsNativeAdmission, runNativeMutation } from '../../control-plane/native-mutation.js';
+import { isDelegatedCaller, runNativeMutation } from '../../control-plane/native-mutation.js';
 import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
 import { channelDraftWireReference, isNativeDraftWireReference } from './wire-reference.js';
@@ -356,7 +356,7 @@ export function registerDraftMethods(
   };
 
   const saveHandler: TypedHandler<unknown, SaveResponse> = async ({ body, context }) => {
-    const autonomous = requestsNativeAdmission(body);
+    const autonomous = isDelegatedCaller(context);
     if (!autonomous) assertConfirmed(body, context);
     context.signal?.throwIfAborted();
     await ensureInit();
@@ -381,7 +381,7 @@ export function registerDraftMethods(
   };
 
   const deleteHandler: TypedHandler<unknown, DeleteResponse> = async ({ body, context }) => {
-    const autonomous = requestsNativeAdmission(body);
+    const autonomous = isDelegatedCaller(context);
     if (!autonomous) assertConfirmed(body, context);
     context.signal?.throwIfAborted();
     await ensureInit();

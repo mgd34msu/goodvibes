@@ -100,7 +100,8 @@ Ordinary session message, steer, and follow-up HTTP contracts are defined in
 A `202` conversation-message response means the input was persisted and routed;
 it does not mean the turn completed. Native Agent and WebUI delivery uses the
 separate [native hosted-turn protocol](../../../packages/engine/platform/src/platform/control-plane/method-catalog-native-hosted-turn.ts),
-which binds admitted source identity to its paired owner and requires fresh
+which binds admitted source identity to its owner (an app on the daemon's own
+machine with the operator token it holds, or a paired device) and requires fresh
 operator authentication. A status read never grants delivery or retries an
 ambiguous dispatch.
 

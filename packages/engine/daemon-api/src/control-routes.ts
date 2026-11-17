@@ -76,6 +76,12 @@ export interface ControlRouteContext {
       readonly explicitUserRequest?: boolean | undefined;
     };
     /**
+     * The principal the request was authenticated as where it entered,
+     * credential kind included, so the dispatch does not authenticate the
+     * token again and handlers read who called from it.
+     */
+    readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined }) | undefined;
+    /**
      * How many synthesized dispatches already produced this call. Passed on so
      * a request that re-enters the dispatcher is refused as a loop instead of
      * consuming the concurrent-call budget one nesting level at a time.
@@ -170,7 +176,7 @@ export const EXPLICIT_USER_REQUEST_HEADER = 'x-goodvibes-explicit-user-request';
  */
 function credentialOf(principal: AuthenticatedPrincipal): CredentialKind | null {
   const kind = (principal as { readonly credentialKind?: unknown }).credentialKind;
-  return kind === 'local' || kind === 'shared-token' || kind === 'device-token' || kind === 'user-session' ? kind : null;
+  return kind === 'local' || kind === 'shared-token' || kind === 'device-token' || kind === 'agent' || kind === 'user-session' ? kind : null;
 }
 
 function readExplicitUserRequest(req: Request): boolean | undefined {
@@ -276,7 +282,7 @@ export function createDaemonControlRouteHandlers(
       // The authenticator states which credential this is; nothing is inferred from a principal's name.
       const credential = principal ? credentialOf(principal) : null;
       const authMode = principal
-        ? (credential === 'shared-token' ? 'shared-token' : 'session')
+        ? (credential === 'shared-token' || credential === 'local' ? 'shared-token' : 'session')
         : token.length > 0
           ? 'invalid'
           : 'anonymous';
@@ -361,6 +367,7 @@ export function createDaemonControlRouteHandlers(
         methodId,
         query: payload.query,
         body: invokeBody,
+        ...(principal ? { principal } : {}),
         context: {
           principalId: principal?.principalId,
           principalKind: principal?.principalKind,
@@ -423,6 +430,7 @@ export function createDaemonControlRouteHandlers(
         // Carry the depth forward. This route IS the far side of a synthesized
         // dispatch, so a marked request arriving here is the loop itself.
         synthesizedDepth: readSynthesizedDispatchDepth(req),
+        ...(principal ? { principal } : {}),
         context: {
           principalId: principal?.principalId,
           principalKind: principal?.principalKind,

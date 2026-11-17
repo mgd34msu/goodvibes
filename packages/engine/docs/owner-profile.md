@@ -744,7 +744,8 @@ There is a fourth authority, `autonomous`, for a write the runtime makes while
 carrying out a task the owner delegated. It is not a claim a caller can make: it
 is accepted only when the invocation carries a recorded delegation that the
 runtime itself captured (a tool call running under a recorded autonomy source, or
-a native call admitted for the paired owner), and a request that merely says
+a native call admitted because the GoodVibes Agent sent it with its delegated
+credential, which the daemon reports as credential `agent`), and a request that merely says
 `autonomous` without one is refused at layer 1. For this path:
 
 - Layer 1 is satisfied by the recorded delegation instead of

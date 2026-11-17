@@ -3,8 +3,10 @@
  * setting that points at it, each owner (secret store, config manager) does
  * its own compare-and-write under its own lock, and the receipt names what was
  * written. The import is admitted once, by the caller's own gate when the
- * caller is an agent; a paired admin's request is not judged a second time
- * here. The paired authority is read once, immediately before the write.
+ * caller is an agent; a paired admin's request, or one from an app on the
+ * daemon's own machine with the operator token it holds, is not judged a
+ * second time here. The owner authority is read once, immediately before the
+ * write.
  */
 import { createSettingsImportPreconditionHandler, type SettingsImportPreconditionFacts, type SettingsImportPreconditionHandler } from '@goodvibes-jev/engine/daemon-api';
 import type { ConfigManager, PreparedConfigMutation, PreparedConfigMutationTransition, PreparedConfigMutationReceipt } from '../../config/manager.js';
@@ -45,7 +47,7 @@ interface Authority {
 }
 const SCOPE = 'write:config';
 function allowed(snapshot: NativePairedSnapshot | null): snapshot is NativePairedSnapshot {
-  return snapshot !== null && snapshot.kind === 'pairing-token' && missingScopes(snapshot.scopes, [SCOPE]).length === 0;
+  return snapshot !== null && (snapshot.kind === 'pairing-token' || snapshot.kind === 'local') && missingScopes(snapshot.scopes, [SCOPE]).length === 0;
 }
 function samePairedAuthority(current: NativePairedSnapshot, expected: NativePairedSnapshot): boolean {
   return current.principalId === expected.principalId && current.tokenId === expected.tokenId
@@ -82,7 +84,9 @@ export function createServingSettingsImportPrecondition(input: {
     lifetime: authority.settingsLifetime,
     captureAuthority(req): Authority | null {
       const admin = authority.captureSettingsAdminAuthority(req), native = authority.captureNativeExecutionAuthority(req), expected = native?.current();
-      if (admin?.kind !== 'pairing-token' || !native || !expected || !allowed(expected) || authority.requireAdmin(req) !== null) return null;
+      // A paired device's own credential, or the operator token from this machine (whose native authority is the local owner's).
+      const adminMatches = admin?.kind === (expected?.kind === 'local' ? 'shared-token' : 'pairing-token');
+      if (!admin || !adminMatches || !native || !expected || !allowed(expected) || authority.requireAdmin(req) !== null) return null;
       return Object.freeze({ admin, native, expected, token: authority.extractAuthToken(req) });
     },
     withAuthority(req, captured, operation) {

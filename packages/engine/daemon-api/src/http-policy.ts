@@ -17,11 +17,14 @@ export interface AuthenticatedPrincipal {
 }
 
 /**
- * Which credential a request presented. `local` is the credential the apps on
- * the owner's own machine hold; `shared-token` is the daemon's operator token;
- * `device-token` is a named pairing; `user-session` is a login session.
+ * Which credential a request presented. `local` is the daemon's operator token
+ * presented from the daemon's own machine (the credential the apps there
+ * already hold); `shared-token` is the same token from anywhere else;
+ * `device-token` is a named pairing; `agent` is the pairing the GoodVibes
+ * Agent presents for the calls it makes on the owner's behalf;
+ * `user-session` is a login session.
  */
-export type CredentialKind = 'local' | 'shared-token' | 'device-token' | 'user-session';
+export type CredentialKind = 'local' | 'shared-token' | 'device-token' | 'agent' | 'user-session';
 
 /** The caller of one request, authenticated once where the request entered. */
 export interface RequestPrincipal extends AuthenticatedPrincipal {

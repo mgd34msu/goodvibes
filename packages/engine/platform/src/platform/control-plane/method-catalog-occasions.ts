@@ -222,7 +222,6 @@ export const OCCASIONS_PROPOSE_INPUT_SCHEMA = objectSchema({
  * without them is how a published contract breaks a client by construction.
  */
 export const OCCASIONS_CONFIRM_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   title: STRING_SCHEMA,
   date: STRING_SCHEMA,
   kind: OCCASION_KIND_SCHEMA,
@@ -236,14 +235,12 @@ export const OCCASIONS_CONFIRM_INPUT_SCHEMA = objectSchema({
 }, ['title', 'date', 'kind', 'surface', 'said', 'authority']);
 
 export const OCCASIONS_REMOVE_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   occasionId: STRING_SCHEMA,
   confirmed: BOOLEAN_SCHEMA,
   authority: STRING_SCHEMA,
 }, ['occasionId', 'confirmed', 'authority']);
 
 export const OCCASIONS_ANSWER_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   occasionId: STRING_SCHEMA,
   answer: OCCASION_ANSWER_SCHEMA,
   occurrence: STRING_SCHEMA,
@@ -256,13 +253,11 @@ export const OCCASIONS_ANSWER_OUTPUT_SCHEMA = objectSchema({
 
 export const OCCASIONS_INTERVIEW_GET_INPUT_SCHEMA = objectSchema({ interviewId: STRING_SCHEMA }, ['interviewId']);
 export const OCCASIONS_INTERVIEW_ANSWER_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   interviewId: STRING_SCHEMA,
   stepId: STRING_SCHEMA,
   text: STRING_SCHEMA,
 }, ['interviewId', 'stepId', 'text']);
 export const OCCASIONS_INTERVIEW_RECORD_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   interviewId: STRING_SCHEMA,
   landedOn: STRING_SCHEMA,
 }, ['interviewId', 'landedOn']);
@@ -301,7 +296,7 @@ export const NUDGE_DELIVERY_SCHEMA = objectSchema({
   failure: NULLABLE_STRING_SCHEMA,
 }, ['channel', 'delivered', 'deliveryId', 'failure']);
 
-export const OCCASIONS_SWEEP_INPUT_SCHEMA = objectSchema({ admission: { type: 'string', enum: ['autonomous'] } }, []);
+export const OCCASIONS_SWEEP_INPUT_SCHEMA = objectSchema({}, []);
 const OCCASIONS_COMPLETE_SWEEP_OUTPUT_SCHEMA = objectSchema({
   provenance: { type: 'string', enum: ['classic'] },
   semanticAssessment: { type: 'string', enum: ['not-evaluated'] },
@@ -342,7 +337,6 @@ export const OCCASIONS_PLANS_PROPOSE_INPUT_SCHEMA = objectSchema({
 }, ['title', 'from', 'to']);
 
 export const OCCASIONS_PLANS_CONFIRM_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   title: STRING_SCHEMA,
   from: STRING_SCHEMA,
   to: STRING_SCHEMA,
@@ -373,7 +367,6 @@ const OCCASION_EDIT_OUTCOME_SCHEMA = objectSchema({
 }, ['ok', 'reason', 'occasionId', 'disclosure', 'droppedRecords', 'written', 'proposal']);
 
 const OCCASIONS_UPDATE_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   occasionId: STRING_SCHEMA,
   title: STRING_SCHEMA,
   date: STRING_SCHEMA,
@@ -392,7 +385,6 @@ const OCCASIONS_UPDATE_INPUT_SCHEMA = objectSchema({
 const PLAN_FROM_SCHEMA: Record<string, unknown> = { type: 'string', description: 'The start date (YYYY-MM-DD) of the plan meant, needed only when two plans share a name.' };
 
 const OCCASIONS_PLANS_UPDATE_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   planId: STRING_SCHEMA,
   planFrom: PLAN_FROM_SCHEMA,
   title: STRING_SCHEMA,
@@ -408,7 +400,6 @@ const OCCASIONS_PLANS_UPDATE_INPUT_SCHEMA = objectSchema({
 }, ['planId', 'confirmed', 'surface', 'said', 'authority']);
 
 const OCCASIONS_PLANS_REMOVE_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   planId: STRING_SCHEMA,
   planFrom: PLAN_FROM_SCHEMA,
   confirmed: BOOLEAN_SCHEMA,
@@ -422,7 +413,6 @@ export const OCCASIONS_GIFTS_OUTPUT_SCHEMA = objectSchema({
 }, ['occasionId', 'gifts']);
 
 export const OCCASIONS_CONFLICT_RESOLVE_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   occasionId: STRING_SCHEMA,
   keep: { type: 'string', description: 'The date to keep, as recorded (MM-DD or YYYY-MM-DD). Omit to get the recorded dates back without changing anything.' },
   authority: STRING_SCHEMA,
@@ -451,7 +441,6 @@ export const OCCASIONS_STATE_OUTPUT_SCHEMA = objectSchema({
 }, ['path', 'acknowledgements', 'giftRecords', 'openItems', 'interviews', 'mirrors', 'attributions', 'lastSweep', 'reconciledOpenItems', 'corruption']);
 
 export const OCCASIONS_ACKNOWLEDGE_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   occasionId: STRING_SCHEMA,
   source: OCCASION_ACK_SOURCE_SCHEMA,
   occurrence: STRING_SCHEMA,

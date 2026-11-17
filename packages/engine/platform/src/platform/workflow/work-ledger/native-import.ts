@@ -7,7 +7,7 @@ import { decideAutonomous } from '../../gate/autonomous-decision.js';
 import { captureLegacyImportAction } from './import-action-binding.js';
 import { assertLegacyWorkLedgerSourcesCurrent, legacyMigrationPreparationRevision, validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';
 import { workLedgerCommandSchema, WorkLedgerAccessError, type WorkLedgerAuthority, type WorkLedgerResult, type WorkLedgerRejection, type WorkLedgerService } from './types.js';
-import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
+import { holdsNativeOwnership, type NativeExecutionScopeOwner, type NativePairedExecutionAuthority, type NativePairedExecutionSnapshot } from './native-execution.js';
 
 export const NATIVE_IMPORT_SCOPES = ['write:work-ledger-import', 'read:knowledge'] as const;
 export const NATIVE_IMPORT_SITE = 'work-ledger.legacy-import';
@@ -60,8 +60,7 @@ class NativeImportPrecommitError extends JudgmentError {
 const refusal = (code: WorkLedgerRejection, reason: string, revision: number | null = null): WorkLedgerResult => ({ kind: 'rejected', code, reason, revision });
 function paired(authority: NativePairedExecutionAuthority): NativePairedExecutionSnapshot {
   const current = authority.current();
-  if (!current || current.kind !== 'pairing-token' || current.principalId !== current.authorityId || current.authorityRevision !== current.tokenId
-    || !NATIVE_IMPORT_SCOPES.every(scope => current.scopes.includes('*') || current.scopes.includes(scope))) throw new NativeImportPrecommitError('forbidden', 'Native import requires current paired authority and dedicated scopes');
+  if (!holdsNativeOwnership(current, NATIVE_IMPORT_SCOPES)) throw new NativeImportPrecommitError('forbidden', 'Native import needs the owner's own machine or a current paired device holding the import scopes; this caller holds neither.');
   return Object.freeze({ ...current, scopes: Object.freeze([...current.scopes].sort()) });
 }
 

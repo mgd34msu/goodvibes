@@ -393,16 +393,17 @@ removes a webhook.
 
 ## Explicit owner review of delegated messages
 
-A selected delegated route holds each external message for the paired owner's
-explicit review decision. The owner chooses the original message's memory
+A selected delegated route holds each external message for the owner's
+explicit review decision (the owner configures it from an app on the daemon's
+own machine or from a paired device). The owner chooses the original message's memory
 lifetime and the metadata record's retention period. Approving review does not
 start work. Closing the review, changing the configured owner or route, expiry,
 or leaving the workspace releases access to the retained original.
 
-Review metadata records the paired identity and granted scopes without storing
+Review metadata records the owner identity and granted scopes without storing
 a bearer token or the original message. A restart can display that metadata but
 cannot recover the original message or its approval capability. Older saved
-review records remain readable by their matching paired owner.
+review records remain readable by their matching owner.
 
 Native installations declare support for the explicit-owner receipt format
 before saving it. Updating or rolling back to a binary that cannot read that

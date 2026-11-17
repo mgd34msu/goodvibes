@@ -30,7 +30,7 @@ function failure(error: unknown): Error {
     NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY:
       "Native execution requires current paired admin authority with read:work-ledger and write:fleet.",
     PAIRED_OWNER_REQUIRED:
-      "Native execution runs only for a paired device with owner access. Pair this browser (Settings, Devices and pairing), then retry.",
+      "Native execution runs from the daemon's own machine or a paired device with owner access. Open the web app on that machine, or pair this browser (Settings, Devices and pairing), then retry.",
     FORBIDDEN:
       "This pairing lacks the access native execution needs (read:work-ledger and write:fleet). Pair this browser again with that access (Settings, Devices and pairing), then retry.",
     NATIVE_EXECUTION_REFUSED:

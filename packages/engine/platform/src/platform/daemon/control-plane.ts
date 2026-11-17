@@ -6,7 +6,8 @@ import { withUntrustedContentScope } from '../security/untrusted-content.js';
 import type { UserAuthManager, SettingsSessionAuthority } from '../security/user-auth.js';
 import type { SettingsPairingAuthority } from '../pairing/pairing-token-store.js';
 import { PairingStoreFaultedError, SettingsAuthorityUnavailableError, runSynchronousSettingsOperation } from '../security/settings-authority.js';
-import { isPairingTokenShape, pairingPrincipalId } from '../pairing/pairing-token-store.js';
+import { LOCAL_OWNER_CREDENTIAL, isPairingTokenShape, pairingPrincipalId, type NativeCredential } from '../pairing/pairing-token-store.js';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import {
   authenticateOperatorToken,
   credentialKindOf,
@@ -374,7 +375,7 @@ export class DaemonControlPlaneHelper {
     const bound = requestContextOf(req);
     if (bound && isPrincipalCurrent(bound.principal, this.authRevision())) return bound;
     const token = extractOperatorAuthToken(req);
-    const principal = token ? this.describeRequestPrincipal(token) : null;
+    const principal = token ? this.describeRequestPrincipal(token, isLoopbackHost(this.clientAddress(req))) : null;
     if (!principal) return null;
     const gateway = this.context.controlPlaneGateway;
     const context = createRequestContext(principal, req.signal,
@@ -558,9 +559,10 @@ export class DaemonControlPlaneHelper {
   /**
    * Authenticate a credential once into the principal a request or a socket
    * carries: who, with which credential, which scopes, and the authentication
-   * revision it was read under.
+   * revision it was read under. `loopback`: the credential arrived from the
+   * daemon's own machine, which makes the operator token the `local` credential.
    */
-  describeRequestPrincipal(token: string): RequestPrincipal | null {
+  describeRequestPrincipal(token: string, loopback = false): RequestPrincipal | null {
     const authenticated = authenticateOperatorToken(token, this.authContext());
     if (!authenticated) return null;
     const base = this.principalFor(authenticated);
@@ -568,7 +570,7 @@ export class DaemonControlPlaneHelper {
     const authRevision = this.authRevision();
     return Object.freeze({
       ...base,
-      credentialKind: credentialKindOf(authenticated),
+      credentialKind: credentialKindOf(authenticated, loopback),
       scopeSet: new Set(base.scopes),
       roles: authenticated.kind === 'session' ? authenticated.roles : [],
       authRevision,
@@ -615,54 +617,85 @@ export class DaemonControlPlaneHelper {
   }
 
   /**
-   * Resolve only persisted per-pairing native authority. In particular, a
-   * session named `pairing:...` and the legacy operator token never qualify.
-   * This path must not call ordinary authentication and its last-seen writer.
+   * Resolve persisted native authority: a pairing token's, or the owner's own
+   * machine's for {@link LOCAL_OWNER_CREDENTIAL}, which only a caller that
+   * established the local credential passes. A session named `pairing:...`
+   * never qualifies. This path must not call ordinary authentication and its
+   * last-seen writer.
    */
-  describeNativeExecutionAuthority(token: string): NativePairedSnapshot | null {
-    const paired = this.context.pairingTokens?.authenticateNative?.(token);
-    if (!paired || paired.kind !== 'pairing-token') return null;
-    return Object.freeze({ ...paired, scopes: Object.freeze([...this.getGrantedGatewayScopes(true)]) });
+  describeNativeExecutionAuthority(credential: NativeCredential): NativePairedSnapshot | null {
+    const owner = this.context.pairingTokens;
+    const local = credential === LOCAL_OWNER_CREDENTIAL;
+    const native = local ? owner?.ensureLocalNativeOwner?.() : owner?.authenticateNative?.(credential);
+    if (!native || native.kind !== (local ? 'local' : 'pairing-token')) return null;
+    return Object.freeze({ ...native, scopes: Object.freeze([...this.getGrantedGatewayScopes(true)]) });
   }
 
   /**
    * Only the transport constructs this capability. The credential stays in its
    * closure, outside native state, durable records and returned identities.
    * Cached transport scopes are a ceiling; a later catalog cannot widen them.
+   *
+   * `credentialKind` is what the transport established for this request. The
+   * `local` credential (the operator token from this machine) gets the owner's
+   * own machine's authority while that token is still the operator token; it
+   * is looked up on first use, so a call that never reaches native work pays
+   * nothing for it. Any other credential is native only as a pairing token.
+   * While the native identity holds and the catalog's scopes do not move,
+   * `current()` answers the snapshot it already built: one `lstat` per call.
    */
-  createNativeExecutionAuthority(token: string, capturedScopes?: readonly string[]): NativeExecutionAuthority | null {
+  createNativeExecutionAuthority(token: string, capturedScopes?: readonly string[], credentialKind?: CredentialKind | null): NativeExecutionAuthority | null {
     const owner = this.context.pairingTokens;
     if (!owner?.authenticateNative || !owner.withNativeAuthority) return null;
-    const initial = this.describeNativeExecutionAuthority(token);
-    if (!initial) return null;
-    const ceiling = new Set(capturedScopes ?? initial.scopes);
+    const local = credentialKind === 'local';
+    const credential: NativeCredential = local ? LOCAL_OWNER_CREDENTIAL : token;
+    const stillLocal = (): boolean => {
+      const shared = this.context.authToken();
+      return typeof shared === 'string' && shared.length > 0 && matchesSharedToken(token, shared);
+    };
+    let initial: NativePairedSnapshot | null | undefined;
+    if (!local) {
+      initial = this.describeNativeExecutionAuthority(token);
+      if (!initial) return null;
+    }
+    const base = (): NativePairedSnapshot | null => {
+      if (initial === undefined) initial = stillLocal() ? this.describeNativeExecutionAuthority(LOCAL_OWNER_CREDENTIAL) : null;
+      return initial;
+    };
+    let built: { readonly granted: readonly string[]; readonly snapshot: NativePairedSnapshot } | undefined;
     const current = (): NativePairedSnapshot | null => {
-      if (this.context.pairingTokens !== owner) return null;
-      const fresh = this.describeNativeExecutionAuthority(token);
-      if (!fresh || fresh.tokenId !== initial.tokenId || fresh.authorityRevision !== initial.authorityRevision) return null;
-      const scopes = ceiling.has('*') ? fresh.scopes : fresh.scopes.includes('*') ? [...ceiling]
-        : fresh.scopes.filter(scope => ceiling.has(scope));
-      return Object.freeze({ ...fresh, scopes: Object.freeze([...scopes].sort()) });
+      if (this.context.pairingTokens !== owner || (local && !stillLocal())) return null;
+      const expected = base();
+      const fresh = expected ? owner.authenticateNative!(credential) : null;
+      if (!expected || !fresh || fresh.kind !== expected.kind || fresh.tokenId !== expected.tokenId
+        || fresh.authorityRevision !== expected.authorityRevision) return null;
+      const granted = this.getGrantedGatewayScopes(true);
+      if (built?.granted === granted) return built.snapshot;
+      const ceiling = new Set(capturedScopes ?? expected.scopes);
+      const scopes = ceiling.has('*') ? granted : granted.includes('*') ? [...ceiling] : granted.filter(scope => ceiling.has(scope));
+      const snapshot: NativePairedSnapshot = Object.freeze({ ...fresh, scopes: Object.freeze([...scopes].sort()) });
+      built = { granted, snapshot };
+      return snapshot;
     };
     return Object.freeze({
       current,
       ...(owner.revokeNativeContinuation ? { revokeContinuation: owner.revokeNativeContinuation.bind(owner) } : {}),
       ...(owner.issueNativeContinuation ? { issueContinuation: (binding: string, assertSource: () => void, sourceBinding?: string) => {
-        const expected = current(); if (!expected) throw new Error('Native continuation pairing is unavailable');
-        return owner.issueNativeContinuation!(token, expected, binding, () => {
+        const expected = current(); if (!expected) throw new Error('Native continuation owner is unavailable');
+        return owner.issueNativeContinuation!(credential, expected, binding, () => {
           assertSource(); const fresh = current();
-          if (!fresh || JSON.stringify(fresh) !== JSON.stringify(expected)) throw new Error('Native continuation pairing scopes changed');
+          if (!fresh || JSON.stringify(fresh) !== JSON.stringify(expected)) throw new Error('Native continuation owner scopes changed');
         }, sourceBinding);
       } } : {}),
       withCurrent: <T>(expected: NativePairedSnapshot,
         operation: (assertCurrent: () => NativePairedSnapshot) => T | Promise<T>): Promise<T> =>
-        owner.withNativeAuthority!(token, expected, (assertPaired) => {
+        owner.withNativeAuthority!(credential, expected, (assertPaired) => {
           const assertCurrent = (): NativePairedSnapshot => {
             assertPaired();
             const fresh = current();
             if (!fresh || fresh.scopes.length !== expected.scopes.length
               || fresh.scopes.some((scope, index) => scope !== expected.scopes[index])) {
-              throw new Error('Native pairing scopes are no longer current');
+              throw new Error('Native authority scopes are no longer current');
             }
             return fresh;
           };
@@ -800,7 +833,7 @@ export class DaemonControlPlaneHelper {
   private socketPrincipalCurrent(ws: { data: ControlPlaneWebSocketData }): boolean {
     const data = ws.data;
     if (data.authRevision !== undefined && isPrincipalCurrent({ authRevision: data.authRevision, ...(data.expiresAt === undefined ? {} : { expiresAt: data.expiresAt }) }, this.authRevision())) return true;
-    const fresh = this.describeRequestPrincipal(data.authToken);
+    const fresh = this.describeRequestPrincipal(data.authToken, isLoopbackHost(data.remoteAddress));
     if (!fresh || fresh.principalId !== data.principalId || fresh.principalKind !== data.principalKind) return false;
     const held = new Set(data.scopes);
     const wasAdmin = data.admin;
@@ -886,7 +919,7 @@ export class DaemonControlPlaneHelper {
 
     if (frame.type === 'auth') {
       const token = typeof frame.token === 'string' ? frame.token : ws.data.authToken;
-      const principal = this.describeRequestPrincipal(token);
+      const principal = this.describeRequestPrincipal(token, isLoopbackHost(ws.data.remoteAddress));
       if (!principal) {
         this.authFailures.record(ws.data.remoteAddress ?? 'unknown', 'control-plane');
         this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: false, error: 'Unauthorized' }));
@@ -1212,11 +1245,13 @@ export class DaemonControlPlaneHelper {
     const denied = this.validateGatewayInvocation(descriptor, context);
     if (denied) return denied;
     // The client frame asserts that a person asked for this call. Only a principal
-    // the transport itself established as a person's (a login session or a paired
-    // device; the shared operator token is not one, automation drives it) can make that claim; a bot, service or peer cannot, so its claim is
-    // dropped before any handler reads it. A literal false stays: it only restricts.
+    // the transport itself established as a person's (a login session, a paired
+    // device, or an app on the daemon's own machine) can make that claim; the
+    // operator token from elsewhere, the Agent's credential for the calls it
+    // makes on the owner's behalf, a bot, service or peer cannot, so their claim
+    // is dropped before any handler reads it. A literal false stays: it only restricts.
     const credential = authenticated?.credentialKind;
-    if (context?.explicitUserRequest === true && credential !== 'user-session' && credential !== 'device-token') {
+    if (context?.explicitUserRequest === true && credential !== 'user-session' && credential !== 'device-token' && credential !== 'local') {
       context = { ...context, explicitUserRequest: undefined };
     }
     // Input validation gate: reject a wrong-typed / missing-required body against
@@ -1257,8 +1292,8 @@ export class DaemonControlPlaneHelper {
           signal: input.signal,
           // A plain field, not built on first read: handlers refuse invocation
           // fields that are accessors. For anything but a paired device's token
-          // it is a prefix test and null.
-          nativeExecutionAuthority: this.createNativeExecutionAuthority(input.authToken, context?.scopes ?? []) ?? undefined,
+          // or the local credential it is a prefix test and null.
+          nativeExecutionAuthority: this.createNativeExecutionAuthority(input.authToken, context?.scopes ?? [], authenticated?.credentialKind) ?? undefined,
           isAuthorized: this.retainGatewayAuthorization(input.authToken, descriptor, context),
           context: {
             authToken: input.authToken,
@@ -1267,6 +1302,7 @@ export class DaemonControlPlaneHelper {
             admin: context?.admin,
             scopes: context?.scopes,
             clientKind: context?.clientKind,
+            ...(authenticated?.credentialKind ? { credentialKind: authenticated.credentialKind } : {}),
             ...(context?.explicitUserRequest === undefined
               ? {}
               : { metadata: { explicitUserRequest: context.explicitUserRequest } }),

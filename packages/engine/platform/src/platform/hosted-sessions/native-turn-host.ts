@@ -12,7 +12,7 @@ import { readNativeConversationTurnStatus } from '../core/native-turn-admission.
 import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 import { createOperatorNativeConversationIntakeClient, type NativeConversationTurnPermit, type NativeConversationTurnSource } from '../workflow/work-ledger/native-intake-client.js';
 import type { NativeConversationIntakeHost, NativeConversationContinuationOwner } from '../workflow/work-ledger/native-intake.js';
-import type { NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from '../workflow/work-ledger/native-execution.js';
+import { holdsNativeOwnership, type NativePairedExecutionAuthority, type NativePairedExecutionSnapshot } from '../workflow/work-ledger/native-execution.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import type { HostedSessionManager } from './manager.js';
 import { NativeHostedTurnJournal, NativeHostedTurnJournalError, isTerminalNativeHostedTurnState, type NativeHostedTurnFailure, type NativeHostedTurnIdentity, type NativeHostedTurnDispatch, type NativeHostedTurnOriginSurface } from './native-turn-journal.js';
@@ -97,8 +97,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
   function authorize(authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions) {
     if (closed) throw new NativeHostedTurnError('closed');
     const value = authority.current();
-    if (!options.isAuthorized() || !value || value.kind !== 'pairing-token' || value.principalId !== value.authorityId
-      || value.authorityRevision !== value.tokenId || !NATIVE_HOSTED_TURN_SCOPES.every(scope => value.scopes.includes('*') || value.scopes.includes(scope))) throw new NativeHostedTurnError('forbidden');
+    if (!options.isAuthorized() || !holdsNativeOwnership(value, NATIVE_HOSTED_TURN_SCOPES)) throw new NativeHostedTurnError('forbidden');
     return value;
   }
   function assertSession(sessionId: string, principalId: string, originSurface?: NativeHostedTurnOriginSurface) {

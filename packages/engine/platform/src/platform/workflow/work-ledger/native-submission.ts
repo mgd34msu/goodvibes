@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { realpathSync } from 'node:fs';
-import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
+import { holdsNativeOwnership, type NativeExecutionScopeOwner, type NativePairedExecutionAuthority, type NativePairedExecutionSnapshot } from './native-execution.js';
 import type { WorkLedgerAuthority, WorkLedgerEvent, WorkLedgerService } from './types.js';
 import {
   nativeWorkSubmissionRequestSchema, nativeWorkSubmissionLookupRequestSchema,
@@ -35,8 +35,7 @@ const historicalSourceId = (projectId: string, principalId: string, inputId: str
 const originalInputCommitment = (version: 1 | 3, inputId: string, goal: string, criteria: readonly string[]) => createHash('sha256').update(JSON.stringify({ version, inputId, goal, criteria })).digest('hex');
 function paired(authority: NativePairedExecutionAuthority): NativePairedExecutionSnapshot {
   const current = authority.current();
-  if (!current || current.kind !== 'pairing-token' || current.principalId !== current.authorityId || current.authorityRevision !== current.tokenId
-    || !REQUIRED_SCOPES.every(scope => current.scopes.includes('*') || current.scopes.includes(scope))) throw new NativeWorkSubmissionError('unsupported-authority');
+  if (!holdsNativeOwnership(current, REQUIRED_SCOPES)) throw new NativeWorkSubmissionError('unsupported-authority');
   return Object.freeze({ ...current, scopes: Object.freeze([...current.scopes].sort()) });
 }
 function receipt(event: WorkLedgerEvent, projectId: string, sessionId: string, principalId: string,

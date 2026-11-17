@@ -1,6 +1,7 @@
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import type { ContractErrorCode, ContractReplayKey } from '../types/foundation-contract.js';
 import type { NativeExecutionAuthority } from '../security/http-auth.js';
+import type { CredentialKind } from '../daemon/http-policy.js';
 export type { NativeExecutionAuthority, NativePairedSnapshot } from '../security/http-auth.js';
 
 export type GatewayMethodTransport = 'http' | 'ws' | 'internal';
@@ -103,6 +104,12 @@ export interface GatewayMethodInvocationContext {
   readonly scopes?: readonly string[] | undefined;
   readonly clientKind?: string | undefined;
   readonly authToken?: string | undefined;
+  /**
+   * Which credential the transport authenticated the caller with. Set only by
+   * the transport; `agent` is the GoodVibes Agent calling on the owner's
+   * behalf, and the calls it makes are judged by that.
+   */
+  readonly credentialKind?: CredentialKind | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }
 

@@ -1,7 +1,7 @@
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import { readTriggerOperatorStatus, TRIGGER_OPERATOR_MESSAGES, type TriggerOperatorFailureKind } from '@goodvibes-jev/engine/platform/platform/triggers/browser';
 import { describeRetainedConnectionFailure, RetainedOperatorConnection } from './retained-operator-connection.js';
-import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
+import { isOwnerOperatorPrincipal } from './native/native-paired-principal.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 import type { TerminalSlashCommand } from './command-registry.js';
@@ -25,7 +25,7 @@ export function registerRemoteTriggerSupervisorCommand<Context extends PaymentWi
       const report = (message: string) => { context.print(message); context.renderRequest(); };
       try {
         const auth = await connection.run((operator, signal) => operator.control.auth.current({}, { signal }));
-        if (!isPairedOperatorPrincipal(auth, ['read:watchers'], connection.expectedPrincipalId)) throw new Error('Original administrative watcher principal required');
+        if (!isOwnerOperatorPrincipal(auth, ['read:watchers'], connection.expectedPrincipalId)) throw new Error('Original administrative watcher principal required');
         const status = await connection.run(async (operator, signal) => readTriggerOperatorStatus(await operator.transport.requestJson(
           '/api/control-plane/methods/watchers.triggers.status/invoke', { method: 'POST', body: { body: {} }, signal, retry: false },
         )));

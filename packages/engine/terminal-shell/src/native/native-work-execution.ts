@@ -18,8 +18,8 @@ function failureMessage(error: unknown, action: NativeWorkExecutionAction): stri
     NATIVE_EXECUTION_STALE: 'Native work, attempt or authority changed. Inspect status before choosing a new action.',
     NATIVE_EXECUTION_CONFLICT: 'Native execution conflicts with the recorded admission. Inspect status before choosing a new action.',
     NATIVE_EXECUTION_RECOVERY_REQUIRED: 'Host recovery is required. Inspect status, then use explicit resume only if still appropriate.',
-    PAIRED_OWNER_REQUIRED: 'Native execution runs only for a paired device with owner access. Pair this terminal with the host (/pair), then try again.',
-    FORBIDDEN: 'This pairing lacks the access native execution needs (read:work-ledger and write:fleet). Pair this terminal again with that access, then try again.',
+    PAIRED_OWNER_REQUIRED: 'Native execution runs from the daemon\'s own machine (with the operator token this terminal already holds) or from a paired device. Run it there, or pair this terminal with the host (/devices migrate-shared), then try again.',
+    FORBIDDEN: 'This credential lacks the access native execution needs (read:work-ledger and write:fleet). Pair this terminal again with that access, then try again.',
   };
   try {
     const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;

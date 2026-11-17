@@ -190,7 +190,7 @@ export class NativeWorkSubmissionControls {
         if (operationDraft) operationDraft.outcome = 'conflict';
         result = publish({ status: 'conflict', message: 'Native ledger revision changed. The original request was not rewritten. Inspect its status; an explicitly new submit-file command may capture a fresh revision.', request });
       } else if (code === 'PAIRED_OWNER_REQUIRED' || code === 'NATIVE_SUBMISSION_UNSUPPORTED_AUTHORITY' || code === 'NATIVE_SUBMISSION_FORBIDDEN' || code === 'FORBIDDEN') {
-        result = publish({ status: 'unavailable', message: 'Submission runs only for a paired device with work-ledger read and write access. Pair this terminal with the daemon (/devices migrate-shared), then retry. No submission was sent.', request });
+        result = publish({ status: 'unavailable', message: 'Submission runs from the daemon\'s own machine or a paired device with work-ledger read and write access. Run it there, or pair this terminal with the daemon (/devices migrate-shared), then retry. No submission was sent.', request });
       } else if (code === 'NATIVE_SUBMISSION_REQUEST_CONFLICT') {
         result = publish({ status: 'unknown', message: 'Submission identity conflicts with recorded input. Inspect the original request; no source or identity was replaced.', request });
       } else result = publish({ status: request ? 'unknown' : 'unavailable', message: request

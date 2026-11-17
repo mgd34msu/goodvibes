@@ -12,14 +12,14 @@
 // `registerCatalogHandlers`, flipping the builtin method from HTTP-fallback to
 // in-process execution. Handler outputs match the platform output schemas exactly.
 //
-// Manual assign/delete require explicit confirmation. Autonomous selections
-// require fresh recorded native admission under current paired owner authority,
+// Manual assign/delete require explicit confirmation. A call made with the
+// Agent's credential requires fresh recorded native admission under current paired owner authority,
 // retained through durable publication. Listing remains a read operation.
 // ---------------------------------------------------------------------------
 
 import type { RoutingHostContext as HandlerContext } from './registration-types.js';
 import { assertConfirmed } from '../../control-plane/host-handlers.js';
-import { requestsNativeAdmission, runNativeMutation } from '../../control-plane/native-mutation.js';
+import { isDelegatedCaller, runNativeMutation } from '../../control-plane/native-mutation.js';
 import {
   registerCatalogHandlers,
   HandlerError,
@@ -257,7 +257,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
   };
 
   const assignHandler: TypedHandler<RoutingAssignBody, RoutingAssignResult> = async ({ body, context }) => {
-    const autonomous = requestsNativeAdmission(body);
+    const autonomous = isDelegatedCaller(context);
     if (!autonomous) assertConfirmed(body, context);
     context.signal?.throwIfAborted();
     await ensureInit();
@@ -319,7 +319,7 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
   };
 
   const deleteHandler: TypedHandler<RoutingDeleteBody, RoutingDeleteResult> = async ({ body, context }) => {
-    const autonomous = requestsNativeAdmission(body);
+    const autonomous = isDelegatedCaller(context);
     if (!autonomous) assertConfirmed(body, context);
     context.signal?.throwIfAborted();
     await ensureInit();

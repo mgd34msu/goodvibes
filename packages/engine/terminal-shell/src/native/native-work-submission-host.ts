@@ -1,4 +1,4 @@
-import { isNativePairedPrincipal } from './native-paired-principal.js';
+import { isNativeOwnerPrincipal } from './native-paired-principal.js';
 import { createNativeHostFetch } from './native-host-fetch.js';
 import { realpathSync } from 'node:fs';
 import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
@@ -59,8 +59,8 @@ export function createNativeWorkSubmissionBinding(host: NativeSubmissionHost, pr
     return { client,
         readPrincipal: signal => invoke('control.auth.current', {}, { signal }).then(auth => {
             // The host states the credential kind; this exact principal comes from the live host.
-            if (!isNativePairedPrincipal(auth, host.expectedPrincipalId)) {
-                throw Object.assign(new Error('Native submission requires a paired device'), { code: 'PAIRED_OWNER_REQUIRED' });
+            if (!isNativeOwnerPrincipal(auth, host.expectedPrincipalId)) {
+                throw Object.assign(new Error('Native submission runs from the daemon\'s own machine or a paired device; pair this device (/devices migrate-shared), then retry'), { code: 'PAIRED_OWNER_REQUIRED' });
             }
             return auth.principalId;
         }),

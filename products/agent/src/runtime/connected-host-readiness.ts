@@ -1,7 +1,7 @@
 import { canonicalizePairingHost } from './connected-host-pairing-store.ts';
 import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostConnection } from '../agent/connected-host-client.ts';
 import type { AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
-import { isNativePairedPrincipal } from './native-paired-principal.ts';
+import { isNativeOwnerPrincipal } from './native-paired-principal.ts';
 
 export interface ConnectedHostReadiness {
   readonly status: 'ready' | 'disabled' | 'missing-credential' | 'unavailable' | 'unsupported-principal' | 'changed';
@@ -68,9 +68,9 @@ export async function readConnectedHostReadiness(options: AgentDaemonVerbCallerO
   let result: ConnectedHostReadiness;
   try {
     const auth = await host.invoke('control.auth.current', {}, { signal: ownership.signal, deadlineMs });
-    result = isNativePairedPrincipal(auth, selected.expectedPrincipalId)
-      ? { status: 'ready', detail: 'The selected host verified the current credential as a paired owner with native intake scopes.' }
-      : { status: 'unsupported-principal', detail: 'The selected host did not verify a paired owner with read:work-ledger and write:work-ledger. A shared token is insufficient; pair with setup pair.' };
+    result = isNativeOwnerPrincipal(auth, selected.expectedPrincipalId)
+      ? { status: 'ready', detail: 'The selected host verified the current credential as the owner (this machine\'s operator token or a paired device) with native intake scopes.' }
+      : { status: 'unsupported-principal', detail: 'The selected host did not verify the owner with read:work-ledger and write:work-ledger. From a machine other than the daemon\'s, the operator token is not enough; pair with setup pair.' };
   } catch (error) {
     result = { status: 'unavailable', detail: failureDetail(error, selected.baseUrl, deadlineMs) };
   }

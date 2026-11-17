@@ -246,7 +246,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
             const principalId = await binding.readPrincipal(controller.signal);
             if (!current())
                 return;
-            if (!principalId || principalId === 'shared-token' || principalId.length > 200)
+            if (!principalId || principalId.length > 200)
                 throw new NativeIntakeFailure('principal', 'Unsupported native principal');
             const scope: NativeIntakeJournalBinding = { endpoint: selected.endpoint, projectId: selected.projectId, workspace: selected.workspace, principalId };
             phase = 'journal-read';

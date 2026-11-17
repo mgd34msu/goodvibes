@@ -26,8 +26,18 @@ import type { NativeContractCompositionOwner } from '../../runtime/contract-comp
 import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, nativeExecutionOwnerMatches, nativeExecutionTargetRevision, bindNativeExecutionRequest, type NativeExecutionOwnerFacts, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionStorage, type NativeWorkExecutionTarget, type NativeWorkExecutionTransaction } from './native-execution-types.js';
 
 export interface NativePairedExecutionSnapshot {
-  readonly kind: 'pairing-token'; readonly tokenId: string; readonly principalId: string;
+  /** `local`: the owner's own machine, whose apps use the operator token they already hold. */
+  readonly kind: 'pairing-token' | 'local'; readonly tokenId: string; readonly principalId: string;
   readonly authorityId: string; readonly authorityRevision: string; readonly scopes: readonly string[];
+}
+/**
+ * The one rule for "this snapshot is a current native owner holding `scopes`":
+ * a pairing or the owner's own machine, whose authority is its own principal
+ * at its own revision. Every native host asks this, so the rule lives here.
+ */
+export function holdsNativeOwnership(value: NativePairedExecutionSnapshot | null | undefined, scopes: readonly string[]): value is NativePairedExecutionSnapshot {
+  return !!value && (value.kind === 'pairing-token' || value.kind === 'local') && value.principalId === value.authorityId
+    && value.authorityRevision === value.tokenId && scopes.every(scope => value.scopes.includes('*') || value.scopes.includes(scope));
 }
 /** Nonserialized transport-created capability. Keep the credential inside its authenticated owner. */
 export interface NativePairedExecutionAuthority {
@@ -99,8 +109,7 @@ const equalTarget = (a: NativeWorkExecutionTarget, b: NativeWorkExecutionTarget)
 const equalScopes = (a: readonly string[], b: readonly string[]) => a.length === b.length && [...a].sort().every((scope, index) => scope === [...b].sort()[index]);
 function paired(owner: NativePairedExecutionAuthority): NativePairedExecutionSnapshot {
   const value = owner.current();
-  if (!value || value.kind !== 'pairing-token' || value.principalId !== value.authorityId || value.authorityRevision !== value.tokenId
-    || !REQUIRED_SCOPES.every(scope => value.scopes.includes('*') || value.scopes.includes(scope))) throw new NativeWorkExecutionError('unsupported-authority');
+  if (!holdsNativeOwnership(value, REQUIRED_SCOPES)) throw new NativeWorkExecutionError('unsupported-authority');
   return Object.freeze({ ...value, scopes: Object.freeze([...value.scopes].sort()) });
 }
 function captureTarget(value: NativeWorkExecutionTarget): NativeWorkExecutionTarget {

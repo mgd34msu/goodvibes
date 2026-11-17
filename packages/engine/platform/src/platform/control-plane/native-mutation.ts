@@ -1,4 +1,8 @@
-/** A wire selection requests native admission; only the host's recorded decision permits the mutation. */
+/**
+ * A call made with the Agent's credential is admitted natively: only the
+ * host's recorded decision permits the mutation. Who called is the transport's
+ * fact, never a body field, so every call of that kind is judged alike.
+ */
 import { randomUUID } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -28,10 +32,14 @@ export function readNativeMutationAdmission(token: NativeMutationAdmission, invo
   admission.assertCurrent(); return admission;
 }
 
-export function requestsNativeAdmission(body: unknown): boolean {
-  if (!body || typeof body !== 'object' || nodeTypes.isProxy(body)) return false;
-  const field = Object.getOwnPropertyDescriptor(body, 'admission');
-  return field !== undefined && 'value' in field && field.value === 'autonomous';
+/**
+ * Whether the caller is the GoodVibes Agent acting on the owner's behalf: the
+ * transport authenticated it with the Agent's credential (`agent`). Such a
+ * call takes recorded native admission; any other caller takes its method's
+ * own confirmation rule.
+ */
+export function isDelegatedCaller(context: { readonly credentialKind?: string | undefined }): boolean {
+  return context.credentialKind === 'agent';
 }
 
 /** Native path identity stays local, including replacement with equal database bytes. */
@@ -82,7 +90,7 @@ export async function runNativeMutation<T>(input: {
   readonly mutate: (assertCurrent: () => void, admission?: NativeMutationAdmission, withPublication?: MutationPublication) => Promise<T>;
 }): Promise<T> {
   const { body, context } = input;
-  if (!requestsNativeAdmission(body)) {
+  if (!isDelegatedCaller(context)) {
     if (input.confirmation !== 'none') assertConfirmed(body, context);
     const current = () => { context.signal?.throwIfAborted(); };
     current(); return input.mutate(current);

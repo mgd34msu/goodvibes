@@ -8,7 +8,7 @@ import { realpathSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { canonicalJson, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import type { AutonomousDecision } from '../../gate/autonomous-decision.js';
-import type { NativeExecutionScope, NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
+import { holdsNativeOwnership, type NativeExecutionScope, type NativeExecutionScopeOwner, type NativePairedExecutionAuthority, type NativePairedExecutionSnapshot } from './native-execution.js';
 import { createWorkLedger } from './service.js';
 import type { WorkLedgerState, WorkLedgerSubmission } from './types.js';
 import { readNativeIntakeRoute, decideNativeIntake, validateNativeRequirementProposal } from './native-intake-decisions.js';
@@ -70,8 +70,7 @@ export interface NativeConversationIntakeHost {
 const scopes = ['read:work-ledger', 'write:work-ledger'] as const;
 function paired(authority: NativePairedExecutionAuthority): NativePairedExecutionSnapshot {
   const value = authority.current();
-  if (!value || value.kind !== 'pairing-token' || value.principalId !== value.authorityId || value.authorityRevision !== value.tokenId
-    || !scopes.every(scope => value.scopes.includes('*') || value.scopes.includes(scope))) throw new NativeConversationIntakeError('unsupported-authority');
+  if (!holdsNativeOwnership(value, scopes)) throw new NativeConversationIntakeError('unsupported-authority');
   return Object.freeze({ ...value, scopes: Object.freeze([...value.scopes].sort()) });
 }
 const contextReadScope = (selectedDiff: NativeSelectedDiffSelector | undefined) => selectedDiff ? selectedDiff.kind === 'session' ? 'read:sessions' : 'read:checkpoints' : undefined;

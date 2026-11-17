@@ -73,7 +73,7 @@ export function captureScheduleEffect(rawArgs: Record<string, unknown>, options:
         const target = capture.selectedTarget;
         if (!target || target.id !== input.jobId) throw new ToolInputProjectionError('held');
         // The revision read when the edit was admitted; the host refuses the update if the job moved since.
-        payload = { ...input, expectedMutationRevision: target.revision, admission: 'autonomous' };
+        payload = { ...input, expectedMutationRevision: target.revision };
       }
       assertCurrent();
       sent = true;

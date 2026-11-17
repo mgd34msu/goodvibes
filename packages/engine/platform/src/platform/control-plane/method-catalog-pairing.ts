@@ -38,6 +38,8 @@ const PUBLIC_PAIRING_TOKEN_SCHEMA = objectSchema({
   createdAt: NUMBER_SCHEMA,
   lastSeenAt: NUMBER_SCHEMA,
   mintedBy: STRING_SCHEMA,
+  /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
+  client: { type: 'string', enum: ['agent'] },
 }, ['id', 'name', 'createdAt']);
 
 /** The minted token, the ONE shape that carries the plaintext secret, returned once. */
@@ -86,11 +88,11 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.tokens.create',
     title: 'Mint Paired Device Token',
-    description: 'Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND.',
+    description: 'Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent\'s credential for the calls it makes on the owner\'s behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret.',
     category: 'pairing',
     scopes: ['write:control-plane'],
     transport: ['ws'],
-    inputSchema: objectSchema({ name: STRING_SCHEMA }, ['name']),
+    inputSchema: objectSchema({ name: STRING_SCHEMA, attemptId: STRING_SCHEMA, client: { type: 'string', enum: ['agent'] } }, ['name']),
     outputSchema: objectSchema({ token: MINTED_PAIRING_TOKEN_SCHEMA }, ['token']),
   }),
   methodDescriptor({

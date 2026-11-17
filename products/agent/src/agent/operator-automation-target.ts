@@ -12,6 +12,11 @@ export interface OperatorAutomationTarget {
   readonly wireFields: Record<string, unknown>;
 }
 
+/** The automation methods this Agent sends on the owner's behalf, with its delegated credential. */
+export function isOperatorAutomationTargetMethod(methodId: string): boolean {
+  return CREATED_METHODS.has(methodId) || Object.hasOwn(SELECTED_TARGETS, methodId);
+}
+
 /**
  * The host's current revision of the job a mutation names, sent with the
  * mutation so the host refuses it if the job changed in between. A caller that
@@ -23,7 +28,7 @@ export interface OperatorAutomationTarget {
  */
 export async function captureOperatorAutomationTarget(methodId: string, input: Record<string, unknown>,
   connection: ReturnType<typeof captureOperatorConnection>, options: { readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => void }): Promise<OperatorAutomationTarget> {
-  if (CREATED_METHODS.has(methodId)) return { wireFields: { admission: 'autonomous' } };
+  if (CREATED_METHODS.has(methodId)) return { wireFields: {} };
   const targetKey = SELECTED_TARGETS[methodId];
   if (!targetKey) return { wireFields: {} };
   const targetId = input[targetKey];
@@ -31,7 +36,7 @@ export async function captureOperatorAutomationTarget(methodId: string, input: R
     throw new ToolInputProjectionError('invalid', `The method needs ${targetKey}, the id of the job to change; automation.schedules.list shows them.`);
   }
   const known = input.expectedMutationRevision;
-  if (typeof known === 'string' && known.trim()) return { wireFields: { admission: 'autonomous', expectedMutationRevision: known } };
+  if (typeof known === 'string' && known.trim()) return { wireFields: { expectedMutationRevision: known } };
   if (known !== undefined) throw new ToolInputProjectionError('invalid', 'expectedMutationRevision is the mutationRevision string automation.schedules.list shows for the job; pass it as given or leave it out.');
   const receipt = await createDaemonOperatorInvoke(() => connection)('automation.schedules.list', {}, { signal: options.signal, assertCurrent: options.assertCurrent });
   // The host's own failure text can echo the id, so only its classified kind is passed on.
@@ -46,5 +51,5 @@ export async function captureOperatorAutomationTarget(methodId: string, input: R
   if (typeof target.mutationRevision !== 'string' || !target.mutationRevision) {
     throw new ToolInputProjectionError('unavailable', 'The connected host gave the job no revision, so the change was not sent; update GoodVibes on the host.');
   }
-  return { wireFields: { admission: 'autonomous', expectedMutationRevision: target.mutationRevision } };
+  return { wireFields: { expectedMutationRevision: target.mutationRevision } };
 }

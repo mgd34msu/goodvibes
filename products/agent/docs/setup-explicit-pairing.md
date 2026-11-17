@@ -1,5 +1,10 @@
 # Explicit Agent pairing
 
+On the daemon's own machine the Agent needs no pairing: the operator token file
+it already reads is reported by the daemon as the `local` credential, which has
+native intake, submission and execution authority. Pairing is for an Agent on
+another machine (attribution and revocation per device).
+
 `goodvibes-agent setup pair` previews migration of the selected host's existing
 legacy shared operator credential into a named per-device Agent credential.
 `--name <name>` selects the device label (default `GoodVibes Agent`). Preview is
@@ -122,6 +127,23 @@ A verified pair establishes native intake identity only. Provider, workspace,
 Jev availability and execution remain separate checks, and pairing does not
 establish hosted, inbound or derived-continuation authority.
 
+## The delegated credential
+
+The calls the Agent makes on the owner's behalf (schedule changes, channel
+drafts and routing, profile and occasions writes) are sent with a second
+credential, the Agent's delegated credential: a pairing the host marks
+`client: "agent"` and reports as credential `agent`. The host judges every call
+made with it (recorded native admission) and never lets it claim that a person
+asked; nothing in the request body selects that. It is made automatically, the
+first time it is needed, with the Agent's ordinary credential
+(`pairing.tokens.create` with `client: "agent"`), saved in
+`~/.goodvibes/agent/connected-host-pairings/delegations.json` (owner-only), and
+reused. Its attempt id is saved before the request leaves, so a lost reply is
+settled by repeating the same request. The host lists it with the paired devices
+(it does not count toward `device.nodes.maxPaired`); revoking it makes the next
+delegated call make a new one, and revoking the Agent's own pairing revokes it
+too.
+
 ## Native intake setup readiness
 
 Setup status is a read-only observation, never an authority grant. Agent uses the
@@ -129,7 +151,8 @@ same selected-host resolver and effective token precedence as native intake:
 `GOODVIBES_CONNECTED_HOST_TOKEN`, `GOODVIBES_DAEMON_TOKEN`, the Agent-owned
 pairing for the exact selected origin, then the existing daemon operator token
 file (only when no host pairing exists). A fresh `control.auth.current` response must report an
-authenticated admin whose `credential` is `device-token` (a paired device), with
+authenticated admin whose `credential` is `local` (the operator token on the
+daemon's own machine) or `device-token` (a paired device), with
 `read:work-ledger` and `write:work-ledger` (or `*`). The daemon states the
 credential kind; nothing is inferred from the principal's name. Intake and setup
 share this predicate.

@@ -6,6 +6,8 @@ import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { assertOperatorEffect, captureOperatorConnection } from '../agent/operator-connection-owner.ts';
+import { delegatedOperatorConnection, forgetDelegatedCredential } from '../agent/agent-delegation-credential.ts';
+import { isOperatorAutomationTargetMethod } from '../agent/operator-automation-target.ts';
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
 import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '../agent/operator-contract-routes.ts';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './agent-operator-input-projector.ts';
@@ -57,7 +59,9 @@ type WatcherMethodId =
 const AGENT_PURCHASE_METHOD_IDS = new Set(['payments.checkout.begin', 'payments.purchase.cancel']);
 // The profile tool owns these reads and its disclosure rules; the generic path has none of them.
 const PROFILE_TOOL_ONLY_METHOD_IDS = new Set(['profile.read', 'profile.person', 'profile.get', 'profile.provenance']);
-// These native routes independently admit this paired invocation on the server.
+// This Agent acts for the owner on these: they are sent with its delegated
+// credential, and the host judges each call as the Agent's. Profile writes
+// also state their provenance (`authority: "autonomous"`, no quote).
 const AUTONOMOUS_NATIVE_STATE_METHOD_IDS = new Set([
   'channels.drafts.save', 'channels.drafts.delete', 'channels.routing.assign', 'channels.routing.delete',
   'occasions.answer', 'occasions.acknowledge', 'occasions.interview.answer',
@@ -640,12 +644,14 @@ export function createAgentOperatorMethodTool(
         if (!connection.token) return { success: false, error: 'auth_required: no connected-host operator token found.' };
         const retainedPayload = operatorExecutionWireInput(route.payload, rawArgs, options, shellPaths, configManager, 'method');
         const wirePayload = AUTONOMOUS_PROFILE_METHOD_IDS.has(methodSnapshot.id)
-          ? { ...retainedPayload, admission: 'autonomous', authority: 'autonomous',
+          ? { ...retainedPayload, authority: 'autonomous',
             ...(PROFILE_QUOTE_METHOD_IDS.has(methodSnapshot.id) ? { said: '' } : {}),
             ...(methodSnapshot.id === 'occasions.remove' ? { confirmed: true } : {}) }
-          : AUTONOMOUS_NATIVE_STATE_METHOD_IDS.has(methodSnapshot.id)
-            ? { ...retainedPayload, admission: 'autonomous' }
-            : methodSnapshot.id === 'payments.purchase.cancel' ? { ...retainedPayload, confirm: true } : retainedPayload;
+          : methodSnapshot.id === 'payments.purchase.cancel' ? { ...retainedPayload, confirm: true } : retainedPayload;
+        const actsForOwner = AUTONOMOUS_PROFILE_METHOD_IDS.has(methodSnapshot.id) || AUTONOMOUS_NATIVE_STATE_METHOD_IDS.has(methodSnapshot.id)
+          || isOperatorAutomationTargetMethod(methodSnapshot.id);
+        const delegated = actsForOwner ? await delegatedOperatorConnection(connection, shellPaths.homeDirectory, options?.signal) : undefined;
+        const bearer = delegated?.token ?? connection.token;
         const ownerRequest = AGENT_PURCHASE_METHOD_IDS.has(methodSnapshot.id);
         // A read-only HTTP method carries its input in the query, so the query is built from the
         // same payload that is screened below, not from the pre-projection one.
@@ -664,13 +670,15 @@ export function createAgentOperatorMethodTool(
           redirect: 'error',
           method: route.httpMethod,
           headers: {
-            authorization: `Bearer ${connection.token}`,
+            authorization: `Bearer ${bearer}`,
             ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { 'content-type': 'application/json' }),
             ...(ownerRequest ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
           },
           ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { body: JSON.stringify(wirePayload) }),
         });
         stage = 'answered'; httpStatus = response.status;
+        // A delegated credential the host no longer accepts is forgotten; the next call makes a new one.
+        if (response.status === 401 && delegated) await forgetDelegatedCredential(delegated).catch(() => {});
         // From here the host's answer is the outcome. A check after it cannot undo an
         // applied effect, so nothing below re-checks currentness, and for an effect a body
         // that cannot be read or protected is withheld instead of turning the answer into
@@ -702,7 +710,7 @@ export function createAgentOperatorMethodTool(
         let formatted: string;
         try {
           formatted = await stringifyOutput({ ...facts, body, ...(outcome ? { outcome } : {}) }, {
-            signal: options?.signal, secretValues: [connection.token], declaredFields: operatorResultFields(methodSnapshot) });
+            signal: options?.signal, secretValues: [connection.token, bearer], declaredFields: operatorResultFields(methodSnapshot) });
         } catch (error) {
           if (!requiresEffect) throw error;
           return withheldOperatorAnswer({ ...facts, route: `${route.httpMethod} ${route.path}` }, `the answer body could not be checked for private data (${summarizeError(error)})`);

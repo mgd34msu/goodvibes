@@ -44,6 +44,8 @@ export interface HandlerContextEnvelope {
   readonly explicitUserRequest: boolean;
   readonly authToken: string;
   readonly principalKind?: GatewayMethodInvocationContext['principalKind'];
+  /** Which credential the transport authenticated the caller with; absent for an in-process call. */
+  readonly credentialKind?: GatewayMethodInvocationContext['credentialKind'];
   readonly nativeExecutionAuthority?: GatewayMethodInvocation['nativeExecutionAuthority'];
   readonly isAuthorized?: GatewayMethodInvocation['isAuthorized'];
 }
@@ -96,6 +98,7 @@ export function normalizeContext(
     explicitUserRequest: metadata['explicitUserRequest'] === true,
     authToken: context.authToken ?? '',
     ...(context.principalKind ? { principalKind: context.principalKind } : {}),
+    ...(context.credentialKind ? { credentialKind: context.credentialKind } : {}),
   };
 }
 

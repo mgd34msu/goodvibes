@@ -8,7 +8,7 @@ import type { OccasionProfileMutation } from '../../occasions/capture.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { normalizeContext } from '../host-handlers.js';
-import { requestsNativeAdmission, runNativeMutation, type NativeMutationHost } from '../native-mutation.js';
+import { isDelegatedCaller, runNativeMutation, type NativeMutationHost } from '../native-mutation.js';
 import { bindProfileDelegationToInvocation, captureNativeProfileDelegation, profileDelegationForInvocation, profileMutationOptionsForInvocation, readProfileAdmittedInvocation, readProfileDelegation, type ProfileMutationOptions, type RecordedProfileDelegation, type RecordedProfileMutation } from '../../owner-profile/delegation.js';
 import type { OccasionMutationOptions } from '../../occasions/operation.js';
 import { readStoppedNativeNudge } from '../../occasions/push.js';
@@ -55,11 +55,14 @@ export function profileMutationOptions(invocation: GatewayMethodInvocation, scop
   } };
 }
 
-/** Selects fresh server admission. The original human protocol remains independently enforced. */
+/**
+ * A call made with the Agent's credential takes fresh server admission; any
+ * other caller keeps the original human protocol, enforced independently.
+ */
 export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: string, handler: GatewayMethodHandler,
   host: NativeMutationHost | undefined, target: NativeProfileTarget | undefined, provenance = true): GatewayMethodHandler {
   return async invocation => {
-    if (!requestsNativeAdmission(invocation.body)) {
+    if (!isDelegatedCaller(invocation.context ?? {})) {
       const delegation = profileDelegationForInvocation(invocation);
       const retained = profileMutationOptionsForInvocation(invocation);
       if (delegation && retained && target && targets.get(catalog)?.get(method) === target) {
@@ -103,7 +106,7 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
       if (!profileIntent) profileRead.assertCurrent();
       if (!stateIntent) stateRead?.assertCurrent();
     };
-    return runNativeMutation({ host, method, invocation, body: { admission: 'autonomous', body: invocation.body ?? null, query: invocation.query ?? null },
+    return runNativeMutation({ host, method, invocation, body: { body: invocation.body ?? null, query: invocation.query ?? null },
       context: { ...normalizeContext(invocation.context), signal: invocation.signal,
         nativeExecutionAuthority: invocation.nativeExecutionAuthority, isAuthorized: invocation.isAuthorized },
       target: { domain: 'owner-profile', method }, assertTargetCurrent,
@@ -122,7 +125,7 @@ export function nativeProfileMutation(catalog: GatewayMethodCatalog, method: str
               raisedAt: new Date(request.nudge.raisedAt).toISOString(),
               subjects: request.nudge.subjects.map(subject => ({ ...subject, occasionId: nativeNudgeIdentity(subject.occasionId) })) };
             return runNativeMutation({ host, method: 'occasions.sweep.deliver', invocation,
-              body: { admission: 'autonomous', parent: { body: invocation.body ?? null, query: invocation.query ?? null },
+              body: { parent: { body: invocation.body ?? null, query: invocation.query ?? null },
                 delivery: { channel: request.channel, nudge: nudgeMeaning } },
               context: { ...normalizeContext(invocation.context), signal: invocation.signal,
                 nativeExecutionAuthority: invocation.nativeExecutionAuthority, isAuthorized: invocation.isAuthorized },

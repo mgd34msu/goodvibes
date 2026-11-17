@@ -54,13 +54,27 @@ function rethrowAsVerbError(error: unknown): never {
   throw error;
 }
 
+function readAttemptId(params: Record<string, unknown>): string | undefined {
+  const raw = params.attemptId;
+  if (raw === undefined) return undefined;
+  if (!isPairingAttemptId(raw)) {
+    throw new GatewayVerbError('attemptId must be 8 to 128 letters, digits or . _ : -', 'INVALID_ARGUMENT', 400, 'attemptId');
+  }
+  return raw;
+}
+
 function createMintHandler(service: PairingGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
     const name = requireStringValue(params.name, 'name');
+    const attemptId = readAttemptId(params);
+    if (params.client !== undefined && params.client !== 'agent') {
+      throw new GatewayVerbError('client is "agent" or absent', 'INVALID_ARGUMENT', 400, 'client');
+    }
     try {
-      return { token: service.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId) }) };
+      return { token: service.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
+        ...(attemptId !== undefined ? { attemptId } : {}), ...(params.client === 'agent' ? { client: 'agent' as const } : {}) }) };
     } catch (error) {
       rethrowAsVerbError(error);
     }
@@ -72,14 +86,7 @@ function createMigrateHandler(service: PairingGatewayService): GatewayMethodHand
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
     const name = requireStringValue(params.name, 'name');
-    const rawAttemptId = params.attemptId;
-    let attemptId: string | undefined;
-    if (rawAttemptId !== undefined) {
-      if (!isPairingAttemptId(rawAttemptId)) {
-        throw new GatewayVerbError('attemptId must be 8 to 128 letters, digits or . _ : -', 'INVALID_ARGUMENT', 400, 'attemptId');
-      }
-      attemptId = rawAttemptId;
-    }
+    const attemptId = readAttemptId(params);
     try {
       // A device moving off the legacy shared token is not a NEW node, it is a
       // node that is already using this daemon. Refusing it at the cap would

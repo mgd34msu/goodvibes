@@ -21,6 +21,19 @@
  * it is revoked here via `revokeLegacyShared()`; a client on the shared token
  * calls `mintForMigration()` once to move to its own per-device token.
  *
+ * The owner's own machine needs no pairing: its apps hold the shared token,
+ * and the transport, having seen that token arrive from the daemon's own
+ * machine, asks for the local native owner (`ensureLocalNativeOwner`). That
+ * is one stable record, made once, which native work, the work ledger and
+ * continuation grants are bound to the way they are bound to a pairing. It
+ * goes when the legacy shared token is revoked.
+ *
+ * A pairing minted with `client: 'agent'` is the GoodVibes Agent's credential
+ * for the calls it makes on the owner's behalf. The transport reports it as
+ * its own credential kind, so a call made with it is judged as the Agent's
+ * whatever its body says. It is not a device: it does not count toward
+ * `device.nodes.maxPaired`.
+ *
  * A minted token is an offer until its first use: it is not listed as a
  * device and does not count toward `device.nodes.maxPaired`, and when nobody
  * uses it within {@link PAIRING_OFFER_LIFETIME_MS} it stops authenticating and
@@ -59,6 +72,18 @@ const TOKEN_PREFIX = 'gvp_';
 /** The identity recorded for a pairing file that does not exist. */
 const ABSENT_FILE = 'absent';
 
+/**
+ * The owner's own machine as a native credential. Only the transport passes
+ * it, after it established that the daemon's operator token arrived from the
+ * daemon's own machine; no payload can name it.
+ */
+export const LOCAL_OWNER_CREDENTIAL: unique symbol = Symbol('goodvibes.local-owner-credential');
+/** A pairing token, or the owner's own machine. */
+export type NativeCredential = string | typeof LOCAL_OWNER_CREDENTIAL;
+/** The principal the owner's own machine authenticates as: the one its operator token already is. */
+export const LOCAL_OWNER_PRINCIPAL = 'shared-token';
+const LOCAL_OWNER_ID_PATTERN = /^local-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Whether a presented credential has the pairing-token shape (not whether it is valid). */
 export function isPairingTokenShape(token: string): boolean {
   return token.trim().startsWith(TOKEN_PREFIX);
@@ -91,7 +116,25 @@ interface StoredPairingToken {
   /** Issued once per exact credential incarnation; never derived by hashing
    * another hash. Kept private alongside its original verifier, not listable. */
   nativeContinuationRevision?: { readonly id: string; readonly createdAt: number; readonly tokenHash: string };
+  /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
+  client?: 'agent' | undefined;
 }
+
+/**
+ * The owner's own machine as a native authority: the stable id native work,
+ * the ledger and continuation grants are bound to. `tokenHash` is a random
+ * incarnation marker in the place a pairing keeps its verifier; no credential
+ * hashes to it, so it never authenticates anything.
+ */
+interface StoredLocalOwner {
+  readonly id: string;
+  readonly createdAt: number;
+  readonly tokenHash: string;
+  nativeContinuationRevision?: { readonly id: string; readonly createdAt: number; readonly tokenHash: string };
+}
+
+/** What a continuation grant is held by: a pairing, or the owner's own machine. */
+type NativeCustodian = StoredPairingToken | StoredLocalOwner;
 
 interface PairingOwnerLock {
   assertOwned(): void;
@@ -126,6 +169,8 @@ interface PairingTokenSnapshot {
   tokens: StoredPairingToken[];
   /** Once true, the legacy single shared token no longer authenticates. */
   legacyRevoked?: boolean | undefined;
+  /** The owner's own machine, once one of its apps used native work. */
+  localOwner?: StoredLocalOwner | undefined;
 }
 class UnsupportedNativeSourceBindingError extends Error {}
 
@@ -143,6 +188,7 @@ function pruneUnpresentableContinuations(snapshot: PairingTokenSnapshot): void {
   const grants = snapshot.continuations;
   if (!grants?.length) return;
   const live = new Set(snapshot.tokens.map(token => token.id));
+  if (snapshot.localOwner) live.add(snapshot.localOwner.id);
   const kept = grants.filter(grant => live.has(grant.tokenId));
   if (kept.length === grants.length) return;
   const sourcesOf = (list: readonly StoredNativeContinuationGrant[]) =>
@@ -161,6 +207,8 @@ export interface PublicPairingToken {
   readonly lastSeenAt?: number | undefined;
   /** The paired device that minted this token; revoking it revokes this one too. */
   readonly mintedBy?: string | undefined;
+  /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
+  readonly client?: 'agent' | undefined;
 }
 
 /** The result of minting a token, the ONLY time the plaintext secret is exposed. */
@@ -190,11 +238,16 @@ export interface MintPairingInput {
    * secret stops working) instead of adding a second one.
    */
   readonly attemptId?: string | undefined;
+  /** `agent` marks the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
+  readonly client?: 'agent' | undefined;
 }
 
-/** Private native authority identity. It never carries the token or its hash. */
+/**
+ * Private native authority identity. It never carries the token or its hash.
+ * `local` is the owner's own machine; its principal is the operator token's.
+ */
 export interface AuthenticatedNativePairingToken {
-  readonly kind: 'pairing-token';
+  readonly kind: 'pairing-token' | 'local';
   readonly tokenId: string;
   readonly principalId: string;
   readonly authorityId: string;
@@ -257,6 +310,7 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
       || (record.lastSeenAt !== undefined && (typeof record.lastSeenAt !== 'number' || !Number.isFinite(record.lastSeenAt)))
       || (record.mintedBy !== undefined && (typeof record.mintedBy !== 'string' || !PAIRING_ID_PATTERN.test(record.mintedBy)))
       || (record.attemptId !== undefined && (typeof record.attemptId !== 'string' || !PAIRING_ATTEMPT_ID_PATTERN.test(record.attemptId)))
+      || (record.client !== undefined && record.client !== 'agent')
       || ids.has(record.id) || hashes.has(record.tokenHash)) {
       throw new Error('pairing token store has an invalid or duplicate record');
     }
@@ -266,6 +320,16 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
       || Object.keys(revision).length !== 3 || typeof revision.id !== 'string' || !/^[0-9a-f]{64}$/.test(revision.id)
       || typeof revision.tokenHash !== 'string' || !/^[0-9a-f]{64}$/.test(revision.tokenHash)
       || typeof revision.createdAt !== 'number' || !Number.isFinite(revision.createdAt))) throw new Error('Invalid native credential incarnation');
+  }
+  const local = snapshot.localOwner;
+  if (local !== undefined && (!local || typeof local !== 'object' || Array.isArray(local)
+    || typeof local.id !== 'string' || !LOCAL_OWNER_ID_PATTERN.test(local.id)
+    || typeof local.tokenHash !== 'string' || !/^[0-9a-f]{64}$/.test(local.tokenHash) || hashes.has(local.tokenHash)
+    || typeof local.createdAt !== 'number' || !Number.isFinite(local.createdAt)
+    || (local.nativeContinuationRevision !== undefined && (!local.nativeContinuationRevision || typeof local.nativeContinuationRevision !== 'object'
+      || typeof local.nativeContinuationRevision.id !== 'string' || !/^[0-9a-f]{64}$/.test(local.nativeContinuationRevision.id)
+      || local.nativeContinuationRevision.tokenHash !== local.tokenHash || local.nativeContinuationRevision.createdAt !== local.createdAt)))) {
+    throw new Error('pairing token store has an invalid local owner record');
   }
   // Published reader width; newly issued values are ordinary opaque IDs.
   const isStoredBinding = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
@@ -291,6 +355,7 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
     }
   }
   return { tokens: snapshot.tokens, legacyRevoked: snapshot.legacyRevoked === true,
+    ...(local ? { localOwner: local } : {}),
     ...(snapshot.continuations ? { continuations: snapshot.continuations } : {}),
     ...(snapshot.revokedNativeSources ? { revokedNativeSources: snapshot.revokedNativeSources } : {}) };
 }
@@ -301,6 +366,24 @@ export interface AuthenticatedPairingToken {
   readonly name: string;
   /** Stable per-token principal id (`pairing:<id>`), so step-up keys per token. */
   readonly principalId: string;
+  /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
+  readonly client?: 'agent' | undefined;
+}
+
+/** The pairing or local owner record a continuation grant names, while it is live. */
+function custodianOf(snapshot: PairingTokenSnapshot, id: string): NativeCustodian | undefined {
+  return snapshot.tokens.find(item => item.id === id)
+    ?? (snapshot.localOwner?.id === id && snapshot.legacyRevoked !== true ? snapshot.localOwner : undefined);
+}
+
+/** The native identity a custodian authenticates as. */
+function nativeIdentityOf(custodian: NativeCustodian): AuthenticatedNativePairingToken {
+  if (LOCAL_OWNER_ID_PATTERN.test(custodian.id)) {
+    return Object.freeze({ kind: 'local', tokenId: custodian.id, principalId: LOCAL_OWNER_PRINCIPAL,
+      authorityId: LOCAL_OWNER_PRINCIPAL, authorityRevision: custodian.id });
+  }
+  const principalId = pairingPrincipalId(custodian.id);
+  return Object.freeze({ kind: 'pairing-token', tokenId: custodian.id, principalId, authorityId: principalId, authorityRevision: custodian.id });
 }
 
 function hashToken(token: string): string {
@@ -464,6 +547,8 @@ export class PairingTokenManager {
   #observedIdentity: string | undefined;
   /** The last read of a changed file failed: pairing tokens do not authenticate until a read succeeds. */
   #readFaulted = false;
+  /** The file identity native authority last confirmed durable; native reads confirm a new identity once. */
+  #durableIdentity: string | undefined;
   readonly #revocationListeners = new Set<(principalIds: readonly string[]) => void>();
 
   constructor(filePath: string, options: PairingTokenManagerOptions = {}) {
@@ -563,9 +648,12 @@ export class PairingTokenManager {
     return Math.floor(raw);
   }
 
-  /** How many paired device nodes exist right now, one record per node; an offer nobody has used is not one. */
+  /**
+   * How many paired device nodes exist right now, one record per node; an
+   * offer nobody has used is not one, and neither is the Agent's credential.
+   */
   pairedCount(): number {
-    return this.snapshot.tokens.filter(record => record.offeredUntil === undefined).length;
+    return this.snapshot.tokens.filter(record => record.offeredUntil === undefined && record.client !== 'agent').length;
   }
 
   /**
@@ -778,6 +866,7 @@ export class PairingTokenManager {
      */
     additiveOnly: () => boolean = () => false): T {
     const lock = this.acquireOwnerLock();
+    let durable = false;
     try {
       const persisted = this.readPersisted();
       const snapshot = persisted ?? { tokens: [] };
@@ -800,11 +889,13 @@ export class PairingTokenManager {
           writeJsonFileAtomic(this.filePath, snapshot, { mode: 0o600, trailingNewline: false, durable: true });
           this.settingsObservedStore = true;
           this.#pendingLastSeen.clear();
+          durable = true;
         } else if (nativeRecovery && persisted !== null) {
           // Retrying an indeterminate revoke can find the record already absent.
           // Readable bytes alone do not clear uncertainty; confirm the full
           // publication even when the retry has no new bytes to write.
           confirmFileDurable(this.filePath);
+          durable = true;
         }
       } catch (error) {
         this.nativePersistenceFailed = nativeRecovery || this.nativePersistenceFailed === 'owner' ? 'owner' : 'last-seen';
@@ -818,6 +909,7 @@ export class PairingTokenManager {
       lock.assertOwned();
       // Read or written under the owner lock, so this is the identity of what is published.
       this.#observedIdentity = this.#statIdentity();
+      if (durable) this.#durableIdentity = this.#observedIdentity;
       this.#readFaulted = false;
       this.publish(snapshot);
       return result.value;
@@ -927,50 +1019,87 @@ export class PairingTokenManager {
   }
 
   /**
-   * Strict native reads prove that the immutable live identity is still present
-   * in a freshly read, valid persisted snapshot. Last-seen and labels are not
-   * authority generations. Reads confirm durability without stamping last-seen
-   * or rewriting the file; failed confirmation never grants authority.
+   * Native authority reads the published snapshot once the file it came from
+   * is known durable: one `lstat` per check (the file is read again only when
+   * its identity moved), and one durability confirmation per new identity.
+   * Last-seen and labels are not authority generations. A failed confirmation
+   * never grants authority.
    */
-  authenticateNative(token: string): AuthenticatedNativePairingToken | null {
-    const normalized = token.trim();
-    if (this.nativePersistenceFailed || !normalized.startsWith(TOKEN_PREFIX) || this.index.size === 0) return null;
-    const hash = hashToken(normalized);
-    const live = this.index.get(hash);
-    if (!live || this.refusalOf(live, Date.now())) return null;
-    let persisted: StoredPairingToken | undefined;
+  #nativeSnapshotCurrent(): boolean {
+    if (!this.refreshIfChanged()) return false;
+    const identity = this.#observedIdentity;
+    if (identity === undefined || identity === ABSENT_FILE) return false;
+    if (identity === this.#durableIdentity) return true;
     try {
       // A fresh manager cannot treat post-rename, unconfirmed bytes as durable
       // authority. Confirmation also makes recovery after restart explicit.
-      const before = readFileSync(this.filePath, 'utf8');
-      const snapshot = validateSnapshot(JSON.parse(before));
       confirmFileDurable(this.filePath);
-      if (readFileSync(this.filePath, 'utf8') !== before) return null;
-      persisted = snapshot.tokens.find(record => record.tokenHash === hash);
     } catch (error) {
       if (error instanceof AtomicWriteDurabilityError) this.nativePersistenceFailed = 'owner';
       this.faultSettings('read');
-      return null;
+      return false;
     }
-    if (!persisted || persisted.id !== live.id || persisted.createdAt !== live.createdAt) return null;
-    const principalId = pairingPrincipalId(persisted.id);
-    return Object.freeze({ kind: 'pairing-token', tokenId: persisted.id, principalId,
-      authorityId: principalId, authorityRevision: persisted.id });
+    // Replaced while it was confirmed: the next check reads the new file.
+    if (this.#statIdentity() !== identity) return false;
+    this.#durableIdentity = identity;
+    return true;
   }
 
-  /** Hold paired ownership through the caller's workspace/ledger/launch boundary. */
-  async withNativeAuthority<T>(token: string, expected: AuthenticatedNativePairingToken,
+  /**
+   * The native identity of a pairing token, or of the owner's own machine
+   * ({@link LOCAL_OWNER_CREDENTIAL}, which the transport passes only after it
+   * established that credential). Never writes and never stamps last-seen.
+   */
+  authenticateNative(credential: NativeCredential): AuthenticatedNativePairingToken | null {
+    if (this.nativePersistenceFailed) return null;
+    if (credential === LOCAL_OWNER_CREDENTIAL) {
+      if (!this.#nativeSnapshotCurrent()) return null;
+      const owner = this.snapshot.localOwner;
+      return owner && this.snapshot.legacyRevoked !== true ? nativeIdentityOf(owner) : null;
+    }
+    const normalized = credential.trim();
+    if (!normalized.startsWith(TOKEN_PREFIX) || !this.#nativeSnapshotCurrent() || this.index.size === 0) return null;
+    const live = this.index.get(hashToken(normalized));
+    if (!live || this.refusalOf(live, Date.now())) return null;
+    return nativeIdentityOf(live);
+  }
+
+  /**
+   * The owner's own machine's native identity, made the first time one of its
+   * apps uses native work (one durable write, once) and read after that. Null
+   * once the legacy shared token is revoked, or when the record cannot be
+   * written; the refusal the caller gives then names pairing as the way on.
+   */
+  ensureLocalNativeOwner(): AuthenticatedNativePairingToken | null {
+    const current = this.authenticateNative(LOCAL_OWNER_CREDENTIAL);
+    if (current || this.nativePersistenceFailed || this.snapshot.legacyRevoked === true) return current;
+    try {
+      const made = this.mutate(snapshot => {
+        if (snapshot.legacyRevoked === true) return { value: false, changed: false };
+        if (snapshot.localOwner) return { value: true, changed: false };
+        snapshot.localOwner = { id: `local-${randomUUID()}`, createdAt: Date.now(), tokenHash: randomBytes(32).toString('hex') };
+        return { value: true, changed: true };
+      }, true, () => true);
+      return made ? this.authenticateNative(LOCAL_OWNER_CREDENTIAL) : null;
+    } catch (error) {
+      logger.warn('The local native owner could not be recorded; native work from this machine is refused until it can be', { path: this.filePath, error: String(error) });
+      return null;
+    }
+  }
+
+  /** Hold native ownership through the caller's workspace/ledger/launch boundary. */
+  async withNativeAuthority<T>(credential: NativeCredential, expected: AuthenticatedNativePairingToken,
     operation: (assertCurrent: () => AuthenticatedNativePairingToken) => T | Promise<T>): Promise<T> {
     const lock = this.acquireOwnerLock();
     let active = true;
     try {
       const assertCurrent = () => {
         lock.assertOwned();
-        const current = active ? this.authenticateNative(token) : null;
+        const current = active ? this.authenticateNative(credential) : null;
         if (!current || current.kind !== expected.kind || current.tokenId !== expected.tokenId
           || current.principalId !== expected.principalId || current.authorityId !== expected.authorityId
           || current.authorityRevision !== expected.authorityRevision) {
-          throw new Error('Persisted native pairing authority is no longer valid');
+          throw new Error('Persisted native authority is no longer valid');
         }
         return current;
       };
@@ -979,7 +1108,7 @@ export class PairingTokenManager {
     } finally { active = false; lock.release(); }
   }
 
-  private continuationCustodyMatches(grant: StoredNativeContinuationGrant, token: StoredPairingToken): boolean {
+  private continuationCustodyMatches(grant: StoredNativeContinuationGrant, token: NativeCustodian): boolean {
     const revision = token.nativeContinuationRevision;
     if (revision?.id === grant.tokenRevision) {
       return revision.createdAt === token.createdAt && revision.tokenHash === token.tokenHash
@@ -1006,11 +1135,11 @@ export class PairingTokenManager {
    * exact source/scope/policy validator; persistence precedes any successful receipt.
    * No plaintext credential or signing material enters the issued record.
    */
-  issueNativeContinuation(token: string, expected: NativeContinuationAuthority, binding: string, assertCurrent: () => void, sourceBinding = binding): NativeContinuationGrant {
+  issueNativeContinuation(credential: NativeCredential, expected: NativeContinuationAuthority, binding: string, assertCurrent: () => void, sourceBinding = binding): NativeContinuationGrant {
     if (typeof sourceBinding !== 'string' || !/^[0-9a-f]{64}$/.test(sourceBinding) || !/^[0-9a-f]{64}$/.test(binding) || !Array.isArray(expected.scopes) || !expected.scopes.length
       || expected.scopes.some(scope => typeof scope !== 'string' || !scope) || new Set(expected.scopes).size !== expected.scopes.length) throw new Error('Invalid continuation binding');
     return this.mutate(snapshot => {
-      const current = this.authenticateNative(token);
+      const current = this.authenticateNative(credential);
       if (!current || current.kind !== expected.kind || current.authorityId !== expected.authorityId || current.tokenId !== expected.tokenId || current.principalId !== expected.principalId
         || current.authorityRevision !== expected.authorityRevision) throw new Error('Native continuation owner is no longer current');
       assertCurrent();
@@ -1035,7 +1164,7 @@ export class PairingTokenManager {
   private appendNativeContinuation(snapshot: PairingTokenSnapshot, expected: NativeContinuationAuthority, binding: string,
     parent: StoredNativeContinuationGrant['parent'], assertCurrent: () => void, sourceBinding: string): { changed: boolean; value: NativeContinuationGrant } {
     if (snapshot.revokedNativeSources?.includes(sourceBinding)) throw new Error('Native continuation source was cancelled');
-    const tokenRecord = snapshot.tokens.find(item => item.id === expected.tokenId);
+    const tokenRecord = custodianOf(snapshot, expected.tokenId);
     if (!tokenRecord) throw new Error('Native continuation pairing is unavailable');
     const previous = snapshot.continuations?.find(item => item.tokenId === expected.tokenId && item.binding === binding);
     if (previous) {
@@ -1066,15 +1195,18 @@ export class PairingTokenManager {
     return { changed: true, value: Object.freeze({ id: grant.id, binding: grant.binding }) };
   }
 
-  /** Strict restart lookup of an actually issued grant, never adoption by token ID. */
+  /**
+   * Strict restart lookup of an actually issued grant, never adoption by token
+   * ID. Reads the published snapshot once its file is known durable (one
+   * `lstat` per lookup; the file is read again only when it changed).
+   */
   readNativeContinuation(grant: NativeContinuationGrant, consumption?: string, watchBinding?: string): NativeContinuationAuthority | null {
     if (this.nativePersistenceFailed) return null;
     try {
-      const before = readFileSync(this.filePath, 'utf8');
-      const snapshot = validateSnapshot(JSON.parse(before)); confirmFileDurable(this.filePath);
-      if (readFileSync(this.filePath, 'utf8') !== before) return null;
+      if (!this.#nativeSnapshotCurrent()) return null;
+      const snapshot = this.snapshot;
       const issued = snapshot.continuations?.find(item => item.id === grant.id && item.binding === grant.binding);
-      const token = issued && snapshot.tokens.find(item => item.id === issued.tokenId);
+      const token = issued && custodianOf(snapshot, issued.tokenId);
       if (!issued || !token || !this.continuationCustodyMatches(issued, token)
         || (watchBinding !== undefined && issued.watchBinding !== watchBinding)
         || snapshot.revokedNativeSources?.includes(issued.sourceBinding) || (issued.successorSourceBinding !== null && snapshot.revokedNativeSources?.includes(issued.successorSourceBinding))
@@ -1089,9 +1221,7 @@ export class PairingTokenManager {
           || JSON.stringify(parent.scopes) !== JSON.stringify(issued.scopes)) return null;
         visited.add(parent.id); child = parent;
       }
-      const principalId = pairingPrincipalId(token.id);
-      return Object.freeze({ kind: 'pairing-token', tokenId: token.id, principalId, authorityId: principalId,
-        authorityRevision: token.id, scopes: Object.freeze([...issued.scopes]) });
+      return Object.freeze({ ...nativeIdentityOf(token), scopes: Object.freeze([...issued.scopes]) });
     } catch { return null; }
   }
 
@@ -1114,7 +1244,7 @@ export class PairingTokenManager {
     this.mutate(snapshot => {
       const issued = snapshot.continuations?.find(item => item.id === grant.id && item.binding === grant.binding);
       if (!issued || issued.revoked
-        || !snapshot.tokens.some(token => token.id === issued.tokenId)
+        || !custodianOf(snapshot, issued.tokenId)
         || (issued.watchBinding !== null && issued.watchBinding !== watchBinding)) throw new Error('Native continuation watch is unavailable or already bound');
       if (!this.readNativeContinuation(grant)) throw new Error('Native continuation lineage is unavailable');
       assertCurrent(); const changed = issued.watchBinding === null;
@@ -1128,7 +1258,7 @@ export class PairingTokenManager {
     if (typeof successorSourceBinding !== 'string' || !/^[0-9a-f]{64}$/.test(successorSourceBinding) || !/^[0-9a-f]{64}$/.test(consumption)) throw new Error('Invalid continuation consumption');
     this.mutate(snapshot => {
       const issued = snapshot.continuations?.find(item => item.id === grant.id && item.binding === grant.binding);
-      if (!issued || issued.revoked || !snapshot.tokens.some(token => token.id === issued.tokenId)
+      if (!issued || issued.revoked || !custodianOf(snapshot, issued.tokenId)
         || snapshot.revokedNativeSources?.includes(successorSourceBinding)
         || (issued.consumption !== null && (issued.consumption !== consumption || issued.successorSourceBinding !== successorSourceBinding))) throw new Error('Native continuation is unavailable or already consumed');
       assertCurrent();
@@ -1149,9 +1279,10 @@ export class PairingTokenManager {
       assertCurrent();
       const bindings = new Set([sourceBinding]);
       if (compatibility) {
-        const expected = compatibility.authority, token = snapshot.tokens.find(item => item.id === expected.tokenId);
-        if (!token || expected.kind !== 'pairing-token' || expected.authorityId !== expected.principalId
-          || expected.principalId !== pairingPrincipalId(token.id) || expected.authorityRevision !== token.id) throw new Error('Native source owner changed');
+        const expected = compatibility.authority, token = custodianOf(snapshot, expected.tokenId);
+        const identity = token && nativeIdentityOf(token);
+        if (!token || !identity || expected.kind !== identity.kind || expected.authorityId !== expected.principalId
+          || expected.principalId !== identity.principalId || expected.authorityRevision !== token.id) throw new Error('Native source owner changed');
         // Only actual pre-marker root grants can have the earlier producer bug.
         // A current marked grant never causes a historical recipe calculation.
         const candidates = snapshot.continuations?.filter(grant => !grant.revoked && grant.parent === null
@@ -1227,7 +1358,8 @@ export class PairingTokenManager {
       }
       const attemptId = input.attemptId;
       const repeated = attemptId === undefined ? undefined
-        : snapshot.tokens.find(record => record.offeredUntil !== undefined && record.attemptId === attemptId && record.mintedBy === input.mintedBy);
+        : snapshot.tokens.find(record => record.offeredUntil !== undefined && record.attemptId === attemptId
+          && record.mintedBy === input.mintedBy && record.client === input.client);
       if (repeated) {
         // The reply to this attempt was lost: the same offer goes out again under a
         // new secret, so nothing is added and the secret nobody received never works.
@@ -1239,9 +1371,10 @@ export class PairingTokenManager {
         replaced = true;
         return { value: { id: reissued.id, name: reissued.name, token, createdAt: reissued.createdAt }, changed: true };
       }
-      const cap = options.enforceCap ? this.currentCap() : null;
+      // The Agent's credential is not a device node, so the node cap does not apply to it.
+      const cap = options.enforceCap && input.client !== 'agent' ? this.currentCap() : null;
       // An offer nobody has used yet is not a paired device and does not count toward the cap.
-      const paired = snapshot.tokens.filter(record => record.offeredUntil === undefined);
+      const paired = snapshot.tokens.filter(record => record.offeredUntil === undefined && record.client !== 'agent');
       if (cap !== null && paired.length >= cap) {
         const normalized = input.name.trim().toLowerCase();
         const existing = normalized ? paired.find(record => record.name.trim().toLowerCase() === normalized) : undefined;
@@ -1259,6 +1392,7 @@ export class PairingTokenManager {
         tokenHash: hashToken(token), createdAt: now, offeredUntil: now + PAIRING_OFFER_LIFETIME_MS,
         ...(input.mintedBy !== undefined && input.mintedBy !== replacedId ? { mintedBy: input.mintedBy } : {}),
         ...(attemptId !== undefined ? { attemptId } : {}),
+        ...(input.client === 'agent' ? { client: 'agent' as const } : {}),
       };
       // A device paired again keeps answering for what its old pairing minted.
       if (replacedId !== undefined) for (const item of snapshot.tokens) if (item.mintedBy === replacedId) item.mintedBy = record.id;
@@ -1333,7 +1467,7 @@ export class PairingTokenManager {
     } else {
       this.#stampLastSeen(record, now);
     }
-    return { id: record.id, name: record.name, principalId: pairingPrincipalId(record.id) };
+    return { id: record.id, name: record.name, principalId: pairingPrincipalId(record.id), ...(record.client === 'agent' ? { client: 'agent' as const } : {}) };
   }
 
   /** Every per-pairing token, redacted (name / created / last-seen), never the secret. */
@@ -1346,6 +1480,7 @@ export class PairingTokenManager {
       createdAt: t.createdAt,
       ...lastSeenField(t.lastSeenAt, this.#pendingLastSeen.get(t.id)),
       ...(t.mintedBy !== undefined ? { mintedBy: t.mintedBy } : {}),
+      ...(t.client === 'agent' ? { client: 'agent' as const } : {}),
     }));
   }
 
@@ -1385,11 +1520,16 @@ export class PairingTokenManager {
     return this.snapshot.legacyRevoked === true;
   }
 
-  /** Revoke the legacy single shared token; report only persisted success. */
+  /**
+   * Revoke the legacy single shared token; report only persisted success. The
+   * owner's own machine loses its native authority with it (its grants go in
+   * the same write): its apps then pair like any other device.
+   */
   revokeLegacyShared(): void {
     this.mutate(snapshot => {
-      const changed = snapshot.legacyRevoked !== true;
+      const changed = snapshot.legacyRevoked !== true || snapshot.localOwner !== undefined;
       snapshot.legacyRevoked = true;
+      delete snapshot.localOwner;
       return { value: undefined, changed };
     });
   }

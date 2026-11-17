@@ -30,9 +30,9 @@ export type DelegatedTelegramConfiguration = z.infer<typeof delegatedTelegramCon
 export type DelegatedTelegramDecision = z.infer<typeof delegatedTelegramDecisionSchema>;
 export type DelegatedInboundChoices = NonNullable<DelegatedTelegramDecision['choices']>;
 
-/** Paired identity metadata only; no bearer token, source content, or derived digest. */
+/** Owner identity metadata only (a pairing or the owner's own machine); no bearer token, source content, or derived digest. */
 export const delegatedReviewOwnerSchema = z.object({
-  kind: z.literal('pairing-token'), principalId: id, tokenId: id, authorityId: id, authorityRevision: id,
+  kind: z.enum(['pairing-token', 'local']), principalId: id, tokenId: id, authorityId: id, authorityRevision: id,
   scopes: z.array(id).max(256),
 }).strict();
 export type DelegatedReviewOwner = Readonly<Omit<z.infer<typeof delegatedReviewOwnerSchema>, 'scopes'>> & { readonly scopes: readonly string[] };

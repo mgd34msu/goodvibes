@@ -2,7 +2,7 @@ import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type Tele
 import { describeRetainedConnectionFailure, RetainedOperatorConnection } from './retained-operator-connection.js';
 import type { PaymentWindowCommandContext, PaymentWindowCommandPolicy } from './payment-window-command.js';
 import type { SelectionItem, SelectionResult } from './selection-modal.js';
-import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
+import { isOwnerOperatorPrincipal } from './native/native-paired-principal.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 
 /** One controller shared by both terminals; products only choose their own
@@ -38,7 +38,7 @@ export function createTelegramCursorCommand<Context extends PaymentWindowCommand
     };
     const authenticate = async () => {
       const auth = await connection.run((operator, signal) => operator.control.auth.current({}, { signal }));
-      if (!isPairedOperatorPrincipal(auth, ['read:channels', 'write:channels'], connection.expectedPrincipalId)
+      if (!isOwnerOperatorPrincipal(auth, ['read:channels', 'write:channels'], connection.expectedPrincipalId)
         || principal !== undefined && principal !== auth.principalId) throw new Error('Administrative channel owner required');
       principal = auth.principalId;
     };

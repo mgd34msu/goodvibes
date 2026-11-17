@@ -1,7 +1,7 @@
 import type { GatePresetName } from '@goodvibes-jev/engine/platform/platform/gate/presets';
 import { createNativeHostFetch, NativeHostSelectionChangedError } from './native-host-fetch.js';
 import { createNativeHostedTurnClient } from './native-hosted-turn.js';
-import { isNativePairedPrincipal } from './native-paired-principal.js';
+import { isNativeOwnerPrincipal } from './native-paired-principal.js';
 import { createOperatorNativeWorkExecutionClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes-jev/engine/operator-client';
 import { createOperatorNativeConversationIntakeClient } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-intake-client';
@@ -49,8 +49,8 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
         client, execution, ...(allowHosted ? { hostedTurn: createNativeHostedTurnClient({ invoke: hostedInvoke }, projectId, readMode) } : {}),
         async readPrincipal(signal) {
             const auth = await invoke('control.auth.current', {}, { signal });
-            if (!isNativePairedPrincipal(auth, host.expectedPrincipalId)) {
-                throw new NativeIntakeFailure('principal', 'Native intake requires an existing paired principal');
+            if (!isNativeOwnerPrincipal(auth, host.expectedPrincipalId)) {
+                throw new NativeIntakeFailure('principal', 'Native intake runs from the daemon\'s own machine or a paired device; pair this device (/devices migrate-shared), then retry');
             }
             principalId = auth.principalId;
             return principalId;

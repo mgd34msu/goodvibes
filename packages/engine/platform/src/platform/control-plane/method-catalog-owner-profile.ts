@@ -250,7 +250,6 @@ export const PROFILE_PROVENANCE_OUTPUT_SCHEMA = objectSchema({
  * weakened gate, it was no gate.
  */
 export const PROFILE_SET_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   fieldId: STRING_SCHEMA,
   value: STRING_SCHEMA,
   surface: STRING_SCHEMA,
@@ -259,7 +258,6 @@ export const PROFILE_SET_INPUT_SCHEMA = objectSchema({
 }, ['fieldId', 'value', 'surface', 'said', 'authority']);
 
 export const PROFILE_APPEND_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   section: STRING_SCHEMA,
   text: STRING_SCHEMA,
   surface: STRING_SCHEMA,
@@ -285,7 +283,6 @@ export const PROFILE_APPEND_INPUT_SCHEMA = objectSchema({
  * the reachable surface.
  */
 export const PROFILE_FORGET_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   fieldId: STRING_SCHEMA,
   section: STRING_SCHEMA,
   text: STRING_SCHEMA,
@@ -293,7 +290,6 @@ export const PROFILE_FORGET_INPUT_SCHEMA = objectSchema({
 }, ['authority']);
 
 export const PROFILE_UNDO_INPUT_SCHEMA = objectSchema({
-  admission: { type: 'string', enum: ['autonomous'] },
   fieldId: STRING_SCHEMA,
   authority: STRING_SCHEMA,
 }, ['fieldId', 'authority']);

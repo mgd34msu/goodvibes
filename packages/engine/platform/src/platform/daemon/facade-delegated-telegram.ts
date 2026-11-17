@@ -8,6 +8,7 @@ import type { GatewayMethodInvocation } from '../control-plane/method-catalog-sh
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/native-error-summary.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
+import { PAIRED_OWNER_REQUIRED, requireNativeOwner } from '../control-plane/routes/native-owner.js';
 import { readInvocationParams } from '../control-plane/routes/invocation-params.js';
 import { NativeInboundReceiverRefusal } from '../control-plane/native-inbound-handoff.js';
 import {
@@ -16,13 +17,14 @@ import {
 } from '../control-plane/delegated-inbound-wire.js';
 import { z } from 'zod/v4';
 const scopes = ['read:work-ledger', 'write:work-ledger'] as const;
+/** The one native owner rule (routes/native-owner.ts); a token credential, never a login session. */
 function owner(invocation: GatewayMethodInvocation) {
-  const authority = invocation.nativeExecutionAuthority; const current = authority?.current(); const context = invocation.context;
-  if (!authority || !current || !context.admin || context.principalKind !== 'token' || context.principalId !== current.principalId
-    || current.kind !== 'pairing-token' || current.authorityId !== current.principalId || current.authorityRevision !== current.tokenId
-    || !scopes.every(scope => current.scopes.includes('*') || current.scopes.includes(scope)) || invocation.isAuthorized?.(scopes) !== true) {
-    throw new GatewayVerbError('Delegated intake requires a current persisted paired owner with work-ledger read/write access.', 'FORBIDDEN', 403);
+  if (invocation.context.principalKind !== 'token') {
+    throw new GatewayVerbError('Delegated Telegram intake runs for the owner's own machine or a paired device, not a login session. Use the app on the daemon's machine or a paired device, then retry.', PAIRED_OWNER_REQUIRED, 403);
   }
+  const authority = requireNativeOwner(invocation, scopes, 'Delegated Telegram intake');
+  const current = authority.current();
+  if (!current) throw new GatewayVerbError('Delegated Telegram intake: the caller's owner authority ended while the command started. Retry.', PAIRED_OWNER_REQUIRED, 403);
   return { authority, current };
 }
 /** Each command's input, parsed once at the top so a malformed one is a 400 for every command. */

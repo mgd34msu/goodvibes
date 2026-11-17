@@ -6,9 +6,14 @@ export interface ManualModelPrice {
   readonly cacheWrite?: number | undefined;
 }
 
+const MANUAL_MODEL_PRICE_FIELDS: ReadonlySet<string> = new Set(['input', 'output', 'cacheRead', 'cacheWrite']);
+
 export function validManualModelPrice(value: unknown): value is ManualModelPrice {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const rec = value as Record<string, unknown>;
+  // Only the four rates: a field of any other name (a key pasted into the wrong
+  // place) is refused rather than stored and later printed as a price.
+  if (Object.keys(rec).some((key) => !MANUAL_MODEL_PRICE_FIELDS.has(key))) return false;
   const rate = (key: string, required: boolean): boolean => {
     const v = rec[key];
     if (v === undefined) return !required;

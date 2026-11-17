@@ -8,10 +8,11 @@
  *
  *  - a key of the platform's config schema is answered by the platform's own
  *    declaration (SECRET_BEARING_CONFIG_PATHS), and so is every list element
- *    or leaf under one whose value passes that setting's own validator: the
- *    schema then says what each part is, so no reading is needed. A value the
- *    validator refuses holds something the schema did not declare, and its
- *    parts are read like any undeclared path;
+ *    or leaf under one whose schema entry marks its validator closed and whose
+ *    value passes it: the schema then says what each part is, so no reading is
+ *    needed. A value the validator refuses, or any value of a setting whose
+ *    validator is not closed, may hold something the schema did not declare,
+ *    and its parts are read like any undeclared path;
  *  - any other path (a provider's key, an env map under an MCP server, a
  *    header map, payment card fields) is read by Jev with the
  *    `config.credential-key` reading, from the path and never the value, once
@@ -46,11 +47,14 @@ export const CONFIG_PATH_CREDENTIAL_SITE = 'terminal-shell.redaction.config-path
 const PATH_READING_CONCURRENCY = 8;
 
 const SCHEMA_KEYS: ReadonlySet<string> = new Set(CONFIG_SCHEMA.map((setting) => setting.key));
+// Only a validator the schema marks closed (it refuses any part it does not
+// describe) can vouch for every leaf: an open one would let an undeclared field
+// ride on the setting's non-secret declaration into a support bundle.
 const SCHEMA_VALIDATORS: ReadonlyMap<string, (value: unknown) => boolean> = new Map(
-  CONFIG_SCHEMA.flatMap((setting) => (setting.validate ? [[setting.key, setting.validate] as const] : [])),
+  CONFIG_SCHEMA.flatMap((setting) => (setting.validate && setting.closedShape ? [[setting.key, setting.validate] as const] : [])),
 );
 
-/** Whether a setting's value has the shape its schema declares, so the declaration covers every part of it. */
+/** Whether a setting's value has the closed shape its schema declares, so the declaration covers every part of it. */
 function holdsDeclaredShape(key: string, value: unknown): boolean {
   const validate = SCHEMA_VALIDATORS.get(key);
   if (!validate) return false;

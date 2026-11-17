@@ -277,6 +277,14 @@ export interface ConfigSetting {
   unit?: 'money' | undefined;
   /** What a port number addresses: a port this machine binds, or a remote server's (schema-shared.ts `port()` / `remotePort()`). */
   role?: 'listen-port' | 'remote-port' | undefined;
+  /**
+   * True when `validate` accepts only values whose every part this setting
+   * describes: no field, key or element of a kind it does not know. A value
+   * that validates is then covered by this setting's declaration down to its
+   * leaves. Without it the leaves of an object or list value are classified on
+   * their own (for example when redacting a support bundle).
+   */
+  closedShape?: true | undefined;
 }
 
 /**

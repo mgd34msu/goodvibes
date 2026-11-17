@@ -30,6 +30,7 @@ export const pricingConfigSettings: ConfigSetting[] = [
       + 'provider-served and catalog pricing and applies live (no restart). Set one when registering a '
       + 'custom provider/model, or to pin a negotiated rate for any model.',
     validate: validateManualModelPrices,
+    closedShape: true,
     validationHint: 'record keyed "provider:model" of { input, output, cacheRead?, cacheWrite? }, finite numbers >= 0, USD per 1M tokens',
   },
 ];

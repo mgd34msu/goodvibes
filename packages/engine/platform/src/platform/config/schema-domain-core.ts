@@ -236,6 +236,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     default: DEFAULT_DECISION_ROUTER_SETTINGS,
     description: 'Decision Router category descriptions and answer provider/model/effort targets. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials.',
     validate: validDecisionRouterSettings,
+    closedShape: true,
   },
   {
     key: 'provider.reasoningEffort',

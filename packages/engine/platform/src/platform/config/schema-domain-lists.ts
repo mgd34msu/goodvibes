@@ -47,6 +47,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     default: [...clusterConfigDefaults.cluster.peers],
     description: 'Static list of cluster peers (host or host:port) contacted directly as well as over multicast. Set it on a network that drops multicast, so the nodes still find each other',
     validate: stringList,
+    closedShape: true,
     validationHint: 'list of host or host:port strings, for example ["10.0.0.2", "10.0.0.3:4000"]',
   },
   {
@@ -55,6 +56,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     default: [...conversationGateConfigDefaults.conversationGate.gatedSurfaces],
     description: 'Channel surfaces whose inbound messages pass the conversation gate before a session sees them',
     validate: stringList,
+    closedShape: true,
     validationHint: 'list of surface names, for example ["slack", "telegram"]',
   },
   {
@@ -71,6 +73,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     default: [...coreConfigDefaults.sandbox.egressAllowlist],
     description: 'Commands the exec sandbox lets reach the network; every other sandboxed command runs with the network off. Applies from the next command',
     validate: (value) => stringList(value) && value.every((entry) => entry.trim().length > 0),
+    closedShape: true,
     validationHint: 'list of non-empty command names, for example ["git", "npm"]',
   },
   {
@@ -79,6 +82,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     default: [...coreConfigDefaults.sandbox.workspaceWritable],
     description: 'Extra absolute paths the exec sandbox lets commands write besides the workspace. Applies from the next command',
     validate: (value) => stringList(value) && value.every((entry) => isAbsolute(entry)),
+    closedShape: true,
     validationHint: 'list of absolute paths',
   },
   {
@@ -87,6 +91,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     default: [...runtimeConfigDefaults.worktree.setup.commands],
     description: 'Commands run in a new worktree before an isolated agent starts in it. auto (the default, an empty list) runs the install command each lockfile in the repository names (bun install, npm ci, pnpm, yarn, uv sync, cargo fetch, go mod download; pip install -r requirements.txt only inside an active virtual environment). none runs nothing. A list runs exactly those commands, in order; one that exits non-zero marks the worktree setup failed',
     validate: worktreeSetupList,
+    closedShape: true,
     validationHint: 'a list of shell commands, [] for auto, or {"mode":"none"}',
   },
   {
@@ -95,6 +100,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     default: [...runtimeConfigDefaults.worktree.setup.carryOverGlobs],
     description: 'Untracked files copied from the main checkout into a new worktree, as glob patterns. auto (the default, an empty list) copies .env and .env.* when the repository root has them. none copies nothing. A list copies exactly the files those patterns match. Copies stay in the worktree until it is removed',
     validate: worktreeSetupList,
+    closedShape: true,
     validationHint: 'a list of glob patterns such as [".env", "config/*.local.json"], [] for auto, or {"mode":"none"}',
   },
 ];

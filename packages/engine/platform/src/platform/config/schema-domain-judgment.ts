@@ -35,6 +35,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     key: 'judgment.volumeMonitor', type: 'object', default: captureJudgmentVolumeMonitorControl({}),
     description: 'Local decision call-volume alerts. Set enabled:true and budgets:[{name:"All decisions",maxLogicalDecisions:1000,maxWireAttempts:2000}]. Optional battery/site restrict each budget; windowMs defaults to one hour, intervalMs to one minute, limit to 10000 log entries. Alerts report usage without calling models or stopping work. Disabled settings retain the optional GOODVIBES_JUDGMENT_MONITOR file override.',
     validate: value => { try { captureJudgmentVolumeMonitorControl(value); return value !== undefined; } catch { return false; } },
+    closedShape: true,
     validationHint: 'object with enabled and up to 100 budgets; enabled monitoring needs at least one budget',
   },
   {
@@ -77,6 +78,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     default: {},
     description: 'Optional adapter (system-one, cloudflare-workers-ai or laya), maxInputBytes, maxQuestions and responseModels for the primary deployment. Limits apply to the complete request; evidence is never silently shortened. Cloudflare run URLs select their adapter automatically',
     validate: value => { try { captureJudgmentBackendSettings(value); return value !== undefined; } catch { return false; } },
+    closedShape: true,
     validationHint: 'data object with optional adapter, positive maxInputBytes/maxQuestions and explicit responseModels',
   },
   {

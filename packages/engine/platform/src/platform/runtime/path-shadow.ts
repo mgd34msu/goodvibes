@@ -19,9 +19,9 @@
  * is injected, so the policy is provable under test with fake paths and no
  * real install. The surfaces wire the real I/O:
  *   - a client's startup check reports a shadow before anything else renders;
- *   - the installer's shell implementation (goodvibes-daemon scripts/install.sh)
- *     mirrors these same rules in POSIX sh, because an installer cannot
- *     import TypeScript.
+ *   - the installer's shell implementation (scripts/install.sh) mirrors these
+ *     same rules in POSIX sh: it runs before any of the binaries it installs
+ *     can answer, and no compiled binary offers this scan as a subcommand.
  *
  * Removal is deliberately conservative. A copy is only ever offered for
  * removal when it is recognisably one of OUR programs, a link into an
@@ -96,6 +96,8 @@ export interface CommandShadowReport {
   readonly shadowing: readonly CommandCopy[];
   /** True when the install directory holds this command but is not on PATH at all. */
   readonly installDirNotOnPath: boolean;
+  /** The directory the installer and the auto-updater maintain this command in. */
+  readonly installDir: string;
 }
 
 /** The whole-install verdict across every command the installer maintains. */
@@ -340,6 +342,7 @@ export function scanCommandShadows(input: ShadowScanInput): ShadowScanResult {
       installed: installedOnPath,
       shadowing,
       installDirNotOnPath: installedOffPath,
+      installDir,
     });
   }
 
@@ -364,7 +367,8 @@ export function describeShadowReport(report: CommandShadowReport): string[] {
   const lines: string[] = [];
   if (report.installDirNotOnPath) {
     lines.push(
-      `${report.command} is installed but its directory is not on your PATH, so typing "${report.command}" does not reach it.`,
+      `${report.command} is installed in ${report.installDir}, which is not on your PATH, so typing "${report.command}" does not reach it.`,
+      `  Add ${report.installDir} to PATH (in your shell profile to keep it): export PATH=${quoteShadowArgument(report.installDir)}:"$PATH"`,
     );
     return lines;
   }

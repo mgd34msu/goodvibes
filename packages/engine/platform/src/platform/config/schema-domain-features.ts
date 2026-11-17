@@ -24,9 +24,15 @@ export interface FetchConfig {
   /**
    * Allow fetches to localhost/loopback dev servers. Saved in the user's own
    * settings by the localhost fetch approval (a project file cannot set it);
-   * private-IP and cloud-metadata blocking is unaffected and absolute.
+   * private-IP and cloud-metadata blocking is unaffected.
    */
   allowLocalhost: boolean;
+  /**
+   * Comma-separated private-network hosts (LAN devices, containers, VPN peers)
+   * the fetch tool may reach when a call writes them. Owner-only; never a
+   * redirect target; metadata and link-local addresses stay refused.
+   */
+  allowedPrivateHosts: string;
 }
 
 /** API token audit: enablement, rotation cadence / warning window / managed enforcement. */
@@ -97,6 +103,7 @@ export const featureConfigDefaults: {
     trustedHosts: '',
     blockedHosts: '',
     allowLocalhost: false,
+    allowedPrivateHosts: '',
   },
   security: {
     tokenAudit: {
@@ -152,7 +159,14 @@ export const featureConfigSettings: ConfigSetting[] = [
     type: 'boolean',
     default: false,
     description:
-      'Allow the fetch tool to reach localhost/loopback dev servers (e.g. http://localhost:3000) in every project. Set by approving the localhost fetch ask and saved in your own settings, so it never re-asks; a project settings file cannot turn it on. Private-IP and cloud-metadata endpoint blocking is unaffected and absolute.',
+      'Allow the fetch tool to reach localhost/loopback dev servers (e.g. http://localhost:3000) in every project. Set by approving the localhost fetch ask and saved in your own settings, so it never re-asks; a project settings file cannot turn it on. Private-IP blocking is governed by fetch.allowedPrivateHosts; cloud-metadata blocking is absolute.',
+  },
+  {
+    key: 'fetch.allowedPrivateHosts',
+    type: 'string',
+    default: '',
+    description:
+      'Comma-separated private-network hosts the fetch tool may reach when a call names them: a LAN device (192.168.1.20), a container (172.17.0.2), a VPN peer (100.101.102.103), or a name that resolves to one (nas.lan). Patterns match as in fetch.trustedHosts. Applies only to the host a call writes, never to a redirect target; cloud-metadata, link-local, loopback (see fetch.allowLocalhost) and other reserved addresses stay refused. A call in YOLO mode, or one the owner admitted, may also reach a private address written as an IP without this list. Your own settings only: a project settings file cannot set it.',
   },
   {
     key: 'fetch.trustedHosts',

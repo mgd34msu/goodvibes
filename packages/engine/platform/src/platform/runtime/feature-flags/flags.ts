@@ -264,8 +264,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     description:
       'Enables fetch response sanitization and host trust tier classification.'
       + ' Sanitizes HTTP response content (none/safe-text/strict modes, default safe-text).'
-      + ' Requests to private IPs, cloud metadata endpoints, and encoded private-IP forms are'
-      + ' always refused with an honest tool-result reason. Fetches to localhost dev servers'
+      + ' Requests to cloud metadata endpoints and encoded private-IP forms are always refused'
+      + ' with an honest tool-result reason; a private-network host a call writes is reached only'
+      + ' when fetch.allowedPrivateHosts lists it or, written as an IP, in YOLO or an admitted call,'
+      + ' and never by redirect. Fetches to localhost dev servers'
       + ' ask once; approving saves fetch.allowLocalhost in your own settings.'
       + ' Set fetch.sanitizeMode to none to skip content sanitization for trusted flows.',
     defaultState: 'enabled',
@@ -275,7 +277,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     // blocking of private IPs and metadata endpoints is absolute, so the
     // capability itself has no off switch.
     settings: { key: 'fetch.sanitizeMode', kind: 'constant' },
-    tuningKeys: ['fetch.sanitizeMode', 'fetch.trustedHosts', 'fetch.blockedHosts', 'fetch.allowLocalhost'],
+    tuningKeys: ['fetch.sanitizeMode', 'fetch.trustedHosts', 'fetch.blockedHosts', 'fetch.allowLocalhost', 'fetch.allowedPrivateHosts'],
   },
 
   {

@@ -60,7 +60,7 @@ configurable capability, never unreachable machinery.
 | Local provider context ingestion | `provider.localContextIngestion` | `true` | on | no | Provider-reported context windows for local models. |
 | Provider optimizer | `provider.optimizerMode` | `manual`/`auto`/`pinned` | `off` | no | Capability-contract routing; pin via `provider.optimizerPinnedModel`. |
 | Adaptive execution planner | `planner.adaptive` | `true` | off | no | Strategy scoring + `/plan` commands; dark until routing-visibility UX lands. |
-| Fetch sanitization | `fetch.sanitizeMode` | always active | `safe-text` | no | Content modes `none`/`safe-text`/`strict`; private-IP/metadata blocking is absolute; localhost asks once (`fetch.allowLocalhost`). |
+| Fetch sanitization | `fetch.sanitizeMode` | always active | `safe-text` | no | Content modes `none`/`safe-text`/`strict`; metadata blocking is absolute; private-network hosts a call writes are reachable when listed in `fetch.allowedPrivateHosts`; localhost asks once (`fetch.allowLocalhost`). |
 | Token scope/rotation audit | `security.tokenAudit.enabled` | `true` | on (advisory) | no | Blocking requires `security.tokenAudit.managed` too. |
 | Adaptive notification suppression | `notifications.adaptiveSuppression` | `true` | on | no | Repeats of one notification (same domain, level and title) past `notifications.burstThreshold` in one collapse window go to the history without a toast; the window follows the print level. |
 | Integration delivery SLO | `integrations.delivery.sloEnforced` | `true` | on | no | Retry/backoff/dead-letter enforcement; tunes via `integrations.delivery.*`. |

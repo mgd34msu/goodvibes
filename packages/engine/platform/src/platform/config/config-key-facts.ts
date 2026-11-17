@@ -103,6 +103,13 @@ const BLOCKED_HOSTS: Loosening = {
     return hostList(prev).some(host => !kept.has(host));
   },
 };
+const PRIVATE_HOSTS: Loosening = {
+  loosening: 'let fetch reach a private-network host',
+  loosens: (prev, next) => {
+    const had = new Set(hostList(prev));
+    return hostList(next).some(host => !had.has(host));
+  },
+};
 const STEP_UP: Loosening = {
   loosening: 'change a safety-gate setting',
   loosens: (prev, next) => next !== true && changes(prev, next),
@@ -149,6 +156,7 @@ declareLoosening('sandbox.enabled', SANDBOX);
 declareLoosening('permissions.tools.', TOOL_PERMISSION);
 for (const key of OPENING_SWITCHES) declareLoosening(key, OPENING);
 declareLoosening('fetch.blockedHosts', BLOCKED_HOSTS);
+declareLoosening('fetch.allowedPrivateHosts', PRIVATE_HOSTS);
 declareLoosening('relay.requireStepUpForMutations', STEP_UP);
 declareLoosening('sandbox.judgment', { loosening: 'let a model approve sandbox escalations', loosens: becomes('auto-approve') });
 declareLoosening('permissions.commandParser', { loosening: 'stop parsing shell commands before they run', loosens: becomes('flat') });

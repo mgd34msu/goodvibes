@@ -4,7 +4,11 @@ import { sanitizeUrlForLog } from '../../utils/fetch-with-timeout.js';
  *
  * Classifies outbound HTTP request targets into one of four tiers before
  * the request is sent. Blocked hosts are denied pre-request with an
- * `SSRF_DENY` telemetry event, absolutely, regardless of configuration.
+ * `SSRF_DENY` telemetry event. The one exception is a private-network
+ * address the caller wrote itself (writtenPrivateHostAllowed): reachable when
+ * the owner lists it in fetch.allowedPrivateHosts, or, for an IP address
+ * written as the host, when the call runs in YOLO or was admitted. Metadata
+ * and link-local addresses and every redirect target stay refused.
  * Localhost/loopback targets (dev servers) are their own tier: they ask once
  * and the approval is saved in the user's settings (fetch.allowLocalhost). Unknown hosts
  * receive `safe-text` sanitization. Trusted hosts may opt into `none`
@@ -18,7 +22,8 @@ import { sanitizeUrlForLog } from '../../utils/fetch-with-timeout.js';
  *   - `blocked`  , Host matches an internal address, metadata endpoint, or
  *                   explicit blocklist entry. Request is denied pre-flight.
  *
- * SSRF protections detect (always blocked, in every mode):
+ * SSRF protections detect (blocked in every mode, except a written private
+ * address as above):
  *   - An IP address written as the host that falls in a non-public range
  *     (classifyResolvedAddress: private, link-local and metadata, shared,
  *     reserved, multicast, unspecified, and mapped forms of these). A name is
@@ -44,7 +49,7 @@ import { hostMatchesGlob, normalizeHost } from './host-utils.js';
  * - `trusted`  , Explicitly allowlisted; sanitization may be relaxed.
  * - `unknown`  , Not in any list; standard `safe-text` sanitization applied.
  * - `localhost`, Loopback dev-server target; needs the localhost approval.
- * - `blocked`  , Sensitive host; request denied pre-request, absolutely.
+ * - `blocked`  , Sensitive host; request denied pre-request.
  */
 export type HostTrustTier = 'trusted' | 'unknown' | 'localhost' | 'blocked';
 
@@ -236,6 +241,40 @@ export function classifyHostTrustTier(
 /** A plainly written loopback address: 127.0.0.0/8 or ::1, not a mapped or embedded form. */
 function isPlainLoopbackAddress(address: string): boolean {
   return address === '::1' || (isIP(address) === 4 && address.startsWith('127.'));
+}
+
+/** The owner's setting that names private hosts the fetch tool may reach. */
+export const ALLOWED_PRIVATE_HOSTS_SETTING = 'fetch.allowedPrivateHosts';
+
+/**
+ * Whether an address is in a range the caller may reach when it wrote the host
+ * itself: private networks (10/8, 172.16/12, 192.168/16, where LAN devices and
+ * containers live), IPv6 unique-local, and plain IPv4 carrier-grade NAT
+ * (100.64/10, where VPN overlays put their peers) except the cloud metadata
+ * endpoint 100.100.100.200. Loopback has its own approval; link-local (the
+ * metadata range), reserved, multicast and unspecified addresses never are.
+ */
+export function isCallerReachablePrivateAddress(address: string): boolean {
+  const range = classifyResolvedAddress(address);
+  if (range === 'private' || range === 'unique-local') return true;
+  return range === 'shared' && ipv4Octets(address) !== null && address !== '100.100.100.200';
+}
+
+/**
+ * Whether the host the caller wrote may be reached at a private address
+ * ({@link isCallerReachablePrivateAddress}): any host the owner lists in
+ * fetch.allowedPrivateHosts (patterns as in fetch.trustedHosts), or an IP
+ * address written as the host when the call runs in YOLO or was admitted. A
+ * name that merely resolves to a private address needs the owner's list, and a
+ * redirect target is the server's choice, so it is never asked about here.
+ */
+export function writtenPrivateHostAllowed(
+  host: string,
+  options: { readonly callerAdmitted: boolean; readonly allowedPrivateHosts: readonly string[] },
+): boolean {
+  const normalized = normalizeHost(host);
+  if (options.allowedPrivateHosts.some((pattern) => hostMatchesGlob(normalized, pattern))) return true;
+  return options.callerAdmitted && ipLiteral(normalized) !== null;
 }
 
 /** What a resolved address is, when it is one a fetch must not reach by a name. */

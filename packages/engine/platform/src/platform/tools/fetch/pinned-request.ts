@@ -17,14 +17,23 @@ import { assertDeliveryCurrent, runDeliveryPublication, type DeliveryLifetime } 
  * plain loopback target (localhost, 127.x, ::1) that was approved; a name that
  * merely resolves to loopback is refused. A host that does not resolve is
  * refused, since nothing was checked. The check runs in every mode: YOLO and an
- * admitted call skip a prompt, never this.
+ * admitted call skip a prompt, never this. The one widening is for the host the
+ * caller wrote (never a redirect target): a private-network answer is accepted
+ * when the caller's hop says so (writtenPrivateHostAllowed in trust-tiers.ts).
  */
 import { lookup } from 'node:dns/promises';
 import { currentExecutionMode } from '../../gate/execution-context.js';
 import { isIP } from 'node:net';
 import { checkServerIdentity } from 'node:tls';
 import { instrumentedFetch } from '../../utils/fetch-with-timeout.js';
-import { classifyHostTrustTier, classifyResolvedAddress, emitSsrfDeny, type TrustTierConfig } from './trust-tiers.js';
+import {
+  ALLOWED_PRIVATE_HOSTS_SETTING,
+  classifyHostTrustTier,
+  classifyResolvedAddress,
+  emitSsrfDeny,
+  isCallerReachablePrivateAddress,
+  type TrustTierConfig,
+} from './trust-tiers.js';
 
 /** One DNS answer. */
 export interface ResolvedAddress {
@@ -73,6 +82,10 @@ export async function resolveCheckedAddresses(
     readonly resolveHost?: HostResolver | undefined;
     /** Diagnostic projection only; every address is still checked unchanged. */
     readonly diagnosticMode?: 'default' | 'opaque-url';
+    /** The hop is the host the caller wrote, so a refusal of a private address names the owner's setting. */
+    readonly callerWroteHost?: boolean;
+    /** The caller's written host may be reached at a private-network address (writtenPrivateHostAllowed). */
+    readonly privateAllowed?: boolean;
   },
 ): Promise<readonly ResolvedAddress[]> {
   assertHttpScheme(url);
@@ -100,7 +113,12 @@ export async function resolveCheckedAddresses(
     const range = classifyResolvedAddress(answer.address);
     if (range === null) continue;
     if (range === 'loopback' && writtenLoopback && options.localhostApproved) continue;
-    const reason = `host "${host}" resolves to ${answer.address}, a ${range} address, SSRF risk`;
+    const reachable = isCallerReachablePrivateAddress(answer.address);
+    if (reachable && options.privateAllowed === true) continue;
+    const next = reachable && options.callerWroteHost === true
+      ? `. To reach it, the owner can add "${host}" to ${ALLOWED_PRIVATE_HOSTS_SETTING} in their own settings (a project file cannot set it)`
+      : '';
+    const reason = `host "${host}" resolves to ${answer.address}, a ${range} address, SSRF risk${next}`;
     if (options.diagnosticMode === 'opaque-url') {
       emitSsrfDeny('[redacted-host]', '[redacted-url]', 'Resolved address is not allowed');
     } else {

@@ -268,7 +268,10 @@ See [Feature settings](./feature-settings.md) for the full capability catalog.
 
 The fetch tool sanitizes by default (`fetch.sanitizeMode`, default
 `safe-text`). It classifies initial and redirected hosts, blocks
-private/link-local/metadata targets absolutely, gates localhost dev servers
+link-local/metadata targets absolutely and private-network targets unless the
+call wrote the host and it is listed in `fetch.allowedPrivateHosts` (your own
+settings) or, written as an IP address, the call runs in YOLO or was admitted;
+a redirect into a private address is always refused. It gates localhost dev servers
 behind a one-tap approval saved in your own settings (`fetch.allowLocalhost`; a project file cannot turn it on), applies
 safe-text handling for unknown hosts, and enforces streaming response-size
 caps. `fetch.sanitizeMode: none` skips content sanitization only. Host

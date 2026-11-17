@@ -55,7 +55,7 @@ const SECURITY_SETTINGS: readonly SecuritySettingEntry[] = [
       'Keep fetch.sanitizeMode at safe-text or strict unless the target host is explicitly trusted.',
     ],
     operationalNotes: [
-      'Requests to private IPs, link-local metadata endpoints, and encoded private IP forms are always blocked.',
+      'Requests to link-local metadata endpoints and encoded private IP forms are always blocked. A private-network host is reached only when the call wrote it and fetch.allowedPrivateHosts lists it (or, written as an IP, in YOLO or an admitted call); a redirect into a private address is always refused.',
       'Redirect chains are validated hop-by-hop.',
       'Localhost fetches are refused until approved; the approval is saved as fetch.allowLocalhost in your own settings and applies to every project.',
     ],

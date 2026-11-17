@@ -11,10 +11,13 @@ import type { FetchOutput, FetchUrlResult } from './types.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import { applySanitizer, resolveSanitizeMode } from './sanitizer.js';
 import {
+  ALLOWED_PRIVATE_HOSTS_SETTING,
   classifyHostTrustTier,
   emitSsrfDeny,
   emitHostTrustTier,
   extractHostname,
+  isCallerReachablePrivateAddress,
+  writtenPrivateHostAllowed,
   type TrustTierConfig,
 } from './trust-tiers.js';
 import { applyExtractDetailed, sniffContentType } from './extract.js';
@@ -67,6 +70,12 @@ export interface FetchRuntimeDeps {
    * Autonomous operations always require fresh exact-hop admission.
    */
   readonly isLocalhostAllowed?: (() => boolean) | undefined;
+  /**
+   * Private-network hosts the owner lets the fetch tool reach when a call
+   * writes them (fetch.allowedPrivateHosts, the owner's own settings). Read on
+   * every call. Never applies to a redirect target.
+   */
+  readonly allowedPrivateHosts?: (() => readonly string[]) | undefined;
   /**
    * The runtime composition returns a live exact-hop permit for autonomous
    * operations, or a legacy interactive boolean grant. A boolean can never
@@ -414,9 +423,16 @@ async function fetchWithValidatedRedirects(input: {
       }
       localhostApproved = true;
     }
+    // Only the host the caller wrote may be a private-network address; a redirect target never.
+    const privateAllowed = redirectCount === 0 && host !== null && writtenPrivateHostAllowed(host, {
+      callerAdmitted: isYoloExecution() || admittedInitialRequest,
+      allowedPrivateHosts: input.deps.allowedPrivateHosts?.() ?? [],
+    });
     // Final claim follows checked DNS. The live guard also protects every address retry.
-    const addresses = await resolveCheckedAddresses(currentUrl,
-      { trustTierConfig: input.trustTierConfig, localhostApproved, resolveHost: input.resolveHost });
+    const addresses = await resolveCheckedAddresses(currentUrl, {
+      trustTierConfig: input.trustTierConfig, localhostApproved, resolveHost: input.resolveHost,
+      callerWroteHost: redirectCount === 0, privateAllowed,
+    });
     assertCurrent();
     permit?.assertCurrent();
     permit?.claim();
@@ -602,16 +618,29 @@ async function fetchOne(
     initialTrustResult = classifyHostTrustTier(hostname, trustTierConfig);
     emitHostTrustTier(hostname, urlInput.url, initialTrustResult);
 
-    // Private-IP / metadata-endpoint blocking is absolute: no mode, approval,
-    // configuration or kill switch relaxes it. The tool result carries the
-    // honest reason; nothing else is surfaced.
-    if (initialTrustResult.tier === 'blocked') {
+    // Metadata, link-local and other internal addresses are refused in every
+    // mode. A private-network address the caller wrote (a LAN device, a
+    // container, a VPN peer) is reachable when the owner lists it in
+    // fetch.allowedPrivateHosts or, written as an IP address, when the call
+    // runs in YOLO or was admitted; the refusal names the setting.
+    const writtenAddress = hostname.replace(/^\[|\]$/g, '');
+    const privateReachable = initialTrustResult.tier === 'blocked' && initialTrustResult.isSsrf
+      && isCallerReachablePrivateAddress(writtenAddress);
+    if (privateReachable && writtenPrivateHostAllowed(hostname, {
+      callerAdmitted: isYoloExecution() || isAdmittedFetchRequest(effectiveUrl),
+      allowedPrivateHosts: deps.allowedPrivateHosts?.() ?? [],
+    })) {
+      initialTrustResult = { tier: 'unknown', reason: `host "${hostname}" is a private-network address the caller wrote, allowed for this call`, isSsrf: false };
+    } else if (initialTrustResult.tier === 'blocked') {
       if (initialTrustResult.isSsrf) {
         emitSsrfDeny(hostname, urlInput.url, initialTrustResult.reason);
       }
+      const next = privateReachable
+        ? `. To reach it, the owner can add "${writtenAddress}" to ${ALLOWED_PRIVATE_HOSTS_SETTING} in their own settings (a project file cannot set it).`
+        : '';
       return {
         url: urlInput.url,
-        error: `Request blocked: ${initialTrustResult.reason}`,
+        error: `Request blocked: ${initialTrustResult.reason}${next}`,
         host_trust_tier: 'blocked',
         sanitization_tier: effectiveSanitizeModeForBlocked,
       };
@@ -949,7 +978,9 @@ export function createFetchTool(
       sideEffects: ['network'],
       // Where a call's hosts sit: the gate and network-scope policy rules read them from here.
       subjects: { hosts: ['urls[].url'] },
-      concurrency: 'parallel',
+      // Only a call whose every request is a safe method reads: it runs beside other reads.
+      // A POST, PUT, PATCH or DELETE changes something, so the call is decided and run as a change.
+      readModes: { field: 'urls[].method', values: ['GET', 'HEAD', 'OPTIONS'], defaultValue: 'GET' },
       supportsProgress: true,
       supportsStreamingOutput: true,
     },

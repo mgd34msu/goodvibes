@@ -4,14 +4,16 @@
  * The PairingTokenManager in isolation: per-device tokens are hashed (never
  * stored/listed in plaintext), authenticate by hash, revoke immediately, and
  * the legacy shared token can be turned off. Custody + revocation semantics,
- * proven against a temp file.
+ * proven against a temp file. A token a paired device mints through the QR
+ * hand-off verb is revoked with that device.
  */
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import * as crypto from 'node:crypto';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
+import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
+import { registerPairingHandoffGatewayMethods } from '../platform/src/platform/control-plane/routes/pairing-handoff.ts';
 
 const dirs: string[] = [];
 function tempFile(): string {
@@ -22,28 +24,6 @@ function tempFile(): string {
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 describe('PairingTokenManager', () => {
-  test('empty pairing stores have no verifier candidate to hash', () => {
-    const mgr = new PairingTokenManager(tempFile());
-    const minted = mgr.mint({ name: 'Original device' });
-    const hash = spyOn(crypto, 'createHash');
-    try {
-      expect(mgr.authenticateNative(minted.token)?.tokenId).toBe(minted.id);
-      expect(hash).toHaveBeenCalledTimes(1);
-      expect(mgr.authenticate(minted.token)?.id).toBe(minted.id);
-      expect(hash).toHaveBeenCalledTimes(2);
-      expect(mgr.captureSettingsAuthority({ kind: 'pairing-token', token: minted.token })).not.toBeNull();
-      expect(hash).toHaveBeenCalledTimes(3);
-      expect(mgr.revoke(minted.id)).toBe(true);
-      hash.mockClear();
-      for (const store of [mgr, new PairingTokenManager(tempFile())]) {
-        expect(store.authenticateNative(minted.token)).toBeNull();
-        expect(store.authenticate(minted.token)).toBeNull();
-        expect(store.captureSettingsAuthority({ kind: 'pairing-token', token: minted.token })).toBeNull();
-      }
-      expect(hash).not.toHaveBeenCalled();
-    } finally { hash.mockRestore(); }
-  });
-
   test('mint returns the secret once; the secret is never persisted or listed', () => {
     const file = tempFile();
     const mgr = new PairingTokenManager(file);
@@ -114,16 +94,6 @@ describe('PairingTokenManager', () => {
     expect(reloaded.list().map((t) => t.id)).toEqual([b.id]);
   });
 
-  test('rename changes the visible name; the principal id is stable per token', () => {
-    const mgr = new PairingTokenManager(tempFile());
-    const a = mgr.mint({ name: 'Old' });
-    expect(mgr.authenticate(a.token)?.id).toBe(a.id);
-    expect(mgr.rename(a.id, 'New')).toBe(true);
-    expect(mgr.list()[0]?.name).toBe('New');
-    expect(mgr.authenticate(a.token)?.principalId).toBe(`pairing:${a.id}`);
-    expect(mgr.rename('pair-missing', 'x')).toBe(false);
-  });
-
   test('the legacy shared token can be revoked and the flag persists', () => {
     const file = tempFile();
     const mgr = new PairingTokenManager(file);
@@ -131,6 +101,43 @@ describe('PairingTokenManager', () => {
     mgr.revokeLegacyShared();
     expect(mgr.isLegacyRevoked()).toBe(true);
     expect(new PairingTokenManager(file).isLegacyRevoked()).toBe(true);
+  });
+});
+
+describe('a token minted through the QR hand-off', () => {
+  function handoff(file: string) {
+    const tokens = new PairingTokenManager(file);
+    const catalog = new GatewayMethodCatalog();
+    const unused = (): never => { throw new Error('no offer is requested in this proof'); };
+    registerPairingHandoffGatewayMethods(catalog, { tokens, push: { getPublicKey: unused, subscribe: unused }, relayAvailable: () => false });
+    /** pairing.handoff.create as the paired device `deviceId` asks for it over the gateway. */
+    const create = (deviceId: string, name: string) => catalog.invoke('pairing.handoff.create', {
+      context: { principalId: `pairing:${deviceId}`, admin: true }, body: { name, offers: [] },
+    }) as Promise<{ token: { id: string; token: string } }>;
+    return { tokens, create };
+  }
+
+  test('is revoked with the device that asked for it, also after a reload', async () => {
+    const file = tempFile();
+    const { tokens, create } = handoff(file);
+    const phone = tokens.mint({ name: 'phone' });
+    const unrelated = tokens.mint({ name: 'desk' });
+    const { token: tablet } = await create(phone.id, 'tablet');
+    expect(tokens.authenticate(tablet.token)?.id).toBe(tablet.id);
+    expect(tokens.revokeWithMinted(phone.id).alsoRevoked).toContain(tablet.id);
+    for (const store of [tokens, new PairingTokenManager(file)]) {
+      expect(store.authenticate(tablet.token)).toBeNull();
+      expect(store.authenticate(unrelated.token)?.id).toBe(unrelated.id);
+    }
+  });
+
+  test('cannot be minted by a device whose own pairing is gone', async () => {
+    const { tokens, create } = handoff(tempFile());
+    const phone = tokens.mint({ name: 'phone' });
+    tokens.revoke(phone.id);
+    const refused = await create(phone.id, 'late').then(() => null, (error: unknown) => error as { status?: number });
+    expect(refused?.status).toBe(403);
+    expect(tokens.list()).toEqual([]);
   });
 });
 

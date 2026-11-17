@@ -10,7 +10,7 @@ import { assertPreparedConfigWriteRoute, resolvePreparedConfigWriteRoute, type C
 import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
 import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn/protected-research-report';
-import { bindSettingSchemaDescriptors, coerceHarnessSettingValue } from '../agent/harness-control.ts';
+import { coerceHarnessSettingValue } from '../agent/harness-control.ts';
 import { getAgentSettingsSchema } from '../config/settings-catalog.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting, configKeyScope } from '../config/daemon-config-routing.ts';
 import { buildSecretBackedConfigUpdate, defaultSecretBackedScope, isSecretConfigKey, isSecretReferenceValue } from '../config/secret-config.ts';
@@ -79,7 +79,6 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
       const platform = context.platform, workspace = context.workspace;
       const config = platform.configManager, secrets = platform.secretsManager, subscriptions = platform.subscriptionManager;
       const builtin = config.getSchema(), host = config.getHostSettingsSchema();
-      const assertSchema = bindSettingSchemaDescriptors([builtin, host]);
       const incarnation = config.getConfigurationIncarnation();
       const client = agentDaemonConfigClient(), clientRevision = agentDaemonConfigClientRevision();
       const clientImport = client?.preparedImport, ownsKey = client?.ownsKey;
@@ -91,7 +90,7 @@ export function createAgentSettingsImportProjector(context: CommandContext, fall
       // is the import's one admission (the daemon does not judge it again).
       const assertSource = () => {
         if (request.args !== args || request.signal !== signal || request.assertCurrent !== assertRequestCurrent) throw new ToolInputProjectionError('stale');
-        signal?.throwIfAborted(); assertModelReadingInputCurrent(args, argsJson); assertSchema(); source.assertCurrent();
+        signal?.throwIfAborted(); assertModelReadingInputCurrent(args, argsJson); source.assertCurrent();
         if (context.platform !== platform || context.workspace !== workspace || platform.configManager !== config
           || platform.secretsManager !== secrets || platform.subscriptionManager !== subscriptions
           || config.getSchema() !== builtin || config.getHostSettingsSchema() !== host

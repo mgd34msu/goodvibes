@@ -17,7 +17,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 type ToolExecuteOptions = NonNullable<Parameters<Tool['execute']>[1]>;
 import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
-import { coerceHarnessSettingValue, bindSettingSchemaDescriptors, resolveHarnessSettingAsync, type HarnessSettingLookup } from '../agent/harness-control.ts';
+import { coerceHarnessSettingValue, resolveHarnessSettingAsync, type HarnessSettingLookup } from '../agent/harness-control.ts';
 import { getAgentSettingsSchema } from '../config/settings-catalog.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting, configKeyScope } from '../config/daemon-config-routing.ts';
 import { buildGoodVibesSecretKey, defaultSecretBackedScope, isSecretConfigKey, isSecretReferenceValue } from '../config/secret-config.ts';
@@ -79,8 +79,8 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
     const signal = request.signal, assertRequestCurrent = request.assertCurrent;
     const originalJson = JSON.stringify(captureModelReadingInput(original));
     const schemaMethods = [config.getSchema, config.getHostSettingsSchema];
+    // The schema is replaced, never edited in place: its arrays' identity and the incarnation say it is current.
     const builtinSchema = config.getSchema(), hostSchema = config.getHostSettingsSchema();
-    const assertSchemaDescriptors = bindSettingSchemaDescriptors([builtinSchema, hostSchema]);
     const schema = getAgentSettingsSchema(config);
     const client = agentDaemonConfigClient(); const installRevision = agentDaemonConfigClientRevision();
     const incarnation = config.getConfigurationIncarnation();
@@ -89,7 +89,6 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
     const sessionId = runtime?.sessionId;
     const retained = new Map<string | (() => void), () => void>();
     const assertRoutingOwner = () => {
-      assertSchemaDescriptors();
       if (platform.configManager !== config || platform.secretsManager !== secrets || agentDaemonConfigClient() !== client || agentDaemonConfigClientRevision() !== installRevision
         || config.getSchema !== schemaMethods[0] || config.getHostSettingsSchema !== schemaMethods[1]
         || config.getSchema() !== builtinSchema || config.getHostSettingsSchema() !== hostSchema) throw new ToolInputProjectionError('stale');

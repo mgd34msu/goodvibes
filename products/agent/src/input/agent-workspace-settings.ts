@@ -5,7 +5,7 @@ import { containsIssuerCredential, writeDocument } from '@goodvibes-jev/engine/p
 import { readFileSync } from 'node:fs';
 import { getAgentSettingsSchema, readAgentSettingValue, type AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { PendingSubscriptionLogin, ProviderSubscription } from '@goodvibes-jev/engine/platform/platform/config';
-import { bindSettingSchemaDescriptors, setHarnessSetting } from '../agent/harness-control.ts';
+import { setHarnessSetting } from '../agent/harness-control.ts';
 import { applyThemeModeSettingChange, applyThemeNameSettingChange, THEME_MODE_CONFIG_KEY, THEME_NAME_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 import { listThemeChoices, normalizeThemeName } from '../renderer/theme.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
@@ -798,7 +798,6 @@ export function captureAgentWorkspaceTuiSettingsImportPreview(context: CommandCo
   const paths = workspace.shellPaths, config = platform.configManager, subscriptions = platform.subscriptionManager;
   if (!paths || !config) throw new ToolInputProjectionError('unconfigured');
   const builtin = config.getSchema(), host = config.getHostSettingsSchema();
-  const assertSchema = bindSettingSchemaDescriptors([builtin, host]);
   const incarnation = config.getConfigurationIncarnation();
   const subscriptionValues = () => JSON.stringify(captureStrictJudgmentJson(subscriptions ? [subscriptions.list(), subscriptions.listPending()] : []));
   const originalSubscriptions = subscriptionValues();
@@ -806,7 +805,6 @@ export function captureAgentWorkspaceTuiSettingsImportPreview(context: CommandCo
     paths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'settings.json'), paths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'subscriptions.json')];
   const sources = sourcePaths.map(path => ({ path, observation: observeImportFile(path) }));
   const assertCurrent = () => {
-    assertSchema();
     if (config.getConfigurationIncarnation() !== incarnation || config.getSchema() !== builtin || config.getHostSettingsSchema() !== host
       || subscriptionValues() !== originalSubscriptions) throw new ToolInputProjectionError('stale');
     for (const source of sources) {

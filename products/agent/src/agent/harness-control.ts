@@ -386,18 +386,6 @@ function captureSettingsReadingOptions(options: CatalogRankingOptions) {
   return { assertIdentity, assertCurrent: () => { assertIdentity(); assertCurrent?.(); } };
 }
 
-const settingSchemaUnchanged = (): void => {};
-
-/**
- * The settings schema is replaced, never edited in place, so a caller knows it
- * is current by comparing the schema arrays' identity (every caller does);
- * nothing inside the program's own schema is re-checked per call. Kept so
- * callers can still retain a guard.
- */
-export function bindSettingSchemaDescriptors(_roots: readonly unknown[]): () => void {
-  return settingSchemaUnchanged;
-}
-
 /**
  * One immutable metadata snapshot for a prose search, with executable validators
  * bound separately. The schema is replaced, never edited in place, when it

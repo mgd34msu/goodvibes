@@ -26,7 +26,6 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
   },
   policy: {
     readonly hidden: boolean;
-    readonly confirmMutations: boolean;
     readonly eagerPaths: boolean;
     readonly openModalOnEmpty: boolean;
     readonly manualOnly: boolean;
@@ -152,7 +151,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
       async handler(args, ctx) {
         // Export writes live sign-in tokens, so it needs an explicit --yes even where other mutations do not.
         const explicit = stripYesFlag(args);
-        const parsed = policy.confirmMutations ? explicit : { rest: args, yes: true };
+        const parsed = { rest: explicit.rest, yes: true };
         args = [...parsed.rest];
         const print = (message: string) => ctx.print(policy.present(message));
         const shellPaths = policy.eagerPaths ? requireShellPaths(ctx) : undefined;

@@ -27,7 +27,6 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
   policy: {
     readonly hidden: boolean;
     readonly description: string;
-    readonly confirmMutations: boolean;
     readonly concealedEntry: boolean;
     readonly writeScope: (key: string, requested: SecretScope) => SecretScope;
     readonly deleteScope: (key: string, requested: SecretScope | undefined) => SecretScope | undefined;
@@ -37,7 +36,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
     readonly deleted: (key: string) => string;
   },
 ): TerminalSlashCommand<Context> & CommandSubcommandHints & Pick<ConfirmableCommand<Context>, 'confirm'> {
-  const suffix = policy.confirmMutations ? ' --yes' : '';
+  const suffix = '';
   const storageFlags = '[--user|--project] [--secure|--plaintext]';
   const mutationUsage = (operation: string) =>
     `/secrets ${operation} <KEY> <${operation === 'link' ? 'secret-ref' : 'value'}> ${storageFlags}${suffix}`;
@@ -69,19 +68,17 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
       trust: `<KEY>${suffix}`,
       delete: `<KEY> ${storageFlags}${suffix}`,
     },
-    // A product that asks with --yes (confirmMutations) has its own question; otherwise the registry asks once.
-    confirm: policy.confirmMutations
-      ? undefined
-      : (args) => {
-          const key = args[0] === 'delete' || args[0] === 'trust' ? args.slice(1).find((value) => !value.startsWith('--')) : undefined;
-          if (!key) return undefined;
-          return args[0] === 'trust'
-            ? { title: `Use ${key} from this project's secret store?`, detail: `A project's secret store is part of the checkout, so whoever wrote the repository may have put ${key} there. Once confirmed, ${key} from this project's store is used whenever you have not set it yourself.`, confirmLabel: 'Use it' }
-            : { title: `Delete secret ${key}?`, detail: `The stored value of ${key} is removed and cannot be recovered; anything that reads it stops working until it is set again.`, confirmLabel: 'Delete' };
-        },
+    // The registry asks once for a line that cannot be undone.
+    confirm: (args) => {
+      const key = args[0] === 'delete' || args[0] === 'trust' ? args.slice(1).find((value) => !value.startsWith('--')) : undefined;
+      if (!key) return undefined;
+      return args[0] === 'trust'
+        ? { title: `Use ${key} from this project's secret store?`, detail: `A project's secret store is part of the checkout, so whoever wrote the repository may have put ${key} there. Once confirmed, ${key} from this project's store is used whenever you have not set it yourself.`, confirmLabel: 'Use it' }
+        : { title: `Delete secret ${key}?`, detail: `The stored value of ${key} is removed and cannot be recovered; anything that reads it stops working until it is set again.`, confirmLabel: 'Delete' };
+    },
     async handler(args, context) {
       const store = manager(context);
-      const parsed = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
+      const parsed = { rest: stripYesFlag(args).rest, yes: true };
       const [subcommand, ...rest] = parsed.rest;
       const invalidReference = (): never => { throw commandRefusal('[secrets] Invalid secret reference.', 'Use /secrets providers for examples.'); };
       if (!subcommand || subcommand === 'list') {

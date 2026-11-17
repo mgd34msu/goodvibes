@@ -7,7 +7,6 @@ export const { registerLocalProviderRuntimeCommands } = createLocalProviderComma
   {
     surfaceRoot: 'agent',
     hidden: true,
-    confirmMutations: true,
     allowInlineKey: true,
     captureMissingKey: false,
     explicitModelSelection: true,

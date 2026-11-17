@@ -161,11 +161,18 @@ function printError(_ctx: CommandContext, error: unknown): never {
 export function registerPersonasRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'personas',
+    // Deleting a persona cannot be undone: the registry asks once (command-confirmation.ts).
+    confirm(args) {
+      const sub = (args[0] ?? '').toLowerCase();
+      const id = args.slice(1).find((word) => !word.startsWith('--'));
+      if ((sub !== 'delete' && sub !== 'remove') || !id) return undefined;
+      return { title: `Delete Agent persona ${id}?`, detail: `The persona ${id} is removed from the Agent-local registry and cannot be recovered.`, confirmLabel: 'Delete' };
+    },
     effect: 'local-state',
     aliases: ['persona'],
     description: 'Manage Agent-local personas',
     hidden: true,
-    usage: '[list|discover|import-discovered <name> --yes|search <query>|show <id>|create --name <name> --description <summary> --body <instructions>|update <id> [--name ...] [--description ...] [--body ...]|use <id>|active|clear|review <id>|stale <id> <reason...>|delete <id> --yes]',
+    usage: '[list|discover|import-discovered <name> --yes|search <query>|show <id>|create --name <name> --description <summary> --body <instructions>|update <id> [--name ...] [--description ...] [--body ...]|use <id>|active|clear|review <id>|stale <id> <reason...>|delete <id>]',
     async handler(args, ctx) {
       const sub = (args[0] ?? 'list').toLowerCase();
       const registryStore = registryFromContext(ctx);
@@ -273,10 +280,7 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
           const parsed = parsePersonaArgs(args.slice(1));
           const id = parsed.rest[0];
           if (!id) {
-            throw commandRefusal('Usage: /personas delete <id> --yes');
-          }
-          if (!parsed.yes) {
-            throw commandRefusal(`Refusing to delete Agent persona ${id} without --yes.`);
+            throw commandRefusal('Usage: /personas delete <id>');
           }
           const removed = registryStore.deletePersona(id);
           ctx.print(formatPersonaReceipt('Deleted Agent persona', removed));

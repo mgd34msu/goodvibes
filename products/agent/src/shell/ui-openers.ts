@@ -31,6 +31,7 @@ import { type ModelPickerOpenDeps } from '../input/model-picker-open.ts';
 import { buildLocalFitRecommendations, buildSignInRow, LOCAL_REC_PROVIDER } from '../input/model-picker-local-fit.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { wireNotificationSurfaces } from './notification-surfaces.ts';
+import { confirmThrough } from '../input/confirm-dialog.ts';
 import {
   applyThemeModeSettingChange,
   applyThemeNameSettingChange,
@@ -304,6 +305,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     return true;
   };
 
+  // The one confirmation rule for typed commands (command-confirmation.ts) asks here.
+  commandContext.confirm = (confirmOptions) => confirmThrough(input.surfaceModals, confirmOptions);
   commandContext.openSettingsModal = createSettingsWorkspaceOpener({
     configure: () => {
       input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {

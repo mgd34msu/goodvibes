@@ -29,12 +29,11 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
     readonly description: string;
     readonly usage: string;
     readonly argsHint: string;
-    readonly confirmMutations: boolean;
     readonly maskUrls: boolean;
     readonly allowSend: boolean;
   },
 ) {
-  const suffix = policy.confirmMutations ? ' --yes' : '';
+  const suffix = '';
   const emptyList = `No webhook URLs configured. Add one with /notify add <url>${suffix}`;
   /** A stored URL as the transcript shows it: the path holds the secret topic or token, so a masked policy shows only the origin. */
   const shownUrl = (url: string): string => {
@@ -55,7 +54,7 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
       usage: policy.usage,
       argsHint: policy.argsHint,
       async handler(args, ctx) {
-        const parsed = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
+        const parsed = { rest: stripYesFlag(args).rest, yes: true };
         const commandArgs = [...parsed.rest];
         const notifications = ctx.platform.configManager.getCategory('notifications');
         const urls: string[] = Array.isArray(notifications.webhookUrls) ? [...notifications.webhookUrls] : [];
@@ -178,10 +177,6 @@ export function createNotifyRuntimeCommands<Context extends NotifyContext>(
           const message = commandArgs.slice(1).join(' ').trim();
           if (!message) {
             throw commandRefusal(`Usage: /notify send <message>${suffix}`);
-          }
-          if (!parsed.yes) {
-            requireYesFlag(ctx, 'send a notification to configured webhook targets', `/notify send <message>${suffix}`);
-            return;
           }
           if (urls.length === 0) {
             ctx.print(emptyList);

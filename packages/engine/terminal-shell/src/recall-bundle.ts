@@ -6,7 +6,6 @@ import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/r
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, resolveConfinedBundlePath, type RecallFlagKind } from './recall-shared.js';
 import { afterMemory, mutationArguments, type RecallQueryContext } from './recall-query.js';
-import { commandRefusal } from './command-confirmation.js';
 function isMemoryBundle(value: unknown): value is MemoryBundle {
   if (typeof value !== 'object' || value === null) return false;
   const bundle = value as Record<string, unknown>;
@@ -20,7 +19,7 @@ function isMemoryBundle(value: unknown): value is MemoryBundle {
     Array.isArray(bundle['links'])
   );
 }
-// `--yes` is read by mutationArguments where a product asks for it and is harmless where it does not.
+// `--yes` typed out of habit is accepted and dropped (mutationArguments).
 const EXPORT_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'word', '--cls': 'word', '--yes': 'switch' };
 const HANDOFF_EXPORT_FLAGS: Readonly<Record<string, RecallFlagKind>> = { '--scope': 'word', '--yes': 'switch' };
 export function createRecallBundleCommands<Context extends RecallQueryContext>(
@@ -32,7 +31,6 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
   presentation: {
     readonly tag: string;
     readonly command: string;
-    readonly confirmMutations: boolean;
   },
 ) {
   /** The resolved bundle path, or undefined after printing why a model-run command may not use it. */
@@ -55,13 +53,13 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     return parsed;
   }
   function handleRecallExport(args: string[], context: Context): void | Promise<void> {
-    const parsed = mutationArguments(args, presentation.confirmMutations);
+    const parsed = mutationArguments(args);
     args = parsed.rest;
     const memory = getMemory(context);
     if (!memory) {
       return;
     }
-    const usage = `${presentation.tag} Usage: /${presentation.command} export <path> [--scope <scope>] [--cls <class>]${presentation.confirmMutations ? ' --yes' : ''}`;
+    const usage = `${presentation.tag} Usage: /${presentation.command} export <path> [--scope <scope>] [--cls <class>]`;
     const flags = readRecallFlags(args, EXPORT_FLAGS);
     if ('refusal' in flags) {
       context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
@@ -71,9 +69,6 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     if (!pathArg || extra.length > 0) {
       context.print(usage);
       return;
-    }
-    if (!parsed.yes) {
-      throw commandRefusal(`Refusing to export durable memory bundle to ${pathArg} without --yes.\nUsage: /${presentation.command} export <path> [--scope <scope>] [--cls <class>] --yes`);
     }
     const filter: MemorySearchFilter = {};
     const scope = flags.values.get('--scope');
@@ -104,7 +99,7 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     });
   }
   async function handleRecallImport(args: string[], context: Context): Promise<void> {
-    const parsed = mutationArguments(args, presentation.confirmMutations);
+    const parsed = mutationArguments(args);
     args = parsed.rest;
     const memory = getMemory(context);
     if (!memory) {
@@ -112,11 +107,8 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     }
     const pathArg = args[0];
     if (!pathArg) {
-      context.print(`${presentation.tag} Usage: /${presentation.command} import <path>${presentation.confirmMutations ? ' --yes' : ''}`);
+      context.print(`${presentation.tag} Usage: /${presentation.command} import <path>`);
       return;
-    }
-    if (!parsed.yes) {
-      throw commandRefusal(`Refusing to import durable memory bundle from ${pathArg} without --yes.\nUsage: /${presentation.command} import <path> --yes`);
     }
     const targetPath = bundlePath(pathArg, context);
     if (targetPath === undefined) return;
@@ -142,13 +134,13 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     ].join('\n');
   }
   function handleRecallHandoffExport(args: string[], context: Context): void | Promise<void> {
-    const parsed = mutationArguments(args, presentation.confirmMutations);
+    const parsed = mutationArguments(args);
     args = parsed.rest;
     const memory = getMemory(context);
     if (!memory) {
       return;
     }
-    const usage = `${presentation.tag} Usage: /${presentation.command} handoff-export <path> [--scope <scope>]${presentation.confirmMutations ? ' --yes' : ''}`;
+    const usage = `${presentation.tag} Usage: /${presentation.command} handoff-export <path> [--scope <scope>]`;
     const flags = readRecallFlags(args, HANDOFF_EXPORT_FLAGS);
     if ('refusal' in flags) {
       context.print(`${presentation.tag} ${flags.refusal}\n${usage}`);
@@ -158,9 +150,6 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     if (!pathArg || extra.length > 0) {
       context.print(usage);
       return;
-    }
-    if (!parsed.yes) {
-      throw commandRefusal(`Refusing to export memory handoff bundle to ${pathArg} without --yes.\nUsage: /${presentation.command} handoff-export <path> [--scope <scope>] --yes`);
     }
     const scopeRaw = flags.values.get('--scope') ?? 'team';
     if (!isValidScope(scopeRaw)) {
@@ -191,16 +180,16 @@ export function createRecallBundleCommands<Context extends RecallQueryContext>(
     }
   }
   async function handleRecallHandoffImport(args: string[], context: Context): Promise<void> {
-    const parsed = mutationArguments(args, presentation.confirmMutations);
+    const parsed = mutationArguments(args);
     args = parsed.rest;
     const pathArg = args[0];
     if (!pathArg) {
       context.print(
-        `${presentation.tag} Usage: /${presentation.command} handoff-import <path>${presentation.confirmMutations ? ' --yes' : ''}`,
+        `${presentation.tag} Usage: /${presentation.command} handoff-import <path>`,
       );
       return;
     }
-    await handleRecallImport([pathArg, ...(presentation.confirmMutations && parsed.yes ? ['--yes'] : [])], context);
+    await handleRecallImport([pathArg], context);
   }
   return { handleRecallExport, handleRecallImport, handleRecallHandoffExport, handleRecallHandoffInspect, handleRecallHandoffImport };
 }

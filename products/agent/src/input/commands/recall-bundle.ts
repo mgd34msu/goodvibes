@@ -9,5 +9,4 @@ export const { handleRecallExport, handleRecallImport, handleRecallHandoffExport
   createRecallBundleCommands<CommandContext>(getMemoryBundleStore, requireShellPaths, {
     tag: '[memory]',
     command: 'memory',
-    confirmMutations: true,
   });

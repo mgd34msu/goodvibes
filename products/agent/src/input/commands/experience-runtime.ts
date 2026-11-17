@@ -17,6 +17,7 @@ import {
   WAKE_SETUP_ANNOUNCEMENT,
 } from '../../core/wake-provision-status.ts';
 import { proposesSpeechToText, runWakeSetupPlan } from '../../core/wake-setup-plan.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 function formatVoiceComponentState(state: string): string {
   return state.replace(/[_-]+/g, ' ');
@@ -82,7 +83,6 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   usage:
     '[review|status|setup --yes|enable|disable|wake status|wake setup --yes [yes]|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
   help: 'Usage: /voice [review|status|setup --yes|enable|disable|wake status|wake setup --yes [yes]|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
-  confirmMutations: true,
   reportFailure: true,
   paths: requireShellPaths,
   async wake(args, ctx, _shellPaths, yes) {
@@ -123,7 +123,8 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
         const proposesStt = proposesSpeechToText(outcome);
         ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt ? ['(yes: /voice wake setup --yes yes installs it now)'] : [])].join('\n'));
       } catch (error) {
-        ctx.print(`Wake-Word Setup\n  setup failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (readRefusal(error)) throw error;
+        throw commandRefusal(`Wake-Word Setup\n  setup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       return;
     }
@@ -209,7 +210,8 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
           ...result.configured.skipped.map((entry) => `  skipped ${entry.key} (${entry.reason})`),
         ].join('\n'));
       } catch (error) {
-        ctx.print(`voice setup failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (readRefusal(error)) throw error;
+        throw commandRefusal(`voice setup failed: ${error instanceof Error ? error.message : String(error)}`);
       } finally {
         installSettled = true;
       }

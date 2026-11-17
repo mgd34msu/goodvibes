@@ -65,6 +65,14 @@ export const recallCommand: SlashCommand = {
   description: 'Project memory: add decisions, constraints, incidents, and patterns with provenance.',
   usage: '<subcommand> [args]',
   argsHint: 'add|search|link|get|list|remove|files',
+  confirm(args) {
+    if (args[0] !== 'remove' || !args[1]) return undefined;
+    return {
+      title: `Delete memory record ${args[1]}?`,
+      detail: `The durable memory record ${args[1]} and its links are deleted and cannot be recovered; /recall get ${args[1]} shows it first.`,
+      confirmLabel: 'Delete',
+    };
+  },
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     const [sub, ...rest] = args;
 

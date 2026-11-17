@@ -6,7 +6,6 @@ export const { registerSubscriptionRuntimeCommands } = createSubscriptionRuntime
   { requireSubscriptionManager, requireServiceRegistry, requireSecretsManager, requireShellPaths },
   {
     hidden: true,
-    confirmMutations: true,
     eagerPaths: false,
     openModalOnEmpty: false,
     manualOnly: true,

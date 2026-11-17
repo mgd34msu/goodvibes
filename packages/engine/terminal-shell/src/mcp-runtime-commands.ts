@@ -15,7 +15,6 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
   requireShellPaths: (context: Context) => ShellPathService,
   policy: {
     readonly hidden: boolean;
-    readonly confirmMutations: boolean;
     readonly allowAllOnAdd: boolean;
     /** Product-specific wording; the defaults are the Agent's. */
     readonly wording?: {
@@ -44,7 +43,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     ...policy.wording,
   };
   // The --yes hint only applies where the command asks for confirmation.
-  const present = (message: string): string => (policy.confirmMutations ? message : message.replaceAll(' --yes', ''));
+  const present = (message: string): string => message.replaceAll(' --yes', '');
   const MCP_ROLES = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'] as const;
   const MCP_TRUST_MODES = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'] as const;
   const MCP_COMMAND_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;
@@ -288,8 +287,8 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         };
         // A trailing --yes is never a server argument, whether or not this
         // product asks for confirmation; only tokens after -- are passed on.
-        const stripped = args[0] === 'add' ? stripMcpAddYesFlag(args) : policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
-        const confirmation = policy.confirmMutations ? stripped : { rest: stripped.rest, yes: true };
+        const stripped = args[0] === 'add' ? stripMcpAddYesFlag(args) : stripYesFlag(args);
+        const confirmation = { rest: stripped.rest, yes: true };
         const commandArgs = [...confirmation.rest];
         const subcommand = commandArgs[0];
         if (!subcommand && ctx.openMcpWorkspace) {

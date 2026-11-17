@@ -5,7 +5,6 @@ const commands = createNotifyRuntimeCommands<CommandContext>(requireWebhookNotif
   description: 'Manage and send configured Agent webhook notifications',
   usage: 'add <url> --yes | remove <n|url> --yes | list [--show --yes] | clear --yes | test --yes | send <message> --yes',
   argsHint: 'list|add --yes|remove --yes|test --yes|send --yes',
-  confirmMutations: true,
   maskUrls: true,
   allowSend: true,
 });

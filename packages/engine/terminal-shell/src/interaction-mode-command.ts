@@ -14,7 +14,6 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
   readonly usage: string;
   readonly argsHint: string;
   readonly hidden?: boolean | undefined;
-  readonly confirmMutations: boolean;
   readonly help: string;
   readonly invalidVerbosity: (value: string) => string;
   readonly domainSet: (domain: string, value: string) => string;
@@ -33,7 +32,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         ctx.print('The print level is not available in this runtime.');
         return;
       }
-      const parsed = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
+      const parsed = { rest: stripYesFlag(args).rest, yes: true };
       const commandArgs = parsed.rest;
       const sub = commandArgs[0] ?? 'show';
 
@@ -94,7 +93,7 @@ export function createInteractionModeCommand<Context extends InteractionModeCont
         const domain = commandArgs[1];
         const verbosity = commandArgs[2];
         if (!domain || !verbosity) {
-          throw commandRefusal('Usage: /mode set-domain <domain> <minimal|normal|verbose>' + (policy.confirmMutations ? ' --yes' : ''));
+          throw commandRefusal('Usage: /mode set-domain <domain> <minimal|normal|verbose>');
         }
         if (verbosity !== 'minimal' && verbosity !== 'normal' && verbosity !== 'verbose') {
           ctx.print(policy.invalidVerbosity(verbosity));

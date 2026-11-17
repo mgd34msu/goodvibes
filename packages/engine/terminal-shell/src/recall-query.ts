@@ -1,7 +1,6 @@
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import type { MemoryRecord, MemorySearchFilter, MemoryLink } from '@goodvibes-jev/engine/platform/platform/state';
 import { VALID_CLASSES, VALID_SCOPES, isValidClass, isValidScope, readRecallFlags, temporalStatusLabel, type RecallFlagKind } from './recall-shared.js';
-import { commandRefusal } from './command-confirmation.js';
 export interface RecallQueryContext {
   readonly print: (message: string) => void;
   /** True when a model, not the owner at the keyboard, is running the command. */
@@ -42,7 +41,6 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     readonly provenance: (refs: MemoryRecord['provenance']) => string;
     readonly provenanceEntry: (ref: MemoryRecord['provenance'][number]) => string;
     readonly label: (label: 'scope' | 'class' | 'summary' | 'detail' | 'tags' | 'created' | 'origin' | 'links') => string;
-    readonly confirmMutations: boolean;
     readonly printLinked: (context: Context, fromId: string, toId: string, relation: string) => void;
     readonly printDeleted: (context: Context, id: string) => void;
     readonly linkFailure: string;
@@ -244,20 +242,17 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     });
   }
   function mutationArgs(args: string[]) {
-    return mutationArguments(args, presentation.confirmMutations);
+    return mutationArguments(args);
   }
   async function handleRecallLink(args: string[], context: Context): Promise<void> {
     const memory = getMemory(context);
     if (!memory) return;
     const parsed = mutationArgs(args);
     const [fromId, toId, relation] = parsed.rest;
-    const usage = `/${presentation.command} link <fromId> <toId> <relation>${presentation.confirmMutations ? ' --yes' : ''}`;
+    const usage = `/${presentation.command} link <fromId> <toId> <relation>`;
     if (!fromId || !toId || !relation) {
       context.print(`${presentation.tag} Usage: ${usage}`);
       return;
-    }
-    if (!parsed.yes) {
-      throw commandRefusal(`Refusing to link memory records ${fromId} and ${toId} without --yes.\nUsage: ${usage}`);
     }
     const link = await memory.link(fromId, toId, relation);
     if (!link) {
@@ -271,13 +266,10 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
     if (!memory) return;
     const parsed = mutationArgs(args);
     const id = parsed.rest[0];
-    const usage = `/${presentation.command} remove <id>${presentation.confirmMutations ? ' --yes' : ''}`;
+    const usage = `/${presentation.command} remove <id>`;
     if (!id) {
       context.print(`${presentation.tag} Usage: ${usage}`);
       return;
-    }
-    if (!parsed.yes) {
-      throw commandRefusal(`Refusing to delete durable memory record ${id} without --yes.\nUsage: ${usage}`);
     }
     return afterMemory(memory.delete(id), (removed) => {
       if (!removed) {
@@ -290,6 +282,10 @@ export function createRecallQueryCommands<Context extends RecallQueryContext>(
   return { handleRecallSearch, handleRecallVector, handleRecallGet, handleRecallLink, handleRecallRemove, handleRecallList };
 }
 
-export function mutationArguments(args: string[], confirm: boolean): { rest: string[]; yes: boolean } {
-  return confirm ? { rest: args.filter((a) => a !== '--yes'), yes: args.includes('--yes') } : { rest: args, yes: true };
+/**
+ * A mutation's arguments: the line runs as typed (the registry asks first for
+ * a line that cannot be undone), and a `--yes` typed out of habit is dropped.
+ */
+export function mutationArguments(args: string[]): { rest: string[]; yes: boolean } {
+  return { rest: args.filter((a) => a !== '--yes'), yes: true };
 }

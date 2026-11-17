@@ -351,10 +351,7 @@ function runBundleCommand(args: readonly string[], ctx: CommandContext, skillReg
     const parsed = parseSkillArgs(args.slice(1));
     const id = parsed.rest[0];
     if (!id) {
-      throw commandRefusal('Usage: /skills bundle delete <id> --yes');
-    }
-    if (!parsed.yes) {
-      throw commandRefusal(`Refusing to delete Agent skill bundle ${id} without --yes.`);
+      throw commandRefusal('Usage: /skills bundle delete <id>');
     }
     const removed = skillRegistry.deleteBundle(id);
     ctx.print(formatSkillReceipt('Deleted Agent skill bundle', removed));
@@ -543,10 +540,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
       const parsed = parseSkillArgs(args.slice(1));
       const id = parsed.rest[0];
       if (!id) {
-        throw commandRefusal('Usage: /skills delete <id> --yes');
-      }
-      if (!parsed.yes) {
-        throw commandRefusal(`Refusing to delete Agent skill ${id} without --yes.`);
+        throw commandRefusal('Usage: /skills delete <id>');
       }
       const removed = skillRegistry.deleteSkill(id);
       ctx.print(formatSkillReceipt('Deleted Agent skill', removed));
@@ -563,11 +557,24 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
 export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'skills',
+    // Deleting a skill or bundle cannot be undone: the registry asks once (command-confirmation.ts).
+    confirm(args) {
+      let at = 0;
+      while (['local', 'agent'].includes((args[at] ?? '').toLowerCase())) at += 1;
+      const bundle = ['bundle', 'bundles'].includes((args[at] ?? '').toLowerCase());
+      if (bundle) at += 1;
+      const sub = (args[at] ?? '').toLowerCase();
+      const id = args.slice(at + 1).find((word) => !word.startsWith('--'));
+      if ((sub !== 'delete' && sub !== 'remove') || !id) return undefined;
+      return bundle
+        ? { title: `Delete Agent skill bundle ${id}?`, detail: `The skill bundle ${id} is removed from the Agent-local registry and cannot be recovered.`, confirmLabel: 'Delete' }
+        : { title: `Delete Agent skill ${id}?`, detail: `The skill ${id} is removed from the Agent-local registry and cannot be recovered.`, confirmLabel: 'Delete' };
+    },
     effect: 'local-state',
     aliases: ['skill', 'agent-skills', 'askills', 'local-skills'],
     description: 'Manage Agent-local skills',
     hidden: true,
-    usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled] --yes|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id> --yes|bundle ...]',
+    usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled] --yes|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id>|bundle ...]',
     handler: runAgentSkillsRuntimeCommand,
   });
 }

@@ -60,7 +60,6 @@ export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRe
           origin: 'origin',
           links: 'links',
         })[label],
-      confirmMutations: true,
       linkFailure: '[memory] Link failed, check that both IDs exist.',
       printLinked(context, fromId, toId, relation) {
         context.print(['[memory] Linked', `  from ${fromId}`, `  to ${toId}`, `  relation ${relation}`].join('\n'));

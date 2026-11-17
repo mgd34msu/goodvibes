@@ -200,7 +200,6 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
     'Review or toggle always-speak mode, provision the managed local voice runtime and the wake-word models (setup/status), and export or import the voice settings',
   usage: '[review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
   help: 'Usage: /voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
-  confirmMutations: false,
   reportFailure: false,
   paths: requireShellPaths,
   async wake(args, ctx, shellPaths, _yes) {

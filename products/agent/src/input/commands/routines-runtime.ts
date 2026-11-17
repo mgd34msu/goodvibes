@@ -488,10 +488,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
       const parsed = parseRoutineArgs(args.slice(1));
       const id = parsed.rest[0];
       if (!id) {
-        throw commandRefusal('Usage: /routines delete <id> --yes');
-      }
-      if (!parsed.yes) {
-        throw commandRefusal(`Refusing to delete Agent routine ${id} without --yes.`);
+        throw commandRefusal('Usage: /routines delete <id>');
       }
       const removed = routineRegistry.deleteRoutine(id);
       ctx.print(formatRoutineReceipt('Deleted Agent routine', removed));
@@ -506,11 +503,18 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
 export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'routines',
+    // Deleting a routine cannot be undone: the registry asks once (command-confirmation.ts).
+    confirm(args) {
+      const sub = (args[0] ?? '').toLowerCase();
+      const id = args.slice(1).find((word) => !word.startsWith('--'));
+      if ((sub !== 'delete' && sub !== 'remove') || !id) return undefined;
+      return { title: `Delete Agent routine ${id}?`, detail: `The routine ${id} is removed from the Agent-local registry and cannot be recovered.`, confirmLabel: 'Delete' };
+    },
     effect: 'local-state',
     aliases: ['routine'],
     description: 'Manage Agent-local routines',
     hidden: true,
-    usage: '[list|enabled|attention|discover|import-discovered <name> --yes|search <query>|show <id>|receipts|reconcile|receipt <id>|create --name <name> --description <summary> --steps <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--steps ...]|enable <id>|disable <id>|start <id>|review <id>|stale <id> <reason...>|promote <id> --cron <expr> [--delivery-channel slack] --yes|delete <id> --yes]',
+    usage: '[list|enabled|attention|discover|import-discovered <name> --yes|search <query>|show <id>|receipts|reconcile|receipt <id>|create --name <name> --description <summary> --steps <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--steps ...]|enable <id>|disable <id>|start <id>|review <id>|stale <id> <reason...>|promote <id> --cron <expr> [--delivery-channel slack] --yes|delete <id>]',
     handler: runRoutinesRuntimeCommand,
   });
 }

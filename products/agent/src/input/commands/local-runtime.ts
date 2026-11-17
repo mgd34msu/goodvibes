@@ -16,9 +16,10 @@ import {
   resolveCredentialWriteScope,
 } from '../../config/credential-scope.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { requireYesFlag, stripYesFlag, withOwnerConfirmation, type ConfirmableCommand } from './confirmation.ts';
+import { commandRefusal, requireYesFlag, stripYesFlag, withOwnerConfirmation, type ConfirmableCommand } from './confirmation.ts';
 import { collectAgentMedia, mediaCollectCommand } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentMediaGenerationResult, generateAgentMedia } from '@goodvibes-jev/engine/terminal-shell/agent-turn/media-generation';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 interface MediaGenerateArgs {
   readonly prompt: string;
@@ -104,7 +105,6 @@ const localActions = createLocalCommandActions<CommandContext>(requireProviderAp
 const secretsCommand = createSecretsCommand<CommandContext>(requireSecretsManager, {
   description: 'Manage hierarchy-aware secrets, external secret refs, and secure/plaintext storage policy controls',
   hidden: true,
-  confirmMutations: true,
   concealedEntry: true,
   writeScope: resolveCredentialWriteScope,
   deleteScope: resolveCredentialDeleteScope,
@@ -155,7 +155,8 @@ const servicesCommand = withOwnerConfirmation<CommandContext, SlashCommand & Pic
           ? '[services] ' + name + ' from this project is used from now on\n  ' + describePendingProjectService(result.service)
           : '[services] Nothing was confirmed: ' + result.reason + '.');
       } catch (error) {
-        ctx.print('[services] Nothing was confirmed: the confirmation could not be saved (' + summarizeError(error) + ').');
+        if (readRefusal(error)) throw error;
+        throw commandRefusal('[services] Nothing was confirmed: the confirmation could not be saved (' + summarizeError(error) + ').');
       }
       return;
     }
@@ -286,7 +287,8 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
           });
           ctx.print(formatAgentMediaGenerationResult(result, mediaCollectCommand));
         } catch (error) {
-          ctx.print(`[media] Collecting ${task.providerId} task ${task.taskId} failed ${summarizeError(error)}`);
+          if (readRefusal(error)) throw error;
+          throw commandRefusal(`[media] Collecting ${task.providerId} task ${task.taskId} failed ${summarizeError(error)}`);
         }
         return;
       }
@@ -307,7 +309,8 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
         const result = await generateAgentMedia(registry, artifactStore, parsed);
         ctx.print(formatAgentMediaGenerationResult(result, mediaCollectCommand));
       } catch (error) {
-        ctx.print(`[media] Generation failed ${summarizeError(error)}`);
+        if (readRefusal(error)) throw error;
+        throw commandRefusal(`[media] Generation failed ${summarizeError(error)}`);
       }
     },
   });

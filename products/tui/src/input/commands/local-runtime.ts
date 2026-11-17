@@ -24,7 +24,6 @@ const secretsCommand = createSecretsCommand<CommandContext>(requireSecretsManage
   description:
     'Persistent secret storage: hierarchy-aware, external secret refs, providers (a quick one-off masked value instead: /secret)',
   hidden: false,
-  confirmMutations: false,
   concealedEntry: true,
   writeScope: (_key, requested) => requested,
   deleteScope: (_key, requested) => requested,

@@ -11,6 +11,7 @@ import type {
 
 import { createTerminalCommandRegistry, reportDaemonWriteRefusals, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
 import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
+import { SHARED_COMMAND_CONFIRMATIONS, withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 
@@ -271,14 +272,30 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
    * means the surface's own input handler received keystrokes.
    */
   readonly invokedByModel?: boolean | undefined;
+  /**
+   * Ask a yes/no question in a small centered confirm dialog (a kit modal on
+   * top of whatever is open). Resolves true only when the confirming button
+   * is pressed; Esc and "no" resolve false.
+   */
+  confirm?: (options: import('./confirm-dialog.ts').ConfirmOptions) => Promise<boolean>;
 }
 
-/** A command as this app registers it. `subcommands` gives the composer's argument hint for each subcommand. */
-export type SlashCommand = TerminalSlashCommand<CommandContext> & CommandSubcommandHints;
+/**
+ * A command as this app registers it. `subcommands` gives the composer's
+ * argument hint for each subcommand; `confirm` names the lines that cannot be
+ * undone or change access, which the registry asks about once before running.
+ */
+export type SlashCommand = TerminalSlashCommand<CommandContext> & CommandSubcommandHints & Pick<ConfirmableCommand<CommandContext>, 'confirm' | 'leadingFlagsOnly'>;
 const platformCommands = createTerminalCommandRegistry<CommandContext>({ afterCommand: (context) => reportDaemonWriteRefusals(context) });
 export class CommandRegistry extends platformCommands.CommandRegistry {
+  /**
+   * Every registration passes through the one confirmation rule
+   * (command-confirmation.ts), the same rule the TUI registry applies: a
+   * reversible line runs at once, an irreversible one asks once inline.
+   */
   override register(command: SlashCommand): void {
-    super.register(command);
+    const confirm = command.confirm ?? SHARED_COMMAND_CONFIRMATIONS[command.name];
+    super.register(withOwnerConfirmation<CommandContext, SlashCommand>(confirm ? { ...command, confirm } : command));
   }
   override get(name: string): SlashCommand | undefined {
     return super.get(name);

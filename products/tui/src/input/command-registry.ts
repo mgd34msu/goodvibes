@@ -10,9 +10,8 @@ import type {
 } from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
 
 import { createTerminalCommandRegistry, reportDaemonWriteRefusals, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
-import { withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { SHARED_COMMAND_CONFIRMATIONS, withOwnerConfirmation, type ConfirmableCommand } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
-import { SHARED_COMMAND_CONFIRMATIONS } from './shared-command-confirmations.ts';
 import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 
@@ -425,7 +424,7 @@ export class CommandRegistry extends platformCommands.CommandRegistry {
   /**
    * Every registration passes through the one confirmation rule
    * (command-confirmation.ts); a command built by shared shell code takes its
-   * irreversible lines from shared-command-confirmations.ts.
+   * irreversible lines from SHARED_COMMAND_CONFIRMATIONS, the table the Agent uses too.
    */
   override register(command: SlashCommand): void {
     const confirm = command.confirm ?? SHARED_COMMAND_CONFIRMATIONS[command.name];

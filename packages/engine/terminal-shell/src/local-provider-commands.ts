@@ -54,7 +54,6 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
   policy: {
     readonly surfaceRoot: string;
     readonly hidden: boolean;
-    readonly confirmMutations: boolean;
     readonly allowInlineKey: boolean;
     readonly captureMissingKey: boolean;
     readonly explicitModelSelection: boolean;
@@ -97,7 +96,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
     apiKey: string | undefined,
   ): Promise<void> {
     const { name, baseURL, endpoint, directory, file } = request;
-    const confirmationSuffix = policy.confirmMutations ? ' --yes' : '';
+    const confirmationSuffix = '';
     context.print(`Probing ${baseURL}/models ...`);
     let ids: string[] = [];
     let unreadable = false;
@@ -197,7 +196,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
     );
   }
   function registerLocalProviderRuntimeCommands(registry: Pick<TerminalCommandRegistry<Context>, 'register'>): void {
-    const confirmationSuffix = policy.confirmMutations ? ' --yes' : '';
+    const confirmationSuffix = '';
     registry.register({
       name: 'provider',
       effect: 'mixed',
@@ -205,9 +204,9 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
       description: 'Switch provider or manage custom providers (add/remove)',
       ...(policy.hidden ? { hidden: true } : {}),
       usage: `[add <name> <baseURL>${policy.allowInlineKey ? ' [apiKey]' : ''}${confirmationSuffix} | remove <name>${confirmationSuffix} | <provider-name>]`,
-      argsHint: policy.confirmMutations ? '[name|add --yes|remove --yes]' : '[add|remove|name]',
+      argsHint: '[add|remove|name]',
       async handler(args, context) {
-        const parsed = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
+        const parsed = { rest: stripYesFlag(args).rest, yes: true };
         const commandArgs = parsed.rest;
         const paths = services.requireShellPaths(context);
         if (commandArgs[0] === 'add') {

@@ -3,7 +3,6 @@ import type { CommandContext } from '../command-registry.ts';
 import { requireMcpApi, requireShellPaths } from './runtime-services.ts';
 export const { registerMcpRuntimeCommands } = createMcpRuntimeCommands<CommandContext>(requireMcpApi, requireShellPaths, {
   hidden: false,
-  confirmMutations: false,
   allowAllOnAdd: true,
   wording: {
     host: 'the TUI',

@@ -6,5 +6,4 @@ export const { handleRecallExport, handleRecallImport, handleRecallHandoffExport
   createRecallBundleCommands<CommandContext>(getMemorySpine, requireShellPaths, {
     tag: '[recall]',
     command: 'recall',
-    confirmMutations: false,
   });

@@ -23,6 +23,7 @@ import {
   resetHarnessSetting,
   setHarnessSetting,
 } from '../../agent/harness-control.ts';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 
 function readValuedFlag(args: readonly string[], flag: string): string | undefined {
   const assignmentPrefix = `${flag}=`;
@@ -175,7 +176,8 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
           ctx.print(formatHarnessMutation(result));
           ctx.renderRequest();
         } catch (error) {
-          ctx.print(formatHarnessError(error));
+          if (readRefusal(error)) throw error;
+          throw commandRefusal(formatHarnessError(error));
         }
         return;
       }
@@ -194,7 +196,8 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
           ctx.print(formatHarnessMutation(result));
           ctx.renderRequest();
         } catch (error) {
-          ctx.print(formatHarnessError(error));
+          if (readRefusal(error)) throw error;
+          throw commandRefusal(formatHarnessError(error));
         }
         return;
       }
@@ -227,7 +230,6 @@ const interactionModeCommand = createInteractionModeCommand<CommandContext>({
   description: 'Set how much the app prints: quiet, balanced or operator',
   usage: '[quiet|balanced|operator|show|set-domain <domain> <verbosity>]',
   argsHint: '[level|show|set-domain]',
-  confirmMutations: false,
   help:
     'Usage: /mode [quiet|balanced|operator|show|set-domain <domain> <verbosity>]\n' +
     '  /mode                          show the print level\n' +

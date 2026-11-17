@@ -7,7 +7,6 @@ export const { registerLocalProviderRuntimeCommands } = createLocalProviderComma
   {
     surfaceRoot: 'tui',
     hidden: false,
-    confirmMutations: false,
     allowInlineKey: false,
     captureMissingKey: true,
     explicitModelSelection: false,

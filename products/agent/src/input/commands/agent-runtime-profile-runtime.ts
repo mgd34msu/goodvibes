@@ -138,6 +138,12 @@ function renderTemplatePreview(homeDirectory: string, templateId: string): strin
 export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'agent-profile',
+    // Deleting a profile removes its whole home: the registry asks once (command-confirmation.ts).
+    confirm(args) {
+      const name = args[0] === 'delete' ? args.slice(1).find((word) => !word.startsWith('--')) : undefined;
+      if (!name) return undefined;
+      return { title: `Delete Agent profile ${name}?`, detail: `The profile ${name} and everything in its home (config, sessions, memory, notes, personas, skills, routines) are deleted and cannot be recovered.`, confirmLabel: 'Delete' };
+    },
     effect: 'mixed',
     aliases: ['runtime-profile', 'agent-profiles'],
     description: 'Manage isolated Agent profiles and starter templates',
@@ -370,17 +376,13 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         if (sub === 'delete') {
           const name = commandArgs[1];
           if (!name) {
-            throw commandRefusal('Usage: /agent-profile delete <name> --yes');
-          }
-          if (!parsed.yes) {
-            requireYesFlag(ctx, `delete Agent profile ${name}`, '/agent-profile delete <name> --yes');
-            return;
+            throw commandRefusal('Usage: /agent-profile delete <name>');
           }
           ctx.print(deleteAgentRuntimeProfile(homeDirectory, name) ? `Agent profile deleted: ${name}` : `Agent profile not found ${name}`);
           return;
         }
 
-        throw commandRefusal('Usage: /agent-profile [list|show <name>|default [<name>|clear] --yes|use <name> --yes|templates|guide|template show <id>|template export <id> <path> [--include-vibe] --yes|template import <path> [--replace] --yes|create <name> [--template <id>] --yes|create-from-discovered <name> [--include-vibe] --yes|delete <name> --yes]');
+        throw commandRefusal('Usage: /agent-profile [list|show <name>|default [<name>|clear] --yes|use <name> --yes|templates|guide|template show <id>|template export <id> <path> [--include-vibe] --yes|template import <path> [--replace] --yes|create <name> [--template <id>] --yes|create-from-discovered <name> [--include-vibe] --yes|delete <name>]');
       } catch (error) {
         if (readRefusal(error)) throw error;
         throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');

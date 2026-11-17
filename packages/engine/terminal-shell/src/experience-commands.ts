@@ -64,7 +64,6 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
   readonly description: string;
   readonly usage: string;
   readonly help: string;
-  readonly confirmMutations: boolean;
   readonly reportFailure: boolean;
   readonly paths: (context: Context) => ShellPathService;
   readonly wake: (args: string[], ctx: Context, shellPaths: ShellPathService, yes: boolean) => void | Promise<void>;
@@ -84,7 +83,8 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
     usage: policy.usage,
     async handler(args, ctx) {
       try {
-        const { rest, yes } = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
+        const { rest } = stripYesFlag(args);
+        const yes = true;
         const commandArgs = [...rest],
           shellPaths = policy.paths(ctx),
           sub = (commandArgs[0] ?? 'review').toLowerCase();
@@ -110,7 +110,7 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
             path = commandArgs[2];
           if (mode === 'export' || mode === 'inspect' || mode === 'import') {
             if (!path) {
-              throw commandRefusal(`Usage: /voice bundle ${mode} <path>${mode !== 'inspect' && policy.confirmMutations ? ' --yes' : ''}`);
+              throw commandRefusal(`Usage: /voice bundle ${mode} <path>`);
             }
             const target = shellPaths.resolveWorkspacePath(path);
             if (mode === 'export') {

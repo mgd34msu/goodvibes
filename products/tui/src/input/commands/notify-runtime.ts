@@ -5,7 +5,6 @@ const commands = createNotifyRuntimeCommands<CommandContext>(requireWebhookNotif
   description: 'Manage webhook notification URLs (ntfy.sh format)',
   usage: 'add <url> | remove <n|url> | list [--show] | clear | test',
   argsHint: 'add|remove|list|clear|test',
-  confirmMutations: false,
   maskUrls: true,
   allowSend: false,
 });

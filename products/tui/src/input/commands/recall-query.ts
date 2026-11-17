@@ -57,7 +57,6 @@ export const { handleRecallSearch, handleRecallVector, handleRecallGet, handleRe
         origin: 'Provenance:',
         links: 'Links:',
       })[label],
-    confirmMutations: false,
     linkFailure: '[recall] Link failed: check that both IDs exist.',
     printLinked(context, fromId, toId, relation) {
       context.print(`[recall] Linked: ${fromId} -> ${toId} [${relation}]`);

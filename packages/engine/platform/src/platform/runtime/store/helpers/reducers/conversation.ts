@@ -116,8 +116,9 @@ export function updateConversationState(
         messageCount: domain.messageCount + 1,
       };
     case 'PREFLIGHT_OK':
-      // The check runs again before each provider call, so it also follows a finished tool batch.
-      if (!isCurrentTurnEvent(domain, event.turnId) || (domain.turnState !== 'preflight' && domain.turnState !== 'post_hooks')) return domain;
+      // The check runs again before each provider call: after a finished tool batch, and
+      // after a response with no tools that the loop follows with another request.
+      if (!isCurrentTurnEvent(domain, event.turnId) || isTerminalTurnState(domain.turnState) || domain.turnState === 'tool_dispatch') return domain;
       return {
         ...updateDomainMetadata(domain, source),
         currentTurnId: event.turnId,
@@ -138,7 +139,9 @@ export function updateConversationState(
         stream: resetStreamState(),
       };
     case 'STREAM_START':
-      if (!isCurrentTurnEvent(domain, event.turnId) || domain.turnState !== 'preflight') return domain;
+      // Every provider call of the turn starts its own stream: the counters and the
+      // reasoning text describe one response, never the sum of the turn's responses.
+      if (!isCurrentTurnEvent(domain, event.turnId) || isTerminalTurnState(domain.turnState) || domain.turnState === 'tool_dispatch') return domain;
       return {
         ...updateDomainMetadata(domain, source),
         currentTurnId: event.turnId,

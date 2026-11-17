@@ -585,15 +585,12 @@ function workspaceRelativeLabel(context: CommandContext, cwd: string | undefined
   return label === '' ? '.' : label.startsWith('..') ? '(outside the workspace)' : label;
 }
 
+/** Waits on the process manager's completion signal: returns the moment the process ends, not on the next poll. */
 async function waitForProcess(manager: ProcessManager, processId: string, timeoutMs: number, options: CatalogRankingOptions): Promise<BackgroundProcess | undefined> {
-  const started = Date.now();
-  for (;;) {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    const entry = manager.getStatus(processId);
-    if (!entry || entry.done) return entry;
-    if (Date.now() - started >= timeoutMs) return entry;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  await manager.whenSettled(processId, timeoutMs, options.signal);
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  return manager.getStatus(processId);
 }
 
 export async function runBackgroundProcessAction(context: CommandContext, args: AgentHarnessBackgroundProcessArgs,

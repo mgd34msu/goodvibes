@@ -255,6 +255,8 @@ export class ProcessManager {
   private readonly _launches = new Set<Promise<BgCommandResult>>();
   private _closed = false;
   private _closing: Promise<void> | undefined;
+  /** Callers of `whenSettled`, woken when their process finishes or its record goes. */
+  private readonly _settledWaiters = new Map<string, Set<() => void>>();
 
   // ─── Private helpers ────────────────────────────────────────────────────────
 
@@ -743,6 +745,31 @@ export class ProcessManager {
       timed_out: entry.timedOut === true, duration_ms: (entry.completedAt ?? Date.now()) - entry.startTime }), stderr: '', success: true };
   }
 
+  /**
+   * Resolve once the process has finished or has no record, the time limit has
+   * passed, or the signal aborts, whichever is first. Never rejects: the caller
+   * reads `getStatus` afterwards to learn which.
+   */
+  whenSettled(id: string, timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    const entry = this._processes.get(id);
+    if (!entry || entry.done || timeoutMs <= 0 || signal?.aborted) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const waiters = this._settledWaiters.get(id) ?? new Set<() => void>();
+      this._settledWaiters.set(id, waiters);
+      const finish = (): void => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', finish);
+        waiters.delete(finish);
+        if (waiters.size === 0 && this._settledWaiters.get(id) === waiters) this._settledWaiters.delete(id);
+        resolve();
+      };
+      const timer = setTimeout(finish, timeoutMs);
+      timer.unref?.();
+      signal?.addEventListener('abort', finish, { once: true });
+      waiters.add(finish);
+    });
+  }
+
   /** Get the status record for a background process, or undefined if not found. */
   getStatus(id: string): BackgroundProcess | undefined {
     this.pruneCompletedProcesses();
@@ -975,6 +1002,12 @@ export class ProcessManager {
       this._expired.set(entry.id, completedAt);
       if (this._expired.size > MAX_EXPIRED_PROCESSES) this._expired.delete(this._expired.keys().next().value!);
       void this.releaseSpills(entry.id);
+    }
+    // Every path that finishes a process prunes, so this is where its waiters wake.
+    for (const [id, waiters] of this._settledWaiters) {
+      const entry = this._processes.get(id);
+      if (entry && !entry.done) continue;
+      for (const finish of [...waiters]) finish();
     }
   }
 

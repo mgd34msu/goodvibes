@@ -98,7 +98,7 @@ function shortcutGroups(keybindingsManager: KeybindingsManager): ShortcutGroup[]
         ['Tab', 'Collapse/expand block'],
         [kb('bookmark'), 'Bookmark block'],
         [kb('block-copy'), 'Copy block to clipboard'],
-        [kb('block-save'), 'Block file save disabled; copy or export'],
+        [kb('block-save'), 'Save block to file'],
         [kb('copy-selection'), 'Copy selection'],
         ['F2', 'Process monitor'],
         ['?', 'Help overlay'],

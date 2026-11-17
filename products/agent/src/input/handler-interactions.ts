@@ -56,7 +56,7 @@ import '../renderer/theme.ts';
  */
 
 /**
- * handleBlockSave - Ctrl+S: Explain that implicit block file saves are blocked.
+ * handleBlockSave - Ctrl+S: Save the nearest block to a new file in the bookmarks folder.
  */
 
 /**

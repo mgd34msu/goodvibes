@@ -48,8 +48,7 @@ type KeybindingOperationEffect =
   | 'visible-ui-interaction'
   | 'prompt-editor-state'
   | 'clipboard-selection'
-  | 'reserved'
-  | 'disabled';
+  | 'reserved';
 
 interface KeybindingOperationRoute {
   readonly supported: boolean;
@@ -450,10 +449,10 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
     case 'block-save':
       return {
         supported: false,
-        effect: 'disabled',
+        effect: 'visible-ui-interaction',
         preferredMode: 'direct-user-interaction',
         confirmation: 'No model operation is exposed.',
-        note: 'Saving a block to a file is disabled in the Agent. Use block-copy to copy the block, or export the conversation instead.',
+        note: 'Ctrl+S saves the block nearest the scroll position to a new file in the Agent bookmarks folder, so it depends on what the user is looking at. To save content yourself, write the file with the write tool.',
       };
     case 'block-copy':
     case 'bookmark':

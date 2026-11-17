@@ -36,7 +36,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   'workspace-tab-next':    'Cycle Agent workspace category forward',
   'workspace-tab-prev':    'Cycle Agent workspace category backward',
   'activity-open':         'Open the Activity modal (running work, needs you, recent)',
-  'block-save':            'Block file save disabled; copy block or export conversation',
+  'block-save':            'Save nearest block to file',
   'line-start':            'Move to start of line',
   'clear-prompt':          'Clear the prompt',
 };

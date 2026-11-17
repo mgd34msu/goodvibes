@@ -12,9 +12,8 @@ import '../utils/clipboard.ts';
 
 
 export const { handleCopy, handleBlockCopy, handleBookmark, handleBlockSave, handleBlockToggle } = createBlockContentActions({
-  allowSave: false,
-  saveDisabled:
-    '[Block file save is disabled in GoodVibes Agent: copy the block explicitly or use /export markdown <path> --yes for the conversation.]',
+  allowSave: true,
+  saveDisabled: '',
   noteTouch: (conversation, key) => conversation.noteUserTouch(key),
   bookmarkTarget: (block) => block.collapseKey,
 });

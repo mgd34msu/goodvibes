@@ -1,7 +1,9 @@
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { WorkspaceCheckpointManager, checkpointEligibilityRefusal } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from './index.js';
+import { createSessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.js';
 import { createWorkspaceRegistrationLiveChecker, type StoreShellPaths } from './trust/checkpoint-eligibility.js';
@@ -117,20 +119,54 @@ export type RoutedCheckpointGateway = WorkspaceCheckpointing['gatewayManager'] &
   forCheckpoint?(id: string): Promise<RoutedCheckpointGateway | undefined>;
 };
 
-function gatewayOf(checkpointing: WorkspaceCheckpointing): RoutedCheckpointGateway {
+/**
+ * The verbs' surface over a hosted workspace's checkpointing. A store that
+ * cannot be opened refuses with its workspace named, rather than letting the
+ * verb fall through to another workspace's store and answer "no changes".
+ */
+function gatewayOf(checkpointing: WorkspaceCheckpointing, workspaceRoot?: string): RoutedCheckpointGateway {
   const base = checkpointing.gatewayManager;
+  // `init` resolves at once after the first success; a failure is retried on the next call.
+  const ready = async (): Promise<void> => {
+    if (workspaceRoot === undefined) return;
+    try {
+      await checkpointing.manager.init();
+    } catch (error) {
+      throw new Error(hostedStoreUnavailable(workspaceRoot, error), { cause: error });
+    }
+  };
   return {
     // Read live: init may move the root to the enclosing repository's top level.
     get workspaceRoot() { return base.workspaceRoot; },
-    resolveRoot: () => base.resolveRoot(),
-    list: (filter) => base.list(filter),
-    diff: (a, b) => base.diff(a, b),
-    restore: (id, restoreOpts) => base.restore(id, restoreOpts),
-    sessionChanges: (sessionId) => base.sessionChanges(sessionId),
-    create: (createOpts) => base.create(createOpts),
+    resolveRoot: async () => { await ready(); return base.resolveRoot(); },
+    list: async (filter) => { await ready(); return base.list(filter); },
+    diff: async (a, b) => { await ready(); return base.diff(a, b); },
+    restore: async (id, restoreOpts) => { await ready(); return base.restore(id, restoreOpts); },
+    sessionChanges: async (sessionId) => { await ready(); return base.sessionChanges(sessionId); },
+    create: async (createOpts) => { await ready(); return base.create(createOpts); },
     retentionFailure: () => checkpointing.manager.retentionFailure(),
     historyTrimmed: () => checkpointing.manager.historyTrimmed(),
   };
+}
+
+function hostedStoreUnavailable(workspaceRoot: string, error: unknown): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  return `The checkpoints of the hosted workspace ${workspaceRoot} could not be opened: ${reason}. Nothing was read from any other workspace. Make sure ${workspaceRoot} exists and is readable by the daemon, then retry.`;
+}
+
+/** What the daemon gives its registry to open a hosted workspace's checkpoints when no session there is running. */
+export interface HostedCheckpointSources {
+  readonly homeDirectory: string;
+  readonly configManager: ConfigManager;
+  readonly shellPaths: StoreShellPaths;
+  /**
+   * The workspace a hosted session works in, from the session's durable record,
+   * so a session that ended, went idle or outlived a daemon restart still
+   * reaches its own workspace's store. Undefined: not a hosted session.
+   */
+  readonly hostedWorkspaceOf: (sessionId: string) => string | undefined;
+  /** Every workspace a recorded hosted session works in. */
+  readonly hostedWorkspaces: () => readonly string[];
 }
 
 /**
@@ -139,18 +175,27 @@ function gatewayOf(checkpointing: WorkspaceCheckpointing): RoutedCheckpointGatew
  * turns (every session publishes on the daemon's one bus), and the
  * `checkpoints.*` and `sessions.changes.get` verbs reach the manager of the
  * session's workspace, or the store that holds the checkpoint they name.
+ *
+ * A hosted workspace's manager is opened when its first session starts, or
+ * when a verb first names a session or checkpoint of it, and stays open until
+ * the daemon stops: reviewing or rewinding a finished hosted session reads the
+ * same store its turns wrote.
  */
 export interface DaemonWorkspaceCheckpoints {
+  /** How to open a hosted workspace's store and find a hosted session's workspace. Set once by the daemon graph. */
+  configure(sources: HostedCheckpointSources): void;
   /** A hosted session works in `workspaceRoot` (told at create and at rebuild). */
   bindSession(sessionId: string, workspaceRoot: string): void;
   /** Which sessions a workspace's manager snapshots: its hosted sessions, plus every unhosted one for the daemon's own. */
   ownsSession(workspaceRoot: string, options?: { readonly daemonOwn?: boolean }): (sessionId: string | undefined) => boolean;
-  /** Add a hosted workspace's checkpointing; returns its removal. */
-  addWorkspace(workspaceRoot: string, checkpointing: WorkspaceCheckpointing): () => void;
+  /** The open checkpointing of a hosted workspace, opened on first use; null for the daemon's own workspace (its manager covers it). */
+  acquire(workspaceRoot: string): WorkspaceCheckpointing | null;
   /** Whether `workspaceRoot` is the daemon's own (its manager already covers it). */
   isDaemonWorkspace(workspaceRoot: string): boolean;
   /** The gateway surface for the verbs: the daemon's own, routed by session and by checkpoint id. */
   gateway(daemon: WorkspaceCheckpointing, daemonRoot: string): RoutedCheckpointGateway;
+  /** Close every hosted workspace's checkpointing (daemon shutdown). */
+  close(): Promise<void>;
 }
 
 /** Sessions remembered per daemon; the oldest binding goes first past this bound. */
@@ -163,9 +208,41 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
   if (existing) return existing;
   const sessions = new Map<string, string>();
   const workspaces = new Map<string, WorkspaceCheckpointing>();
+  let sources: HostedCheckpointSources | undefined;
   let daemonRoot: string | undefined;
-  const workspaceOf = (sessionId: string | undefined): string | undefined => (sessionId === undefined ? undefined : sessions.get(sessionId));
+  let closed = false;
+  const workspaceOf = (sessionId: string | undefined): string | undefined => {
+    if (sessionId === undefined) return undefined;
+    const bound = sessions.get(sessionId);
+    if (bound !== undefined) return bound;
+    const recorded = sources?.hostedWorkspaceOf(sessionId);
+    return recorded === undefined || !isAbsolute(recorded) ? undefined : resolve(recorded);
+  };
+  const isDaemonRoot = (root: string): boolean => daemonRoot !== undefined && root === daemonRoot;
+  const acquire = (workspaceRoot: string): WorkspaceCheckpointing | null => {
+    const root = resolve(workspaceRoot);
+    if (isDaemonRoot(root)) return null;
+    const open = workspaces.get(root);
+    if (open) return open;
+    if (!sources) throw new Error(`The daemon cannot open the checkpoints of ${root}: its checkpoint registry was not given the hosted workspaces. This is a daemon composition fault; restart the daemon.`);
+    if (closed) throw new Error(`The daemon is stopping, so the checkpoints of ${root} were not opened. Retry once it has restarted.`);
+    const checkpointing = createWorkspaceCheckpointing({
+      workspaceRoot: root,
+      surface: createSessionSurface({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDirectory: root, homeDirectory: sources.homeDirectory }),
+      runtimeBus,
+      configManager: sources.configManager,
+      shellPaths: sources.shellPaths,
+      ownsSession: registry.ownsSession(root),
+    });
+    workspaces.set(root, checkpointing);
+    return checkpointing;
+  };
   const registry: DaemonWorkspaceCheckpoints = {
+    configure(next) {
+      // A graph composed again on the same bus opens stores again.
+      sources = next;
+      closed = false;
+    },
     bindSession(sessionId, workspaceRoot) {
       sessions.delete(sessionId);
       sessions.set(sessionId, resolve(workspaceRoot));
@@ -178,13 +255,9 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
         return bound === undefined ? options?.daemonOwn === true : bound === root;
       };
     },
-    addWorkspace(workspaceRoot, checkpointing) {
-      const root = resolve(workspaceRoot);
-      workspaces.set(root, checkpointing);
-      return () => { if (workspaces.get(root) === checkpointing) workspaces.delete(root); };
-    },
+    acquire,
     isDaemonWorkspace(workspaceRoot) {
-      return daemonRoot !== undefined && resolve(workspaceRoot) === daemonRoot;
+      return isDaemonRoot(resolve(workspaceRoot));
     },
     gateway(daemon, root) {
       daemonRoot = resolve(root);
@@ -193,19 +266,71 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
         get workspaceRoot() { return daemon.gatewayManager.workspaceRoot; },
         forSession(sessionId) {
           const bound = workspaceOf(sessionId);
-          const hosted = bound === undefined ? undefined : workspaces.get(bound);
-          return hosted ? gatewayOf(hosted) : undefined;
+          if (bound === undefined || isDaemonRoot(bound)) return undefined;
+          let hosted: WorkspaceCheckpointing | null;
+          try {
+            hosted = acquire(bound);
+          } catch (error) {
+            // Refused through the verb, never answered from the daemon's own store.
+            const failure = new Error(hostedStoreUnavailable(bound, error), { cause: error });
+            return refusingGateway(bound, failure);
+          }
+          return hosted ? gatewayOf(hosted, bound) : undefined;
         },
         async forCheckpoint(id) {
-          // In-memory manifests: a lookup, not a store read. The daemon's own answers an unknown id.
-          for (const hosted of workspaces.values()) {
-            if ((await hosted.manager.list()).some((checkpoint) => checkpoint.id === id)) return gatewayOf(hosted);
+          const holds = async (checkpointing: WorkspaceCheckpointing): Promise<boolean> =>
+            (await checkpointing.manager.list()).some((checkpoint) => checkpoint.id === id);
+          // In-memory manifests of the open stores first: a lookup, not a store read.
+          for (const [hostedRoot, hosted] of workspaces) {
+            if (await holds(hosted).catch(() => false)) return gatewayOf(hosted, hostedRoot);
           }
+          if (await holds(daemon).catch(() => false)) return undefined;
+          // Not in an open store: the workspaces of recorded hosted sessions not opened since the daemon started.
+          const unreadable: string[] = [];
+          for (const recorded of sources?.hostedWorkspaces() ?? []) {
+            if (!isAbsolute(recorded)) continue;
+            const hostedRoot = resolve(recorded);
+            if (isDaemonRoot(hostedRoot) || workspaces.has(hostedRoot)) continue;
+            try {
+              const hosted = acquire(hostedRoot);
+              if (hosted && await holds(hosted)) return gatewayOf(hosted, hostedRoot);
+            } catch (error) {
+              unreadable.push(`${hostedRoot} (${error instanceof Error ? error.message : String(error)})`);
+            }
+          }
+          if (unreadable.length > 0) {
+            throw new Error(`Checkpoint ${id} is not in this daemon's workspace or any hosted workspace it could read. These hosted workspaces' checkpoints could not be opened, so it may be in one of them: ${unreadable.join('; ')}. Make them readable by the daemon, then retry.`);
+          }
+          // The daemon's own answers an unknown id with its 404.
           return undefined;
         },
       };
     },
+    async close() {
+      closed = true;
+      const open = [...workspaces.values()];
+      workspaces.clear();
+      await Promise.all(open.map((checkpointing) => checkpointing.close().catch((error: unknown) => {
+        logger.warn('hosted workspace checkpoints did not close cleanly', { workspaceRoot: checkpointing.manager.workspaceRoot, error: error instanceof Error ? error.message : String(error) });
+      })));
+    },
   };
   byBus.set(runtimeBus, registry);
   return registry;
+}
+
+/** A gateway whose every call refuses with `failure`: a known hosted session whose store cannot be opened. */
+function refusingGateway(workspaceRoot: string, failure: Error): RoutedCheckpointGateway {
+  const refuse = async (): Promise<never> => { throw failure; };
+  return {
+    workspaceRoot,
+    resolveRoot: refuse,
+    list: refuse,
+    diff: refuse,
+    restore: refuse,
+    sessionChanges: refuse,
+    create: refuse,
+    retentionFailure: () => null,
+    historyTrimmed: () => null,
+  };
 }

@@ -71,11 +71,10 @@ import {
   hostedWorkerSurface,
 } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import { CONVERSATIONAL_DIAGNOSIS_SECTION, askingQuestions } from '@goodvibes-jev/engine/platform/platform/agents';
-import { createSessionSurface, createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
-import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
+import { daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
 import { createAgentHostedTurn } from '@goodvibes-jev/engine/terminal-shell/agent-turn/hosted-turn';
 
 /** The operator policy a session hosted by THIS daemon runs under. */
@@ -141,21 +140,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
     );
   };
 
-  // One checkpoint manager per hosted workspace; the daemon's own workspace keeps the daemon's.
+  // One checkpoint manager per hosted workspace, open until the daemon stops; the daemon's own workspace keeps the daemon's.
   const workspaceCheckpoints = daemonWorkspaceCheckpoints(services.runtimeBus);
-  const checkpointsFor = (workspaceRoot: string): { readonly close: () => Promise<void> } | null => {
-    if (workspaceCheckpoints.isDaemonWorkspace(workspaceRoot)) return null;
-    const checkpointing = createWorkspaceCheckpointing({
-      workspaceRoot,
-      surface: createSessionSurface({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDirectory: workspaceRoot, homeDirectory: services.homeDirectory }),
-      runtimeBus: services.runtimeBus,
-      configManager: services.configManager,
-      shellPaths: services.shellPaths,
-      ownsSession: workspaceCheckpoints.ownsSession(workspaceRoot),
-    });
-    const remove = workspaceCheckpoints.addWorkspace(workspaceRoot, checkpointing);
-    return { close: async () => { remove(); await checkpointing.close(); } };
-  };
 
   return {
     nativeConversation: nativeHostedConversationOwner(services.gatewayMethods),
@@ -208,7 +194,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         if (discovered.length > 0) floor.providerRegistry.registerDiscoveredProviders([...discovered]);
         // Snapshots this workspace's tree after each of its sessions' turns, so
         // checkpoints.restore and sessions.changes.get work for a hosted session.
-        const checkpoints = checkpointsFor(workspaceRoot);
+        // It outlives the floor: a finished session's changes stay reviewable.
+        workspaceCheckpoints.acquire(workspaceRoot);
         return {
           services: floor,
           devicePosture: services.devicePosture,
@@ -216,9 +203,6 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
           contractRunner: floor.contractRunner,
           execPosture: hostedExecPosture,
           dispose: (): void => {
-            void checkpoints?.close().catch((error: unknown) => {
-              logger.warn('hosted workspace checkpoints did not close cleanly', { workspaceRoot, error: error instanceof Error ? error.message : String(error) });
-            });
             floor.dispose();
           },
         };

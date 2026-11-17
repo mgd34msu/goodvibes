@@ -151,6 +151,17 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     } = graph;
     const daemonCheckpointing = checkpointingRef.current;
     if (!workspaceTrustManager || !triggerManager || !daemonCheckpointing) throw new Error('The daemon graph was composed without its trust owner, triggers or checkpoints');
+    // A hosted session's workspace is read from its session record, so the
+    // checkpoint verbs reach its store after it ended or the daemon restarted.
+    workspaceCheckpoints.configure({
+      homeDirectory, configManager, shellPaths,
+      hostedWorkspaceOf: (sessionId) => {
+        const record = sessionBroker.getSession(sessionId);
+        return record?.kind === 'hosted' ? record.project : undefined;
+      },
+      hostedWorkspaces: () => [...new Set(sessionBroker.listSessions(Number.MAX_SAFE_INTEGER, { kind: 'hosted' }).map((record) => record.project))],
+    });
+    disposalScope.registry.add('hosted workspace checkpoints', () => workspaceCheckpoints.close());
     // The daemon's approvals snapshot (approvals.list) reads the decisions the gate reports here.
     disposalScope.registry.add('gate events into the runtime store', registerGateRuntimeEvents(options.runtimeBus, graph.runtimeDispatch));
     const browserJudgment = options.createBrowserJudgment ? options.createBrowserJudgment(judgment)

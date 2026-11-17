@@ -216,9 +216,10 @@ export class ChannelHealthWatcher {
       if (alert) alerts.push(alert);
     }
 
-    for (const alert of alerts) {
-      if (signal.aborted) break;
-      const delivered = await this.emit(alert, signal);
+    // Alerts about different surfaces are independent: they go out together,
+    // so one slow channel does not hold back the news about another.
+    const outcomes = signal.aborted ? [] : await Promise.all(alerts.map(async (alert) => ({ alert, delivered: await this.emit(alert, signal) })));
+    for (const { alert, delivered } of outcomes) {
       const tracked = this.tracked.get(alert.surface);
       if (!tracked) continue;
       if (!delivered) {

@@ -9,7 +9,7 @@ import type {
   PrefixRule,
   EvaluationStep,
 } from '../types.js';
-import { execListedCommandTexts } from '../exec-command-text.js';
+import { execShellCommands } from '../exec-command-text.js';
 
 /** Result returned by evaluatePrefixRule. */
 export interface PrefixRuleResult {
@@ -33,17 +33,17 @@ function toolMatchesPrefixPattern(
 
 /**
  * extractCommandArgs, Extracts EVERY command string from args.
- * Understands the exec tool's real shape (`commands: [{ cmd | cmd_base64 }, ...]`)
- * as well as flat `command`/`cmd` strings; falls back to the first string value
- * only for a call that has no `commands` list at all.
+ * Understands the exec tool's real shape (`commands: [{ cmd | cmd_base64 }, ...]`),
+ * flat `command`/`cmd` strings and installed commands (a workflow schedule or
+ * hook action), all of them at once, so an allow rule must vouch for every
+ * command text in the call; falls back to the first string value only for a
+ * call that carries no command-bearing field at all.
  */
 export function extractCommandArgs(args: Record<string, unknown>): string[] {
-  const listed = execListedCommandTexts(args);
-  if (listed.length > 0) return listed;
+  const texts = execShellCommands(args);
+  if (texts.length > 0) return texts;
   // A `commands` list that carries no text must not hand rules some other argument (the working directory) to judge.
   if (Array.isArray(args['commands'])) return [];
-  if (typeof args['command'] === 'string') return [args['command']];
-  if (typeof args['cmd'] === 'string') return [args['cmd']];
   for (const v of Object.values(args)) {
     if (typeof v === 'string') return [v];
   }

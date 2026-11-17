@@ -65,18 +65,24 @@ export function execListedCommandTexts(args: Record<string, unknown>): string[] 
  * `hookActionDefinition.action`). An installed command is judged as a command
  * when it is added, by the same gate questions an exec call gets, because
  * nothing asks again when it runs.
+ *
+ * Every command-bearing field is returned, not the first one found: a tool may
+ * ignore the fields its mode does not use, so a harmless `command` beside a
+ * destructive `scheduleCommand` must not be the only text judged.
  */
 export function execShellCommands(args: Record<string, unknown>): string[] {
-  const listed = execListedCommandTexts(args);
-  if (listed.length > 0) return listed;
-  for (const key of ['command', 'cmd']) if (typeof args[key] === 'string') return [args[key] as string];
-  return installedCommandTexts(args);
+  const texts = execListedCommandTexts(args);
+  for (const key of ['command', 'cmd']) if (typeof args[key] === 'string') texts.push(args[key] as string);
+  texts.push(...installedCommandTexts(args));
+  return [...new Set(texts)];
 }
 
 function installedCommandTexts(args: Record<string, unknown>): string[] {
+  const installed: string[] = [];
   const scheduled = args['scheduleCommand'];
-  if (typeof scheduled === 'string' && scheduled.trim().length > 0) return [scheduled];
+  if (typeof scheduled === 'string' && scheduled.trim().length > 0) installed.push(scheduled);
   const hookAction = args['hookActionDefinition'];
   const action = hookAction && typeof hookAction === 'object' ? (hookAction as Record<string, unknown>)['action'] : undefined;
-  return typeof action === 'string' && action.trim().length > 0 ? [action] : [];
+  if (typeof action === 'string' && action.trim().length > 0) installed.push(action);
+  return installed;
 }

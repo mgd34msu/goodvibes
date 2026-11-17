@@ -28,6 +28,7 @@ import {
 } from '../runtime/permissions/rules/index.js';
 import { execContextOf, extractCommandArgs, splitShellCommand } from '../runtime/permissions/rules/prefix.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
+import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
 
 /** How far a remembered approval decision reaches. */
 export type RememberTier = 'session' | 'exact' | 'command-class' | 'path' | 'tool';
@@ -167,8 +168,8 @@ function sessionScope(toolName: string, args: Record<string, unknown>): string {
     if (classes.length > 0) return `every ${classes.join(' / ')} command`;
   }
   const paths = extractPathArgs(args);
+  if (execShellCommands(args).length > 0) return `this exact ${toolName} command`;
   if (paths.length > 0) return `${toolName} on ${uniqueSorted(paths).join(', ')}`;
-  if (typeof args['command'] === 'string') return `this exact ${toolName} command`;
   return `every ${toolName} call`;
 }
 
@@ -191,8 +192,11 @@ export function sessionApprovalKey(toolName: string, args: Record<string, unknow
     if (classes.length > 0) return `${toolName}:class:${classes.join('+')}`;
   }
   const paths = extractPathArgs(args);
+  // Every command the call carries (a workflow schedule's or hook action's installed command
+  // included) is in the key, so an answer about one command never covers a call that carries another.
+  const shell = execShellCommands(args);
+  if (shell.length > 0) return `${toolName}:command:${JSON.stringify({ commands: shell, paths: uniqueSorted(paths) })}`;
   if (paths.length > 0) return `${toolName}:path:${JSON.stringify(uniqueSorted(paths))}`;
-  if (typeof args['command'] === 'string') return `${toolName}:${args['command']}`;
   return toolName;
 }
 

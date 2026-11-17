@@ -9,7 +9,7 @@
  * object, so the model cannot choose what the owner sees by ordering its
  * arguments.
  */
-import { execEntryTexts, execShellCommands } from '../runtime/permissions/exec-command-text.js';
+import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
 import type { PermissionAnalysisTargetKind } from './types.js';
 
 export interface PermissionSubject {
@@ -39,10 +39,7 @@ function keys(args: Args, names: readonly string[]): string[] {
   return names.flatMap((name) => (typeof args[name] === 'string' ? [args[name] as string] : []));
 }
 
-function commands(args: Args): string[] {
-  const listed = Array.isArray(args['commands']) ? args['commands'].flatMap(execEntryTexts) : [];
-  return listed.length > 0 ? listed : execShellCommands(args);
-}
+const commands = (args: Args): string[] => execShellCommands(args);
 
 function paths(args: Args): string[] {
   const notebook = args['notebook_operations'];

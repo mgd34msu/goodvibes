@@ -283,6 +283,44 @@ export class BrowserEngine {
     }
   }
 
+  /**
+   * The label of the control that Enter in this element's form would activate:
+   * the form's default (first) submit control. Undefined outside a form, with
+   * no submit control, or when the page will not answer.
+   */
+  private static async enclosingFormSubmitLabel(locator: Locator): Promise<string | undefined> {
+    try {
+      const label = await locator.evaluate((node: Element) => {
+        const owner = (node as HTMLInputElement).form ?? node.closest('form');
+        if (!owner) return null;
+        const control = Array.from(owner.elements).find((candidate) => {
+          const tag = candidate.tagName.toLowerCase();
+          const type = (candidate.getAttribute('type') ?? '').toLowerCase();
+          if (tag === 'input') return type === 'submit' || type === 'image';
+          return tag === 'button' && (type === '' || type === 'submit');
+        });
+        if (!control) return null;
+        const text = control.getAttribute('aria-label') || (control as HTMLElement).innerText
+          || (control as HTMLInputElement).value || control.getAttribute('alt') || control.getAttribute('title') || '';
+        return text.replace(/\s+/g, ' ').trim();
+      });
+      return label || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Refuses submitting a form by key or by typed submit when the form's
+   * default submit control places an order, outside the payment flow.
+   */
+  private static async refuseOrderSubmitByKey(locator: Locator, work: BrowserControlIdentityWork, how: string): Promise<void> {
+    const label = await work.wait(() => BrowserEngine.enclosingFormSubmitLabel(locator));
+    if (label !== undefined && placesOrder({ name: label })) {
+      throw new BrowserSessionError(`${how} would submit "${label}", which places an order, and an order placed with the browser tools skips your spending limits, so it was not done.`, ORDER_SUBMIT_REFUSAL_FIX);
+    }
+  }
+
   sessionManager(): BrowserSessionManager {
     return this.sessions;
   }
@@ -857,7 +895,7 @@ export class BrowserEngine {
       const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, current, 'click', ownership, args); current();
       const { locator, element, revalidate, passwordInDocument } = await scope.resolve(args.ref);
       credentialCurrent(passwordInDocument); current();
-      if (element.submits && !paymentFlowSubmit && placesOrder(element)) {
+      if (!paymentFlowSubmit && placesOrder(element)) {
         // An order placed here would bypass the owner's spending limits.
         throw new BrowserSessionError(`"${element.name}" places an order, and an order placed with the browser tools skips your spending limits, so it was not clicked.`, ORDER_SUBMIT_REFUSAL_FIX);
       }
@@ -933,6 +971,7 @@ export class BrowserEngine {
     },
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
+    const paymentFlowSubmit = isPaymentCheckoutAction(ownership);
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
@@ -950,6 +989,10 @@ export class BrowserEngine {
       // submits a form just as `submit` does, so it is checked the same way.
       const typesLineBreak = args.replace === false && /[\r\n]/.test(args.text);
       if (args.submit === true || typesLineBreak) {
+        if (!paymentFlowSubmit) {
+          await BrowserEngine.refuseOrderSubmitByKey(locator, work, args.submit === true ? 'Submitting after typing' : 'Typing a line break');
+          await revalidate(); scope.current();
+        }
         // The text about to be typed is named explicitly as well as read back off
         // the form, because the fill has not happened yet at this point: the
         // guard runs BEFORE anything is entered, so a body lifted from a page
@@ -1065,6 +1108,7 @@ export class BrowserEngine {
     args: { readonly ref: string; readonly key: string; readonly timeoutMs?: number | undefined },
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
+    const paymentFlowSubmit = isPaymentCheckoutAction(ownership);
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
@@ -1073,6 +1117,13 @@ export class BrowserEngine {
       const { locator, element, revalidate, assertCurrent, passwordInDocument } = await scope.resolve(args.ref);
       credentialCurrent(passwordInDocument);
       if (keyCanSubmit(args.key, element.submits)) {
+        if (!paymentFlowSubmit) {
+          if (element.submits && placesOrder(element)) {
+            throw new BrowserSessionError(`"${element.name}" places an order, and an order placed with the browser tools skips your spending limits, so ${args.key} was not pressed.`, ORDER_SUBMIT_REFUSAL_FIX);
+          }
+          await BrowserEngine.refuseOrderSubmitByKey(locator, work, `Pressing ${args.key}`);
+          await revalidate(); scope.current();
+        }
         const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
         await revalidate(); scope.current();
         await work.wait(() => this.requireOutwardEffectAllowed(

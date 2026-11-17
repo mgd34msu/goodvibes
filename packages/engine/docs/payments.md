@@ -2323,12 +2323,16 @@ and that a restart (after checking the named path) is the step.
 
 A purchase is budgeted only when it runs through `payments.checkout.begin`. A
 merchant's saved payment method can take an order with one click, so the
-browser refuses to click a submit control whose own label says it places an
-order ("Place order", "Buy now", "Pay now", "Complete purchase", ...) for any
-caller but the payment flow, and says to use `payments.checkout.begin`. The
-recognition is the control's label, checked in code; an order taken by a
-control whose label does not say so (or by pressing Enter in a form) is not
-recognised, and nothing claims such a click was budgeted. Complete purchase
+browser refuses to click any control whose own label says it places an order
+("Place order", "Buy now", "Pay now", "Complete purchase", "Zahlungspflichtig
+bestellen", "Valider la commande", "Realizar pedido", ...), whether it is a
+submit button, a plain button, a link or a scripted button, for any caller but
+the payment flow, and says to use `payments.checkout.begin`. Pressing Enter in
+a field, typing a line break or `submit: true` is refused the same way when
+the form's default submit control carries such a label. A link that only leads
+to the checkout ("Checkout now") is not refused. The recognition is the
+label, checked in code; an order taken by a control whose label does not say
+so is not recognised, and nothing claims such a click was budgeted. Complete purchase
 records remain in `payments.purchases.list`.
 
 To stop processing outside a window, send

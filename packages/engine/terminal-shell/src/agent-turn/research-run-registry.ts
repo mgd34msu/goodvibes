@@ -714,8 +714,13 @@ export class AgentResearchRunRegistry {
       if (!existing) throw new Error(`Research run ${id} not found.`);
       const { runningSession: _session, ...changed } = updater(existing);
       // A running run names the session running it; any other status names none.
+      // A live session that set it running keeps it; one that has ended hands
+      // it to this session, so the next process to start does not pause a run
+      // this session is still working on.
+      const keepSession = existing.status === 'running' && existing.runningSession !== undefined
+        && !sessionEnded(this.storePath, existing.runningSession);
       const updated: AgentResearchRunRecord = changed.status === 'running'
-        ? { ...changed, runningSession: existing.status === 'running' && existing.runningSession ? existing.runningSession : holdProcessSession(this.storePath) }
+        ? { ...changed, runningSession: keepSession ? existing.runningSession : holdProcessSession(this.storePath) }
         : changed;
       return { value: updated, runs: runs.map((run) => run.id === existing.id ? updated : run) };
     });

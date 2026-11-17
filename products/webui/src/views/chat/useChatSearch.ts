@@ -33,7 +33,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { CompanionMessageSearchHit } from '../../lib/goodvibes';
-import { errorCode } from '../../lib/errors';
+import { errorCode, formatError } from '../../lib/errors';
 import type { SessionsSearchSessionSummary } from '../../lib/contract-bridge-types';
 
 /** A single search result referencing a specific message. */
@@ -84,6 +84,8 @@ export interface UseChatSearchReturn {
   isLoadingMoreResults: boolean;
   /** Fetch the next page of message matches and append them. */
   loadMoreResults: () => void;
+  /** Why the last further page of message matches failed; cleared by the next try or a new search. */
+  loadMoreResultsError?: string;
   /** Session-discovery results from sessions.search (title/id match, full history). */
   sessionResults: ChatSessionSearchResult[];
   /** Lifecycle of the session-search stage, see SessionSearchState. */
@@ -101,6 +103,8 @@ export interface UseChatSearchReturn {
   isLoadingMoreSessions: boolean;
   /** Fetch the next page of session results and append them. */
   loadMoreSessions: () => void;
+  /** Why the last further page of session results failed; cleared by the next try or a new search. */
+  loadMoreSessionsError?: string;
 }
 
 const DEBOUNCE_MS = 300;
@@ -203,6 +207,7 @@ export function useChatSearch(query: string): UseChatSearchReturn {
   const [messageCursor, setMessageCursor] = useState<string | undefined>(undefined);
   const [hasMoreResults, setHasMoreResults] = useState(false);
   const [isLoadingMoreResults, setIsLoadingMoreResults] = useState(false);
+  const [loadMoreResultsError, setLoadMoreResultsError] = useState<string | undefined>(undefined);
   // Bumped for every fresh message search, so a page requested for an earlier
   // search is dropped instead of appended.
   const messageGenerationRef = useRef(0);
@@ -215,6 +220,7 @@ export function useChatSearch(query: string): UseChatSearchReturn {
   const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [isLoadingMoreSessions, setIsLoadingMoreSessions] = useState(false);
+  const [loadMoreSessionsError, setLoadMoreSessionsError] = useState<string | undefined>(undefined);
   const sessionSearchAbortRef = useRef<AbortController | null>(null);
   // Tracks the query/includeClosed pair the currently-visible sessionResults were
   // fetched for, so a slow load-more response that lands after the user has
@@ -231,6 +237,7 @@ export function useChatSearch(query: string): UseChatSearchReturn {
   useEffect(() => {
     messageGenerationRef.current += 1;
     messageParamsRef.current = { query, includeClosed };
+    setLoadMoreResultsError(undefined);
     if (!query.trim()) {
       setResults([]);
       setMessageSearchState('idle');
@@ -271,6 +278,7 @@ export function useChatSearch(query: string): UseChatSearchReturn {
     const requested = messageParamsRef.current;
     const generation = messageGenerationRef.current;
     setIsLoadingMoreResults(true);
+    setLoadMoreResultsError(undefined);
     void (async () => {
       try {
         const page = await fetchMessageSearchPage(requested.query, requested.includeClosed, undefined, messageCursor);
@@ -278,9 +286,13 @@ export function useChatSearch(query: string): UseChatSearchReturn {
         setResults((prev) => [...prev, ...page.results]);
         setMessageCursor(page.nextCursor);
         setHasMoreResults(page.hasMore);
-      } catch {
-        // A failed further page leaves the matches already shown in place;
-        // "Load more" stays offered so the user can try again.
+      } catch (error) {
+        // A failed further page leaves the matches already shown in place and
+        // says why; "Load more" stays offered so the user can try again.
+        if (messageGenerationRef.current !== generation) return;
+        setLoadMoreResultsError(isNotInvokableError(error)
+          ? 'This daemon does not serve message search any more.'
+          : `More messages could not be loaded: ${formatError(error)}`);
       } finally {
         setIsLoadingMoreResults(false);
       }
@@ -295,6 +307,7 @@ export function useChatSearch(query: string): UseChatSearchReturn {
     async (term: string, closed: boolean, signal: AbortSignal): Promise<void> => {
       // A fresh search supersedes any in-flight load-more from a prior generation.
       searchGenerationRef.current += 1;
+      setLoadMoreSessionsError(undefined);
       if (!term.trim()) {
         setSessionResults([]);
         setSessionSearchState('idle');
@@ -357,6 +370,7 @@ export function useChatSearch(query: string): UseChatSearchReturn {
     const requestedGeneration = searchGenerationRef.current;
 
     setIsLoadingMoreSessions(true);
+    setLoadMoreSessionsError(undefined);
     void (async () => {
       try {
         const page = await fetchSessionSearchPage(requestedParams.query, requestedParams.includeClosed, nextCursor);
@@ -383,9 +397,10 @@ export function useChatSearch(query: string): UseChatSearchReturn {
           || activeSessionParamsRef.current.query !== requestedParams.query
           || activeSessionParamsRef.current.includeClosed !== requestedParams.includeClosed;
         if (!superseded && isNotInvokableError(error)) setSessionSearchState('unavailable');
-        // Otherwise: leave the existing page's results in place. A failed
-        // load-more is not a failed search, do not blow away what already
-        // rendered successfully.
+        // Otherwise: leave the existing page's results in place and say why
+        // no more came. A failed load-more is not a failed search, do not blow
+        // away what already rendered successfully.
+        else if (!superseded) setLoadMoreSessionsError(`More sessions could not be loaded: ${formatError(error)}`);
       } finally {
         setIsLoadingMoreSessions(false);
       }
@@ -399,6 +414,7 @@ export function useChatSearch(query: string): UseChatSearchReturn {
     hasMoreResults,
     isLoadingMoreResults,
     loadMoreResults,
+    loadMoreResultsError,
     sessionResults,
     sessionSearchState,
     includeClosed,
@@ -406,5 +422,6 @@ export function useChatSearch(query: string): UseChatSearchReturn {
     hasMoreSessions,
     isLoadingMoreSessions,
     loadMoreSessions,
+    loadMoreSessionsError,
   };
 }

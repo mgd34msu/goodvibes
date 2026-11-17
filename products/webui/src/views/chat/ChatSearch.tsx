@@ -78,6 +78,7 @@ export function ChatSearch({ onSelect, className, onClose }: ChatSearchProps) {
     hasMoreResults,
     isLoadingMoreResults,
     loadMoreResults,
+    loadMoreResultsError,
     sessionResults,
     sessionSearchState,
     includeClosed,
@@ -85,6 +86,7 @@ export function ChatSearch({ onSelect, className, onClose }: ChatSearchProps) {
     hasMoreSessions,
     isLoadingMoreSessions,
     loadMoreSessions,
+    loadMoreSessionsError,
   } = useChatSearch(query);
 
   // Reset active index when results change
@@ -301,6 +303,9 @@ export function ChatSearch({ onSelect, className, onClose }: ChatSearchProps) {
               {isLoadingMoreSessions ? 'Loading…' : 'Load more sessions'}
             </button>
           )}
+          {loadMoreSessionsError && (
+            <p className="chat-search__load-more-error" role="alert">{loadMoreSessionsError}</p>
+          )}
         </section>
       )}
 
@@ -401,6 +406,9 @@ export function ChatSearch({ onSelect, className, onClose }: ChatSearchProps) {
         >
           {isLoadingMoreResults ? 'Loading…' : 'Load more messages'}
         </button>
+      )}
+      {hasQuery && loadMoreResultsError && (
+        <p className="chat-search__load-more-error" role="alert">{loadMoreResultsError}</p>
       )}
     </div>
   );

@@ -232,7 +232,10 @@ export class HostedSessionManager {
   private contractWorkAdapter: HostedContractWorkAdapter | null = null;
 
   constructor(private readonly options: HostedSessionManagerOptions) {
-    this.floors = new HostedWorkspaceFloors(options.floorFactory);
+    // A contract a hosted turn starts reads the owner's reads from the live
+    // conversation, not from the saved transcript, which trails it by a turn.
+    this.floors = new HostedWorkspaceFloors(options.floorFactory,
+      (sessionId) => this.sessions.get(sessionId)?.runtime?.conversation.readMessagesInPlace());
     this.now = options.now ?? ((): number => Date.now());
     this.spine = new HostedSessionSpineIntake({
       failureReading: options.failureReading,

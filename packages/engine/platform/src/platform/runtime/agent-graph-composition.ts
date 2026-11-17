@@ -54,6 +54,8 @@ export interface ContractedAgentGraphOptions extends AgentExecutionGraphOptions 
   readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   readonly judgmentLog?: Pick<import('@goodvibes-jev/judgment').DecisionLog, 'get'> | undefined;
   readonly surfaceRoot?: string | undefined;
+  /** The owner conversation's stored messages by session id, when this host holds it (contract-composition.ts). */
+  readonly ownerConversationMessages?: ((sessionId: string) => readonly object[] | undefined) | undefined;
   readonly readAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
   readonly admitSetupCommand?: import('./worktree/setup.js').WorktreeSetupCommandAdmission | undefined;
 }
@@ -77,6 +79,7 @@ export function createContractedAgentGraph(options: ContractedAgentGraphOptions)
     nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(),
     judgmentLog: options.judgmentLog,
     surfaceRoot: options.surfaceRoot,
+    ownerConversationMessages: options.ownerConversationMessages,
     readAccessFilter: options.readAccessFilter,
     admitSetupCommand: options.admitSetupCommand,
     runtimeBus: options.runtimeBus,

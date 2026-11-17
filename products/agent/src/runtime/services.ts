@@ -212,6 +212,8 @@ export interface RuntimeServicesOptions {
   readonly localUserAuthManager?: UserAuthManager;
   readonly featureFlags?: FeatureFlagManager;
   readonly getConversationTitle?: () => string | undefined;
+  /** The live conversation's stored messages for the session this Agent runs; undefined for any other session. */
+  readonly ownerConversationMessages?: (sessionId: string) => readonly object[] | undefined;
   /**
    * Maps a triggering turn/agent lifecycle event to the owning session id so the
    * WorkspaceCheckpointManager can stamp automatic (and defaulted explicit)
@@ -728,6 +730,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         configManager,
         featureFlags: options.featureFlags,
         getConversationTitle: options.getConversationTitle,
+        ownerConversationMessages: options.ownerConversationMessages,
         keybindingsManager,
         localUserAuthManager: options.localUserAuthManager,
         // Launch tolerance: an absent key is an unconfigured provider, never a construction failure.

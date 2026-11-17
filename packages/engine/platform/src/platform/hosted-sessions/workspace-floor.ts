@@ -96,7 +96,15 @@ export interface HostedWorkspaceFloor {
 
 /** How a product builds a floor for one workspace. */
 export type HostedWorkspaceFloorFactory = (
-  input: { readonly workspaceRoot: string },
+  input: {
+    readonly workspaceRoot: string;
+    /**
+     * A hosted session's stored conversation messages, read in place; undefined
+     * for a session this engine does not hold live. The floor's contract runner
+     * reads the owner's reads from here (contract-composition.ts).
+     */
+    readonly liveConversationMessages?: ((sessionId: string) => readonly object[] | undefined) | undefined;
+  },
 ) => HostedWorkspaceFloor | Promise<HostedWorkspaceFloor>;
 
 /** A borrowed floor. `release()` is idempotent and drops one reference. */
@@ -126,7 +134,10 @@ export class HostedWorkspaceFloors {
   private disposed = false;
   private disposal: Promise<void> | null = null;
 
-  constructor(private readonly factory: HostedWorkspaceFloorFactory) {}
+  constructor(
+    private readonly factory: HostedWorkspaceFloorFactory,
+    private readonly liveConversationMessages?: ((sessionId: string) => readonly object[] | undefined) | undefined,
+  ) {}
 
   /** How many workspaces currently hold a composed floor. */
   size(): number {
@@ -174,7 +185,7 @@ export class HostedWorkspaceFloors {
     // Publish ownership before entering product code, which may request shutdown.
     const construction = Promise.resolve().then(async (): Promise<FloorEntry> => {
       this.assertUsable();
-      const floor = await hostedLifecycleCallbacks.run(this, () => this.factory({ workspaceRoot }));
+      const floor = await hostedLifecycleCallbacks.run(this, () => this.factory({ workspaceRoot, liveConversationMessages: this.liveConversationMessages }));
       const entry: FloorEntry = { workspaceRoot, floor, refs: 0 };
       if (this.disposed) {
         await this.disposeEntry(entry);

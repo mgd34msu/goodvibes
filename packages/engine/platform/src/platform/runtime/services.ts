@@ -198,6 +198,13 @@ export interface HostSeams {
   readonly configManager: ConfigManager;
   readonly featureFlags?: FeatureFlagManager | undefined;
   readonly getConversationTitle?: (() => string | undefined) | undefined;
+  /**
+   * The stored messages of the owner conversation this host runs, by session
+   * id (the conversation's own objects, read in place); undefined for a session
+   * this host does not hold. A contract started mid-turn reads the owner's
+   * reads from here instead of a session file that trails by a turn.
+   */
+  readonly ownerConversationMessages?: ((sessionId: string) => readonly object[] | undefined) | undefined;
   readonly panelManager?: PanelManagerLike | undefined;
   readonly keybindingsManager?: KeybindingsManagerLike | undefined;
   /** A local user store the host already built; absent: one under this surface's root. */

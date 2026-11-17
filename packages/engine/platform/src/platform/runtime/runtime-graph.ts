@@ -651,6 +651,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     nativeDataWriter,
     judgmentLog: judgment.decisionLog,
     surfaceRoot,
+    ownerConversationMessages: seams.ownerConversationMessages,
     readAccessFilter: async (path) => (await permissionManager.readAccess(path)) === 'allow',
     admitSetupCommand: async (command, cwd) => {
       const decision = await permissionManager.checkDetailed('exec', { commands: [{ cmd: command }], working_dir: cwd });

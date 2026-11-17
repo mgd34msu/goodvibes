@@ -275,12 +275,16 @@ export async function initializeBootstrapCore(
   const userSessionId = `user-${generateUserSessionId()}`;
   const { runtimeBus, store, domainDispatch } = createTerminalEventState(configManager);
   let getConversationTitle = (): string | undefined => undefined;
+  let ownerConversationMessages = (_sessionId: string): readonly object[] | undefined => undefined;
   const services = createRuntimeServices({
     configManager,
     featureFlags,
     runtimeBus,
     runtimeStore: store,
     getConversationTitle: () => getConversationTitle(),
+    // A contract this session starts mid-turn sees the reads already in the
+    // conversation, not only the ones the session file has caught up with.
+    ownerConversationMessages: (sessionId) => ownerConversationMessages(sessionId),
     workingDir,
     homeDirectory,
     ...(options.daemonHomeDirectory === undefined ? {} : { daemonHomeDirectory: options.daemonHomeDirectory }),
@@ -327,6 +331,7 @@ export async function initializeBootstrapCore(
 
   // Declared before the tool composition: its `resolveSessionId` reads it.
   const runtimeSessionIdRef = { value: userSessionId };
+  ownerConversationMessages = (sessionId) => sessionId === runtimeSessionIdRef.value ? conversation.readMessagesInPlace() : undefined;
 
   const toolRegistry = new ToolRegistry();
   const { fileCache, projectIndex, dispose: disposeTurnTools } = registerTuiTurnTools(toolRegistry, services, {

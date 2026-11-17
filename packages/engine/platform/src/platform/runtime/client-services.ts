@@ -361,6 +361,12 @@ export interface ClientRuntimeServicesOptions {
    * owned, so ignorance never reaps.
    */
   readonly isSessionLive?: ((sessionId: string) => boolean) | undefined;
+  /**
+   * The stored messages of an owner conversation this host holds, by session
+   * id (read in place); undefined for a session it does not hold. Contracts
+   * read the owner's reads from here before any saved session file.
+   */
+  readonly ownerConversationMessages?: ((sessionId: string) => readonly object[] | undefined) | undefined;
   /** The daemon's state root when this host was told one; threaded into the secrets manager. */
   readonly daemonHome?: string | undefined;
   /**
@@ -628,6 +634,7 @@ function composeClientRuntimeServices(
     nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(),
     judgmentLog: judgment.decisionLog,
     surfaceRoot,
+    ownerConversationMessages: options.ownerConversationMessages,
     readAccessFilter: async (path) => (await permissionManager.readAccess(path)) === 'allow',
     admitSetupCommand: async (command, cwd) => {
       const decision = await permissionManager.checkDetailed('exec', { commands: [{ cmd: command }], working_dir: cwd });

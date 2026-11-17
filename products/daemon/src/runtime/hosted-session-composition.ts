@@ -159,7 +159,7 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
 
   return {
     nativeConversation: nativeHostedConversationOwner(services.gatewayMethods),
-    floorFactory: async ({ workspaceRoot }): Promise<HostedWorkspaceFloor> => {
+    floorFactory: async ({ workspaceRoot, liveConversationMessages }): Promise<HostedWorkspaceFloor> => {
       const taskGraphPath = createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: services.homeDirectory })
         .resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'sessions', 'task-graph.json');
       const sessionOrchestration = services.sessionOrchestration.borrowForGraphPath(taskGraphPath);
@@ -178,6 +178,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
         workingDir: workspaceRoot,
         homeDirectory: services.homeDirectory,
+        // A contract a hosted turn starts sees the owner's reads from that turn at once.
+        ownerConversationMessages: liveConversationMessages,
         requestApproval: gateFor(workspaceRoot),
         workspaceTrust: trustFor(workspaceRoot),
         // One store owns the rule file: a remembered approval in a hosted session

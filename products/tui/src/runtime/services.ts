@@ -160,6 +160,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       configManager,
       featureFlags: options.featureFlags,
       getConversationTitle: options.getConversationTitle,
+      ownerConversationMessages: options.ownerConversationMessages,
       panelManager: viewPanelAdapter,
       keybindingsManager,
       localUserAuthManager: options.localUserAuthManager,

@@ -81,6 +81,8 @@ export interface RuntimeServicesOptions {
   readonly featureFlags?: FeatureFlagManager;
   readonly modelDiscovery?: ClientRuntimeServicesOptions['modelDiscovery'];
   readonly getConversationTitle?: () => string | undefined;
+  /** The live conversation's stored messages for the session this terminal runs; undefined for any other session. */
+  readonly ownerConversationMessages?: (sessionId: string) => readonly object[] | undefined;
   readonly workingDir: string;
   readonly homeDirectory: string;
   /**

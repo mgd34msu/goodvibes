@@ -165,12 +165,16 @@ export async function initializeBootstrapCore(
   // first bus exists, so every bus this process builds later uses it.
   const { runtimeBus, store, domainDispatch } = createTerminalEventState(configManager);
   let getConversationTitle = (): string | undefined => undefined;
+  let ownerConversationMessages = (_sessionId: string): readonly object[] | undefined => undefined;
   const services = createRuntimeServices({
     configManager,
     featureFlags,
     runtimeBus,
     runtimeStore: store,
     getConversationTitle: () => getConversationTitle(),
+    // A contract this session starts mid-turn sees the reads already in the
+    // conversation, not only the ones the session file has caught up with.
+    ownerConversationMessages: (sessionId) => ownerConversationMessages(sessionId),
     resolveSessionId: () => runtimeSessionIdRef.value || undefined,
     workingDir,
     homeDirectory,
@@ -229,6 +233,7 @@ export async function initializeBootstrapCore(
   // Every system notice is a toast and a /notifications entry in full (core/notices.ts); the transcript draws none.
   conversation.setNoticeSink(publishToSharedFeed);
   getConversationTitle = () => conversation.title;
+  ownerConversationMessages = (sessionId) => sessionId === runtimeSessionIdRef.value ? conversation.readMessagesInPlace() : undefined;
 
   const compositor = new Compositor(stdout);
   const selection = new SelectionManager();

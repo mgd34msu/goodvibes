@@ -75,7 +75,6 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
         const nextSteps = [
           record.setup?.state === 'failed' ? `/worktree setup ${record.path}` : null,
           record.state === 'paused' ? `/worktree resume ${record.path}` : null,
-          record.state === 'discard' || record.state === 'pending-cleanup' ? `/worktree cleanup ${record.path}` : null,
           record.state === 'kept' ? `/worktree keep ${record.path}` : null,
           record.sessionId ? `/worktree session ${record.sessionId}` : null,
           record.taskId ? `/worktree task ${record.taskId}` : null,
@@ -157,7 +156,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
           ? [
               `${header}: ${targetKind} ${targetId}`,
               `  total: ${review.total}`,
-              `  active: ${review.active}  paused: ${review.paused}  kept: ${review.kept}  discard: ${review.discard}  cleanup: ${review.pendingCleanup}`,
+              `  active: ${review.active}  paused: ${review.paused}  kept: ${review.kept}`,
               ...review.records.map((record) => `  ${record.state.padEnd(15)} ${record.kind.padEnd(12)} ${record.path}`),
               ...(sub === 'recover'
                 ? [
@@ -232,7 +231,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
         ? [
             'Worktree Review',
             `  total: ${summary.total}`,
-            `  active: ${summary.active}  paused: ${summary.paused}  kept: ${summary.kept}  discard: ${summary.discard}`,
+            `  active: ${summary.active}  paused: ${summary.paused}  kept: ${summary.kept}`,
             `  session attached: ${summary.sessionAttached}  task attached: ${summary.taskAttached}`,
             `  agent owned: ${summary.agentOwned}  orchestrator owned: ${summary.orchestratorOwned}  manual: ${summary.manualOwned}`,
             ...rows.map((row) => (

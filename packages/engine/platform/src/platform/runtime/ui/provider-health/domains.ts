@@ -195,7 +195,7 @@ export function buildProviderHealthDomainSummaries(
   });
 
   const worktreeSummary = worktrees.summary;
-  const worktreeIssues = worktreeSummary.discard + worktreeSummary.pendingCleanup + worktreeSummary.paused;
+  const worktreeIssues = worktreeSummary.paused;
   summaries.push({
     name: 'worktrees',
     level: worktreeIssues > 0 ? 'warn' : worktreeSummary.total > 0 ? 'good' : 'info',
@@ -205,8 +205,6 @@ export function buildProviderHealthDomainSummaries(
     next: worktreeIssues > 0 ? '/worktree recover <session|task> <id>' : '/worktree review',
     details: [
       worktreeSummary.paused > 0 ? `${worktreeSummary.paused} paused worktree(s)` : '',
-      worktreeSummary.pendingCleanup > 0 ? `${worktreeSummary.pendingCleanup} cleanup pending` : '',
-      worktreeSummary.discard > 0 ? `${worktreeSummary.discard} marked discard` : '',
     ].filter(Boolean),
     nextSteps: worktreeIssues > 0
       ? ['/worktree review', '/worktree recover <session|task> <id>']

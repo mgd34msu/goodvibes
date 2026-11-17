@@ -315,11 +315,6 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
       if (sub === 'worktrees') {
         const summary = readModels.worktrees.getSnapshot().summary;
         const issues: string[] = [];
-        if (summary.discard > 0) issues.push(`${summary.discard} worktree(s) marked discard still tracked`);
-        if (summary.pendingCleanup > 0) issues.push(`${summary.pendingCleanup} worktree(s) awaiting cleanup`);
-        if ('kept' in summary && typeof (summary as { kept?: number }).kept === 'number' && (summary as { kept?: number }).kept! > 0) {
-          // read-model summary may include kept in some implementations; ignored in rendering below if absent
-        }
         if (summary.paused > 0) issues.push(`${summary.paused} paused worktree(s) may need resume or merge review`);
         ctx.print(
           [
@@ -327,8 +322,6 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
             `  total: ${summary.total}`,
             `  active: ${summary.active}`,
             `  paused: ${summary.paused}`,
-            `  discard: ${summary.discard}`,
-            `  cleanup pending: ${summary.pendingCleanup}`,
             ...(issues.length > 0 ? issues.map((issue) => `  issue: ${issue}`) : ['  no active worktree lifecycle issues detected']),
             '  next: /worktree review',
             '  next: /worktree recover <session|task> <id>',

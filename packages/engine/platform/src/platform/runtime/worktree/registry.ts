@@ -5,7 +5,6 @@ import { GitService } from '../../git/service.js';
 import { isMarkedProductWorktree } from '../../git/product-worktree-marker.js';
 import { logger } from '../../utils/logger.js';
 import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
-import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveScopedDirectory } from '../surface-root.js';
 import type { WorktreeSetupResult } from './setup.js';
@@ -65,36 +64,24 @@ const MAX_PRESERVED_STORES = 10;
 /** Suffix marking a registry file preserved aside for forensics. */
 const PRESERVED_SUFFIX = '.unreadable';
 
-const WORKTREE_STATES: ReadonlySet<string> = new Set<ManagedWorktreeState>([
-  'active',
-  'paused',
-  'kept',
-  'discard',
-  'pending-cleanup',
-]);
+const WORKTREE_STATES: ReadonlySet<string> = new Set<ManagedWorktreeState>(['active', 'paused', 'kept']);
+
+/**
+ * States earlier builds could persist and nothing assigns any more. A record
+ * still carrying one reads as `kept`: never swept, and the owner keeps it,
+ * resumes it or discards it explicitly.
+ */
+const RETIRED_WORKTREE_STATES: ReadonlySet<string> = new Set(['discard', 'pending-cleanup']);
 
 const WORKTREE_KINDS: ReadonlySet<string> = new Set<ManagedWorktreeKind>(['agent', 'orchestrator', 'manual']);
 
-export type ManagedWorktreeState = 'active' | 'paused' | 'kept' | 'discard' | 'pending-cleanup';
-export type ManagedWorktreeKind = 'agent' | 'orchestrator' | 'manual';
-
 /**
- * Worktree state is operator metadata, not a workflow: any state may be set to
- * any state. The one external writer is `setState` (the TUI `/worktree
- * pause|resume|keep`), and `/worktree recover` advertises `keep`/`resume` for
- * every record it lists, including ones persisted as `discard` or
- * `pending-cleanup`, which this registry never assigns itself (the record is
- * removed by `discard()` instead) but accepts on load. Nothing is final, so no
- * move is refused; the table records that. `setState` asserts against it so
- * narrowing it takes effect there.
+ * Worktree state is operator metadata, not a workflow: any of the three may be
+ * set from any other (`/worktree pause|resume|keep`). Discarding a worktree
+ * removes its record (`discard()`), so there is no discard state.
  */
-export const worktreeStateLifecycle = defineLifecycle<ManagedWorktreeState>('worktree', {
-  active: ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
-  paused: ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
-  kept: ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
-  discard: ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
-  'pending-cleanup': ['active', 'paused', 'kept', 'discard', 'pending-cleanup'],
-});
+export type ManagedWorktreeState = 'active' | 'paused' | 'kept';
+export type ManagedWorktreeKind = 'agent' | 'orchestrator' | 'manual';
 
 export interface ManagedWorktreeMeta {
   readonly path: string;
@@ -128,8 +115,6 @@ export interface WorktreeOwnershipSummary {
   readonly active: number;
   readonly paused: number;
   readonly kept: number;
-  readonly discard: number;
-  readonly pendingCleanup: number;
   readonly sessionAttached: number;
   readonly taskAttached: number;
   readonly agentOwned: number;
@@ -144,8 +129,6 @@ export interface WorktreeAttachmentReview {
   readonly active: number;
   readonly paused: number;
   readonly kept: number;
-  readonly discard: number;
-  readonly pendingCleanup: number;
   readonly records: readonly ManagedWorktreeMeta[];
 }
 
@@ -209,7 +192,7 @@ function validateRecord(value: unknown): ManagedWorktreeMeta | null {
   const updatedAt = candidate['updatedAt'];
   if (typeof path !== 'string' || path.length === 0) return null;
   if (typeof kind !== 'string' || !WORKTREE_KINDS.has(kind)) return null;
-  if (typeof state !== 'string' || !WORKTREE_STATES.has(state)) return null;
+  if (typeof state !== 'string' || (!WORKTREE_STATES.has(state) && !RETIRED_WORKTREE_STATES.has(state))) return null;
   if (!isFiniteNumber(updatedAt)) return null;
   const ownerId = candidate['ownerId'];
   const sessionId = candidate['sessionId'];
@@ -220,7 +203,7 @@ function validateRecord(value: unknown): ManagedWorktreeMeta | null {
     // Both narrowed above against their closed literal sets, so these are
     // validated narrowings rather than blind assertions.
     kind: kind as ManagedWorktreeKind,
-    state: state as ManagedWorktreeState,
+    state: RETIRED_WORKTREE_STATES.has(state) ? 'kept' : state as ManagedWorktreeState,
     ...(typeof ownerId === 'string' ? { ownerId } : {}),
     ...(typeof sessionId === 'string' ? { sessionId } : {}),
     ...(typeof taskId === 'string' ? { taskId } : {}),
@@ -446,8 +429,6 @@ export function reviewWorktreeAttachments(
     active: summary.active + (record.state === 'active' ? 1 : 0),
     paused: summary.paused + (record.state === 'paused' ? 1 : 0),
     kept: summary.kept + (record.state === 'kept' ? 1 : 0),
-    discard: summary.discard + (record.state === 'discard' ? 1 : 0),
-    pendingCleanup: summary.pendingCleanup + (record.state === 'pending-cleanup' ? 1 : 0),
     records: [...summary.records, record],
   }), {
     targetKind,
@@ -456,8 +437,6 @@ export function reviewWorktreeAttachments(
     active: 0,
     paused: 0,
     kept: 0,
-    discard: 0,
-    pendingCleanup: 0,
     records: [],
   });
 }
@@ -468,8 +447,6 @@ export function summarizeWorktreeOwnership(records: readonly ManagedWorktreeMeta
     active: summary.active + (record.state === 'active' ? 1 : 0),
     paused: summary.paused + (record.state === 'paused' ? 1 : 0),
     kept: summary.kept + (record.state === 'kept' ? 1 : 0),
-    discard: summary.discard + (record.state === 'discard' ? 1 : 0),
-    pendingCleanup: summary.pendingCleanup + (record.state === 'pending-cleanup' ? 1 : 0),
     sessionAttached: summary.sessionAttached + (record.sessionId ? 1 : 0),
     taskAttached: summary.taskAttached + (record.taskId ? 1 : 0),
     agentOwned: summary.agentOwned + (record.kind === 'agent' ? 1 : 0),
@@ -480,8 +457,6 @@ export function summarizeWorktreeOwnership(records: readonly ManagedWorktreeMeta
     active: 0,
     paused: 0,
     kept: 0,
-    discard: 0,
-    pendingCleanup: 0,
     sessionAttached: 0,
     taskAttached: 0,
     agentOwned: 0,
@@ -493,6 +468,13 @@ export function summarizeWorktreeOwnership(records: readonly ManagedWorktreeMeta
 /** Atomically publish the registry while its writer lock is held; taking that lock created the parent directory. */
 function writeStore(store: WorktreeStore, storePath: string): void {
   writeJsonFileAtomic(storePath, store, { durable: false });
+}
+
+/** True when both registers hold the same records (key order does not matter). */
+function sameRecords(a: Record<string, ManagedWorktreeMeta>, b: Record<string, ManagedWorktreeMeta>): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => b[key] !== undefined && JSON.stringify(a[key]) === JSON.stringify(b[key]));
 }
 
 function classifyWorktreePath(path: string, workingDirectory: string): Pick<ManagedWorktreeMeta, 'kind' | 'ownerId'> {
@@ -608,7 +590,11 @@ export class WorktreeRegistry {
       }
       for (const meta of retainedTombstones) nextRecords[meta.path] = meta;
 
-      writeStore({ version: 1, records: nextRecords }, getStorePath(this.workingDirectory));
+      // Written only when reconciliation changed something; a pass over an
+      // unchanged register is a read.
+      if (!sameRecords(store.records, nextRecords)) {
+        writeStore({ version: 1, records: nextRecords }, getStorePath(this.workingDirectory));
+      }
 
       const reclaimed = vanished + tombstonesExpired + tombstonesOverCap;
       if (reclaimed > 0) {
@@ -846,8 +832,10 @@ export class WorktreeRegistry {
 
   public attach(path: string, target: { sessionId?: string; taskId?: string }): void {
     const normalized = normalizePath(path, this.workingDirectory);
-    // Git is asked before the register lock is taken, so a slow `git` never holds other writers up.
-    const gitKnows = this.gitListsWorktreeSync(normalized);
+    // Git is asked only for a path the register does not hold, and before the
+    // register lock is taken, so a slow `git` never holds other writers up.
+    let gitKnows = false;
+    if (!readStore(getStorePath(this.workingDirectory), false).records[normalized]) gitKnows = this.gitListsWorktreeSync(normalized);
     withRegistryWriteLock(getStorePath(this.workingDirectory), () => {
       const store = readStore(getStorePath(this.workingDirectory), true, true);
       const existing = store.records[normalized];
@@ -894,7 +882,6 @@ export class WorktreeRegistry {
       if (!existing) {
         throw new Error(`No worktree exists at ${normalized}; nothing was changed. /worktree review lists the worktrees git knows about; retry with one of those paths.`);
       }
-      worktreeStateLifecycle.assert(existing.state, state);
       store.records[normalized] = {
         path: normalized,
         kind: existing.kind,

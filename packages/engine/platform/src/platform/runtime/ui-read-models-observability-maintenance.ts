@@ -32,8 +32,6 @@ export interface UiWorktreeSnapshot {
     readonly total: number;
     readonly active: number;
     readonly paused: number;
-    readonly pendingCleanup: number;
-    readonly discard: number;
   };
   readonly records: readonly ManagedWorktreeMeta[];
 }

@@ -284,6 +284,8 @@ Representative slash-command families, with a one-line summary of each:
 
 Composer capture markers: a single line beginning with `#` saves the rest as a session-memory note and does NOT send a turn (a quick "jot this down"), and a confirmation names what was saved and where. (`## ...` markdown headings and multi-line text that starts with `#` are left alone and sent normally.) The existing `!# <text>` still pins to session memory and also sends the text as a prompt.
 
+A typed line that starts with `!` runs the rest as a shell command in the working directory, beside the composer: the output is shown and goes in front of your next message as context, and `Esc` stops a command that is still running. Spoken input is never run as a shell command.
+
 `/schedule add when "<natural language>" <prompt...>` accepts natural-language times parsed locally, for example `every weekday at 9am`, `daily at 6pm`, `every 30 minutes`, `every monday at 08:00`, or `in 2 hours`. The command always echoes back the concrete interpretation (the resulting cron/interval/one-shot schedule) before the job is saved, so you can see exactly what was understood.
 
 `/search <query> [--limit <n>]` runs a provider-backed web search directly (bypassing the agent-tool JSON wrapper) and renders ranked results, an instant answer, and the source label into the transcript; it degrades honestly using the web-search service's own status note.

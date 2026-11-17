@@ -1,4 +1,4 @@
-export type SubmissionIntentKind = 'empty' | 'prompt' | 'slash-command' | 'delegation' | 'orchestration' | 'plan' | 'review' | 'view-action' | 'shell' | 'memory-pin';
+export type SubmissionIntentKind = 'empty' | 'prompt' | 'slash-command' | 'delegation' | 'orchestration' | 'plan' | 'review' | 'view-action' | 'shell' | 'memory-pin' | 'note';
 export interface SubmissionIntent {
     readonly kind: SubmissionIntentKind;
     readonly label: string;

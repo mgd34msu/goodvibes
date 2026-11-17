@@ -103,6 +103,8 @@ import { createUserTurnOwner, type FailoverRetry } from './core/user-turn.ts';
 import { resolveContextStatusHint } from './renderer/context-status-hint.ts';
 import { isEffectiveDangerMode } from '@goodvibes-jev/engine/platform/platform/config';
 import { applyComposerCapture, splitAtModelDirectives, shouldSendAfterCapture } from './input/composer-capture.ts';
+import { readComposerMarker } from '@goodvibes-jev/engine/terminal-shell/submission-router';
+import { ShellPassthrough, SHELL_USAGE_HINT } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
 import { makeComposerEditorOpener, makeFileEditorOpener } from './input/composer-editor.ts';
 import { evaluateSessionMaintenance } from '@/runtime/index.ts';
 import { createCancelGeneration, runOwnedTurnRetry } from './core/turn-cancellation.ts';
@@ -351,6 +353,9 @@ async function main() {
   const scrollToEnd = (vHeight: number) => transcript.followTail(conversation.history.getLineCount(), vHeight);
 
   const unsubs: Array<() => void | Promise<void>> = [];
+  // `!<command>` runs here, beside the composer; Esc or closing the app stops it.
+  const shellPassthrough = new ShellPassthrough();
+  unsubs.push(() => shellPassthrough.cancelRunning());
   const activityAnimation = new ActivityAnimation(() => render());
   unsubs.push(() => activityAnimation.dispose());
   // Consume the registry's change feed. Querying here used to clone every
@@ -542,17 +547,40 @@ async function main() {
     submitCaptured(text, content, options);
   };
 
-  // Composer capture markers: `!#` pins + sends; `# ` saves a note without sending.
+  // Composer markers, read once by the shared router that also labels the composer:
+  // `!` runs a shell command (typed input only, never speech), `!#` pins + sends,
+  // `# ` saves a note without sending.
   const submitCaptured = (text: string, content: ContentPart[] | undefined, options: ProductInputContext): void => {
+    const marker = readComposerMarker(text);
+    if (marker.kind === 'shell' && !options.spokenOutput) {
+      runShellCommand(marker.body);
+      return;
+    }
     const capture = applyComposerCapture(text, {
       sessionMemoryStore: ctx.services.sessionMemoryStore,
       notify: (message) => systemMessageRouter.high(message),
     });
     if (shouldSendAfterCapture(capture, Boolean(content))) {
-      sendOwnerTurn(capture.text, content, options.spokenOutput ? createSpokenTurnInputOptions() : undefined);
+      // The output of `!` commands run since the last message goes with this one.
+      sendOwnerTurn(shellPassthrough.consumeContext(capture.text), content, options.spokenOutput ? createSpokenTurnInputOptions() : undefined);
     } else {
       render();
     }
+  };
+
+  const runShellCommand = (command: string): void => {
+    if (!command) {
+      systemMessageRouter.high(SHELL_USAGE_HINT);
+      render();
+      return;
+    }
+    systemMessageRouter.high(`[Shell] $ ${command}`);
+    render();
+    void shellPassthrough
+      .run(command, workingDir)
+      .then((result) => systemMessageRouter.high(result.display))
+      .catch((error: unknown) => systemMessageRouter.high(`[Shell] Failed to run: ${summarizeError(error)}`, 'error'))
+      .finally(() => render());
   };
 
   /**
@@ -613,9 +641,13 @@ async function main() {
     render();
   }
 
-  const cancelGeneration = commandReadings.withCancellation(
+  const cancelTurn = commandReadings.withCancellation(
     createCancelGeneration(orchestrator, spokenTurns, () => streamResult.cancelPendingRecovery()),
   );
+  const cancelGeneration = (): boolean => {
+    shellPassthrough.cancelRunning();
+    return cancelTurn();
+  };
 
   const jumpToBookmark = (key: string) => {
     conversation.getDisplayBlocks();

@@ -2592,6 +2592,11 @@
       "types": "./terminal-shell/dist/command-confirmation.d.ts",
       "import": "./terminal-shell/dist/command-confirmation.js"
     },
+    "./terminal-shell/shell-passthrough": {
+      "bun": "./terminal-shell/src/shell-passthrough.ts",
+      "types": "./terminal-shell/dist/shell-passthrough.d.ts",
+      "import": "./terminal-shell/dist/shell-passthrough.js"
+    },
     "./terminal-shell/slash-command-parser": {
       "bun": "./terminal-shell/src/slash-command-parser.ts",
       "types": "./terminal-shell/dist/slash-command-parser.d.ts",

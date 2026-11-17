@@ -38,6 +38,7 @@ import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
 import { ShellContextHold, ShellPassthrough, SHELL_USAGE_HINT } from './input/shell-passthrough.ts';
+import { applyComposerCapture, readComposerMarker, shouldSendAfterCapture } from '@goodvibes-jev/engine/terminal-shell/submission-router';
 import { buildShellFooter, estimateShellFooterHeight } from './renderer/shell-surface.ts';
 import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
 import { TranscriptScroll, mainBackToBottom, transcriptEscape } from './shell/transcript-scroll.ts';
@@ -602,8 +603,9 @@ async function main() {
 
   /**
    * The composer's own grammar, applied only to what was typed into it:
-   * `@model:` at either end switches the model, `!#` pins a memory, `!` runs a
-   * shell command. Everything else is sent through `sendTurn` as typed.
+   * `@model:` at either end switches the model, `!#` pins a memory, `# ` saves a
+   * note without sending, `!` runs a shell command. Everything else is sent
+   * through `sendTurn` as typed.
    */
   // A conversation turn carries complete typed text. An image, a file or URL
   // reference, or held shell output cannot go with it: say which part and what
@@ -648,8 +650,10 @@ async function main() {
       },
       notify: (message) => systemMessageRouter.high(message),
     });
-    if (processedText.startsWith('!') && !processedText.startsWith('!#')) {
-      const command = processedText.slice(1).trim();
+    // The one reading of the composer's markers, the same one that labels the composer.
+    const marker = readComposerMarker(processedText);
+    if (marker.kind === 'shell') {
+      const command = marker.body;
       if (!command) {
         systemMessageRouter.high(SHELL_USAGE_HINT);
         render();
@@ -666,18 +670,19 @@ async function main() {
       return;
     }
     if (refuseUnsendable(draft, options.source, content)) return;
-    if (processedText.startsWith('!#')) {
-      const memoryText = processedText.slice(2).trim();
-      if (!memoryText) {
-        systemMessageRouter.high('[Memory] Usage: !# <text to pin as conversation-pinned memory>');
+    if (marker.kind === 'memory-pin' || marker.kind === 'note') {
+      // `!#` pins and sends; `# ` saves a note and sends nothing.
+      const capture = applyComposerCapture(processedText, {
+        sessionMemoryStore: ctx.services.sessionMemoryStore,
+        notify: (message) => systemMessageRouter.high(message),
+      });
+      if (!shouldSendAfterCapture(capture, false)) {
         render();
         return;
       }
-      const memId = ctx.services.sessionMemoryStore.add(memoryText);
-      systemMessageRouter.high(`[Memory] Pinned: "${memoryText}" (${memId})`);
-      processedText = memoryText;
+      processedText = capture.text;
     }
-    // Model directives and the pin prefix are the composer's own grammar; what remains is what the user sent.
+    // Model directives and the memory markers are the composer's own grammar; what remains is what the user sent.
     sendTurn(processedText, options);
   };
 

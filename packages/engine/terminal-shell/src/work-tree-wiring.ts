@@ -17,7 +17,7 @@ import type { WorkTreeController } from './work-tree-focus.js';
 import type { WorkTreeSources } from './work-tree-sources.js';
 export interface WorkTreeConversation {
     readonly workTree: WorkTreeController;
-    getMessageSnapshot(): readonly ConversationMessageSnapshot[];
+    readMessagesInPlace(): readonly ConversationMessageSnapshot[];
     setWorkTreeSources(sources: WorkTreeSources): void;
 }
 import { WorkTreeTimingStore, userMessageFingerprint, type AgentLaneInfo, type TurnOutcome } from './work-tree-sources.js';
@@ -140,9 +140,10 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
     unsubs.push(events.tools.on('TOOL_CANCELLED', (ev) => timings.callSettled(ev.callId, undefined, Date.now())));
     // Everything the session sidecar keeps: fold decisions and failed/cancelled turn endings.
     // A session id can move without a resume (crash recovery sets it directly). The
-    // first save under a new id first reads that session's sidecar, so the live
-    // state of the previous session never overwrites it. Live keys win: a toggle
-    // made this instant is not undone.
+    // first save under a new id, or the next frame's sync, first reads that session's
+    // sidecar, so the live state of the previous session never overwrites it. Live keys
+    // win: a toggle made this instant is not undone, and a replaced transcript has
+    // already cleared its folds (resetAll, fromJSON).
     let syncedSession: string | undefined;
     const reconcileSession = (): void => {
         const current = deps.sessionId();
@@ -163,7 +164,7 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
     // remembered so the refusal cannot close that running turn.
     const rejectedDuplicateTurnIds = new Set<string>();
     unsubs.push(events.turns.on('TURN_SUBMITTED', (ev) => {
-        const snapshot = conversation.getMessageSnapshot();
+        const snapshot = conversation.readMessagesInPlace();
         for (let i = snapshot.length - 1; i >= 0; i--) {
             if (snapshot[i]!.role === 'user') {
                 if (timings.isTurnOpen(i))
@@ -265,15 +266,9 @@ export function wireWorkTree(deps: WorkTreeWiringDeps): WorkTreeWiring {
     sweepOrphanWorkTreeFolds(deps.sessionsDir);
     unsubs.push(onSemanticSummaryReady(() => { conversation.workTree.invalidate(); deps.requestRender(); }));
     unsubs.push(onSyntaxHighlightReady(() => { conversation.workTree.invalidate(); deps.requestRender(); }));
-    // Products may resume sessions through multiple routes; restore folds once per new session.
-    const syncSession = (): void => {
-        const current = deps.sessionId();
-        if (current === syncedSession)
-            return;
-        syncedSession = current;
-        restoreWorkTreeFolds(conversation, deps.sessionsDir, current);
-    };
-    return { timings, unsubs, syncSession };
+    // Products may resume or recover sessions through several routes; each frame's call
+    // costs one string compare and reads the sidecar once per new session id.
+    return { timings, unsubs, syncSession: reconcileSession };
 }
 /**
  * Restore a resumed session's fold decisions and failed/cancelled turn

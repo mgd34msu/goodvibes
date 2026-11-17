@@ -12,8 +12,9 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
  *    machine or the user's data wholesale is a judgment about what the command
  *    does; the old frozen list only knew the spellings someone wrote down.
  *    `engine.gate.boundary` `catastrophic`: a yes refuses; an uncertain
- *    reading lets the call through to the presets at critical stakes, so every
- *    preset asks the owner.
+ *    reading passes here at critical stakes and the gate puts the call to the
+ *    owner as an unrecoverable delete in every mode that reads it (held for the
+ *    end of the run in just-vibes); Jev never decides it.
  * 2. Surface authority (code, table from gate/surface-authority.ts). What it
  *    decides is who can write to the surface the turn's instruction came from,
  *    and that is a fact about the deployment (who holds the Telegram bot, who

@@ -1348,6 +1348,23 @@ export class PermissionManager {
         preset: { preset: input.mode, action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
       });
     }
+    // A shell command the boundary could not tell from wholesale destruction is the owner's in every
+    // mode the gate reads: Jev is never offered to run it. Asked for this one call (nothing is
+    // offered to remember), or held for the end of the run in just-vibes.
+    if (reading?.boundary.catastrophic === 'uncertain') {
+      const item: OwnerOnlyKind = 'unrecoverable-delete';
+      const reason = 'This command may destroy the machine or your data wholesale, and the reading could not rule it out.';
+      const answered = this.sessionApprovals.get(ownerOnlySessionKey(item, this.getApprovalKey(input.toolName, input.args), input.args));
+      if (answered !== undefined) {
+        return { result: this.result(answered, false, 'session_override', answered ? 'session_cached_allow' : 'session_cached_deny', analysis,
+          { boundary: boundaryResult, detail: `Your answer earlier in this session for this exact command: ${ownerOnlyReason(item)}.` }) };
+      }
+      if (input.mode === 'just-vibes') return this.queuedForOwner(input, analysis, `held for you: ${reason}`, item);
+      return this.askOwner(input, analysis, {
+        reasons: [reason], ownerOnly: item, boundary: boundaryResult, single: true,
+        preset: { preset: input.mode, action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
+      });
+    }
     if (input.mode === 'ask-me') {
       if (boundary.passed && reading?.stakes !== 'critical' && reading?.irreversible !== true && reading?.weakensSecurity !== true) {
         return { result: this.result(true, false, 'stakes_preset', 'preset_allow', analysis,

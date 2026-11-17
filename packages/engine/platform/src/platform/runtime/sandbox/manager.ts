@@ -32,8 +32,9 @@ export function isRunningInWsl(): boolean {
 export function getSandboxConfigSnapshot(
   manager: ConfigManagerLike,
 ): SandboxConfigSnapshot {
-  // A value saved before `contained` existed (a VM mode) still asks for a boundary.
-  const mcpIsolation: SandboxMcpIsolationMode = readConfigValue(manager, 'sandbox.mcpIsolation') === 'disabled' ? 'disabled' : 'contained';
+  // Unset is the default, disabled; a value saved before `contained` existed (a VM mode) still asks for a boundary.
+  const saved = readConfigValue(manager, 'sandbox.mcpIsolation');
+  const mcpIsolation: SandboxMcpIsolationMode = saved === undefined || saved === 'disabled' ? 'disabled' : 'contained';
   return Object.freeze({ mcpIsolation });
 }
 

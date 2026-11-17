@@ -56,7 +56,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   Built-in tool families and a per-tool reference, slash-command families, the full keyboard-binding reference, the agent/archetype and hook systems, MCP and plugin extensibility, and the operator, diagnostics, and workflow surfaces that tie them together.
 
 - [Sandbox](sandbox.md)
-  The per-command exec sandbox, its writable-path and egress lists, and what REPL and MCP isolation currently is (host execution; the QEMU backend is retired).
+  The per-command exec sandbox, its writable-path and egress lists, REPL evaluations running through it, and `sandbox.mcpIsolation` (MCP servers as host processes, or each inside its own bubblewrap boundary).
 
 - [Changelog](../CHANGELOG.md)
   Current release history. Older per-version release-note files remain under `docs/releases/` for historical releases, but `CHANGELOG.md` is the canonical current stream.

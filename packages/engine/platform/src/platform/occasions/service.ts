@@ -923,8 +923,21 @@ export class OccasionsService {
     if (input.occurrence !== undefined && !isOccurrenceDate(input.occurrence)) {
       return { ok: false, reason: OCCURRENCE_REFUSAL, reply: '', changed: false };
     }
-    const occurrence = input.occurrence
-      ?? nextOccurrence(occasion.date, occasion.recurrence, today);
+    const upcoming = nextOccurrence(occasion.date, occasion.recurrence, today);
+    // A date the model names in conversation must be the upcoming one: any other
+    // date would record a mute that never fires while the real reminder keeps going.
+    // A surface acting on an open item may still name that item's own date.
+    if (input.source === 'conversation' && input.occurrence !== undefined && input.occurrence !== upcoming) {
+      return {
+        ok: false,
+        reason: `'${input.occurrence}' is not an upcoming date of that occasion`
+          + `${upcoming ? `; its next occurrence is ${upcoming} (YYYY-MM-DD)` : ''}. `
+          + 'Omit the occurrence to acknowledge the upcoming one. Nothing was changed.',
+        reply: '',
+        changed: false,
+      };
+    }
+    const occurrence = input.occurrence ?? upcoming;
     if (occurrence === null) {
       return { ok: false, reason: 'That occasion has no upcoming date.', reply: '', changed: false };
     }

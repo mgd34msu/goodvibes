@@ -176,21 +176,8 @@ function createInstance(
             ['Call `list` for the ids, then acknowledge the one the owner meant.'],
           );
         }
-        // An occurrence the model supplies must be one this occasion actually has; anything else would
-        // record a mute for a date that never fires while the real reminder keeps going.
+        // The service refuses an occurrence other than the upcoming one and names that date.
         const occurrence = text(input.occurrence);
-        if (occurrence.length > 0) {
-          const view = (await port.occasions.list()).occasions.find((entry) => entry.occasion.id === occasionId);
-          const next = view?.nextOccurrence ?? null;
-          if (!ISO_DATE.test(occurrence) || next !== occurrence) {
-            return refused(
-              `'${occurrence}' is not an upcoming date of that occasion${next ? `; its next occurrence is ${next} (YYYY-MM-DD)` : ''}. `
-              + 'Nothing was changed.',
-              'needs-input',
-              ['Omit `occurrence` to acknowledge the upcoming one.'],
-            );
-          }
-        }
         const outcome = await port.occasions.acknowledge({
           occasionId,
           source: 'conversation',

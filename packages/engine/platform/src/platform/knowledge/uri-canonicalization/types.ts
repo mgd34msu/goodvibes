@@ -15,5 +15,10 @@ export interface KnowledgeUriCanonicalizer {
   readonly canonicalize: (input: string) => Promise<string | null>;
   readonly canonicalizeAll: (inputs: readonly string[]) => Promise<readonly (string | null)[]>;
 }
-export const KNOWLEDGE_URI_LIMITS = Object.freeze({ inputs: Infinity, characters: Infinity, requests: Infinity,
-  bytes: Infinity, concurrency: 4, defaultTimeoutMs: 0, timeoutMs: 2_147_483_647 });
+/**
+ * `requests`: ref readings one canonicalizer (one ingest, import or repair)
+ * makes in all; a ref occurrence past the cap is kept unread. `defaultTimeoutMs`:
+ * how long one batch of readings may run; when it ends, the occurrences still
+ * unread are kept. `timeoutMs` is the longest delay a timer honours.
+ */
+export const KNOWLEDGE_URI_LIMITS = Object.freeze({ requests: 64, concurrency: 4, defaultTimeoutMs: 60_000, timeoutMs: 2_147_483_647 });

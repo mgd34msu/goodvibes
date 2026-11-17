@@ -44,6 +44,13 @@ import {
 
 export const WORK_PLAN_ROWS_FILE = 'work-plans.sqlite';
 
+/**
+ * A quick burst of writes to the WAL is reported as one watch event, which can
+ * arrive before the burst's last commit is visible; no further event follows.
+ * One more look this long after the last event hears that commit.
+ */
+const WAL_BURST_SETTLE_MS = 50;
+
 /** Where the plan lives for a configuration: the user's shared `.goodvibes` directory, or the config directory when there is no home. */
 export function workPlanRowsPath(homeDirectory: string | null | undefined, configDirectory: string): string {
   return homeDirectory ? join(homeDirectory, '.goodvibes', WORK_PLAN_ROWS_FILE) : join(configDirectory, WORK_PLAN_ROWS_FILE);
@@ -81,6 +88,7 @@ export class WorkPlanRows {
   #file: SqliteFile | null = null;
   #db: Statements | null = null;
   #watcher: FSWatcher | null = null;
+  #settleTimer: ReturnType<typeof setTimeout> | null = null;
   #dataVersion = -1;
   #scheduled = false;
   #knownChange = false;
@@ -206,7 +214,13 @@ export class WorkPlanRows {
     if (this.#watcher || this.path === ':memory:') return;
     this.#open();
     const wal = `${this.path}-wal`;
-    const onChange = (): void => this.#schedule(false);
+    const onChange = (): void => {
+      this.#schedule(false);
+      // The look after the burst settles: one PRAGMA, and only after an event.
+      if (this.#settleTimer) clearTimeout(this.#settleTimer);
+      this.#settleTimer = setTimeout(() => { this.#settleTimer = null; this.#schedule(false); }, WAL_BURST_SETTLE_MS);
+      this.#settleTimer.unref?.();
+    };
     try {
       // In WAL mode every commit appends to the -wal file while any program holds the file open, as this one does.
       this.#watcher = watch(wal, { persistent: false }, onChange);
@@ -246,6 +260,8 @@ export class WorkPlanRows {
   #stopWatching(): void {
     const watcher = this.#watcher;
     this.#watcher = null;
+    if (this.#settleTimer) clearTimeout(this.#settleTimer);
+    this.#settleTimer = null;
     try { watcher?.close(); } catch { /* already closed */ }
   }
 }

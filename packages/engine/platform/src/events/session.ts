@@ -13,6 +13,11 @@ export type SessionEvent =
   | { type: 'SESSION_READY'; sessionId: string }
   /** Session recovery has failed unrecoverably. */
   | { type: 'SESSION_RECOVERY_FAILED'; sessionId: string; error: string }
+  /**
+   * Every session the health system tracks failed to recover. Published by the
+   * session-unrecoverable health rule, with the playbooks that diagnose it.
+   */
+  | { type: 'SESSION_UNRECOVERABLE'; sessionId: string; ruleId: string; reason?: string | undefined; playbooks: readonly string[] }
   /** The pending mid-turn message queue changed (enqueued/edited/deleted/delivered). */
   | {
     type: 'QUEUED_MESSAGES_CHANGED';

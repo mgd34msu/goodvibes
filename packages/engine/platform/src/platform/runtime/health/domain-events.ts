@@ -4,7 +4,8 @@
  * Turns the runtime events that mean an entity failed, degraded or came back
  * into domain health. Each domain's status is derived from its own entities,
  * as their owners announce them: each MCP server, each transport, each
- * session's last turn and last compaction, each agent. One entity failing does
+ * session's last turn, last compaction and recovery, each agent, each tool's
+ * last call. One entity failing does
  * not make unrelated work look failed, and one entity succeeding does not hide
  * another that is still failing.
  *
@@ -22,8 +23,8 @@ import type { HealthStoreWiring } from './wiring.js';
 /** How one runtime event sets the health of one entity of a domain. */
 interface EntityHealthEvent {
   readonly domain: HealthDomain;
-  /** The entity's status after the event; `ended` drops an entity that finished well. */
-  readonly status: HealthStatus | 'ended';
+  /** The entity's status after the event (or read from its payload); `ended` drops an entity that finished well. */
+  readonly status: HealthStatus | 'ended' | ((payload: Record<string, unknown>) => HealthStatus | 'ended');
   /** What the entities are called in a failure reason. */
   readonly noun: string;
   readonly entity: (payload: Record<string, unknown>, envelope: { readonly sessionId?: string | undefined }) => string | undefined;
@@ -34,10 +35,12 @@ const sessionOf = (payload: Record<string, unknown>, envelope: { readonly sessio
   text(payload['sessionId']) ?? text(envelope.sessionId);
 
 const mcp = (status: HealthStatus): EntityHealthEvent => ({ domain: 'mcp', status, noun: 'MCP servers', entity: (p) => text(p['serverId']) });
-const transport = (status: HealthStatus): EntityHealthEvent => ({ domain: 'transport', status, noun: 'transports', entity: (p) => text(p['transportId']) });
+const transport = (status: EntityHealthEvent['status']): EntityHealthEvent => ({ domain: 'transport', status, noun: 'transports', entity: (p) => text(p['transportId']) });
 const compaction = (status: HealthStatus): EntityHealthEvent => ({ domain: 'compaction', status, noun: 'sessions', entity: sessionOf });
 const turn = (status: HealthStatus): EntityHealthEvent => ({ domain: 'turn', status, noun: 'sessions', entity: sessionOf });
 const agent = (status: HealthStatus | 'ended'): EntityHealthEvent => ({ domain: 'agents', status, noun: 'agents', entity: (p) => text(p['agentId']) });
+const session = (status: HealthStatus): EntityHealthEvent => ({ domain: 'session', status, noun: 'sessions', entity: sessionOf });
+const tool = (status: HealthStatus): EntityHealthEvent => ({ domain: 'toolExecution', status, noun: 'tools', entity: (p) => text(p['tool']) });
 
 /** Runtime event type -> the entity it describes and that entity's health after it. */
 const ENTITY_HEALTH_EVENTS: Readonly<Partial<Record<AnyRuntimeEvent['type'], EntityHealthEvent>>> = {
@@ -45,6 +48,9 @@ const ENTITY_HEALTH_EVENTS: Readonly<Partial<Record<AnyRuntimeEvent['type'], Ent
   MCP_DEGRADED: mcp('degraded'),
   MCP_DISCONNECTED: mcp('failed'),
   TRANSPORT_CONNECTED: transport('healthy'),
+  // A transport that dropped and will retry is degraded; one closed for good
+  // (a finished session) ended. A failure that ends it is TRANSPORT_TERMINAL_FAILURE.
+  TRANSPORT_DISCONNECTED: transport((p) => (p['willRetry'] === true ? 'degraded' : 'ended')),
   TRANSPORT_TERMINAL_FAILURE: transport('failed'),
   COMPACTION_DONE: compaction('healthy'),
   COMPACTION_FAILED: compaction('failed'),
@@ -53,6 +59,11 @@ const ENTITY_HEALTH_EVENTS: Readonly<Partial<Record<AnyRuntimeEvent['type'], Ent
   AGENT_COMPLETED: agent('ended'),
   AGENT_CANCELLED: agent('ended'),
   AGENT_FAILED: agent('failed'),
+  SESSION_STARTED: session('healthy'),
+  SESSION_READY: session('healthy'),
+  SESSION_RECOVERY_FAILED: session('failed'),
+  TOOL_SUCCEEDED: tool('healthy'),
+  TOOL_FAILED: tool('failed'),
 };
 
 /** Entities remembered per domain; the oldest is forgotten past this. */
@@ -103,7 +114,7 @@ export function bindHealthDomainEvents(bus: RuntimeEventBus, wiring: HealthStore
         entities = new DomainEntities();
         domains.set(rule.domain, entities);
       }
-      entities.set(entity, rule.status);
+      entities.set(entity, typeof rule.status === 'function' ? rule.status(payload) : rule.status);
       const summary = entities.summarize(rule.noun);
       const sessionId = sessionOf(payload, envelope);
       wiring.evaluateDomain(rule.domain, summary.status, {

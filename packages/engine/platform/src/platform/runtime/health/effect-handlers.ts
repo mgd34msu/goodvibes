@@ -12,6 +12,7 @@
 
 import type { CascadeEffect, CascadeResult } from './types.js';
 import { createCascadeAppliedEvent } from './types.js';
+import { CASCADE_PLAYBOOK_MAP } from './cascade-playbook-map.js';
 import type { RuntimeHealthAggregator } from './aggregator.js';
 import type { RuntimeEventBus, RuntimeEventEnvelope } from '../events/index.js';
 import { createEventEnvelope } from '../events/index.js';
@@ -53,7 +54,9 @@ export interface EffectHandlerContext {
  * cancels, blocks and deregisters nothing, and it leaves every other domain's
  * status to that domain's own entities (a failed agent does not make `tasks`
  * failed). So every CASCADE_APPLIED carries `enforced: false`. An EMIT_EVENT
- * effect also publishes its named event.
+ * effect also publishes its typed runtime event (SESSION_UNRECOVERABLE on the
+ * session domain, TOOL_DISPATCH_ERROR on the tools domain) carrying the
+ * domain's failure reason and the rule's playbooks.
  *
  * @param effect - The CascadeEffect of the rule that fired.
  * @param result - The CascadeResult that produced this effect (carries ruleId, source, etc.).
@@ -67,18 +70,19 @@ export function handleCascadeEffect(
   const { eventBus } = context;
   const sessionId = result.sourceContext?.['sessionId'] ?? 'runtime';
   if (effect.type === 'EMIT_EVENT') {
-    emitHealthEvent(eventBus, createEventEnvelope(
-      effect.eventType,
-      {
-        type: effect.eventType,
-        ruleId: result.ruleId,
-        source: result.source,
-        target: result.target,
-        timestamp: result.timestamp,
-        sourceContext: result.sourceContext,
-      },
-      { sessionId, source: 'health/effect-handlers' },
-    ));
+    const reason = context.aggregator.getDomainHealth(result.source).failureReason;
+    const playbooks = result.remediationPlaybookIds ?? CASCADE_PLAYBOOK_MAP.get(result.ruleId) ?? [];
+    const ctx = { sessionId, source: 'health/effect-handlers' };
+    if (effect.eventType === 'SESSION_UNRECOVERABLE') {
+      eventBus.emit('session', createEventEnvelope('SESSION_UNRECOVERABLE', {
+        type: 'SESSION_UNRECOVERABLE', sessionId, ruleId: result.ruleId, ...(reason ? { reason } : {}), playbooks,
+      }, ctx));
+    } else {
+      const tool = result.sourceContext?.['entity'];
+      eventBus.emit('tools', createEventEnvelope('TOOL_DISPATCH_ERROR', {
+        type: 'TOOL_DISPATCH_ERROR', ruleId: result.ruleId, ...(tool ? { tool } : {}), ...(reason ? { reason } : {}), playbooks,
+      }, ctx));
+    }
   }
   emitHealthEvent(eventBus, createEventEnvelope(
     'CASCADE_APPLIED',

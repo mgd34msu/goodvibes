@@ -50,6 +50,8 @@ export const NOTIFICATION_BRIDGE_DOMAINS: readonly RuntimeEventDomain[] = [
   'automation',
   'deliveries',
   'security',
+  'session',
+  'tools',
 ];
 
 /** A runtime event a person reads in the notification history: its plain title and severity. */
@@ -98,6 +100,9 @@ export const PERSON_FACING_EVENTS: Readonly<Record<string, PersonFacingEvent>> =
   TOKEN_ROTATION_EXPIRED: { title: 'Access token expired', level: 'warning' },
   TOKEN_BLOCKED: { title: 'Access token blocked', level: 'warning' },
   TOKEN_SCOPE_VIOLATION: { title: 'Request refused: outside the token\'s permissions', level: 'warning' },
+  // health: conditions the health rules report, each with the runbook that diagnoses it
+  SESSION_UNRECOVERABLE: { title: 'The session could not be restored', level: 'critical' },
+  TOOL_DISPATCH_ERROR: { title: 'Every tool call is failing', level: 'warning' },
 };
 
 /** The history entry an event type makes, or undefined for internal traffic that is not recorded. */
@@ -128,6 +133,14 @@ export function eventDetail(payload: unknown): string | undefined {
   const commit = record['hash'] ?? record['commitHash'];
   if (typeof commit === 'string' && commit.trim()) return `commit ${commit.trim().slice(0, 7)}`;
   return undefined;
+}
+
+/** The runbook a health event names, as the command that runs its checks (`/doctor <symptom>`). */
+function runbookHint(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const playbooks = (payload as Record<string, unknown>)['playbooks'];
+  const first = Array.isArray(playbooks) ? playbooks[0] : undefined;
+  return typeof first === 'string' && first ? `Next: /doctor ${first}` : undefined;
 }
 
 export function createNotificationDispatcher(
@@ -195,7 +208,9 @@ export function wireRuntimeNotificationBridge(
     runtimeBus.onDomain(domain, (envelope) => {
       const event = personFacingEvent(envelope.type, envelope.payload);
       if (!event) return;
-      const body = eventDetail(envelope.payload);
+      const detail = eventDetail(envelope.payload);
+      const hint = runbookHint(envelope.payload);
+      const body = detail && hint ? `${detail}. ${hint}` : detail ?? hint;
       // Notification.id identifies this delivery only. A trace and timestamp
       // can be shared by distinct outcomes. Only producer-declared occurrence
       // provenance is a cross-path key. Legacy keyless deliveries stay visible.

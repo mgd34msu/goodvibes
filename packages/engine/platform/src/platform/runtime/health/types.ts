@@ -77,7 +77,8 @@ export type CascadeEffect =
   | { type: 'BLOCK_DISPATCH'; scope: string; queueable: boolean }
   | { type: 'MARK_CHILDREN'; status: 'failed' | 'blocked'; notifyParent: boolean }
   | { type: 'DEREGISTER_TOOLS'; pluginId?: string }
-  | { type: 'EMIT_EVENT'; eventType: string }
+  /** Publishes a typed runtime event that names the condition (SessionEvent / ToolEvent). */
+  | { type: 'EMIT_EVENT'; eventType: 'SESSION_UNRECOVERABLE' | 'TOOL_DISPATCH_ERROR' }
   | { type: 'BLOCK_NEW'; scope: string };
 
 /**

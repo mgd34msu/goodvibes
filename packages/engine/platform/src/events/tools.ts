@@ -54,6 +54,12 @@ export type ToolEvent =
   /** Tool call was cancelled before completion. */
   | { type: 'TOOL_CANCELLED'; callId: string; turnId: string; tool: string; reason?: string | undefined }
   /**
+   * Every tool the health system tracks is failing, so turns that call them
+   * are affected. Published by the tool-failed health rule, with the playbooks
+   * that diagnose it; `tool` is the tool whose failure tipped the domain.
+   */
+  | { type: 'TOOL_DISPATCH_ERROR'; ruleId: string; tool?: string | undefined; reason?: string | undefined; playbooks: readonly string[] }
+  /**
    * A runtime budget was exceeded and the phase pipeline was terminated.
    * The `reason` discriminant distinguishes the type of budget breached:
    *  - BUDGET_EXCEEDED_MS,    wall-clock execution time limit

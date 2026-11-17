@@ -431,6 +431,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       // together with the union cache's 5s liveness probe (one signal, no new timer).
       sessionSpineActive: sessionSpine.active,
       sessionSpineStatus: deriveSpineFooterStatus(sessionSpine.status(), sessionUnionCache.crossSurfaceView),
+      sessionSpineRefusal: sessionSpine.refusal(),
     };
   };
 

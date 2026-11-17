@@ -1266,6 +1266,7 @@ async function main() {
         spine?.sessionSpineActive && spine.sessionSpineStatus && spine.sessionSpineStatus !== 'unknown'
           ? spine.sessionSpineStatus
           : undefined,
+      sessionSpineRefusal: spine?.sessionSpineActive ? spine.sessionSpineRefusal ?? undefined : undefined,
       webSurfaceUrl: configManager.get('web.enabled') ? resolveWebSurfaceUrl(configManager) : undefined,
       autoApprove: isEffectiveDangerMode(configManager),
       keepAwake: powerChipSource.get().keepAwake,

@@ -32,7 +32,7 @@
 import type { RegisterSharedSessionInput, SharedSessionRecord } from '../../control-plane/session-types.js';
 import { readClientCompatibilityFloor } from '../../control-plane/client-compatibility.js';
 import type { DaemonReceipt } from '../../daemon/receipts.js';
-import type { SpineResult, SpineTransport } from './client.js';
+import { classifySpineFailure, type SpineResult, type SpineTransport } from './client.js';
 
 const DEFAULT_REGISTER_TIMEOUT_MS = 1_500;
 const DEFAULT_CLOSE_TIMEOUT_MS = 500;
@@ -172,12 +172,11 @@ export async function postSessionSpineClose(
 }
 
 /**
- * Folds the REST mirror's richer failure vocabulary onto `SessionSpineClient`'s
- * ok/offline/rejected outcome: `ok` stays `ok`; `connected_host_unavailable`
- * (a transient connectivity fault) becomes `offline` so the client enqueues
- * for reconnect replay; every DURABLE refusal (`auth_required`,
- * `connected_host_route_unavailable`, `connected_host_error`) becomes
- * `rejected` so the client logs it and never retries forever.
+ * Folds the REST mirror's failure vocabulary onto `SessionSpineClient`'s
+ * ok/offline/rejected outcome with the one HTTP classification
+ * (`classifySpineFailure`): a network failure and 408/429/5xx are `offline`
+ * (queued for reconnect replay), 401/403/404 and other 4xx are `rejected`. A
+ * missing token is `rejected` (not signed in) without a request.
  */
 function foldSpineResult(result: SessionSpineRegisterResult | SessionSpineCloseResult): SpineResult {
   if (result.ok) {
@@ -188,7 +187,8 @@ function foldSpineResult(result: SessionSpineRegisterResult | SessionSpineCloseR
     return { outcome: 'ok' };
   }
   if (result.kind === 'connected_host_unavailable') return { outcome: 'offline', error: result.error };
-  return { outcome: 'rejected', error: result.error };
+  if (result.status === undefined) return { outcome: 'rejected', error: `not signed in to the daemon (${result.error})` };
+  return classifySpineFailure(result.status, result.error);
 }
 
 export interface SessionSpineRestTransportOptions {

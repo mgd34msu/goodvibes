@@ -55,6 +55,8 @@ import type {
   RegisterSharedSessionInput,
   SharedSessionKind,
   SharedSessionParticipant,
+  SharedSessionRecord,
+  SharedSessionRegisterResult,
 } from '../../control-plane/index.js';
 
 /**
@@ -102,6 +104,59 @@ export interface SpineResult {
    * a failure to retry; it is a disagreement between this surface and the daemon.
    */
   readonly conflict?: 'closed' | undefined;
+}
+
+/**
+ * The one classification of a failed daemon answer for the spine. 401/403 (not
+ * signed in), 404 (a request this daemon does not serve) and every other 4xx are
+ * durable: `rejected`, never resent. 408, 429, 5xx and a failure with no HTTP
+ * status (network, timeout) are transient: `offline`, queued and resent on
+ * reconnect.
+ */
+export function classifySpineFailure(status: number | undefined, detail: string): SpineResult {
+  if (status === undefined || status === 408 || status === 429 || status >= 500) return { outcome: 'offline', error: detail };
+  const reason = status === 401 || status === 403
+    ? 'not signed in to the daemon'
+    : status === 404
+      ? 'the daemon does not serve this request (it may be older than this app)'
+      : 'the daemon refused the request';
+  return { outcome: 'rejected', error: `${reason} (${detail})` };
+}
+
+/** The narrow typed sessions client a surface already holds (the operator client's `sessions`). */
+export interface SpineSessionsClient {
+  register(input: RegisterSharedSessionInput): Promise<SharedSessionRegisterResult>;
+  close(sessionId: string): Promise<SharedSessionRecord | null>;
+}
+
+function thrownFailure(error: unknown): SpineResult {
+  const status = (error as { status?: unknown } | null)?.status;
+  return classifySpineFailure(typeof status === 'number' ? status : undefined, errorMessage(error));
+}
+
+/** A `SpineTransport` over a typed sessions client, with the same classification as the REST transport. */
+export function createSessionsClientSpineTransport(sessionsClient: SpineSessionsClient): SpineTransport {
+  return {
+    register: async (input) => {
+      try {
+        const result = await sessionsClient.register(input);
+        // The daemon answers a register against a closed session with a 200 and a
+        // conflict, not an error: it is a refusal, not an applied register.
+        if (result?.conflict?.status === 'closed') return { outcome: 'rejected', conflict: 'closed', error: 'session is closed on the daemon' };
+        return { outcome: 'ok' };
+      } catch (error) {
+        return thrownFailure(error);
+      }
+    },
+    close: async (sessionId) => {
+      try {
+        await sessionsClient.close(sessionId);
+        return { outcome: 'ok' };
+      } catch (error) {
+        return thrownFailure(error);
+      }
+    },
+  };
 }
 
 /**
@@ -209,6 +264,7 @@ export class SessionSpineClient {
 
   private transport: SpineTransport | null = null;
   private reachability: SpineReachability = 'unknown';
+  private lastRefusal: string | null = null;
   private readonly records = new Map<string, RegisterSharedSessionInput>();
   private readonly queue: QueuedOp[] = [];
   /**
@@ -255,6 +311,21 @@ export class SessionSpineClient {
   /** Honest reachability: 'unknown' until a wire call resolves, then online/offline. */
   status(): SpineReachability {
     return this.reachability;
+  }
+
+  /**
+   * Why the daemon last refused a register or close durably (not signed in, a
+   * daemon too old for the request), or null once one is applied again. Logged
+   * once per distinct reason.
+   */
+  refusal(): string | null {
+    return this.lastRefusal;
+  }
+
+  private noteRefusal(error: string | undefined): void {
+    const reason = error ?? 'the daemon refused the request';
+    if (reason !== this.lastRefusal) this.log.warn?.('session spine: the daemon refused this surface\'s session', { reason });
+    this.lastRefusal = reason;
   }
 
   /** Whether a transport is currently attached. */
@@ -535,6 +606,7 @@ export class SessionSpineClient {
       }
       if (result.outcome === 'ok') {
         this.reachability = 'online';
+        this.lastRefusal = null;
         await this.flush();
       } else if (result.outcome === 'offline') {
         this.reachability = 'offline';
@@ -546,7 +618,7 @@ export class SessionSpineClient {
       } else {
         // Durable reject: honest local-only. Never claim online; do not queue (this is
         // not a transient connectivity fault, so it must not retry-forever).
-        this.log.debug('session spine register not applied', { error: result.error });
+        this.noteRefusal(result.error);
       }
     } catch (error) {
       // Fire-and-forget contract: absorb everything. An unexpected transport throw is
@@ -663,7 +735,7 @@ export class SessionSpineClient {
             const refused = result.outcome === 'rejected' && result.conflict !== 'closed';
             if (result.outcome === 'rejected') {
               if (result.conflict === 'closed') this.noteClosedOnDaemon(op.sessionId);
-              else this.log.debug('session spine flush op not applied', { error: result.error });
+              else this.noteRefusal(result.error);
             }
             op.onSettled?.(!refused);
             if (detached) {

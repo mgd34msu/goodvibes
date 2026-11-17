@@ -34,6 +34,8 @@ export interface StatusReportSource {
   /** Compaction threshold as a fraction. */
   readonly compactFraction: number;
   readonly sessionSpine?: 'online' | 'offline';
+  /** Why the daemon refused this terminal's session (not signed in, daemon too old). */
+  readonly sessionSpineRefusal?: string;
   readonly webSurfaceUrl?: string;
   readonly autoApprove: boolean;
   readonly keepAwake: boolean;
@@ -84,7 +86,7 @@ export function formatStatusReport(s: StatusReportSource): string {
     if (s.contextWindowSource) row('window from', s.contextWindowSource);
   }
   lines.push('Surfaces');
-  row('spine', s.sessionSpine ?? 'local only');
+  row('spine', s.sessionSpineRefusal ? `refused: ${s.sessionSpineRefusal}` : s.sessionSpine ?? 'local only');
   row('web', s.webSurfaceUrl ?? 'off');
   lines.push('Safety');
   row('auto-approve', s.autoApprove ? 'ON: every change is approved automatically' : 'off');

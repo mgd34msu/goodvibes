@@ -27,6 +27,8 @@ type PlatformExtras = {
       // the spine client's own live wire attempts (not the one-shot adopt probe).
       readonly sessionSpineActive?: boolean;
       readonly sessionSpineStatus?: 'unknown' | 'online' | 'offline';
+      /** Why the daemon last refused this terminal's session (not signed in, daemon too old), null when it takes them. */
+      readonly sessionSpineRefusal?: string | null;
     };
     restart(): Promise<{
       readonly daemonRunning: boolean;

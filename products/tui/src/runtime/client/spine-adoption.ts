@@ -7,7 +7,7 @@
  * The platform's `@goodvibes-jev/engine/platform/platform/runtime/client` now owns WHEN the
  * wire comes up and goes down: idempotent per base URL, torn down on a
  * change, the one-time legacy-store fold. This module owns WHAT the wire is,
- * this terminal's own `createHttpTransport` + `createTuiSpineTransport` +
+ * this terminal's own `createHttpTransport` + `createSessionsClientSpineTransport` +
  * `createTuiMemorySpineTransport`, injected as the platform's `connect(baseUrl,
  * authToken)` callback, because building the actual HTTP client is the same
  * connection-resolution concern the verb caller already keeps product-side.
@@ -50,7 +50,7 @@ import { createHttpTransport, type HostServiceStatus, type HttpTransportOptions 
 import { createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
-import { createTuiSpineTransport, type SpineSessionsClient } from '../session-spine-transport.ts';
+import { createSessionsClientSpineTransport, type SpineSessionsClient } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { createTuiMemorySpineTransport } from '../memory-spine-transport.ts';
 
 /** This module's own options: the platform's shape minus the two fields it builds itself. */
@@ -83,7 +83,7 @@ export function createSpineAdoptionSync(
         close: (sessionId) => httpTransport.operator.sessions.close(sessionId),
       };
       return {
-        sessionTransport: createTuiSpineTransport(sessionsClient),
+        sessionTransport: createSessionsClientSpineTransport(sessionsClient),
         inboundInputs: {
           listInputs: async (sessionId, opts) => ({
             inputs: await httpTransport.operator.sessions.inputs(sessionId, opts.limit, { state: opts.state, since: opts.since }),

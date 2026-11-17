@@ -10,6 +10,8 @@
 
 export {
   SessionSpineClient,
+  classifySpineFailure,
+  createSessionsClientSpineTransport,
   foldLegacySpineStore,
   TUI_SPINE_PARTICIPANT,
   AGENT_SPINE_PARTICIPANT,
@@ -17,6 +19,7 @@ export {
   type SpineOutcome,
   type SpineResult,
   type SpineTransport,
+  type SpineSessionsClient,
   type SessionSpineRecord,
   type SessionSpineClientOptions,
   type FoldLegacySpineStoreOptions,

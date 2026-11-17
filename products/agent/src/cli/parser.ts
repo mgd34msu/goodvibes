@@ -20,5 +20,6 @@ export function parseGoodVibesCli(argv: readonly string[], binary = 'goodvibes-a
     positionals: result.positionals,
     flags: result.flags,
     errors: result.errors,
+    warnings: result.warnings,
   };
 }

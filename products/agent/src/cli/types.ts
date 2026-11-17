@@ -88,4 +88,6 @@ export interface GoodVibesCliParseResult {
   readonly positionals: readonly string[];
   readonly flags: GoodVibesCliFlags;
   readonly errors: readonly string[];
+  /** Non-fatal notices: a deprecated alias, or a near-miss first word taken as the prompt. */
+  readonly warnings: readonly string[];
 }

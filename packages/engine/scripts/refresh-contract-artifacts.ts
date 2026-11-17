@@ -186,8 +186,19 @@ function schemaPatternsOf(value: unknown, found: Set<string>, seen = new Set<obj
 const nonLinearPatterns = [...schemaPatternsOf([operatorContract, PEER_CONTRACT_SOURCE], new Set())]
   .filter((pattern) => !isLinearSchemaPattern(pattern));
 if (nonLinearPatterns.length > 0) {
+  // Name the method or endpoint that carries each pattern, so the fix starts at its schema.
+  const owners = new Map<string, string[]>();
+  for (const [kind, entries] of [['operator method', operatorContract.operator.methods], ['peer endpoint', PEER_CONTRACT_SOURCE.endpoints]] as const) {
+    for (const entry of entries as readonly { readonly id: string }[]) {
+      for (const pattern of schemaPatternsOf(entry, new Set())) {
+        owners.set(pattern, [...(owners.get(pattern) ?? []), `${kind} ${entry.id}`]);
+      }
+    }
+  }
   console.error('[refresh:contracts] these schema patterns cannot run synchronously; rewrite each so one stretch of text has one way to match:');
-  for (const pattern of nonLinearPatterns) console.error(`  ${pattern}`);
+  for (const pattern of nonLinearPatterns) {
+    console.error(`  ${pattern}  (in ${owners.get(pattern)?.join(', ') ?? 'a contract schema outside any method, such as an event'})`);
+  }
   process.exit(1);
 }
 

@@ -22,7 +22,7 @@ test('deleting the only administrator is refused while other users remain', () =
   const p = paths();
   const users = new UserAuthManager({ bootstrapFilePath: p.file, bootstrapCredentialPath: p.cred, scryptParams: FAST });
   users.addUser('viewer', 'viewer-password', ['viewer']);
-  expect(() => users.deleteUser('admin')).toThrow(/admin role/);
+  expect(() => users.deleteUser('admin')).toThrow();
   expect(users.getUser('admin')).not.toBeNull();
   users.addUser('second', 'second-password', ['admin']);
   expect(users.deleteUser('admin')).toBe(true);

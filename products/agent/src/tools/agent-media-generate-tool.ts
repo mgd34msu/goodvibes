@@ -5,7 +5,6 @@ import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } 
 import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '../agent/payments-channel-guard.ts';
-import { retainSurfaceMethods } from './agent-surface-effect.ts';
 import {
   formatAgentMediaGenerationResult,
   generateAgentMedia,
@@ -97,13 +96,11 @@ export function createAgentMediaGenerateTool(
       if (readBoolean(args.preview)) return output(preview(args, generationProviderCount));
       try {
         const ledger = getSessionUntrustedContentLedger();
-        const ledgerMethods = retainSurfaceMethods(ledger, ['getPublicationRevision', 'originsThisTurn', 'exposuresThisTurn', 'taintSourcesThisTurn']);
         const ledgerCurrent = () => JSON.stringify([ledger.getPublicationRevision(), ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
         const sources = ledgerCurrent();
         const assertCurrent = () => {
           executionOptions?.signal?.throwIfAborted();
           if (!assertCurrentToolEffect(rawArgs, executionOptions, 'send') || !assertCurrentToolEffect(rawArgs, executionOptions, 'write')) throw new ToolInputProjectionError('held');
-          ledgerMethods();
           if (getSessionUntrustedContentLedger() !== ledger || ledgerCurrent() !== sources) throw new ToolInputProjectionError('stale');
         };
         assertCurrent();

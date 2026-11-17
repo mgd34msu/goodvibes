@@ -2,7 +2,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import type { CommandContext } from '../input/command-registry.ts';
 import { readInteractiveRuntime, type InteractiveRuntimeSnapshot } from './agent-harness-interactive-runtime-records.ts';
 import { isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
-import { toolsDeclaringCapability } from './agent-tool-capability-declarations.ts';
+import type { ToolCapability, ToolDefinition } from '@goodvibes-jev/engine/platform/platform/types';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
@@ -103,6 +103,12 @@ function readString(value: unknown): string {
 
 function quoteRouteValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/** Registered tools whose definition states the capability, in a stable order. */
+function toolsDeclaring(definitions: readonly ToolDefinition[], capability: ToolCapability): readonly string[] {
+  return definitions.filter(definition => definition.capabilities?.includes(capability) === true)
+    .map(definition => definition.name).sort((left, right) => left.localeCompare(right));
 }
 
 function safeToolDefinitions(toolRegistry: ToolRegistry | undefined): readonly ReturnType<ToolRegistry['getToolDefinitions']>[number][] {
@@ -221,9 +227,9 @@ function browserInvocationRoutes(
   mcpServers: readonly BrowserControlMcpServer[],
 ): readonly BrowserControlInvocationRoute[] {
   const routes: BrowserControlInvocationRoute[] = [];
-  const registeredNames = new Set(safeToolDefinitions(registry).map((tool) => tool.name));
-  const declared = new Set(toolsDeclaringCapability('browser-control'));
-  if (registeredNames.has('browser') && declared.has('browser')) {
+  const definitions = safeToolDefinitions(registry);
+  const registeredNames = new Set(definitions.map((tool) => tool.name));
+  if (toolsDeclaring(definitions, 'browser-control').includes('browser')) {
     routes.push({
       kind: 'first-class-tool',
       toolName: 'browser',
@@ -247,9 +253,8 @@ function browserInvocationRoutes(
 
 function projectBrowserControlPosture(context: CommandContext, toolRegistry: ToolRegistry | undefined, snapshot: InteractiveRuntimeSnapshot): BrowserControlPosture {
   const registry = toolRegistry ?? context.extensions?.toolRegistry;
-  const registeredNames = new Set(safeToolDefinitions(registry).map((tool) => tool.name));
-  const declaredControlTools = toolsDeclaringCapability('browser-control')
-    .filter((toolName) => registeredNames.has(toolName));
+  const definitions = safeToolDefinitions(registry);
+  const declaredControlTools = toolsDeclaring(definitions, 'browser-control');
 
   const mcpServers = safeMcpServers(context)
     .filter((server) => BROWSER_CONTROL_MCP_ROLES.has(server.role))
@@ -261,7 +266,7 @@ function projectBrowserControlPosture(context: CommandContext, toolRegistry: Too
   // Readiness is invocability. A connected MCP server or a tool whose name looks
   // browser-shaped is reported below as context; neither makes this capability usable.
   const configured = invocationRoutes.length > 0;
-  const desktopTools = toolsDeclaringCapability('desktop-control').filter((toolName) => registeredNames.has(toolName));
+  const desktopTools = toolsDeclaring(definitions, 'desktop-control');
   // The interactive runtime rows (processes, PTY, sudo) plus the browser/desktop row this posture owns.
   const runtime = {
     ...snapshot.capabilitySummary,

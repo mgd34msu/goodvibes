@@ -2,7 +2,6 @@ import type { WebhookNotifierSendResult } from '@goodvibes-jev/engine/platform/p
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { retainSurfaceRead, retainSurfaceMethods } from './agent-surface-effect.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '../agent/payments-channel-guard.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
@@ -113,20 +112,15 @@ export function createAgentNotifyTool(
         if (urls.length === 0) {
           return failure('No Agent notification webhook targets are configured. Add one from the Channels workspace before sending notifications.');
         }
-        const getCategory = configManager.getCategory;
-        const getIncarnation = configManager.getConfigurationIncarnation;
-        const configCurrent = retainSurfaceRead(configManager,
-          getIncarnation ? ['getCategory', 'getConfigurationIncarnation'] : ['getCategory'],
-          () => ({ category: getCategory.call(configManager, 'notifications'), incarnation: getIncarnation?.call(configManager) ?? null }));
-        const notifierCurrent = retainSurfaceMethods(notifier, ['setUrls', 'send']);
+        // The configuration's revision: a settings change meanwhile means the captured targets may be stale.
+        const incarnation = configManager.getConfigurationIncarnation?.() ?? null;
         const ledger = getSessionUntrustedContentLedger();
-        const ledgerMethods = retainSurfaceMethods(ledger, ['getPublicationRevision', 'originsThisTurn', 'exposuresThisTurn', 'taintSourcesThisTurn']);
         const ledgerCurrent = () => JSON.stringify([ledger.getPublicationRevision(), ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
         const sources = ledgerCurrent();
         const assertCurrent = () => {
           executionOptions?.signal?.throwIfAborted();
           if (!assertCurrentToolEffect(rawArgs, executionOptions, 'send')) throw new ToolInputProjectionError('held');
-          configCurrent(); notifierCurrent(); ledgerMethods();
+          if ((configManager.getConfigurationIncarnation?.() ?? null) !== incarnation) throw new ToolInputProjectionError('stale');
           if (getSessionUntrustedContentLedger() !== ledger || ledgerCurrent() !== sources) throw new ToolInputProjectionError('stale');
         };
         assertCurrent();

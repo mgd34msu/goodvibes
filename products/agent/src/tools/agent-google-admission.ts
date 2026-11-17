@@ -4,7 +4,6 @@ import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, goo
 import { assertCurrentToolEffect, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
   type ToolInputProjector, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { retainSurfaceMethods } from './agent-surface-effect.ts';
 
 export interface GoogleAdmissionOwners {
   readonly configManager: ConfigManager;
@@ -106,8 +105,6 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
       throw new ToolInputProjectionError('invalid', `A client secret is never taken as a tool argument, and the one sent was not stored. ${GOOGLE_CLIENT_SECRET_ENTRY}`);
     }
     request.assertCurrent(); request.signal?.throwIfAborted();
-    const methods = retainSurfaceMethods(config, ['prepareSettingMutationPlan', 'inspectPreparedMutation', 'assertPreparedMutation', 'assertCompletedMutation', 'get', 'getConfigurationIncarnation']);
-    const secretMethods = retainSurfaceMethods(secrets, ['prepareImport', 'inspectPreparedImport', 'assertPreparedImport', 'assertCompletedImport', 'resolveLocalCredentialSnapshot']);
     let clientId: string, clientSecret: string;
     let sourceCurrent: () => void;
     let credential: GooglePendingCredential | undefined;
@@ -149,7 +146,7 @@ export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pen
       };
     }
     const assertSourceCurrent = () => {
-      request.signal?.throwIfAborted(); methods(); secretMethods();
+      request.signal?.throwIfAborted();
       if (owners.configManager !== config || owners.secretsManager !== secrets) throw new ToolInputProjectionError('stale');
       sourceCurrent();
     };

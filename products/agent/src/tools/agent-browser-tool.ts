@@ -5,7 +5,6 @@ import { BrowserEngine, BrowserSessionError, StaleElementError, UntrustedEffectE
 import type { BrowserExtractField, BrowserTarget, UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
 import { createAgentBrowserEngine } from '../runtime/agent-browser.ts';
 import { captureCatalogSnapshotGuard } from './agent-harness-catalog-ranking.ts';
-import { declareToolCapability } from './agent-tool-capability-declarations.ts';
 
 /**
  * The `browser` tool: real browser control, in this process, through Playwright.
@@ -221,6 +220,8 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
     definition: {
       name: 'browser',
       activity: { doing: 'Using', did: 'used', object: 'the browser' },
+      // Stated, not inferred: readiness surfaces read this from the registry instead of guessing from descriptions.
+      capabilities: ['browser-control'],
       description: 'Drive a real browser: open, read, click, type, and sign in.',
       parameters: {
         type: 'object',
@@ -453,7 +454,4 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
 
 export function registerAgentBrowserTool(registry: ToolRegistry, options: AgentBrowserToolOptions = {}): void {
   if (!registry.has('browser')) registry.register(createAgentBrowserTool(options));
-  // Stated, not inferred: readiness surfaces read this declaration instead of
-  // guessing from tool descriptions.
-  declareToolCapability('browser', 'browser-control');
 }

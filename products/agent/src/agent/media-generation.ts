@@ -10,7 +10,6 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/media';
 import { mediaOutputKindOf } from '@goodvibes-jev/engine/platform/platform/media';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import { retainSurfaceMethods, retainSurfaceRead } from '../tools/agent-surface-effect.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { assertDeliveryCurrent, type DeliveryLifetime } from '@goodvibes-jev/engine/platform/platform/utils';
 
@@ -205,12 +204,8 @@ async function runAndStore(
   run: (ownership: DeliveryLifetime) => Promise<MediaGenerationResult>,
 ): Promise<AgentMediaGenerationResult> {
   const incarnation = registry.getIncarnation();
-  const registryCurrent = retainSurfaceMethods(registry, ['getIncarnation', 'findProvider', 'get']);
-  const providerCurrent = retainSurfaceRead(provider, ['generate'], () => ({ id: provider.id, label: provider.label, capabilities: provider.capabilities }));
-  const storeCurrent = retainSurfaceMethods(artifactStore, ['create']);
   const assertCurrent = () => {
     assertDeliveryCurrent(lifetime);
-    registryCurrent(); providerCurrent(); storeCurrent();
     if (registry.getIncarnation() !== incarnation || registry.get(provider.id) !== provider) throw new ToolInputProjectionError('stale');
   };
   assertCurrent();

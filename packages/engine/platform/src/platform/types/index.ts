@@ -73,6 +73,7 @@ export type {
   Tool,
   ToolCall,
   ToolConcurrencyMode,
+  ToolCapability,
   ToolDefinition,
   ToolExecuteOptions,
   ToolReadModes,

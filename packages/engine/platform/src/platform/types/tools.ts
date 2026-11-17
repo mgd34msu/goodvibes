@@ -81,6 +81,9 @@ export interface ToolRecoverability {
   readonly unless?: readonly ToolArgumentPath[] | undefined;
 }
 
+/** A capability a tool can state on its definition: `browser-control` drives a real browser; `desktop-control` drives the desktop outside one. */
+export type ToolCapability = 'browser-control' | 'desktop-control';
+
 /** The category a tool's calls are classed under: its declared one, else an engine tool's entry; undefined when neither. */
 export function toolCategoryOf(definition: Pick<ToolDefinition, 'name' | 'category'>): PermissionCategory | undefined {
   return definition.category ?? (Object.hasOwn(ENGINE_TOOL_CATEGORIES, definition.name) ? ENGINE_TOOL_CATEGORIES[definition.name] : undefined);
@@ -123,6 +126,11 @@ export interface ToolDefinition {
    * full definition `tool_schema` loads on demand (ToolRegistry.getModelToolDefinitions).
    */
   core?: boolean | undefined;
+  /**
+   * What the tool states it can do. Readiness surfaces read this from the
+   * registry; nothing is inferred from names or descriptions. Never sent to the model.
+   */
+  capabilities?: readonly ToolCapability[] | undefined;
   /** Whether multiple calls can safely run in parallel. */
   concurrency?: ToolConcurrencyMode | undefined;
   /** Whether the tool can emit meaningful progress before final completion. */

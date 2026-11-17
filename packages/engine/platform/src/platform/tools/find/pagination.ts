@@ -59,9 +59,13 @@ export function paginateFindResult(result: Record<string, unknown>, output: Outp
   const fullPage = eligible.slice(offset, offset + limit);
   if (offset === 0 && fullPage.length === rows.length && JSON.stringify(result).length <= budgetChars) return result;
 
-  const build = (page: readonly unknown[], trimmed: boolean): Record<string, unknown> => {
+  // `shown` replaces a row with a shortened copy of it (a single row too large for the page).
+  const build = (page: readonly unknown[], trimmed: boolean, shown?: ReadonlyMap<unknown, unknown>): Record<string, unknown> => {
     const selected = new Set(page);
-    const displayed = groups ? Object.fromEntries(groups.map(([name, rows]) => [name, rows.filter(row => selected.has(row))]).filter(([, rows]) => (rows as unknown[]).length)) : page;
+    const show = (row: unknown): unknown => shown?.get(row) ?? row;
+    const displayed = groups
+      ? Object.fromEntries(groups.map(([name, rows]) => [name, rows.filter(row => selected.has(row)).map(show)]).filter(([, rows]) => (rows as unknown[]).length))
+      : page.map(show);
     const hasMore = offset + page.length < eligible.length;
     return {
       ...result, [key]: displayed, total: result.count ?? rows.length, returned: page.length,
@@ -74,7 +78,8 @@ export function paginateFindResult(result: Record<string, unknown>, output: Outp
   };
 
   const complete = build(fullPage, false);
-  if (fullPage.length <= 1 || JSON.stringify(complete).length <= budgetChars) return complete;
+  if (JSON.stringify(complete).length <= budgetChars) return complete;
+  if (fullPage.length <= 1) return fitSingleRow(build, fullPage, budgetChars) ?? complete;
   // The largest prefix of the page that fits; at least one row so a
   // continuation always makes progress.
   let low = 1;
@@ -84,5 +89,48 @@ export function paginateFindResult(result: Record<string, unknown>, output: Outp
     if (JSON.stringify(build(fullPage.slice(0, middle), true)).length <= budgetChars) low = middle;
     else high = middle - 1;
   }
-  return build(fullPage.slice(0, low), true);
+  const page = build(fullPage.slice(0, low), true);
+  if (low > 1 || JSON.stringify(page).length <= budgetChars) return page;
+  return fitSingleRow(build, fullPage.slice(0, 1), budgetChars) ?? page;
+}
+
+/** Text a shortened field keeps at least, so the row still says what it matched. */
+const MIN_FIELD_CHARS = 64;
+
+/** Fields that say where a row is; never shortened. */
+const ROW_LOCATION_FIELDS: ReadonlySet<string> = new Set(['file', 'path', 'line', 'column', 'name', 'kind']);
+
+/**
+ * One row larger than the page on its own (a match on a minified line): its
+ * largest field is shortened (text) or replaced by a note of its size (lists,
+ * objects), saying what was left out, until the page fits. The result stays
+ * whole JSON, so nothing downstream cuts it. Undefined when nothing is left to
+ * shorten.
+ */
+function fitSingleRow(build: (page: readonly unknown[], trimmed: boolean, shown?: ReadonlyMap<unknown, unknown>) => Record<string, unknown>,
+  page: readonly unknown[], budgetChars: number): Record<string, unknown> | undefined {
+  const row = page[0];
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return undefined;
+  const copy: Record<string, unknown> = { ...(row as Record<string, unknown>) };
+  const shown = new Map<unknown, unknown>([[row, copy]]);
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const result = build(page, true, shown);
+    const excess = JSON.stringify(result).length - budgetChars;
+    if (excess <= 0) return { ...result, row_shortened_to_fit: true };
+    let largest: string | undefined, largestSize = MIN_FIELD_CHARS;
+    for (const [name, value] of Object.entries(copy)) {
+      if (ROW_LOCATION_FIELDS.has(name)) continue;
+      const size = JSON.stringify(value)?.length ?? 0;
+      if (size > largestSize) { largest = name; largestSize = size; }
+    }
+    if (largest === undefined) return undefined;
+    const value = copy[largest];
+    if (typeof value === 'string') {
+      const keep = Math.max(MIN_FIELD_CHARS, value.length - excess - MIN_FIELD_CHARS);
+      copy[largest] = `${value.slice(0, keep)}... [${value.length - keep} characters not shown]`;
+    } else {
+      copy[largest] = `[not shown: ${largestSize} characters, larger than this page allows]`;
+    }
+  }
+  return undefined;
 }

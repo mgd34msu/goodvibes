@@ -272,8 +272,11 @@ export function applyToolBudget(budget: ToolBudget | undefined, toolName: string
   };
 }
 
-/** Tools that clip and page their own output; a second cut would drop lines their continuation marker says were delivered. */
-const SELF_PAGING_TOOLS: ReadonlySet<string> = new Set(['read']);
+/**
+ * Tools that clip and page their own output; a second cut would drop lines
+ * their continuation marker says were delivered, or cut `find`'s JSON mid-object.
+ */
+const SELF_PAGING_TOOLS: ReadonlySet<string> = new Set(['read', 'find']);
 
 /** Keeps one tool result from putting its whole text into a conversation; used by every loop that appends tool results. */
 export function capToolResultOutput(toolName: string, args: Record<string, unknown>, result: ToolResult): ToolResult {

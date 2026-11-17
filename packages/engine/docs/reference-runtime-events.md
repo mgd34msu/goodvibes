@@ -664,7 +664,8 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                 "change-contract",
                 "irreversible-operator",
                 "standing-ask",
-                "channel-request"
+                "channel-request",
+                "owner-act"
               ]
             }
           },

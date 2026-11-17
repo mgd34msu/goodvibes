@@ -1141,7 +1141,8 @@
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -1382,6 +1383,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -1743,7 +1745,8 @@
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -2333,7 +2336,8 @@
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -2949,7 +2953,8 @@
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -3190,6 +3195,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -3283,6 +3289,7 @@
                     "boundary_surface_authority",
                     "boundary_card_details",
                     "boundary_outward_effect",
+                    "owner_act",
                     "preset_allow",
                     "preset_deny",
                     "owner_approved_outward",
@@ -3687,7 +3694,8 @@
                           "change-contract",
                           "irreversible-operator",
                           "standing-ask",
-                          "channel-request"
+                          "channel-request",
+                          "owner-act"
                         ]
                       }
                     },
@@ -4197,7 +4205,8 @@
                     "change-contract",
                     "irreversible-operator",
                     "standing-ask",
-                    "channel-request"
+                    "channel-request",
+                    "owner-act"
                   ]
                 }
               },
@@ -4576,7 +4585,8 @@
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -6644,6 +6654,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6690,6 +6701,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6881,6 +6893,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6927,6 +6940,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6977,6 +6991,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -7059,6 +7074,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -27639,6 +27655,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -30504,6 +30521,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -35315,6 +35333,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -35811,6 +35830,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -39212,6 +39232,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -39373,6 +39394,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -75538,6 +75560,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -116036,6 +116059,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -125464,6 +125488,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -125611,6 +125636,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -125771,6 +125797,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -125822,6 +125849,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -125956,6 +125984,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -126032,6 +126061,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -128563,6 +128593,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -128825,6 +128856,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -128875,6 +128907,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -129449,6 +129482,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -133035,6 +133069,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -133085,6 +133120,7 @@
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -134123,6 +134159,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -134527,6 +134564,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -135834,6 +135872,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -136099,6 +136138,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -137882,6 +137922,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -148519,6 +148560,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -179870,6 +179912,7 @@
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -182125,7 +182168,8 @@
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },

@@ -621,7 +621,8 @@
                                 "change-contract",
                                 "irreversible-operator",
                                 "standing-ask",
-                                "channel-request"
+                                "channel-request",
+                                "owner-act"
                               ]
                             }
                           },
@@ -869,6 +870,7 @@
           "write:approvals"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "approvalId",
@@ -1284,7 +1286,8 @@
                                 "change-contract",
                                 "irreversible-operator",
                                 "standing-ask",
-                                "channel-request"
+                                "channel-request",
+                                "owner-act"
                               ]
                             }
                           },
@@ -1901,7 +1904,8 @@
                                 "change-contract",
                                 "irreversible-operator",
                                 "standing-ask",
-                                "channel-request"
+                                "channel-request",
+                                "owner-act"
                               ]
                             }
                           },
@@ -2506,7 +2510,8 @@
                                 "change-contract",
                                 "irreversible-operator",
                                 "standing-ask",
-                                "channel-request"
+                                "channel-request",
+                                "owner-act"
                               ]
                             }
                           },
@@ -2754,6 +2759,7 @@
           "write:approvals"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "approvalId",
@@ -2888,6 +2894,7 @@
                             "boundary_surface_authority",
                             "boundary_card_details",
                             "boundary_outward_effect",
+                            "owner_act",
                             "preset_allow",
                             "preset_deny",
                             "owner_approved_outward",
@@ -3288,7 +3295,8 @@
                                   "change-contract",
                                   "irreversible-operator",
                                   "standing-ask",
-                                  "channel-request"
+                                  "channel-request",
+                                  "owner-act"
                                 ]
                               }
                             },
@@ -4122,7 +4130,8 @@
           "write:auth"
         ],
         "x-dangerous": true,
-        "x-effect": "write"
+        "x-effect": "write",
+        "x-owner-only": true
       }
     },
     "/api/local-auth/sessions/{sessionId}": {
@@ -4167,6 +4176,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "sessionId",
@@ -4355,6 +4365,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -4434,6 +4445,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "username",
@@ -4488,6 +4500,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "username",
@@ -4587,6 +4600,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "username",
@@ -25977,6 +25991,7 @@
           "write:channels"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "surface",
@@ -28913,6 +28928,7 @@
           "write:channels"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "surface",
@@ -33097,6 +33113,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -33721,6 +33738,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -101501,6 +101519,7 @@
           "write:mcp"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -114268,6 +114287,7 @@
           "write:principals"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -114513,6 +114533,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "principalId",
@@ -114921,6 +114942,7 @@
           "write:principals"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "principalId",
@@ -118162,6 +118184,7 @@
           "write:relay"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "requestBody": {
           "required": true,
           "content": {
@@ -118265,6 +118288,7 @@
         ],
         "x-dangerous": true,
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "credentialId",
@@ -119284,6 +119308,7 @@
           "write:remote"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "x-error-codes": [
           {
             "code": "REMOTE_PAIR_REQUEST_SETTLED",
@@ -119708,6 +119733,7 @@
           "write:remote"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "requestId",
@@ -121103,6 +121129,7 @@
           "write:remote"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "peerId",
@@ -121388,6 +121415,7 @@
           "write:remote"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "peerId",
@@ -131906,6 +131934,7 @@
           "write:sessions"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "parameters": [
           {
             "name": "sessionId",
@@ -163343,6 +163372,7 @@
           "write:workspaces"
         ],
         "x-effect": "write",
+        "x-owner-only": true,
         "requestBody": {
           "required": true,
           "content": {

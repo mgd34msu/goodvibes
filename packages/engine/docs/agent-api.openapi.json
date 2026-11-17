@@ -516,6 +516,7 @@
               "boundary_surface_authority",
               "boundary_card_details",
               "boundary_outward_effect",
+              "owner_act",
               "preset_allow",
               "preset_deny",
               "owner_approved_outward",
@@ -5045,7 +5046,8 @@
          "change-contract",
          "irreversible-operator",
          "standing-ask",
-         "channel-request"
+         "channel-request",
+         "owner-act"
         ]
        }
       },

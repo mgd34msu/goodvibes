@@ -1136,7 +1136,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -1369,6 +1370,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -1726,7 +1728,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -2304,7 +2307,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -2908,7 +2912,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -3141,6 +3146,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -3234,6 +3240,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "boundary_surface_authority",
                     "boundary_card_details",
                     "boundary_outward_effect",
+                    "owner_act",
                     "preset_allow",
                     "preset_deny",
                     "owner_approved_outward",
@@ -3634,7 +3641,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "change-contract",
                           "irreversible-operator",
                           "standing-ask",
-                          "channel-request"
+                          "channel-request",
+                          "owner-act"
                         ]
                       }
                     },
@@ -4132,7 +4140,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "change-contract",
                     "irreversible-operator",
                     "standing-ask",
-                    "channel-request"
+                    "channel-request",
+                    "owner-act"
                   ]
                 }
               },
@@ -4503,7 +4512,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },
@@ -6523,6 +6533,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6569,6 +6580,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6760,6 +6772,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6806,6 +6819,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6856,6 +6870,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -6938,6 +6953,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -27174,6 +27190,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -29955,6 +29972,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -34670,6 +34688,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -35166,6 +35185,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -38495,6 +38515,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -38656,6 +38677,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -74729,6 +74751,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -114155,6 +114178,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -123435,6 +123459,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -123582,6 +123607,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -123742,6 +123768,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -123793,6 +123820,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -123927,6 +123955,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -124003,6 +124032,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -126534,6 +126564,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -126788,6 +126819,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -126838,6 +126870,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -127392,6 +127425,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -130978,6 +131012,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -131028,6 +131063,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "dangerous": true,
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -132042,6 +132078,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true,
         "errorCodes": [
           {
@@ -132434,6 +132471,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -133705,6 +133743,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -133966,6 +134005,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -135701,6 +135741,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -146230,6 +146271,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -177301,6 +177343,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -179440,7 +179483,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "change-contract",
                         "irreversible-operator",
                         "standing-ask",
-                        "channel-request"
+                        "channel-request",
+                        "owner-act"
                       ]
                     }
                   },

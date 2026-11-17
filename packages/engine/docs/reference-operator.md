@@ -945,7 +945,8 @@ Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals o
                 "change-contract",
                 "irreversible-operator",
                 "standing-ask",
-                "channel-request"
+                "channel-request",
+                "owner-act"
               ]
             }
           },
@@ -1538,7 +1539,8 @@ Cancel a pending approval. An approval that already ended is returned unchanged 
                 "change-contract",
                 "irreversible-operator",
                 "standing-ask",
-                "channel-request"
+                "channel-request",
+                "owner-act"
               ]
             }
           },
@@ -2119,7 +2121,8 @@ Claim a pending approval for operator handling. A claim is advisory: it shows wh
                 "change-contract",
                 "irreversible-operator",
                 "standing-ask",
-                "channel-request"
+                "channel-request",
+                "owner-act"
               ]
             }
           },
@@ -2726,7 +2729,8 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
                 "change-contract",
                 "irreversible-operator",
                 "standing-ask",
-                "channel-request"
+                "channel-request",
+                "owner-act"
               ]
             }
           },
@@ -3055,6 +3059,7 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
             "boundary_surface_authority",
             "boundary_card_details",
             "boundary_outward_effect",
+            "owner_act",
             "preset_allow",
             "preset_deny",
             "owner_approved_outward",
@@ -3455,7 +3460,8 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                   "change-contract",
                   "irreversible-operator",
                   "standing-ask",
-                  "channel-request"
+                  "channel-request",
+                  "owner-act"
                 ]
               }
             },
@@ -3956,7 +3962,8 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
             "change-contract",
             "irreversible-operator",
             "standing-ask",
-            "channel-request"
+            "channel-request",
+            "owner-act"
           ]
         }
       },
@@ -4332,7 +4339,8 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                 "change-contract",
                 "irreversible-operator",
                 "standing-ask",
-                "channel-request"
+                "channel-request",
+                "owner-act"
               ]
             }
           },
@@ -180713,7 +180721,8 @@ Every approval record transition, pushed the moment the broker records it: an as
                 "change-contract",
                 "irreversible-operator",
                 "standing-ask",
-                "channel-request"
+                "channel-request",
+                "owner-act"
               ]
             }
           },

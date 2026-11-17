@@ -2,23 +2,17 @@
  * Cloudflare Workers test script for @goodvibes-jev/engine/platform.
  *
  * This script runs inside the Miniflare Workers isolate. It exercises the
- * platform's ./web entry point against mock HTTP responses to prove the bundle
- * loads, initialises, and operates correctly under the Workers V8 runtime.
- *
- * Entry selection: ./web (dist/web.js), the same entry used by browser
- * consumers. It contains no node: imports and no Bun.* API calls, making it
- * a direct fit for Workers.
- *
- * Both harnesses (Miniflare in workers.test.ts, `wrangler dev` in
- * ../workers-wrangler) bundle this one file, so the routes cannot drift apart.
- * The built platform is imported by relative path and inlined by esbuild.
+ * platform's ./web entry point (the entry a Worker-hosted operator client
+ * imports) against mock HTTP responses, to prove the code loads and operates
+ * under the Workers V8 runtime. The platform SOURCE is imported by relative
+ * path and inlined by esbuild, so no build is needed.
  *
  * Workers-specific notes embedded in each handler.
  */
 
 import type { ExportedHandler, ExecutionContext } from '@cloudflare/workers-types';
-import { createWebGoodVibesPlatform } from '../../platform/dist/web.js';
-import * as PlatformErrors from '../../platform/dist/errors.js';
+import { createWebGoodVibesPlatform } from '../../platform/src/web.ts';
+import * as PlatformErrors from '../../platform/src/errors.ts';
 
 interface Env {}
 
@@ -234,73 +228,6 @@ function handleErrors(): Response {
 }
 
 /**
- * /crypto, verify Workers crypto.subtle and crypto.randomUUID availability.
- *
- * Workers concern: crypto.subtle IS available (no polyfill needed).
- * crypto.randomUUID IS available. This verifies future token-crypto paths
- * will work without extra adapters.
- */
-async function handleCrypto(): Promise<Response> {
-  const uuid = crypto.randomUUID();
-  const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uuid);
-
-  // Verify crypto.subtle is available
-  const hasCryptoSubtle = typeof crypto.subtle === 'object';
-
-  // Standard independent vector exercises the functional Web Crypto primitive
-  // required by S256 PKCE in this actual isolate; length alone is insufficient.
-  const encoded = new TextEncoder().encode('abc');
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-  const hashHex = Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-
-  return json({
-    ok: true,
-    uuid,
-    isValidUuid,
-    hasCryptoSubtle,
-    sha256HashLength: hashHex.length,
-    sha256Vector: hashHex,
-  });
-}
-
-/**
- * /globals, audit Workers global availability.
- *
- * Reports the globals that define the Workers runtime boundary.
- */
-function handleGlobals(): Response {
-  return json({
-    ok: true,
-    globals: {
-      fetch: typeof fetch !== 'undefined',
-      Request: typeof Request !== 'undefined',
-      Response: typeof Response !== 'undefined',
-      Headers: typeof Headers !== 'undefined',
-      URL: typeof URL !== 'undefined',
-      URLSearchParams: typeof URLSearchParams !== 'undefined',
-      crypto: typeof crypto !== 'undefined',
-      cryptoSubtle: typeof crypto?.subtle !== 'undefined',
-      cryptoRandomUUID: typeof crypto?.randomUUID === 'function',
-      // NOT available in Workers (server-upgrade only, no client WS)
-      WebSocket: typeof WebSocket !== 'undefined',
-      // Miniflare and `wrangler dev --local` inject it; production Workers do not.
-      EventSource: typeof EventSource !== 'undefined',
-      // NOT available in Workers (no DOM)
-      location: typeof (globalThis as Record<string, unknown>).location !== 'undefined',
-      // Timers, available but request-scoped
-      setTimeout: typeof setTimeout === 'function',
-      setInterval: typeof setInterval === 'function',
-      clearTimeout: typeof clearTimeout === 'function',
-      // Not available
-      process: typeof (globalThis as Record<string, unknown>).process !== 'undefined',
-      Buffer: typeof (globalThis as Record<string, unknown>).Buffer !== 'undefined',
-    },
-  });
-}
-
-/**
  * /realtime-without-eventsource, SSE realtime must not need the EventSource
  * global: production Workers lack it, but Miniflare injects it, so a platform
  * that reached for it would pass locally and fail in production. The global is
@@ -383,10 +310,6 @@ const handler = {
           return await handleTransportError();
         case '/errors':
           return handleErrors();
-        case '/crypto':
-          return await handleCrypto();
-        case '/globals':
-          return handleGlobals();
         case '/realtime-without-eventsource':
           return await handleRealtimeWithoutEventSource();
         default:

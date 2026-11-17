@@ -34,11 +34,11 @@ function recordingClient(answer: unknown, options: { validateResponses?: boolean
 type Client = ReturnType<typeof createPeerRemoteClient>;
 
 const SHORTHAND_CASES: ReadonlyArray<{ readonly id: string; readonly call: (client: Client) => Promise<unknown>; readonly pathParams?: Record<string, string> }> = [
-  { id: 'pair.request', call: (c) => c.pairing.request({ peerId: 'node-a', label: 'runner' }) },
+  { id: 'pair.request', call: (c) => c.pairing.request({ peerKind: 'node', label: 'runner' }) },
   { id: 'pair.verify', call: (c) => c.pairing.verify({ requestId: 'pair-1', challenge: '123456' }) },
   { id: 'peer.heartbeat', call: (c) => c.peer.heartbeat({ peerId: 'node-a' }) },
   { id: 'work.pull', call: (c) => c.work.pull({ peerId: 'node-a' }) },
-  { id: 'work.complete', call: (c) => c.work.complete('w-1', { peerId: 'node-a' } as never), pathParams: { workId: 'w-1' } },
+  { id: 'work.complete', call: (c) => c.work.complete('w-1', { status: 'completed' }), pathParams: { workId: 'w-1' } },
   { id: 'operator.snapshot', call: (c) => c.operator.snapshot() },
 ];
 
@@ -70,7 +70,7 @@ describe('peer client refusals', () => {
 
   test('a response the contract does not allow is refused as a contract error', async () => {
     const { client } = recordingClient({ requestId: 'pair-1' });
-    const caught = await client.invoke('pair.request', { peerId: 'node-a', label: 'runner' }).then(() => null, (error: unknown) => error);
+    const caught = await client.invoke('pair.request', { peerKind: 'node', label: 'runner' }).then(() => null, (error: unknown) => error);
     expect(caught).toBeInstanceOf(GoodVibesError);
     expect((caught as GoodVibesError).category).toBe('contract');
   });

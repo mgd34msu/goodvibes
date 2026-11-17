@@ -3,8 +3,9 @@
  * each tool declares (no model request, no I/O), and the bounded runner every
  * tool loop uses to run them.
  *
- * - A read (declared `read_fs` only, `concurrency: 'parallel'`, or a call in
- *   one of the tool's declared `readModes`) runs beside any other read.
+ * - A read (declared `read_fs` only, `concurrency: 'parallel'`, a call in
+ *   one of the tool's declared `readModes`, or a call the tool itself says
+ *   only reads through `callReadsOnly`) runs beside any other read.
  * - A write (declared `write_fs` only, with its paths declared) runs beside
  *   reads and writes whose paths it does not overlap.
  * - Everything else (`exec`, undeclared effects, a tool the owner decides,
@@ -16,7 +17,7 @@
  */
 import { isAbsolute, normalize, resolve, sep } from 'node:path';
 import { declaredValues } from '../gate/classify.js';
-import { readModeCategory, type ToolDefinition, type ToolSideEffect } from '../types/tools.js';
+import { readModeCategory, type Tool, type ToolDefinition, type ToolSideEffect } from '../types/tools.js';
 import type { ConfigManager } from '../config/manager.js';
 
 /** At most this many calls of one response are in flight when `runtime.maxParallelToolCalls` is not set. */
@@ -59,16 +60,27 @@ function touchedPaths(definition: ToolDefinition, args: Record<string, unknown>,
   return paths;
 }
 
-/** The lane of one call, from its tool's declaration and the call's own arguments. */
-export function toolCallLane(definition: ToolDefinition | undefined, args: Record<string, unknown>, workingDirectory?: string): ToolCallLane {
+/** Whether the tool itself says this call only reads; a hook that throws says nothing. */
+function toolSaysReadsOnly(tool: Pick<Tool, 'callReadsOnly'> | undefined, args: Record<string, unknown>): boolean {
+  if (tool?.callReadsOnly === undefined) return false;
+  try { return tool.callReadsOnly(args) === true; } catch { return false; }
+}
+
+/**
+ * The lane of one call, from its tool's declaration and the call's own
+ * arguments; `tool` adds what the tool knows about this call beyond its
+ * declaration (Tool.callReadsOnly).
+ */
+export function toolCallLane(definition: ToolDefinition | undefined, args: Record<string, unknown>, workingDirectory?: string,
+  tool?: Pick<Tool, 'callReadsOnly'> | undefined): ToolCallLane {
   if (!definition) return { kind: 'alone', reason: 'unknown tool' };
   if (definition.dangerous === true) return { kind: 'alone', reason: 'the owner decides this tool' };
   if (definition.concurrency === 'singleton') return { kind: 'alone', reason: 'the tool runs one call at a time' };
   const effects = definition.sideEffects;
   const touchesFiles = effects === undefined || effects.some((effect) => FILE_EFFECTS.has(effect));
   // A call in one of the modes the tool declares read-only reads, whatever its other modes do.
-  const readMode = definition.readModes !== undefined && readModeCategory(definition.readModes, args, 'write') === 'read'
-    && effects !== undefined && !effects.includes('exec');
+  const readMode = effects !== undefined && !effects.includes('exec')
+    && ((definition.readModes !== undefined && readModeCategory(definition.readModes, args, 'write') === 'read') || toolSaysReadsOnly(tool, args));
   if (definition.concurrency === 'parallel' || readMode) {
     return touchesFiles ? { kind: 'read', paths: touchedPaths(definition, args, workingDirectory) } : { kind: 'read', paths: [] };
   }

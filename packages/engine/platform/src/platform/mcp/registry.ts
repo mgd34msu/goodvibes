@@ -452,6 +452,20 @@ export class McpRegistry {
   }
 
   /**
+   * Whether the connected server marks this tool read-only (`readOnlyHint`),
+   * from the catalog already loaded: no request. False when the catalog is not
+   * loaded, the server is not connected or is quarantined. Says how the call
+   * may run beside others; never a permission grant.
+   */
+  isToolReadOnly(qualifiedName: string): boolean {
+    const parsed = this._parseQualifiedName(qualifiedName);
+    if (!parsed) return false;
+    const client = this.clients.get(parsed.serverName);
+    if (!client || !client.isConnected || this.freshness.isQuarantined(parsed.serverName)) return false;
+    return client.getCachedToolSchema(parsed.toolName)?.annotations?.readOnlyHint === true;
+  }
+
+  /**
    * getToolSchema, Fetch full JSON schema for a qualified tool name.
    * Reads the server's tool catalog, loading it on first use.
    */

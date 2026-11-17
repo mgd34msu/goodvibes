@@ -56,23 +56,46 @@ export interface ToolSubjectDeclaration {
  * is one of them, and carrying none of `unless`, is classed 'read'; any other
  * call is classed as a change (the tool's own category, or 'write' when that
  * is 'read'), so the gate decides it like any change.
+ *
+ * `field` is an argument path: `urls[].method` reads the `method` of every
+ * entry of `urls`, and the call reads only when every entry does (an entry
+ * without one takes `defaultValue`; a missing or empty list is a change).
  */
 export interface ToolReadModes {
-  readonly field: string;
+  readonly field: ToolArgumentPath;
   readonly values: readonly string[];
   readonly defaultValue?: string | undefined;
   readonly unless?: readonly ToolArgumentPath[] | undefined;
 }
 
+/** The values a call gives a read-mode field, `defaultValue` where it gives none; undefined when the call cannot be read by it. */
+function readModeValues(args: Record<string, unknown>, field: ToolArgumentPath, defaultValue: string | undefined): unknown[] | undefined {
+  let level: unknown[] = [args];
+  for (const segment of field.split('.')) {
+    const each = segment.endsWith('[]');
+    const key = each ? segment.slice(0, -2) : segment;
+    const next: unknown[] = [];
+    for (const value of level) {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+      const child = Object.hasOwn(value, key) ? (value as Record<string, unknown>)[key] : undefined;
+      if (!each) { next.push(child); continue; }
+      if (!Array.isArray(child) || child.length === 0) return undefined;
+      next.push(...child);
+    }
+    level = next;
+  }
+  return level.map((value) => value === undefined ? defaultValue : value);
+}
+
 /** The category a call of a tool with {@link ToolReadModes} is classed under. */
 export function readModeCategory(readModes: ToolReadModes, args: Record<string, unknown>, own: PermissionCategory): PermissionCategory {
-  const raw = args[readModes.field];
-  const value = raw === undefined ? readModes.defaultValue : raw;
+  const values = readModeValues(args, readModes.field, readModes.defaultValue);
   const present = (path: string): boolean => {
     const found = args[path];
     return found !== undefined && found !== null && found !== false && !(typeof found === 'string' && found.length === 0);
   };
-  const reads = typeof value === 'string' && readModes.values.includes(value) && !(readModes.unless ?? []).some(present);
+  const reads = values !== undefined && values.every((value) => typeof value === 'string' && readModes.values.includes(value))
+    && !(readModes.unless ?? []).some(present);
   return reads ? 'read' : own === 'read' ? 'write' : own;
 }
 
@@ -303,6 +326,15 @@ export interface ToolExecuteOptions {
 /** A registered tool with its definition and executor. */
 export interface Tool {
   definition: ToolDefinition;
+  /**
+   * Whether this call only reads, from facts the tool already holds (no I/O,
+   * no request): a call that does runs beside the other reads of its response
+   * (core/tool-batch.ts). For a fact that lives outside the definition, such
+   * as an MCP server marking one of its tools read-only. Never a permission
+   * grant; the gate decides every call as before. Absent or throwing: the
+   * call is laned by its definition alone.
+   */
+  callReadsOnly?: ((args: Record<string, unknown>) => boolean) | undefined;
   /** Tools return a result without callId, the registry injects callId when wrapping. */
   execute(args: Record<string, unknown>, opts?: ToolExecuteOptions): Promise<Omit<ToolResult, 'callId'>>;
 }

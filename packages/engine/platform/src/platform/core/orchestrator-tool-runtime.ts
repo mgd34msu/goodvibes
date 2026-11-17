@@ -330,10 +330,10 @@ async function fireObservingHook(dispatcher: HookDispatcherLike, event: HookEven
 /** How each call of a batch may run beside the others, from the registry's declarations; every call runs alone when the registry cannot list them. */
 function batchLanes(deps: ToolExecutionDeps, calls: readonly ToolCall[]): number[][] {
   if (calls.length < 2 || typeof deps.toolRegistry.list !== 'function') return calls.map((_, index) => [index]);
-  const definitions = new Map(deps.toolRegistry.list().map((tool) => [tool.definition.name, tool.definition]));
+  const tools = new Map(deps.toolRegistry.list().map((tool) => [tool.definition.name, tool]));
   return planToolBatch(calls, (call) => call.argumentError !== undefined
     ? { kind: 'read', paths: [] }
-    : toolCallLane(definitions.get(call.name), call.arguments, deps.workingDirectory));
+    : toolCallLane(tools.get(call.name)?.definition, call.arguments, deps.workingDirectory, tools.get(call.name)));
 }
 
 /**

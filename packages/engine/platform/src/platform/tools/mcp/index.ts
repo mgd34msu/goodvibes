@@ -105,7 +105,13 @@ export function createMcpTool(mcpRegistry: McpRegistry): Tool {
       parameters: MCP_TOOL_SCHEMA.parameters,
       sideEffects: ['state', 'network'],
       concurrency: 'serial',
+      // Listing servers, tools, schemas, security and auth state reads; any other mode is decided as a change.
+      readModes: { field: 'mode', values: ['servers', 'tools', 'schema', 'security', 'auth'] },
     },
+
+    // A call of a server tool the server marks read-only runs beside the other reads of its response.
+    callReadsOnly: (args) => args.mode === 'call' && typeof args.qualifiedName === 'string'
+      && mcpRegistry.isToolReadOnly(args.qualifiedName.trim()),
 
     async execute(args: Record<string, unknown>, options?: ToolExecuteOptions) {
     if (!args || typeof args !== 'object' || typeof args.mode !== 'string') {

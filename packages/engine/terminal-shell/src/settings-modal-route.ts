@@ -207,7 +207,7 @@ export function createSettingsModalRoute<Context extends { readonly openSelectio
       ) {
         // Shift+arrow nudges the selected number, choice, on/off or trust row
         // in place; a plain arrow moves focus between the two panes.
-        modal.adjustSelected(token.logicalName);
+        modal.adjustSelected(token.logicalName === 'left' ? 'left' : 'right');
       } else if ((token.logicalName === 'left' || token.logicalName === 'right') && !modal.editingMode && !searching) {
         if (token.logicalName === 'left') modal.focusCategories?.();
         else modal.focusSettings?.();

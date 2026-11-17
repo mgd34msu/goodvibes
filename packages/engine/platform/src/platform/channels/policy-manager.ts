@@ -350,6 +350,8 @@ export class ChannelPolicyManager {
   /** Where owner claims are asked; absent, the first identified sender becomes the owner. */
   private ownerInbox: ChannelOwnerClaimInbox | null = null;
   private ownerInboxUnsubscribe: (() => void) | null = null;
+  /** Owner claims answered while this process was not attached, settled once the policies are loaded. */
+  private pendingClaimReplay: (() => void) | null = null;
   /** Per surface, moved by every change of its policy record; a decision carries the one it was made under. */
   readonly #revisions = new Map<ChannelSurface, number>();
 
@@ -374,6 +376,9 @@ export class ChannelPolicyManager {
     this.starting ??= this.load();
     try { await this.starting; }
     finally { this.starting = undefined; }
+    const replay = this.pendingClaimReplay;
+    this.pendingClaimReplay = null;
+    replay?.();
   }
 
   private async load(): Promise<void> {
@@ -447,10 +452,14 @@ export class ChannelPolicyManager {
     };
     this.ownerInboxUnsubscribe = inbox.subscribe(settle);
     // An answer given before this attach (a restart in between) still counts; settling is idempotent.
-    for (const item of inbox.listNow({ kinds: ['claim'], status: 'closed' })) settle(item);
+    // It is read when the policies are, not at attach, so attaching at start-up opens no log.
+    const replay = (): void => { for (const item of inbox.listNow({ kinds: ['claim'], status: 'closed' })) settle(item); };
+    if (this.loaded) replay();
+    else this.pendingClaimReplay = replay;
     return () => {
       this.ownerInboxUnsubscribe?.();
       this.ownerInboxUnsubscribe = null;
+      if (this.pendingClaimReplay === replay) this.pendingClaimReplay = null;
       if (this.ownerInbox === inbox) this.ownerInbox = null;
     };
   }

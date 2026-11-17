@@ -91,7 +91,8 @@ export async function prepareShellCliRuntime(
     completion: renderCompletion,
   });
   if (metadata) {
-    console.log(metadata.stdout ?? '');
+    if (metadata.stdout !== undefined) console.log(metadata.stdout);
+    if (metadata.stderr !== undefined) console.error(metadata.stderr);
     process.exit(metadata.exitCode);
   }
 

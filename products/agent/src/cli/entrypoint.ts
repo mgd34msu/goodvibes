@@ -109,7 +109,8 @@ export async function prepareShellCliRuntime(
     completion: renderCompletion,
   });
   if (metadata) {
-    writeExitingStdoutLine(metadata.stdout ?? '');
+    if (metadata.stdout !== undefined) writeExitingStdoutLine(metadata.stdout);
+    if (metadata.stderr !== undefined) writeFatalLine(metadata.stderr);
     process.exit(metadata.exitCode);
   }
 

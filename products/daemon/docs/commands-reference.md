@@ -454,7 +454,11 @@ goodvibes-daemon completion bash|zsh|fish
 `completions` is an accepted spelling of the same command. Print a completion
 script for the named shell on stdout, generated from the same
 catalog the parser and the help text use, so it cannot drift from what the binary
-accepts. Install by writing it somewhere the shell reads, for example:
+accepts. `goodvibes` and `goodvibes-agent` print theirs from the same generator, so
+the three programs complete the same way: command words, a command's sub-words right
+after it, its flags and the values a flag lists; anywhere else the shell completes
+file names. A shell other than these three is refused with exit 2. Install by writing
+it somewhere the shell reads, for example:
 
 ```sh
 goodvibes-daemon completion bash > ~/.local/share/bash-completion/completions/goodvibes-daemon

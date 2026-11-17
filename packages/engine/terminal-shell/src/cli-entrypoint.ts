@@ -42,7 +42,8 @@ export function shellMetadataResult(
     readonly help: (binary: string) => string;
     readonly commandHelp: (topic: string, binary: string) => string;
     readonly version: (binary: string) => string;
-    readonly completion: (shell: string | undefined, binary: string) => string;
+    /** `completion <shell>`: the script on stdout, or a usage refusal on stderr with exit 2. */
+    readonly completion: (args: readonly string[], binary: string) => ShellMetadataResult;
   },
 ): ShellMetadataResult | null {
   if (cli.flags.help || cli.command === 'help') {
@@ -50,7 +51,7 @@ export function shellMetadataResult(
     return { stdout: topic ? ports.commandHelp(topic, binary) : ports.help(binary), exitCode: 0 };
   }
   if (cli.flags.version || cli.command === 'version') return { stdout: ports.version(binary), exitCode: 0 };
-  if (cli.command === 'completion') return { stdout: ports.completion(cli.commandArgs[0], binary), exitCode: 0 };
+  if (cli.command === 'completion') return ports.completion(cli.commandArgs, binary);
   return null;
 }
 /** Override errors are terminal before runtime construction, headless effects or command dispatch. */

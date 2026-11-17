@@ -287,6 +287,8 @@ export interface RuntimeServices {
   readonly contractRunner: ContractRunner;
   readonly contractOperator: ContractOperatorService;
   readonly contractIntake: ContractIntake;
+  /** Joins the hosted-session floors' workers into this runtime's fleet (the composed graph's own). */
+  readonly attachHostedFleetAgents: import('@goodvibes-jev/engine/platform/platform/runtime/bootstrap').RuntimeServices['attachHostedFleetAgents'];
   readonly judgment: import('@goodvibes-jev/engine/platform/platform/runtime/client-services').ClientRuntimeServices['judgment'];
   readonly sessionSnapshot: import('@goodvibes-jev/engine/platform/platform/runtime/bootstrap').RuntimeServices['sessionSnapshot'];
   readonly processManager: ProcessManager;

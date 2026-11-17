@@ -347,12 +347,32 @@ function workspacePath(shellPaths: ShellPathService, selected: string, field: st
   return target;
 }
 
-/** Read a workspace file once, bounded; these bytes are what the host ingests. */
-function readIngestFile(path: string): Buffer {
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+/**
+ * Read a workspace file once, bounded; these bytes are what the host ingests.
+ * `path` is already fully resolved inside the workspace, but a link can be put
+ * in place of it (or of a directory above it) between that check and this
+ * open. So the open refuses a final-component link, and the opened file must
+ * be the one the path names inside the workspace now: one realpath and one
+ * stat more, no extra read.
+ */
+function readIngestFile(shellPaths: ShellPathService, path: string): Buffer {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
+      throw new IngestArgumentError('Nothing was ingested: a link was put in place of the file while it was being opened. Check the path and call again.');
+    }
+    throw error;
+  }
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile()) throw new IngestArgumentError('The path must name a regular file, not a directory.');
+    const current = workspacePath(shellPaths, path, 'path');
+    const named = statSync(current);
+    if (named.dev !== stat.dev || named.ino !== stat.ino) {
+      throw new IngestArgumentError('Nothing was ingested: the file changed while it was being opened (it was replaced or a link was put in its place). Check the path and call again.');
+    }
     if (stat.size > MAX_INGEST_FILE_BYTES) throw new IngestArgumentError(`The file is larger than the ${MAX_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
     return readFileSync(fd);
   } finally { closeSync(fd); }
@@ -375,7 +395,7 @@ function sendFor(request: AgentKnowledgeIngestRequest, shellPaths: ShellPathServ
   const selected = readOptionalString(payload.path);
   if (!selected) return { kind: 'json', route: request.method.route, payload };
   const path = workspacePath(shellPaths, selected, 'path');
-  const bytes = readIngestFile(path);
+  const bytes = readIngestFile(shellPaths, path);
   if (request.method === AGENT_KNOWLEDGE_METHODS.ingestArtifact) {
     const { path: _path, ...fields } = payload;
     return { kind: 'upload', route: request.method.route, bytes, filename: basename(path), fields };

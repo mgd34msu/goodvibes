@@ -104,7 +104,7 @@ export function createDaemonIntegrationRouteHandlers(
   return {
     getReview: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.buildReview())),
     getIntegrationSession: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getSessionSnapshot())),
-    getIntegrationTasks: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getTaskSnapshot())),
+    getIntegrationTasks: (limit?: number) => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getTaskSnapshot(limit))),
     getIntegrationAutomation: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getAutomationSnapshot())),
     getIntegrationSessions: (url?: URL) => handleGetIntegrationSessions(context.integrationHelpers, url),
     getDeliveries: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getDeliverySnapshot())),

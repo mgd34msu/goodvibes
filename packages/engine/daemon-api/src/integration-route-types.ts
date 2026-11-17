@@ -14,7 +14,7 @@ export interface IntegrationRuntimeStoreLike {
 export interface IntegrationHelperServiceLike {
   buildReview(): unknown;
   getSessionSnapshot(): unknown;
-  getTaskSnapshot(): unknown;
+  getTaskSnapshot(limit?: number): unknown;
   getAutomationSnapshot(): unknown;
   getSessionBrokerSnapshot(): unknown;
   getDeliverySnapshot(): unknown;

@@ -454,15 +454,35 @@ export function buildGitignoreMatcher(
   gitignorePath: string,
   diagnostics?: FindDiagnostics,
 ): ((rel: string) => boolean) | null {
-  if (!existsSync(gitignorePath)) return null;
-  let raw: string;
-  try {
-    assertCapturedInputPathContext(gitignorePath);
-    raw = readFileSync(gitignorePath, 'utf8');
-  } catch (err) {
-    addFindWarning(diagnostics, `Could not read root .gitignore '${gitignorePath}': ${summarizeError(err)}`);
-    return null;
+  return buildIgnoreFileMatcher([gitignorePath], diagnostics);
+}
+
+/** A directory's ignore files, in the order rg and fd apply them: `.ignore` after `.gitignore`, so its `!` lines win. */
+export function directoryIgnoreFiles(directory: string): readonly string[] {
+  return [resolve(directory, '.gitignore'), resolve(directory, '.ignore')];
+}
+
+/**
+ * One matcher from several ignore files of one directory, read in order: a
+ * later file's `!` line re-includes what an earlier one excluded. A file that
+ * is absent is skipped; one that cannot be read is skipped with a warning.
+ */
+export function buildIgnoreFileMatcher(
+  paths: readonly string[],
+  diagnostics?: FindDiagnostics,
+): ((rel: string) => boolean) | null {
+  const sources: string[] = [];
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    try {
+      assertCapturedInputPathContext(path);
+      sources.push(readFileSync(path, 'utf8'));
+    } catch (err) {
+      addFindWarning(diagnostics, `Could not read ignore file '${path}': ${summarizeError(err)}`);
+    }
   }
+  if (sources.length === 0) return null;
+  const raw = sources.join('\n');
 
   interface GitignoreRule {
     negate: boolean;
@@ -515,7 +535,7 @@ export function buildGitignoreMatcher(
 }
 
 /**
- * Ignore rules applied where they live: the `.gitignore` of each directory
+ * Ignore rules applied where they live: the `.gitignore` and `.ignore` of each directory
  * between `root` and a path is read the first time a path below that directory
  * is asked about, and kept for the life of the matcher. No pre-walk and no cap:
  * asking about one file costs one read attempt per ancestor directory; asking
@@ -526,7 +546,7 @@ export function buildGitignoreMatcher(
 export function createNestedIgnoreMatcher(root: string, diagnostics?: FindDiagnostics): (absPath: string) => boolean {
   const byDirectory = new Map<string, ((rel: string) => boolean) | null>();
   const matcherFor = (directory: string): ((rel: string) => boolean) | null => {
-    if (!byDirectory.has(directory)) byDirectory.set(directory, buildGitignoreMatcher(resolve(directory, '.gitignore'), diagnostics));
+    if (!byDirectory.has(directory)) byDirectory.set(directory, buildIgnoreFileMatcher(directoryIgnoreFiles(directory), diagnostics));
     return byDirectory.get(directory) ?? null;
   };
   return (absPath: string): boolean => {

@@ -746,11 +746,11 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'tasks.list',
     title: 'List Runtime Tasks',
-    description: 'Return the integration snapshot for runtime tasks.',
+    description: 'Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.',
     category: 'tasks',
     scopes: ['read:tasks'],
     http: { method: 'GET', path: '/api/tasks' },
-    inputSchema: EMPTY_OBJECT_SCHEMA,
+    inputSchema: objectSchema({ limit: NUMBER_SCHEMA }, []),
     outputSchema: TASK_SNAPSHOT_SCHEMA,
   }),
   methodDescriptor({

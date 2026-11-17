@@ -148,9 +148,9 @@ export function createTasksClient(deps: {
       const probe = deps.verbs.probe();
       if (!probe.available) return { tasks: local, daemonUnavailable: probe.reason };
       try {
-        const daemonTasks = readTasks(await deps.verbs.invoke('tasks.list', {}));
+        // The daemon sends only its newest `limit`; the union keeps the same cap.
+        const daemonTasks = readTasks(await deps.verbs.invoke('tasks.list', { limit: Math.max(1, limit) }));
         return {
-          // The daemon's list has no limit input, so the cap is applied to the union.
           tasks: [
             ...local,
             ...daemonTasks.filter((task) => !owned.has(task.id)).map((task) => ({ task, origin: 'daemon' as const })),

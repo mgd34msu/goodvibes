@@ -67,7 +67,7 @@ export const findSchema: ToolDefinition = {
             },
             respect_gitignore: {
               type: 'boolean',
-              description: 'Exclude files matched by .gitignore patterns (mode: files). Default: true. Note: only reads the project root .gitignore, nested .gitignore files are not applied.',
+              description: 'Exclude files matched by .gitignore and .ignore patterns (mode: files). Default: true. Note: only reads the project root .gitignore and .ignore, nested ones are not applied.',
             },
             sort_by: {
               type: 'string',

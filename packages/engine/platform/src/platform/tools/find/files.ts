@@ -7,10 +7,11 @@ import { statSync, lstatSync } from 'node:fs';
 import type { FilesQuery, OutputOptions } from './shared.js';
 import {
   addFindWarning,
-  buildGitignoreMatcher,
+  buildIgnoreFileMatcher,
   collectGlobFiles,
   createFindDiagnostics,
   findNestedGitignoreFiles,
+  directoryIgnoreFiles,
   makeCountResult,
   makeFilesResult,
   matchesGlob,
@@ -70,9 +71,12 @@ async function scanFilesQuery(
   const ignoreRoot = outside ? basePath : projectRoot;
   // In a captured view this filter also validates original-owner authority
   // before the synchronous matcher opens .gitignore.
-  if (respectGitignore && capturedReadAccess && !await capturedReadAccess(join(ignoreRoot, '.gitignore'))) throw new Error('root ignore-file read is access-restricted');
+  const rootIgnoreFiles = directoryIgnoreFiles(ignoreRoot);
+  if (respectGitignore && capturedReadAccess) {
+    for (const file of rootIgnoreFiles) if (!await capturedReadAccess(file)) throw new Error('root ignore-file read is access-restricted');
+  }
   const gitignoreMatcher = respectGitignore
-    ? buildGitignoreMatcher(join(ignoreRoot, '.gitignore'), diagnostics)
+    ? buildIgnoreFileMatcher(rootIgnoreFiles, diagnostics)
     : null;
   if (respectGitignore) {
     const rootGitignorePath = join(ignoreRoot, '.gitignore');

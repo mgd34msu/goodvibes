@@ -68,7 +68,8 @@ export interface DaemonTaskRouteHandlers
 
 /** Route handler for the integration tasks listing endpoint. */
 export interface DaemonTaskOverviewRouteHandlers {
-  getIntegrationTasks(): MaybeResponse;
+  /** `limit`: the newest tasks only. */
+  getIntegrationTasks(limit?: number): MaybeResponse;
 }
 
 /** Route handlers for daemon control-plane endpoints: auth, status, gateway, and SSE event streams. */
@@ -156,7 +157,7 @@ export interface DaemonIntegrationRouteHandlers
 export interface DaemonIntegrationOverviewRouteHandlers {
   getReview(): MaybeResponse;
   getIntegrationSession(): MaybeResponse;
-  getIntegrationTasks(): MaybeResponse;
+  getIntegrationTasks(limit?: number): MaybeResponse;
   getIntegrationAutomation(): MaybeResponse;
   /** @param url - Accepted for symmetry with the other listings; `limit`/`cursor` are not applied, the whole session broker snapshot is returned. */
   getIntegrationSessions(url?: URL): MaybeResponse;

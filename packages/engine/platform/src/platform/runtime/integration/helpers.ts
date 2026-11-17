@@ -198,8 +198,10 @@ export class IntegrationHelperService {
     };
   }
 
-  getTaskSnapshot(): Record<string, unknown> {
+  /** `limit` keeps the newest tasks only, so a long-lived daemon does not send its whole history; the totals stay whole. */
+  getTaskSnapshot(limit?: number): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
+    const all = [...state.tasks.tasks.values()];
     return {
       queued: state.tasks.queuedIds.length,
       running: state.tasks.runningIds.length,
@@ -210,7 +212,7 @@ export class IntegrationHelperService {
         failed: state.tasks.totalFailed,
         cancelled: state.tasks.totalCancelled,
       },
-      tasks: [...state.tasks.tasks.values()].map((task) => ({
+      tasks: (limit === undefined ? all : all.slice(-Math.max(1, limit))).map((task) => ({
         id: task.id,
         kind: task.kind,
         title: task.title,

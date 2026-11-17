@@ -1,5 +1,6 @@
 import type { DaemonTaskRouteHandlers } from './context.js';
 import { InvalidPathEncodingError, invalidPathEncodingResponse, safeDecodeURIComponent } from './operator.js';
+import { readBoundedPositiveInteger } from './route-helpers.js';
 
 export async function dispatchTaskRoutes(
   req: Request,
@@ -27,7 +28,10 @@ async function dispatchTaskRoutesInner(
   // surface-specific task status pages.
   if (pathname === '/task' && method === 'GET') return null;
 
-  if (pathname === '/api/tasks' && method === 'GET') return handlers.getIntegrationTasks();
+  if (pathname === '/api/tasks' && method === 'GET') {
+    const limit = url.searchParams.get('limit');
+    return handlers.getIntegrationTasks(limit === null ? undefined : readBoundedPositiveInteger(limit, 500, 5_000));
+  }
   const taskDetailMatch = pathname.match(/^\/api\/tasks\/([^/]+)$/);
   if (taskDetailMatch && method === 'GET') return handlers.getRuntimeTask(safeDecodeURIComponent(taskDetailMatch[1]!));
 

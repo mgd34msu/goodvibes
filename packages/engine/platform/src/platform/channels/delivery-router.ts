@@ -26,7 +26,7 @@ import {
   createMattermostDeliveryStrategy,
   createMatrixDeliveryStrategy,
 } from './delivery/strategies-enterprise.js';
-import { resolveChannelDeliverySurfaceKind, splitForSurface, SURFACE_TEXT_LIMITS } from './delivery/shared.js';
+import { resolveChannelDeliverySurfaceKind, resolveRouteBindingTarget, splitForSurface, SURFACE_TEXT_LIMITS } from './delivery/shared.js';
 import { channelCredentials } from './credential-holder.js';
 import { logger } from '../utils/logger.js';
 import { describeStructuralDeliveryError } from '../integrations/delivery-diagnostics.js';
@@ -34,6 +34,7 @@ import { CHANNEL_DELIVERY_SURFACE_KINDS } from './delivery/types.js';
 import type {
   ChannelDeliveryRequest,
   ChannelDeliveryResult,
+  ChannelDeliveryRouteLookup,
   ChannelDeliveryRouterConfig,
   ChannelDeliveryStrategy,
 } from './delivery/types.js';
@@ -42,6 +43,7 @@ export type {
   ChannelDeliveryReceipt,
   ChannelDeliveryResult,
   ChannelDeliveryRouteBinding,
+  ChannelDeliveryRouteLookup,
   ChannelDeliveryRouterConfig,
   ChannelDeliveryStrategy,
   ChannelDeliverySurfaceKind,
@@ -124,9 +126,11 @@ export class ChannelDeliveryRouter {
   /** A removed registration cannot be revived by re-adding the same strategy object. */
   private readonly strategyRegistrations = new WeakMap<ChannelDeliveryStrategy, { readonly guarded: boolean; readonly publication: boolean }>();
   private controlPlaneGateway: ControlPlaneGateway | null;
+  private readonly routeBindings: ChannelDeliveryRouteLookup | undefined;
 
   constructor(config: ChannelDeliveryRouterConfig = {}) {
     this.controlPlaneGateway = config.controlPlaneGateway ?? null;
+    this.routeBindings = config.routeBindings;
     if (config.strategies) {
       this.strategies = [...config.strategies];
       for (const strategy of this.strategies) this.strategyRegistrations.set(strategy, this.captureRegistration(strategy));
@@ -191,9 +195,28 @@ export class ChannelDeliveryRouter {
     return (await this.deliverWithReceipt(request)).responseId;
   }
 
+  /**
+   * The request as it is sent: a target that names a bound route, and carries
+   * no binding yet, takes that route's surface, address and binding.
+   */
+  resolveRequest(request: ChannelDeliveryRequest): ChannelDeliveryRequest {
+    const routeId = request.target.routeId;
+    if (request.binding || !routeId || !this.routeBindings) return request;
+    const binding = this.routeBindings.getBinding(routeId);
+    if (!binding) return request;
+    return { ...request, target: resolveRouteBindingTarget(request.target, binding), binding };
+  }
+
+  /** The strategy that would send this request, or undefined when none takes it. Reads no network. */
+  strategyFor(request: ChannelDeliveryRequest): ChannelDeliveryStrategy | undefined {
+    const resolved = this.resolveRequest(request);
+    return this.strategies.find((entry) => entry.canHandle(resolved));
+  }
+
   /** Same dispatch and lifetime checks as deliver(), retaining actual native
    * acknowledgement metadata for callers that need durable correlation. */
-  async deliverWithReceipt(request: ChannelDeliveryRequest): Promise<ChannelDeliveryResult> {
+  async deliverWithReceipt(input: ChannelDeliveryRequest): Promise<ChannelDeliveryResult> {
+    const request = this.resolveRequest(input);
     const surfaceKind = resolveChannelDeliverySurfaceKind(request.target);
     const strategy = this.strategies.find((entry) => entry.canHandle(request));
     if (!strategy) {

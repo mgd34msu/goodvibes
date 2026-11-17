@@ -30,6 +30,7 @@ export function createSignalDeliveryStrategy(
     id: 'channel-delivery:signal',
     supportsGuardedDelivery: true,
     supportsPublication: true,
+    supportsAttachments: true,
     canHandle(request) {
       return resolveChannelDeliverySurfaceKind(request.target) === 'signal';
     },
@@ -90,6 +91,7 @@ export function createWhatsAppDeliveryStrategy(
     id: 'channel-delivery:whatsapp',
     supportsGuardedDelivery: true,
     supportsPublication: true,
+    supportsAttachments: true,
     canHandle(request) {
       return resolveChannelDeliverySurfaceKind(request.target) === 'whatsapp';
     },
@@ -189,6 +191,7 @@ export function createTelephonyDeliveryStrategy(
     id: 'channel-delivery:telephony',
     supportsGuardedDelivery: true,
     supportsPublication: true,
+    supportsAttachments: true,
     canHandle(request) {
       return resolveChannelDeliverySurfaceKind(request.target) === 'telephony';
     },
@@ -288,6 +291,7 @@ export function createIMessageDeliveryStrategy(
     id: 'channel-delivery:imessage',
     supportsGuardedDelivery: true,
     supportsPublication: true,
+    supportsAttachments: true,
     canHandle(request) {
       return resolveChannelDeliverySurfaceKind(request.target) === 'imessage';
     },
@@ -348,6 +352,7 @@ export function createBlueBubblesDeliveryStrategy(
     id: 'channel-delivery:bluebubbles',
     supportsGuardedDelivery: true,
     supportsPublication: true,
+    supportsAttachments: true,
     canHandle(request) {
       return resolveChannelDeliverySurfaceKind(request.target) === 'bluebubbles';
     },

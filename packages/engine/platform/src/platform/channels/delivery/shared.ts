@@ -9,6 +9,7 @@ import { channelCredentials } from '../credential-holder.js';
 import type {
   ChannelDeliveryRequest,
   ChannelDeliveryResult,
+  ChannelDeliveryRouteBinding,
   ChannelDeliverySurfaceKind,
   ChannelDeliveryTarget,
 } from './types.js';
@@ -36,6 +37,37 @@ export function resolveChannelDeliverySurfaceKind(
   target: ChannelDeliveryTarget,
 ): ChannelDeliverySurfaceKind | undefined {
   return target.surfaceKind ?? (target.kind === 'webhook' ? 'webhook' : undefined);
+}
+
+/**
+ * What a bound route fills in a target that left it out: the route's surface,
+ * its reply address and its title. The one rule for this, used by the router
+ * and by scheduled delivery.
+ */
+export function routeBindingTargetFields(binding: ChannelDeliveryRouteBinding): {
+  readonly surfaceKind: ChannelDeliverySurfaceKind;
+  readonly address: string;
+  readonly label: string | undefined;
+} {
+  return {
+    surfaceKind: binding.surfaceKind,
+    address: typeof binding.metadata.responseUrl === 'string' ? binding.metadata.responseUrl
+      : typeof binding.metadata.callbackUrl === 'string' ? binding.metadata.callbackUrl
+        : binding.channelId ?? binding.externalId,
+    label: binding.title,
+  };
+}
+
+/** A target that names a route, read with its binding (routeBindingTargetFields). */
+export function resolveRouteBindingTarget(target: ChannelDeliveryTarget, binding: ChannelDeliveryRouteBinding): ChannelDeliveryTarget {
+  const fields = routeBindingTargetFields(binding);
+  const label = target.label ?? fields.label;
+  return {
+    ...target,
+    surfaceKind: target.surfaceKind ?? fields.surfaceKind,
+    address: target.address ?? fields.address,
+    ...(label !== undefined ? { label } : {}),
+  };
 }
 
 export function titleFromBody(body: string): string {

@@ -99,7 +99,7 @@ The workspace opens into a set of operator areas. Each area below names what it 
   - saved artifact browse/show/export/package/archive
   - reviewed artifact-to-Knowledge promotion
   - saved packet preset save/list/show/refresh routes with missing/superseded id freshness checks and confirmed refresh into a new preset artifact
-  - confirmed reviewer packet share through `agent_review_packet_share` with channel target preview and no ZIP-byte transcript output
+  - confirmed reviewer packet share through `agent_review_packet_share`: the ZIP is attached where the surface carries attachments (as the file, or a download link on text-only surfaces), and no ZIP bytes appear in the transcript
   - saved text artifact reuse in blind comparison
   - confirmed blind model comparison with:
     - delayed reveal
@@ -316,7 +316,7 @@ Use Agent Workspace -> Documents & Compare when a document needs:
   - synthesis
   - reviewer handoff artifacts
   - one-click reviewer handoff ZIP archives with matching route-decision receipt evidence
-- confirmed packet share through `agent_review_packet_share` when the user wants to send an archive reference to a configured channel target
+- confirmed packet share through `agent_review_packet_share` when the user wants to send the archive to a configured channel, a bound route or a webhook
 
 Use the Artifacts area and Voice & Media workspace for images, source files, generated media, and exported sessions. Generated media returns artifact ids and metadata, not inline base64.
 

@@ -21,12 +21,11 @@ const CHANNEL_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceChannel
     const channel = readField('channel');
     const route = readField('route');
     const webhook = readField('webhook');
-    const link = readField('link');
     // The delivery owner decides what a valid send is (one target, a message, a
     // known surface). Asking it here, before dispatch, keeps the form open with
     // the typed message when the send would be refused.
     try {
-      buildAgentChannelDeliveryPreview({ message: readField('message'), title, channel, route, webhook, link });
+      buildAgentChannelDeliveryPreview({ message: readField('message'), title, channel, route, webhook });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       return editorMessageSubmission(editor, `Not sent: ${reason} Fix the field, then press Enter.`, `Channel delivery not sent: ${reason}`);
@@ -40,10 +39,6 @@ const CHANNEL_COMMAND_SUBMISSION_HANDLERS: Readonly<Record<AgentWorkspaceChannel
     if (webhook) {
       parts.push('--webhook', quoteSlashCommandArg(webhook));
       display.push('--webhook', quoteSlashCommandArg(redactWebhookForDisplay(webhook)));
-    }
-    if (link) {
-      parts.push('--link', quoteSlashCommandArg(link));
-      display.push('--link', quoteSlashCommandArg(link));
     }
     const tail = ['--message', quoteSlashCommandArg(readField('message')), '--yes'];
     parts.push(...tail);

@@ -1,4 +1,4 @@
-import type { ArtifactDescriptor, ArtifactRecord, ArtifactReference, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ChannelDeliveryRequest, ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -26,7 +26,7 @@ export interface AgentReviewPacketShareToolArgs {
 }
 
 type AgentReviewPacketShareArtifactStore = Pick<ArtifactStore, 'get' | 'list' | 'readContent'>;
-type AgentReviewPacketShareChannelRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies'>;
+type AgentReviewPacketShareChannelRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies' | 'strategyFor'>;
 type AgentReviewPacketShareArtifact = ArtifactDescriptor | ArtifactRecord;
 
 interface ReviewPacketArchiveSummary {
@@ -170,18 +170,21 @@ function formatShareResult(input: {
     '',
     formatAgentChannelDeliveryResult(input.delivery),
     input.attached
-      ? 'archive attached: the reviewer received the ZIP with the message'
-      : `archive not attached: this surface cannot carry files. The message names the archive; export it with ${archiveExportRoute(input.summary)} and send exports/${input.summary.filename} to the reviewer yourself.`,
+      ? 'archive attached: the surface sent the ZIP with the message, as the file or, where it carries text only, as a named download link'
+      : `archive not attached: the surface that took this target does not carry attachments. The message names the archive; export it with ${archiveExportRoute(input.summary)} and send exports/${input.summary.filename} to the reviewer yourself.`,
   ].join('\n');
 }
 
-/** Whether the strategy that takes this request carries files: a fact the strategy declares. */
-/** Which surface takes the target: none (nothing can send it), one that carries files, or one that does not. */
+/**
+ * Which surface takes the target, as the router will send it (a bound route
+ * resolved to its surface): none, one that carries attachments, or one that
+ * does not. The strategy declares supportsAttachments; nothing is read from the network.
+ */
 function targetSurface(router: AgentReviewPacketShareChannelRouter, input: AgentChannelDeliveryInput): 'none' | 'files' | 'text' {
   const request = buildAgentChannelDeliveryPreview(input).request as unknown as ChannelDeliveryRequest;
-  const handlers = router.listStrategies().filter(strategy => strategy.canHandle(request));
-  if (handlers.length === 0) return 'none';
-  return handlers.some(strategy => (strategy as { readonly supportsAttachments?: boolean }).supportsAttachments === true) ? 'files' : 'text';
+  const strategy = router.strategyFor(request);
+  if (!strategy) return 'none';
+  return strategy.supportsAttachments === true ? 'files' : 'text';
 }
 
 export function createAgentReviewPacketShareTool(
@@ -192,7 +195,7 @@ export function createAgentReviewPacketShareTool(
     definition: {
       name: 'agent_review_packet_share',
       activity: { doing: 'Sharing', did: 'shared', object: 'a review packet', objects: 'review packets' },
-      description: 'Share one reviewer archive after recorded effect admission: attached where the surface carries files, otherwise named in the message.',
+      description: 'Share one reviewer archive after recorded effect admission: attached where the surface carries attachments, otherwise named in the message. Exactly one of channel, route or webhook is required.',
       parameters: {
         type: 'object',
         properties: {
@@ -210,19 +213,15 @@ export function createAgentReviewPacketShareTool(
           },
           channel: {
             type: 'string',
-            description: 'Delivery target. Exactly one of channel, route, webhook or link is required.',
+            description: 'Delivery target: a configured surface kind, or kind:<conversation id>. Give exactly one of channel, route or webhook.',
           },
           route: {
             type: 'string',
-            description: 'Delivery target: route id or route:label. Exactly one of channel, route, webhook or link is required.',
+            description: 'Delivery target: the id of a bound route (optionally "<route id> | <label>"); it is sent on that route\'s surface. Give exactly one of channel, route or webhook.',
           },
           webhook: {
             type: 'string',
-            description: 'Delivery target: http(s) webhook URL. Exactly one of channel, route, webhook or link is required.',
-          },
-          link: {
-            type: 'string',
-            description: 'Delivery target: link, taken only where a delivery surface handles links; otherwise the share is refused before anything is sent. Exactly one of channel, route, webhook or link is required.',
+            description: 'Delivery target: http(s) webhook URL. Give exactly one of channel, route or webhook.',
           },
           confirm: confirmParameter(),
           explicitUserRequest: requestParameter(),
@@ -261,12 +260,18 @@ export function createAgentReviewPacketShareTool(
         ...(readString(args.route) ? { route: readString(args.route) } : {}),
         ...(readString(args.webhook) ? { webhook: readString(args.webhook) } : {}),
         ...(readString(args.link) ? { link: readString(args.link) } : {}),
+        // Refused by the delivery parse with the targets that work.
       };
       let surface: 'none' | 'files' | 'text';
       try { surface = targetSurface(channelDeliveryRouter, target); }
       catch (error) { return failure(`${error instanceof Error ? error.message : String(error)} Nothing was sent.`); }
       // Found here, before the outward-effect decision, rather than as a delivery error after it.
-      if (surface === 'none') return failure('No delivery surface in this Agent takes that target, so nothing was sent. Use a configured channel, a route id or an http(s) webhook URL.');
+      if (surface === 'none') {
+        const route = readString(args.route);
+        return failure(route
+          ? `Route "${route}" is not a route bound here, so nothing was sent. Use the id of a bound route, a configured channel (kind or kind:<conversation id>) or an http(s) webhook URL.`
+          : 'No delivery surface in this Agent takes that target, so nothing was sent. Use a configured channel (kind or kind:<conversation id>), the id of a bound route or an http(s) webhook URL.');
+      }
       const attached = surface === 'files';
       const message = buildShareMessage(summary, readString(args.message), attached);
       // Set just before the delivery call: a throw after that point cannot say the message was not sent.
@@ -289,14 +294,14 @@ export function createAgentReviewPacketShareTool(
         const decision = await evaluateOutwardEffect({
           request: { toolName: 'agent_review_packet_share', action: 'review-packet.share', description: 'sharing the saved reviewer archive reference' },
           ledger,
-          content: { message, title, channel: readString(args.channel), route: readString(args.route), webhook: readString(args.webhook), link: readString(args.link) },
-          taintOptions: { signal: executionOptions?.signal, exactMatchFields: ['channel', 'route', 'webhook', 'link'] },
+          content: { message, title, channel: readString(args.channel), route: readString(args.route), webhook: readString(args.webhook) },
+          taintOptions: { signal: executionOptions?.signal, exactMatchFields: ['channel', 'route', 'webhook'] },
         });
         assertCurrent();
         if (!decision.allowed) return failure([decision.reason ?? 'Outward effect held.', decision.fix].filter(Boolean).join(' '));
         deliveryStarted = true;
         // The archive goes as an attachment only where the surface carries files; the same decision above covers it.
-        const input: AgentChannelDeliveryInput & { readonly attachments?: readonly ArtifactReference[] } = {
+        const input: AgentChannelDeliveryInput = {
           ...target, message, title,
           ...(attached ? { attachments: [{ artifactId: summary.artifactId, label: summary.filename }] } : {}),
         };

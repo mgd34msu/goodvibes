@@ -89,6 +89,7 @@ export type {
   ChannelDeliveryReceipt,
   ChannelDeliveryResult,
   ChannelDeliveryRouteBinding,
+  ChannelDeliveryRouteLookup,
   ChannelDeliveryRouterConfig,
   ChannelDeliveryStrategy,
   ChannelDeliverySurfaceKind,

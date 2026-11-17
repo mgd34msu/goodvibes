@@ -157,13 +157,13 @@ export function parseWebhookDeliveryTarget(raw: string): RoutineScheduleDelivery
   };
 }
 
-export function parseLinkDeliveryTarget(raw: string): RoutineScheduleDeliveryTargetSpec | string {
-  const normalized = raw.trim();
-  if (!normalized) return '--delivery-link requires a URL or label.';
-  return {
-    kind: 'link',
-    address: normalized,
-  };
+/**
+ * No delivery strategy sends to a link, so a schedule made with one would
+ * report success and deliver its result nowhere: the flag is refused with the
+ * targets that work.
+ */
+export function parseLinkDeliveryTarget(_raw: string): RoutineScheduleDeliveryTargetSpec | string {
+  return '--delivery-link is not a delivery target: no delivery surface sends to a link. Use --delivery-channel, --delivery-route or --delivery-webhook.';
 }
 
 /**

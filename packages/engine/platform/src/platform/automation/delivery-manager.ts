@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ArtifactReference, ArtifactStore } from '../artifacts/index.js';
 import { ChannelDeliveryRouter, RouteBindingManager } from '../channels/index.js';
+import { routeBindingTargetFields } from '../channels/delivery/shared.js';
 import { ServiceRegistry } from '../config/service-registry.js';
 import { createDomainDispatch } from '../runtime/store/index.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
@@ -162,6 +163,8 @@ export class AutomationDeliveryManager {
         secretsManager: config.secretsManager,
         serviceRegistry: config.serviceRegistry,
         artifactStore: config.artifactStore,
+        // A send that names only a route id (an Agent's share or channel send) goes out on that route.
+        routeBindings: config.routeBindings,
       });
     }
     if (config.runtimeStore) this.runtimeDispatch = createDomainDispatch(config.runtimeStore);
@@ -330,15 +333,13 @@ export class AutomationDeliveryManager {
       if (!target.routeId) return target;
       const binding = this.routeBindings.getBinding(target.routeId);
       if (!binding) return { target };
+      const fields = routeBindingTargetFields(binding);
       return {
         target: {
           ...target,
-          surfaceKind: target.surfaceKind ?? binding.surfaceKind,
-          address: target.address
-            ?? (typeof binding.metadata.responseUrl === 'string' ? binding.metadata.responseUrl
-              : typeof binding.metadata.callbackUrl === 'string' ? binding.metadata.callbackUrl
-                : binding.channelId ?? binding.externalId),
-          label: target.label ?? binding.title,
+          surfaceKind: target.surfaceKind ?? fields.surfaceKind,
+          address: target.address ?? fields.address,
+          label: target.label ?? fields.label,
         },
         binding,
       };

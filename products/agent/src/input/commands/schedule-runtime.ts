@@ -103,7 +103,7 @@ async function promoteRoutineSchedule(args: readonly string[], ctx: CommandConte
   const parsed = parseRoutineSchedulePromotionArgs(args);
   if (parsed.errors.length > 0) {
     ctx.print([
-      'Usage: /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
+      'Usage: /schedule promote-routine <routine-id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>] [--disabled] --yes',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
     return;
@@ -120,7 +120,7 @@ async function createReminder(args: readonly string[], ctx: CommandContext): Pro
   const parsed = parseReminderScheduleArgs(args);
   if (parsed.errors.length > 0) {
     ctx.print([
-      'Usage: /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
+      'Usage: /schedule remind (--cron <expr>|--every <interval>|--at <iso-time>) (--message <text>|<text...>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>] [--disabled] --yes',
       ...parsed.errors.map((error) => `  ${error}`),
     ].join('\n'));
     return;

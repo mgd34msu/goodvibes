@@ -81,6 +81,11 @@ export interface ChannelDeliveryStrategy {
   readonly supportsGuardedDelivery?: boolean | undefined;
   /** Invokes withPublication only around the final dispatch, after preparation. */
   readonly supportsPublication?: boolean | undefined;
+  /**
+   * Sends `request.attachments` with the message: as the file where the surface
+   * takes files, otherwise as a named download link. Absent: attachments are dropped.
+   */
+  readonly supportsAttachments?: boolean | undefined;
   canHandle(request: ChannelDeliveryRequest): boolean;
   deliver(request: ChannelDeliveryRequest): Promise<ChannelDeliveryResult>;
 }
@@ -92,6 +97,16 @@ export interface ChannelDeliveryRouterConfig {
   readonly artifactStore?: ArtifactStore | undefined;
   readonly controlPlaneGateway?: ControlPlaneGateway | null | undefined;
   readonly strategies?: readonly ChannelDeliveryStrategy[] | undefined;
+  /**
+   * The bound routes, so a target that names only a route id is sent on that
+   * route's surface. Absent: such a target is taken by no strategy.
+   */
+  readonly routeBindings?: ChannelDeliveryRouteLookup | undefined;
+}
+
+/** Finds a bound route by its id. */
+export interface ChannelDeliveryRouteLookup {
+  getBinding(routeId: string): ChannelDeliveryRouteBinding | undefined;
 }
 
 /**

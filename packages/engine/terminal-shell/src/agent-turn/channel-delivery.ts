@@ -4,6 +4,7 @@ import type {
   ChannelDeliverySurfaceKind,
   ChannelDeliveryTarget,
 } from '@goodvibes-jev/engine/platform/platform/channels';
+import type { ArtifactReference } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import {
   CardMaterialRefusedError,
   resolveDeliverySurfaceName,
@@ -28,6 +29,8 @@ export interface AgentChannelDeliveryInput {
   readonly route?: string | undefined;
   readonly webhook?: string | undefined;
   readonly link?: string | undefined;
+  /** Saved artifacts sent with the message, on a surface whose strategy declares supportsAttachments. */
+  readonly attachments?: readonly ArtifactReference[] | undefined;
 }
 
 export interface AgentChannelDeliveryPreview {
@@ -82,10 +85,11 @@ function parseWebhookTarget(raw: string): AgentChannelDeliveryTarget {
   return { kind: 'webhook', address: normalized };
 }
 
-function parseLinkTarget(raw: string): AgentChannelDeliveryTarget {
-  const normalized = readText(raw);
-  if (!normalized) throw new Error('Link delivery target requires a URL or label.');
-  return { kind: 'link', address: normalized };
+// No delivery strategy sends to a link, so a link target is refused here, the
+// one parse every immediate send passes through, instead of failing after the
+// outward-effect decision.
+function parseLinkTarget(_raw: string): never {
+  throw new Error('No delivery surface sends to a link. Use exactly one of channel, route or webhook.');
 }
 
 function selectedTargetInputs(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): readonly string[] {
@@ -93,14 +97,15 @@ function selectedTargetInputs(input: Pick<AgentChannelDeliveryInput, 'channel' |
 }
 
 /**
- * The one rule for a delivery target: exactly one of channel, route, webhook
- * or link. With none or several, which recipient was meant is unknown, so
- * nothing is sent.
+ * The one rule for a delivery target: exactly one of channel, route or webhook
+ * (a link, which no surface delivers, is counted so it is never silently
+ * dropped beside another). With none or several, which recipient was meant is
+ * unknown, so nothing is sent.
  */
 export function requireOneDeliveryTarget(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): void {
   const count = selectedTargetInputs(input).length;
-  if (count === 0) throw new Error('No delivery target was given, so nothing was sent. Give exactly one of channel, route, webhook or link.');
-  if (count > 1) throw new Error(`${count} delivery targets were given, so the recipient is unclear and nothing was sent. Give exactly one of channel, route, webhook or link.`);
+  if (count === 0) throw new Error('No delivery target was given, so nothing was sent. Give exactly one of channel, route or webhook.');
+  if (count > 1) throw new Error(`${count} delivery targets were given, so the recipient is unclear and nothing was sent. Give exactly one of channel, route or webhook.`);
 }
 
 export function buildAgentChannelDeliveryPreview(input: AgentChannelDeliveryInput): AgentChannelDeliveryPreview {
@@ -132,6 +137,7 @@ export function buildAgentChannelDeliveryPreview(input: AgentChannelDeliveryInpu
       runId: `agent-channel-send-${randomUUID()}`,
       status: 'completed',
       includeLinks: true,
+      ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments } : {}),
       metadata: {
         product: 'goodvibes-agent',
         source: 'agent-channel-send',

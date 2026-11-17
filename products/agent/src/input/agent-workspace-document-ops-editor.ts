@@ -44,7 +44,6 @@ export interface AgentDocumentReviewPacketShareToolArgs {
   readonly channel?: string;
   readonly route?: string;
   readonly webhook?: string;
-  readonly link?: string;
   readonly confirm: boolean;
   readonly explicitUserRequest: string;
 }
@@ -129,15 +128,14 @@ export function createAgentDocumentReviewPacketShareEditor(
     mode: 'create',
     title: 'Share Review Packet',
     selectedFieldIndex: 0,
-    message: 'Share one saved reviewer handoff ZIP archive reference through a configured channel target. The tool validates the archive, includes packet evidence ids, and does not send ZIP bytes.',
+    message: 'Share one saved reviewer handoff ZIP archive through a configured target. The tool validates the archive, includes packet evidence ids, and attaches the ZIP where the surface carries attachments; otherwise the message names it.',
     fields: [
       { id: 'archiveArtifactId', label: 'Archive artifact id', value: defaults?.handoffArchiveArtifactId ?? '', required: true, multiline: false, hint: defaults?.handoffArchiveArtifactId ? `Default from latest packet archive. Packet default: ${defaults.summary}.` : 'Saved reviewer handoff ZIP artifact id from the final archive step.' },
       { id: 'title', label: 'Title', value: 'GoodVibes Agent review packet', required: false, multiline: false, hint: 'Optional delivery title.' },
       { id: 'message', label: 'Message', value: '', required: false, multiline: true, hint: 'Optional note. The tool appends archive evidence, counts, ids, and export route automatically.' },
       { id: 'channel', label: 'Channel target', value: '', required: false, multiline: false, hint: 'Optional surface[:route][ | label], such as slack:C123 | Ops. Fill exactly one target field.' },
-      { id: 'route', label: 'Route target', value: '', required: false, multiline: false, hint: 'Optional route id, or route id | label. Fill exactly one target field.' },
+      { id: 'route', label: 'Route target', value: '', required: false, multiline: false, hint: 'Optional id of a bound route, or route id | label. Fill exactly one target field.' },
       { id: 'webhook', label: 'Webhook URL', value: '', required: false, multiline: false, hint: 'Optional http(s) webhook target. Fill exactly one target field.' },
-      { id: 'link', label: 'Link target', value: '', required: false, multiline: false, hint: 'Optional link delivery target. Fill exactly one target field.' },
       { id: 'confirm', label: 'Confirm share', value: 'no', required: true, multiline: false, hint: 'Type yes only after the user explicitly asks to share this review packet.' },
     ],
   };
@@ -241,7 +239,6 @@ export function buildAgentDocumentReviewPacketShareToolArgs(
   const channel = optionalField(readField, 'channel');
   const route = optionalField(readField, 'route');
   const webhook = optionalField(readField, 'webhook');
-  const link = optionalField(readField, 'link');
   return {
     archiveArtifactId: readField('archiveArtifactId').trim(),
     ...(title ? { title } : {}),
@@ -249,7 +246,6 @@ export function buildAgentDocumentReviewPacketShareToolArgs(
     ...(channel ? { channel } : {}),
     ...(route ? { route } : {}),
     ...(webhook ? { webhook } : {}),
-    ...(link ? { link } : {}),
     confirm: isAffirmative(readField('confirm')),
     explicitUserRequest,
   };
@@ -480,13 +476,13 @@ export function buildAgentDocumentReviewPacketSharePromptSubmission(
     prompt: [
       'Share a saved Document Ops reviewer packet archive with the `agent_review_packet_share` tool.',
       `Use these share fields: ${JSON.stringify(toolArgs, null, 2)}.`,
-      'Only call the tool with confirm:true when the user explicitly asked GoodVibes Agent to share this packet. The tool validates the saved handoff archive, sends a plain-text archive reference through the configured target, and must not print or attach ZIP bytes.',
+      'Only call the tool with confirm:true when the user explicitly asked GoodVibes Agent to share this packet. The tool validates the saved handoff archive and sends packet evidence through the configured target, with the ZIP attached where the surface carries attachments.',
     ].join('\n'),
     status: 'Submitting review packet share.',
     actionResult: {
       kind: 'guidance',
       title: 'Share review packet',
-      detail: 'Asked the model to share the saved handoff archive reference through the chosen target. Nothing is sent until the model calls the tool and its result appears in the conversation.',
+      detail: 'Asked the model to share the saved handoff archive through the chosen target. Nothing is sent until the model calls the tool and its result appears in the conversation.',
       safety: 'safe',
     },
   };

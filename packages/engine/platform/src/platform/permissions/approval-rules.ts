@@ -26,7 +26,7 @@ import {
   evaluatePathScopeRule,
   evaluatePrefixRule,
 } from '../runtime/permissions/rules/index.js';
-import { execContextOf, extractCommandArgs, splitShellCommand } from '../runtime/permissions/rules/prefix.js';
+import { evaluatePrefixRule, execContextOf, extractCommandArgs, splitShellCommand } from '../runtime/permissions/rules/prefix.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
 
@@ -124,7 +124,7 @@ function ruleTools(rule: PolicyRule): readonly string[] | null {
 /**
  * Whether `broader`, a remembered rule, already decides every call `narrower`
  * decides, the same way: same effect and owner-only marker, and a whole-tool
- * rule over the same tools, a command class over exact commands of that class,
+ * rule over the same tools, a command class over exact commands it matches,
  * or a directory over paths inside it. Used when an answer is remembered, so the
  * store neither keeps rules a newer one covers nor writes one already covered.
  */
@@ -137,10 +137,14 @@ export function ruleCovers(broader: PolicyRule, narrower: PolicyRule): boolean {
     return narrower.type === 'prefix' || narrower.type === 'path-scope';
   }
   if (broader.type === 'prefix' && broader.exactCommandMatch === 'command-class' && narrower.type === 'prefix') {
-    const classes = broader.exactCommands ?? [];
     const exact = narrower.exactCommands ?? [];
+    // Covered only when the class rule itself decides each exact command: a class allow does not
+    // reach a command with a pipe, a second command of another class, a redirection or a
+    // substitution, so the exact answer for `npm test 2>&1 | tee log` stays. One match per stored
+    // exact command, at answer time only.
+    const tools = narrowTools ?? ['*'];
     return narrower.exactCommandMatch === undefined && narrower.commandPrefixes === undefined && exact.length > 0
-      && exact.every((command) => classes.includes(commandClassOf(command)));
+      && exact.every((command) => tools.every((tool) => evaluatePrefixRule(broader, tool, {}, [command]).matched));
   }
   if (broader.type === 'path-scope' && narrower.type === 'path-scope') {
     const dirs = broader.pathPatterns.filter((pattern) => pattern.endsWith('/**')).map((pattern) => pattern.slice(0, -3));

@@ -43,7 +43,7 @@ import type { BootstrapOptions } from './context.ts';
 import '@/runtime/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 
-import { type RuntimeStore } from './store/index.ts';
+import { type RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { ForensicsCollector, ForensicsRegistry } from '@/runtime/index.ts';
 import { generateUserSessionId } from '@/runtime/index.ts';
 import { loadBootstrapSystemPrompt, syncConfiguredServices } from '@/runtime/index.ts';

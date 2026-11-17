@@ -16,8 +16,9 @@ import type {
   transport as Transport,
 } from '@goodvibes-jev/engine/platform/platform/runtime';
 
-// Local runtime entry points.
-export { bootstrapRuntime } from './bootstrap.ts';
+// Local runtime entry points. `bootstrapRuntime` is imported from
+// './bootstrap.ts' directly: bootstrap reaches the command and view modules,
+// which import this barrel, so re-exporting it here would close an import cycle.
 export type { RuntimeContext, BootstrapOptions } from './context.ts';
 export type { BootstrapContext } from './bootstrap.ts';
 export { createUiRuntimeServices } from './ui-services.ts';

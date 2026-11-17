@@ -276,6 +276,21 @@ export class DaemonBatchManager {
     return this.getMode();
   }
 
+  /**
+   * Whether a job for this provider and model would go to the provider's Batch
+   * API. A route that queues work nobody asked to batch asks this first: for a
+   * provider that cannot batch, the ordinary live request is the honest
+   * answer, not a job record around it. Two registry lookups, no I/O.
+   */
+  canBatch(providerId: string, model: string): boolean {
+    try {
+      this.requireProviderBatchSupport(this.getBatchProvider(model, providerId), providerId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async describeRuntime(): Promise<DaemonBatchRuntimeSnapshot> {
     return {
       mode: this.getMode(),
@@ -310,7 +325,11 @@ export class DaemonBatchManager {
     };
   }
 
-  async createJob(input: CreateDaemonBatchJobInput): Promise<DaemonBatchJob> {
+  /**
+   * `signal`: the caller's request. Only the live fallback uses it: a caller
+   * that went away cancels the provider request it was waiting on.
+   */
+  async createJob(input: CreateDaemonBatchJobInput, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<DaemonBatchJob> {
     if (this.getMode() === 'off') {
       throw new DaemonBatchError('Daemon batch mode is off.', 'BATCH_DISABLED', 409);
     }
@@ -335,7 +354,7 @@ export class DaemonBatchManager {
     }
     if (runLive) {
       const redelivered = this.findQueueRedelivery(input);
-      return redelivered ?? this.runLiveJob(input, provider, model, providerInstance);
+      return redelivered ?? this.runLiveJob(input, provider, model, providerInstance, options.signal);
     }
     const payloadBytes = estimateJsonBytes(input);
     if (payloadBytes > MAX_BATCH_REQUEST_BYTES) {
@@ -399,7 +418,7 @@ export class DaemonBatchManager {
    * as a job that is created finished (completed with its result, or failed with
    * the provider's error), so the caller reads it like any batch job.
    */
-  private async runLiveJob(input: CreateDaemonBatchJobInput, provider: string, model: string, providerInstance: LLMProvider): Promise<DaemonBatchJob> {
+  private async runLiveJob(input: CreateDaemonBatchJobInput, provider: string, model: string, providerInstance: LLMProvider, signal?: AbortSignal): Promise<DaemonBatchJob> {
     const request = copyBatchRequest(input.request);
     const startedAt = now();
     let outcome: Pick<DaemonBatchJob, 'status' | 'result' | 'error'>;
@@ -412,9 +431,12 @@ export class DaemonBatchManager {
         ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
         ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
         ...(request.reasoningSummary !== undefined ? { reasoningSummary: request.reasoningSummary } : {}),
+        ...(signal ? { signal } : {}),
       });
       outcome = { status: 'completed', result };
     } catch (error) {
+      // The caller went away and cancelled it: nobody reads a job, so none is kept.
+      if (signal?.aborted) throw error;
       outcome = { status: 'failed', error: { code: 'LIVE_FALLBACK_FAILED', message: `${provider} cannot batch, so the request ran live, and the live request failed: ${summarizeError(error)}` } };
     }
     const finishedAt = now();

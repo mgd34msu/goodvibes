@@ -21,9 +21,9 @@ export interface OpenAICompatibleRouteContext {
    * The daemon's batch queue. A non-streaming chat completion is batch-capable:
    * it is queued when it asks for batch execution (`x-goodvibes-execution: batch`)
    * or, with `batch.mode` set to `eligible-by-default`, when it does not ask to
-   * run live. Absent: every completion runs live.
+   * run live and its provider has a Batch API. Absent: every completion runs live.
    */
-  readonly batch?: Pick<DaemonBatchManager, 'createJob' | 'getJob' | 'currentMode'> | undefined;
+  readonly batch?: Pick<DaemonBatchManager, 'createJob' | 'getJob' | 'currentMode' | 'canBatch'> | undefined;
 }
 
 /** How a caller asks for one execution or the other; any other value is refused. */
@@ -204,9 +204,9 @@ async function handleChatCompletions(
     });
   }
 
-  const queue = decideBatchExecution(context.batch, execution);
+  const queue = decideBatchExecution(context.batch, execution, resolved);
   if (queue instanceof Response) return queue;
-  if (queue) return queueChatCompletion(queue, resolved, prepared, maxTokens, headers, prefix);
+  if (queue) return queueChatCompletion(queue, resolved, prepared, maxTokens, headers, prefix, request.signal);
 
   try {
     const response = await resolved.provider.chat({
@@ -571,12 +571,16 @@ function readExecutionPreference(request: Request): 'batch' | 'live' | undefined
 /**
  * Whether this completion is queued: the queue that takes it, null to run it
  * live, or the refusal of a batch the daemon does not accept. `explicit`
- * queues only what asks for batch; `eligible-by-default` queues everything
- * that does not ask to run live.
+ * queues only what asks for batch; `eligible-by-default` also queues what did
+ * not ask either way, but only when its provider has a Batch API: anything
+ * else runs as the ordinary live request (the caller's cancellation, the
+ * provider's own error status, no job record), and `batch.fallback` applies
+ * only to a caller that asked for a batch.
  */
 function decideBatchExecution(
   batch: OpenAICompatibleRouteContext['batch'],
   execution: 'batch' | 'live' | undefined,
+  resolved: ResolvedModel,
 ): NonNullable<OpenAICompatibleRouteContext['batch']> | null | Response {
   if (execution === 'live') return null;
   const mode = batch?.currentMode() ?? 'off';
@@ -586,7 +590,7 @@ function decideBatchExecution(
     }
     return batch;
   }
-  return batch && mode === 'eligible-by-default' ? batch : null;
+  return batch && mode === 'eligible-by-default' && batch.canBatch(resolved.providerId, resolved.modelId) ? batch : null;
 }
 
 /** Queue one completion as a batch job and answer 202 with where to read it, or the finished answer when it ran live. */
@@ -597,6 +601,7 @@ async function queueChatCompletion(
   maxTokens: number | undefined,
   headers: Record<string, string>,
   prefix: string,
+  signal: AbortSignal,
 ): Promise<Response> {
   let job: DaemonBatchJob;
   try {
@@ -612,7 +617,7 @@ async function queueChatCompletion(
       },
       source: { kind: 'daemon-api', id: 'openai-compatible' },
       metadata: { [RESPONSE_MODEL_METADATA_KEY]: resolved.responseModel },
-    });
+    }, { signal });
   } catch (error) {
     if (error instanceof DaemonBatchError) {
       return openAIError(error.message, error.status, openAIErrorType(error.status), error.code.toLowerCase(), EXECUTION_HEADER);

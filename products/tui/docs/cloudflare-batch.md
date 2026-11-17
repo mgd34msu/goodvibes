@@ -109,7 +109,7 @@ Errors return JSON with `error`; failures raised by the Cloudflare integration a
 
 `explicit` uses Cloudflare only for requests explicitly marked for batch execution.
 
-`eligible-by-default` also queues every non-streaming chat completion sent to the daemon's OpenAI-compatible route unless the request sends `x-goodvibes-execution: live`; `explicit` queues one only when it sends `x-goodvibes-execution: batch`. Terminal, companion and web chat stays live in every mode.
+`eligible-by-default` also queues every non-streaming chat completion sent to the daemon's OpenAI-compatible route whose provider has a Batch API, unless the request sends `x-goodvibes-execution: live` (one whose provider cannot batch runs live as usual, and `batch.fallback` applies only to a request that asked for a batch); `explicit` queues one only when it sends `x-goodvibes-execution: batch`. Terminal, companion and web chat stays live in every mode.
 
 For most users, keep `off` or `explicit`.
 

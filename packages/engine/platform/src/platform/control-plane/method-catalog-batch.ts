@@ -83,7 +83,7 @@ export const builtinGatewayBatchMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'batch.runtime.get',
     title: 'Batch Runtime',
-    description: 'The batch queue\'s current mode (`off`: nothing is queued; `explicit`: the job API is open and a non-streaming OpenAI-compatible chat completion is queued when it sends `x-goodvibes-execution: batch`; `eligible-by-default`: every such completion is queued unless it sends `x-goodvibes-execution: live`), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.',
+    description: 'The batch queue\'s current mode (`off`: nothing is queued; `explicit`: the job API is open and a non-streaming OpenAI-compatible chat completion is queued when it sends `x-goodvibes-execution: batch`; `eligible-by-default`: every such completion whose provider can batch is queued unless it sends `x-goodvibes-execution: live`, and one whose provider cannot runs live as usual), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.',
     category: 'batch',
     scopes: ['read:batch'],
     http: { method: 'GET', path: '/api/batch/runtime' },

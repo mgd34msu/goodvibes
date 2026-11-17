@@ -262,10 +262,14 @@ only while the surface is switched on.
 
 ## Allowlists
 
-A direct conversation is admitted when the surface's user list is empty or
-holds its sender. A group, channel or thread is admitted when the conversation
-is on the group or channel list, or its sender is on the user list. Empty lists
-restrict nobody.
+Every list that is set must admit a message; an empty list restricts nobody.
+A group, channel or thread is admitted when it is on the group list (if one is
+set), on the channel list (if one is set), and its sender is on the user list
+(if one is set): listing a group and a user admits that user in that group, not
+everyone in it, and not that user in other groups. A direct conversation is
+judged by the user list when one is set. When only group or channel lists are
+set, the surface is restricted to those conversations: a direct message is
+admitted only from the surface's owner, or when the chat itself is listed.
 
 A surface with every list empty has no owner yet. The first message from an
 unknown sender is not answered; it raises an owner claim in the owner inbox

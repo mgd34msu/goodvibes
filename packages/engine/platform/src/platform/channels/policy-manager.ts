@@ -119,6 +119,8 @@ export interface ChannelAllowlists {
   readonly allowlistUserIds: readonly string[];
   readonly allowlistGroupIds: readonly string[];
   readonly allowlistChannelIds: readonly string[];
+  /** The surface's recorded owner, admitted to a direct conversation when only conversation lists are set. */
+  readonly ownerId?: string | undefined;
 }
 
 /** The conversation a message (or a would-be sender) is in. */
@@ -134,37 +136,45 @@ export interface ChannelAllowlistSubject {
  * Who the allowlists admit. One rule, read by ingress, by actor checks and by
  * the allowlist edit's lock-out check:
  *
- * - A direct conversation is judged by the user list alone. Adapters pass a
- *   direct chat's id as its group id, and judging it against the group list
- *   refused the owner's own direct chat the moment any group was listed.
- * - A shared conversation (group, channel, thread) is admitted when the
- *   conversation is on the group or channel list, OR its sender is on the user
- *   list. A listed group admits everyone in it; a listed person is admitted
- *   wherever they write.
- * - An empty list restricts nobody; when every list that applies is empty the
- *   message is admitted. Every list empty also means the surface has no owner
- *   yet, which `decideIngress` turns into an owner claim unless the surface is
- *   `open`.
+ * - Every list that is set must admit the message; an empty list restricts
+ *   nobody. When every list that applies is empty the message is admitted;
+ *   that also means the surface has no owner yet, which `decideIngress` turns
+ *   into an owner claim unless the surface is `open`.
+ * - A shared conversation (group, channel, thread) must be on the group list
+ *   when one is set, on the channel list when one is set, and its sender on
+ *   the user list when one is set. A listed group admits only the listed
+ *   people in it when a user list is set, and a listed person is admitted only
+ *   in the listed groups and channels.
+ * - A direct conversation is judged by the user list when one is set; adapters
+ *   pass a direct chat's id as its group id, and judging it against the group
+ *   list would refuse the owner's own direct chat the moment any group was
+ *   listed. When only group or channel lists are set the owner restricted the
+ *   surface to those conversations: a direct message is admitted only from the
+ *   recorded owner or when the chat itself is listed.
  */
 export function admitByAllowlists(
   lists: ChannelAllowlists,
   subject: ChannelAllowlistSubject,
 ): { readonly allowed: true } | { readonly allowed: false; readonly reason: string } {
   const users = lists.allowlistUserIds;
-  const senderListed = subject.userId !== undefined && users.includes(subject.userId);
-  if (subject.conversationKind === 'direct') {
-    if (users.length === 0 || senderListed) return { allowed: true };
-    return { allowed: false, reason: subject.userId ? 'user-not-allowlisted' : 'missing-user-identity' };
-  }
   const groups = lists.allowlistGroupIds;
   const channels = lists.allowlistChannelIds;
-  if (users.length === 0 && groups.length === 0 && channels.length === 0) return { allowed: true };
-  const conversationListed = (subject.groupId !== undefined && groups.includes(subject.groupId))
-    || (subject.channelId !== undefined && channels.includes(subject.channelId));
-  if (conversationListed || senderListed) return { allowed: true };
-  if (groups.length > 0) return { allowed: false, reason: subject.groupId ? 'group-not-allowlisted' : 'missing-group-identity' };
-  if (channels.length > 0) return { allowed: false, reason: subject.channelId ? 'channel-not-allowlisted' : 'missing-channel-identity' };
-  return { allowed: false, reason: subject.userId ? 'user-not-allowlisted' : 'missing-user-identity' };
+  const userRefusal = users.length > 0 && !(subject.userId !== undefined && users.includes(subject.userId))
+    ? (subject.userId ? 'user-not-allowlisted' : 'missing-user-identity')
+    : undefined;
+  const groupListed = subject.groupId !== undefined && groups.includes(subject.groupId);
+  const channelListed = subject.channelId !== undefined && channels.includes(subject.channelId);
+  if (subject.conversationKind === 'direct') {
+    if (userRefusal !== undefined) return { allowed: false, reason: userRefusal };
+    if (users.length > 0 || (groups.length === 0 && channels.length === 0)) return { allowed: true };
+    if (groupListed || channelListed) return { allowed: true };
+    if (subject.userId !== undefined && lists.ownerId !== undefined && subject.userId === lists.ownerId) return { allowed: true };
+    return { allowed: false, reason: subject.userId ? 'direct-not-allowlisted' : 'missing-user-identity' };
+  }
+  if (groups.length > 0 && !groupListed) return { allowed: false, reason: subject.groupId ? 'group-not-allowlisted' : 'missing-group-identity' };
+  if (channels.length > 0 && !channelListed) return { allowed: false, reason: subject.channelId ? 'channel-not-allowlisted' : 'missing-channel-identity' };
+  if (userRefusal !== undefined) return { allowed: false, reason: userRefusal };
+  return { allowed: true };
 }
 
 /**
@@ -187,9 +197,17 @@ export function describeActorAdmission(
   if (decision.allowed) {
     return {
       admitted: true,
-      reason: policy.allowlistUserIds.length === 0
-        ? (policy.open ? 'The surface policy is open: any sender may write to it.' : 'The surface has no user list, so a direct sender is admitted.')
-        : `Actor '${actorId}' is on the surface's user list.`,
+      reason: policy.allowlistUserIds.length > 0
+        ? `Actor '${actorId}' is on the surface's user list.`
+        : !unowned
+          ? `Actor '${actorId}' is the surface's owner.`
+          : policy.open ? 'The surface policy is open: any sender may write to it.' : 'The surface has no user list, so a direct sender is admitted.',
+    };
+  }
+  if (decision.reason === 'direct-not-allowlisted') {
+    return {
+      admitted: false,
+      reason: `The surface admits only its listed groups and channels and its owner, and actor '${actorId}' is neither; add them with the allowlist edit action (kind user) first.`,
     };
   }
   return {
@@ -627,7 +645,7 @@ export class ChannelPolicyManager {
       && Boolean(command)
       && isAuthorizedControlCommand;
     const listed = admitByAllowlists(
-      { allowlistUserIds, allowlistGroupIds, allowlistChannelIds },
+      { allowlistUserIds, allowlistGroupIds, allowlistChannelIds, ownerId: policy.ownerId },
       { conversationKind: parentKind === 'direct' ? 'direct' : conversationKind, userId: input.userId, groupId: input.groupId, channelId: input.channelId },
     );
     let allowed = true;

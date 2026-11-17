@@ -528,8 +528,9 @@ export async function editBuiltinAllowlist(
 }
 
 /** The rule the edited lists are applied by (admitByAllowlists), stated in every edit result. */
-const ALLOWLIST_RULE = 'A direct conversation is admitted when the user list is empty or holds its sender. A group, channel or thread is '
-  + 'admitted when its conversation is on the group or channel list, or its sender is on the user list; empty lists restrict nobody.';
+const ALLOWLIST_RULE = 'Every list that is set must admit a message; empty lists restrict nobody. A group, channel or thread must be on the '
+  + 'group list and the channel list when each is set, and its sender on the user list when it is set. A direct conversation is judged by '
+  + 'the user list when it is set; with only group or channel lists set, only the owner (or a listed chat) is admitted directly.';
 
 /**
  * Refuse an edit that would shut out the caller: their own conversation when

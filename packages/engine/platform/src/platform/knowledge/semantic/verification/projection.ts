@@ -182,7 +182,7 @@ export function projectSupportInput(input: GeneratedFactSupportInput, labels?: S
   }
   // Detach the request/plan from caller-owned objects before the first await.
   const snapshot = JSON.parse(JSON.stringify({ state, fields, subjects, claim })) as {
-    state: JsonValue; fields: typeof fields; subjects: { originalId: string; state: ReturnType<typeof subjectProjection> }[]; claim: typeof claim;
+    state: SupportProjectionState; fields: typeof fields; subjects: { originalId: string; state: ReturnType<typeof subjectProjection> }[]; claim: typeof claim;
   };
   const projection = freezeSupport({ ...snapshot, spaceId, claimId: claim.id, sourceId: source.id,
     extractionId: extraction.id, extractionUpdatedAt: extraction.updatedAt });
@@ -190,4 +190,8 @@ export function projectSupportInput(input: GeneratedFactSupportInput, labels?: S
     claim: captureOwnedJson(claim), subjects: Object.freeze(input.subjects.map(subject => captureOwnedJson(subject))) }));
   return projection;
 }
+/** The judgment state of one input, as plain JSON: what the reader sends for its claim, source, extraction and subjects. */
+export type SupportProjectionState = {
+  spaceId: string; claim: JsonValue; source: JsonValue; extraction: JsonValue; subjects: JsonValue[];
+};
 export type ProjectedSupportInput = ReturnType<typeof projectSupportInput>;

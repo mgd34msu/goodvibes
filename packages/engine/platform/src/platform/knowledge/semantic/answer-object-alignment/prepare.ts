@@ -6,7 +6,7 @@ import { knowledgeTerms } from '../../passages.js';
 import { isActiveKnowledgeEdge } from '../../projection-utils.js';
 import { getExplicitKnowledgeSpaceId, getKnowledgeSpaceId, isHomeAssistantKnowledgeSpace } from '../../spaces.js';
 import type { KnowledgeStore } from '../../store.js';
-import type { KnowledgeEdgeRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../../types.js';
+import type { KnowledgeEdgeRecord, KnowledgeNodeRecord, KnowledgeReferenceKind, KnowledgeSourceRecord } from '../../types.js';
 import type { EvidenceItem } from '../answer-common.js';
 import { freezeSupport } from '../verification/projection.js';
 import type { KnowledgeSemanticAnswerInput } from '../types.js';
@@ -177,7 +177,7 @@ export function prepareAnswerLinkedObjects(store: KnowledgeStore, spaceId: strin
       const references = new Map<string, string>();
       ranked.forEach((entry, index) => references.set(entry.node.id, `object-${index + 1}`));
       let context = 0;
-      const contextReference = (kind: 'node' | 'source', id: string) => {
+      const contextReference = (kind: KnowledgeReferenceKind, id: string) => {
         if (kind === 'node' && references.has(id)) return references.get(id);
         const key = `${kind}:${id}`;
         if (!references.has(key)) references.set(key, `context-${++context}`);

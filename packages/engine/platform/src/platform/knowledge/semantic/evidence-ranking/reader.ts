@@ -1,6 +1,6 @@
 import { activateClassicFallback } from '../../../runtime/decision-policy.js';
 import { DecisionModelsDisabledError, judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
-import { toJson, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { toJson, type JsonValue, type JudgmentPort, type JudgmentRequest, type JudgmentResult, type Questions } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput } from '../../../gate/judgment-input.js';
 import { freezeSupport } from '../verification/projection.js';
 import { answerEvidenceRelevance } from './battery.js';
@@ -49,9 +49,9 @@ function jsonState(value: object): Record<string, JsonValue> {
   return freezeSupport(state);
 }
 function validatedPort(port: JudgmentPort, beforeAsk: () => void): JudgmentPort {
-  return { ...port, model: port.model, async ask(request) {
+  return { ...port, model: port.model, async ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
     beforeAsk();
-    let result: Awaited<ReturnType<JudgmentPort['ask']>>;
+    let result: JudgmentResult<Q>;
     // Only a failure of the request itself means the model could not be reached.
     try { result = await port.ask(request); }
     catch (error) {

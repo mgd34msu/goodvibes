@@ -116,7 +116,7 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
   // request; an identical claim with the same subjects is read once.
   const groups = new Map<string, SourceGroup>();
   const slotsByInput = projections.map((input) => {
-    const state = input.state as { readonly claim: JsonValue; readonly source: JsonValue; readonly extraction: JsonValue; readonly subjects: readonly JsonValue[] };
+    const state = input.state;
     const groupKey = JSON.stringify([input.sourceId, input.extractionId]);
     let group = groups.get(groupKey);
     if (!group) { group = { source: state.source, extraction: state.extraction, jobs: [], keys: new Map() }; groups.set(groupKey, group); }

@@ -159,7 +159,7 @@ Every error thrown by the platform's public surface is an instance of `GoodVibes
 
 Daemon HTTP routes return structured error bodies with a `code` string that is separate from the platform-layer `kind` discriminant. These codes appear in route-specific error responses and are not `GoodVibesError` instances. They are HTTP error body fields returned by the daemon before the platform maps them to a `GoodVibesError`.
 
-Route-level codes are not standardized across the daemon, except a missing or invalid credential: every route and listener answers it with the same 401 body, code `AUTH_REQUIRED`, category `authentication` and guidance. Treat the table as a sample of codes actually in use, not an exhaustive or normalized catalog:
+Route-level codes are not standardized across the daemon, except a missing or invalid credential: every route and listener, the WebSocket upgrade and the remote-peer routes included, answers it with the same 401 body, code `AUTH_REQUIRED`, category `authentication` and guidance (the guidance names the credential that route takes), and a refused control-plane WebSocket `auth` frame carries the same `code` and `category`. A channel webhook whose provider signature does not verify is refused by that channel's adapter, not with this body. Treat the table as a sample of codes actually in use, not an exhaustive or normalized catalog:
 
 | Code | HTTP Status | Meaning |
 |------|-------------|----------|

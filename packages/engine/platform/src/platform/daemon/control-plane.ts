@@ -34,7 +34,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
-import { authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
+import { AUTHENTICATION_REQUIRED_GUIDANCE, authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
   type AuthenticatedPrincipal,
@@ -538,7 +538,7 @@ export class DaemonControlPlaneHelper {
     );
     if (!auth) {
       this.recordRefusedCredential(req);
-      return Response.json({ error: 'Unauthorized remote peer' }, { status: 401 });
+      return authenticationRequiredResponse('Send this daemon a valid remote peer token (Authorization: Bearer) issued when the peer was paired; pair the peer again if its token was revoked or expired.');
     }
     if (scope && !auth.token.scopes.includes(scope)) {
       return jsonErrorResponse({ error: `Remote peer token missing required scope: ${scope}`, code: 'MISSING_SCOPE',
@@ -723,11 +723,10 @@ export class DaemonControlPlaneHelper {
     const principal = this.authenticateRequest(req)?.principal;
     if (!principal) {
       this.recordRefusedCredential(req);
-      const error = 'Unauthorized: the WebSocket upgrade request itself must authenticate. Send an '
+      return authenticationRequiredResponse('The WebSocket upgrade request itself must authenticate. Send an '
         + 'Authorization: Bearer token header on the upgrade (React Native and server runtimes support '
         + 'WebSocket constructor headers) or present an operator session cookie (same-origin browser '
-        + 'session login). The in-band auth frame is only read after an authenticated upgrade.';
-      return Response.json({ error }, { status: 401 });
+        + 'session login). The in-band auth frame is only read after an authenticated upgrade.');
     }
     const origin = req.headers.get('origin');
     const bearer = /^Bearer\s+\S+/i.test(req.headers.get('authorization') ?? '');
@@ -899,8 +898,12 @@ export class DaemonControlPlaneHelper {
       const principal = this.describeRequestPrincipal(token, ws.data.localOrigin === true);
       if (!principal) {
         this.authFailures.record(ws.data.remoteAddress ?? 'unknown', 'control-plane');
-        this.sendFrame(ws, JSON.stringify({ type: 'auth', ok: false, error: 'Unauthorized' }));
-        this.closeRefusedAuth(ws, 'Unauthorized');
+        // The same refusal an HTTP route gives, as a frame.
+        this.sendFrame(ws, JSON.stringify({
+          type: 'auth', ok: false, error: 'Authentication required', code: 'AUTH_REQUIRED', category: 'authentication',
+          guidance: AUTHENTICATION_REQUIRED_GUIDANCE,
+        }));
+        this.closeRefusedAuth(ws, 'Authentication required');
         return;
       }
       const domains = Array.isArray(frame.domains) ? normalizeFrameDomains(frame.domains) : undefined;

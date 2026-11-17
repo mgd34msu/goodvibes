@@ -590,18 +590,23 @@ export function jsonErrorResponse(error: unknown, options: JsonErrorResponseOpti
   return responseFor(buildErrorResponseBody(error, options), options);
 }
 
+/** What a caller without a valid operator credential is told to do. */
+export const AUTHENTICATION_REQUIRED_GUIDANCE = 'Authenticate with the operator shared token or an authenticated user session before calling daemon APIs.';
+
 /**
  * The one answer for a request without a valid credential, on every route
  * and listener: code `AUTH_REQUIRED`, category `authentication`, and what to
- * do, so a client or an agent matches one refusal.
+ * do, so a client or an agent matches one refusal. `guidance` replaces the
+ * default next step where the credential is a different one (a remote peer
+ * token) or must arrive another way (on a WebSocket upgrade).
  */
-export function authenticationRequiredResponse(): Response {
+export function authenticationRequiredResponse(guidance: string = AUTHENTICATION_REQUIRED_GUIDANCE): Response {
   return jsonErrorResponse({
     error: 'Authentication required',
     code: 'AUTH_REQUIRED',
     category: 'authentication',
     source: 'runtime',
-    guidance: 'Authenticate with the operator shared token or an authenticated user session before calling daemon APIs.',
+    guidance,
   }, { status: 401 });
 }
 

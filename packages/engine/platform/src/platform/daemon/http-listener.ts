@@ -20,6 +20,7 @@ import { AddressRateLimiter } from '@goodvibes-jev/engine/daemon-api';
 import { resolveClientAddress } from './client-address.js';
 import { handleOperatorLogin, SIGN_IN_ATTEMPTS_PER_MINUTE } from './operator-login.js';
 import { parseDaemonJsonBody } from './http/router-request-body.js';
+import { authenticationRequiredResponse } from './http/error-response.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitAuthFailed } from '../runtime/emitters/security.js';
 
@@ -444,7 +445,7 @@ export class HttpListener {
     if (!this.checkAuth(req)) {
       // A request with no credential is a probe, answered 401 and not reported as a failed sign-in.
       if (extractOperatorAuthToken(req)) this.emitAuthFailed(requestId, clientIp);
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      return authenticationRequiredResponse();
     }
 
     const { pathname, method } = { pathname: url.pathname, method: req.method };

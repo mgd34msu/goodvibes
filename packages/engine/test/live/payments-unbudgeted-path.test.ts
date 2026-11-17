@@ -2,6 +2,8 @@
 // Red when: The browser click path stops asking whether a control places an order or loses its name, Enter or a submitting type in the order form is not treated as an order, or a key pressed on the order control itself is not refused.
 // Proves: After the daemon typed the card into a real page, a snapshot, text read, extract or screenshot through the browser tool returns the number to the model.
 // Red when: The browser engine's screenshot stops asking the card guard while the card is live on the page, so the typed number goes out as an image.
+// Proves: A click that reached the merchant and then timed out is reported as never sent, so the hold is released and the record closed for an order that may exist.
+// Red when: The payment flow's click, once dispatched to the page, ends in an error other than outcome-unknown when it does not finish.
 /**
  * An order cannot be placed around the spending limits. A merchant's saved
  * payment method lets one click on "Place order" charge the card, so the
@@ -36,7 +38,7 @@ import { executeToolCalls, type ToolExecutionDeps } from '../../platform/src/pla
 import { HeldForOwnerLedger } from '../../platform/src/platform/permissions/held-for-owner.ts';
 import { createPermissionConfigReader, PermissionManager } from '../../platform/src/platform/permissions/manager.ts';
 import { PolicyRuntimeState } from '../../platform/src/platform/runtime/permissions/policy-runtime.ts';
-import { ORDER_SUBMIT_REFUSAL_FIX } from '../../platform/src/platform/security/order-submission.ts';
+import { markPaymentCheckoutAction, ORDER_SUBMIT_REFUSAL_FIX } from '../../platform/src/platform/security/order-submission.ts';
 import { ToolRegistry } from '../../platform/src/platform/tools/registry.ts';
 import type { ToolResult } from '../../platform/src/platform/types/tools.ts';
 import { registerAgentBrowserTool } from '../../terminal-shell/src/agent-turn/browser-tool.ts';
@@ -54,12 +56,14 @@ const CHECKOUT = `<!doctype html><title>Checkout</title><h1>Checkout</h1>
 </form>
 <a href="#" onclick="fetch('/order', { method: 'POST', body: 'buy-now' }); return false;">Buy now</a>
 <button type="button" onclick="fetch('/order', { method: 'POST', body: 'pay-now' })">Pay now</button>
-<button type="button" onclick="fetch('/coupon', { method: 'POST', body: 'SAVE10' })">Apply coupon</button>`;
+<button type="button" onclick="fetch('/coupon', { method: 'POST', body: 'SAVE10' })">Apply coupon</button>
+<button type="button" onclick="const held = new XMLHttpRequest(); held.open('POST', '/held-order', false); held.send('confirm');">Confirm and pay</button>`;
 
 /** The merchant: serves the page and records every POST by path. */
 function startMerchant() {
   const posts: { readonly path: string; readonly body: string }[] = [];
   const waiting = new Map<string, (() => void)[]>();
+  let release: () => void = () => {};
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -68,6 +72,8 @@ function startMerchant() {
       if (request.method !== 'POST') return new Response(CHECKOUT, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       posts.push({ path, body: await request.text() });
       for (const arrived of waiting.get(path)?.splice(0) ?? []) arrived();
+      // This order's answer is held until the test lets it go, as a merchant that is slow to confirm.
+      if (path === '/held-order') await new Promise<void>(resolve => { release = resolve; });
       return new Response('<!doctype html><title>Thank you</title><p>Received.</p>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
     },
   });
@@ -78,6 +84,8 @@ function startMerchant() {
     clear: () => { posts.length = 0; },
     /** Resolves when the next POST to `path` arrives. */
     next: (path: string) => new Promise<void>(resolve => { waiting.set(path, [...(waiting.get(path) ?? []), resolve]); }),
+    /** Lets the held order's answer go. */
+    release: () => release(),
     stop: () => server.stop(true),
   };
 }
@@ -188,4 +196,19 @@ test('once the daemon has typed the card into the page, a screenshot through the
   const capture = await call({ action: 'screenshot' });
   expect(capture.success).toBe(false);
   expect(JSON.stringify(capture).replace(/\D/g, '')).not.toContain(pan);
+});
+
+test('a payment click the merchant received but never answered is reported as outcome unknown, not as never sent', async () => {
+  expect((await call({ action: 'navigate', url: merchant.url })).success).toBe(true);
+  const page = JSON.parse((await call({ action: 'snapshot' })).output!) as { sessionId: string; pageId: string; elements: { ref: string; name: string }[] };
+  const confirm = page.elements.find(element => element.name === 'Confirm and pay')!.ref;
+  // The click as the payment flow makes it, with a one-second deadline.
+  const owner = { assertCurrent: () => {} };
+  markPaymentCheckoutAction(owner);
+  const arrived = merchant.next('/held-order');
+  const clicked = browser.click({ sessionId: page.sessionId, pageId: page.pageId }, { ref: confirm, timeoutMs: 1_000 }, owner).then(() => null, (error: unknown) => error);
+  await arrived;
+  const failure = await clicked;
+  merchant.release();
+  expect((failure as Error | null)?.name).toBe('BrowserClickOutcomeUnknownError');
 });

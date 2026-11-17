@@ -742,6 +742,12 @@ export class SQLiteStore {
    * Write `operation` in one immediate transaction, after `assertCurrent`
    * passed inside it; then `onCommit` mirrors the change. A throw anywhere
    * before the commit leaves the store as it was.
+   *
+   * The check runs once inside the transaction, before the writes: the
+   * transaction is immediate and the operation synchronous, so nothing else
+   * can change the state in between. Checking again after the writes read the
+   * operation's own rows back from the file and refused every publication
+   * that adds a row the check watches (every knowledge ingest).
    */
   publishPrepared(operation: (db: SqlDatabase) => void, assertCurrent: () => void, onCommit: () => void): Promise<void> {
     try {
@@ -749,7 +755,6 @@ export class SQLiteStore {
       this.#writeTransaction(() => {
         assertSynchronous(assertCurrent, 'SQLiteStore: the currency check must be synchronous');
         assertSynchronous(() => operation(this.#adapter), 'SQLiteStore: prepared operation must be synchronous and return no value');
-        assertSynchronous(assertCurrent, 'SQLiteStore: the currency check must be synchronous');
       });
     } catch (error) { return Promise.reject(error); }
     try { onCommit(); } catch (error) { return Promise.reject(new SQLitePublishedButFencedError(error)); }

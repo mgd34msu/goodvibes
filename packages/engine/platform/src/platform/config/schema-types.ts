@@ -285,19 +285,20 @@ export interface ConfigSetting {
 type ObjectValuedConfigKey = 'provider.decisionRouter' | 'judgment.volumeMonitor' | 'judgment.backend';
 
 /**
- * The dot paths of every leaf of `T`: a scalar, a list, a map keyed by any
+ * The dot paths of every leaf of `T`: a scalar, a list (or a value that may be
+ * one, like a worktree setup list or its `{ mode }`), a map keyed by any
  * string, or an object-valued setting. Optional fields are keys like the rest.
  */
 type ConfigLeafPaths<T, Prefix extends string> = {
   [Name in keyof T & string]-?: `${Prefix}${Name}` extends ObjectValuedConfigKey
     ? `${Prefix}${Name}`
-    : Exclude<T[Name], undefined> extends readonly unknown[]
-      ? `${Prefix}${Name}`
-      : Exclude<T[Name], undefined> extends object
+    : [Extract<Exclude<T[Name], undefined>, readonly unknown[]>] extends [never]
+      ? Exclude<T[Name], undefined> extends object
         ? string extends keyof Exclude<T[Name], undefined>
           ? `${Prefix}${Name}`
           : ConfigLeafPaths<Exclude<T[Name], undefined>, `${Prefix}${Name}.`>
-        : `${Prefix}${Name}`;
+        : `${Prefix}${Name}`
+      : `${Prefix}${Name}`;
 }[keyof T & string];
 
 /**

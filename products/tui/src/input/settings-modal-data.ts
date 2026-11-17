@@ -25,8 +25,8 @@ import {
   formatWorktreeSetupEditText,
   isWorktreeSetupListConfigKey,
   readWorktreeSetupSetting,
-  worktreeSetupSettingValue,
 } from './worktree-setup-config.ts';
+import { worktreeSetupSettingValue } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT, readBudgetAlertUsd } from '@goodvibes-jev/engine/platform/platform/providers';
 import { MEMORY_PROJECTION_DIR_CONFIG_KEY, buildMemoryProjectionDirSyntheticEntry } from './commands/recall-files-config.ts';
 import {

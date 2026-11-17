@@ -53,7 +53,7 @@ import type {
   CalendarGatewayUpdated,
   CalendarGatewayUpdateInput,
 } from '../control-plane/routes/calendar.js';
-import { CalDavClient, type CalDavHttpPort } from '../google/caldav-client.js';
+import { CalDavClient, withinCredentialPin, type CalDavHttpPort } from '../google/caldav-client.js';
 import { isCalendarResourceType, parseMultistatus } from '../google/caldav-parse.js';
 import { parseICSDetailed, splitICalDocument, type ICalComponentBlock, type ParsedICalEvent } from './caldav-ics.js';
 import { buildCalendarObject, eventToVEvent, foldLine, generateICS, ICalValueError, type GenerateICalInput } from './caldav-ics-generate.js';
@@ -350,6 +350,75 @@ export function createCalDavCalendarGatewayService(
     return { config, request: createCalDavRequest(options.http, config) };
   }
 
+  /**
+   * Where each calendar the server advertised lives, by logical id, per
+   * configured address and account: the collection URL the server named,
+   * which can sit below the configured path or on a sibling host of the same
+   * domain (iCloud names `p42-caldav.icloud.com` for an account configured as
+   * `caldav.icloud.com`). A read goes there instead of to a path guessed from
+   * the id. Only URLs the credentials may go to are kept.
+   */
+  const discoveredCollections = new Map<string, { readonly at: number; readonly urls: ReadonlyMap<string, string> }>();
+  const REDISCOVER_AFTER_MS = 60_000;
+  const discoveryKey = (config: CalDavGatewayConfig): string => `${config.baseUrl}\n${config.username}`;
+
+  /** The calendars the server advertises, remembering where each one lives. */
+  async function findCalendars(config: CalDavGatewayConfig, request: CalDavRequest): Promise<readonly CalDavCalendarSummary[]> {
+    const urls = new Map<string, string>();
+    const remember = (calendarId: string, href: string): void => {
+      let url: string;
+      try { url = new URL(href, config.baseUrl).href; } catch { return; }
+      if (!urls.has(calendarId) && withinCredentialPin(config.baseUrl, url)) urls.set(calendarId, stripTrailingSlash(url));
+    };
+    const response = await request(
+      stripTrailingSlash(config.baseUrl),
+      'PROPFIND',
+      propfindCalendarsBody(),
+      { Depth: '1' },
+    );
+    let calendars: readonly CalDavCalendarSummary[] = collectionsFrom(response.body, config.defaultCalendarId, remember);
+    if (calendars.length === 0) {
+      // The configured URL is not itself a calendar home (a server root, or a
+      // principal URL). Chain the standard discovery, current-user-principal,
+      // then calendar-home-set, then the collections under it, through the
+      // hoisted client, which speaks exactly those three PROPFINDs.
+      const discovered = await new CalDavClient({
+        http: options.http,
+        auth: { kind: 'basic', username: config.username, password: config.password },
+      }).discover(config.baseUrl);
+      if (discovered.ok) {
+        calendars = discovered.calendars.map((calendar) => {
+          const calendarId = logicalIdFor(toRelativeHref(calendar.href), config.defaultCalendarId);
+          remember(calendarId, calendar.href);
+          return { calendarId, displayName: calendar.displayName.length > 0 ? calendar.displayName : calendarId };
+        });
+      }
+    }
+    discoveredCollections.set(discoveryKey(config), { at: now(), urls });
+    return calendars;
+  }
+
+  /**
+   * The collection URL for a logical calendar id: the default calendar and an
+   * id the owner mapped resolve from configuration; any other id resolves to
+   * where the server said that calendar lives, asking the server once when
+   * nothing is known yet; an id the server never named keeps the configured
+   * guess (a child collection of the base URL).
+   */
+  async function collectionUrlOf(config: CalDavGatewayConfig, request: CalDavRequest, calendarId: string): Promise<string> {
+    if (calendarId === config.defaultCalendarId || config.collectionMap[calendarId]) return collectionUrlFor(config, calendarId);
+    let known = discoveredCollections.get(discoveryKey(config));
+    if (known === undefined || (!known.urls.has(calendarId) && now() - known.at > REDISCOVER_AFTER_MS)) {
+      try {
+        await findCalendars(config, request);
+      } catch (error) {
+        logger.debug('CalDAV calendar discovery failed; using the configured calendar path', { error: error instanceof Error ? error.message : String(error) });
+      }
+      known = discoveredCollections.get(discoveryKey(config));
+    }
+    return known?.urls.get(calendarId) ?? collectionUrlFor(config, calendarId);
+  }
+
   function stampNow(): string {
     return new Date(now()).toISOString();
   }
@@ -423,7 +492,7 @@ export function createCalDavCalendarGatewayService(
       ? input.calendarId
       : config.defaultCalendarId;
     const response = await request(
-      collectionUrlFor(config, calendarId),
+      await collectionUrlOf(config, request, calendarId),
       'REPORT',
       calendarQueryBody(input.from, input.to, { expand }),
       { Depth: '1' },
@@ -445,7 +514,7 @@ export function createCalDavCalendarGatewayService(
     ics: string,
     guardAgainstOverwrite: boolean,
   ): Promise<string> {
-    const collectionUrl = collectionUrlFor(config, calendarId);
+    const collectionUrl = await collectionUrlOf(config, request, calendarId);
     const resourcePath = `${resourceName}.ics`;
     const response = await request(
       joinUrl(collectionUrl, resourcePath),
@@ -479,7 +548,7 @@ export function createCalDavCalendarGatewayService(
   }> {
     const { config, request } = await connect();
     const id = calendarId && calendarId.length > 0 ? calendarId : config.defaultCalendarId;
-    const collectionUrl = collectionUrlFor(config, id);
+    const collectionUrl = await collectionUrlOf(config, request, id);
     let href = eventId;
     if (!isHrefLike(eventId)) {
       const response = await request(collectionUrl, 'REPORT', calendarQueryByUidBody(eventId), { Depth: '1' });
@@ -613,31 +682,8 @@ export function createCalDavCalendarGatewayService(
 
     async listCalendars(): Promise<readonly CalDavCalendarSummary[]> {
       const { config, request } = await connect();
-      const response = await request(
-        stripTrailingSlash(config.baseUrl),
-        'PROPFIND',
-        propfindCalendarsBody(),
-        { Depth: '1' },
-      );
-      const calendars = collectionsFrom(response.body, config.defaultCalendarId);
+      const calendars = await findCalendars(config, request);
       if (calendars.length > 0) return calendars;
-
-      // The configured URL is not itself a calendar home (a server root, or a
-      // principal URL). Chain the standard discovery, current-user-principal,
-      // then calendar-home-set, then the collections under it, through the
-      // hoisted client, which speaks exactly those three PROPFINDs.
-      const discovered = await new CalDavClient({
-        http: options.http,
-        auth: { kind: 'basic', username: config.username, password: config.password },
-      }).discover(config.baseUrl);
-      if (discovered.ok && discovered.calendars.length > 0) {
-        return discovered.calendars.map((calendar) => ({
-          calendarId: logicalIdFor(toRelativeHref(calendar.href), config.defaultCalendarId),
-          displayName: calendar.displayName.length > 0
-            ? calendar.displayName
-            : logicalIdFor(toRelativeHref(calendar.href), config.defaultCalendarId),
-        }));
-      }
       // Nothing advertised a calendar collection. The configured default is
       // still a usable answer, it is the collection every other verb writes
       // to, and is a better reply than an empty list that reads as "you have
@@ -684,7 +730,7 @@ export function createCalDavCalendarGatewayService(
     ): Promise<CalendarGatewayEventDetail> {
       const { config, request } = await connect();
       const id = calendarId && calendarId.length > 0 ? calendarId : config.defaultCalendarId;
-      const collectionUrl = collectionUrlFor(config, id);
+      const collectionUrl = await collectionUrlOf(config, request, id);
 
       // Strategy 1, an href-like identifier (a path, or a *.ics resource
       // name): resolve it to a single resource URL and GET that. A true
@@ -900,8 +946,8 @@ function logicalIdFor(relativeHref: string, fallback: string): string {
   return last === undefined ? fallback : decodeURIComponent(last);
 }
 
-/** Calendar collections in a PROPFIND multistatus body, de-duplicated by logical id. */
-function collectionsFrom(xml: string, fallbackId: string): CalDavCalendarSummary[] {
+/** Calendar collections in a PROPFIND multistatus body, de-duplicated by logical id; `found` hears each one's href. */
+function collectionsFrom(xml: string, fallbackId: string, found?: (calendarId: string, href: string) => void): CalDavCalendarSummary[] {
   const calendars: CalDavCalendarSummary[] = [];
   const seen = new Set<string>();
   for (const entry of parseMultistatus(xml)) {
@@ -909,6 +955,7 @@ function collectionsFrom(xml: string, fallbackId: string): CalDavCalendarSummary
     const logical = logicalIdFor(toRelativeHref(entry.href), fallbackId);
     if (seen.has(logical)) continue;
     seen.add(logical);
+    found?.(logical, entry.href);
     const displayName = entry.props['displayname'];
     calendars.push({
       calendarId: logical,

@@ -246,13 +246,16 @@ export function isHrefLike(eventId: string): boolean {
 
 /**
  * An href-like identifier as an absolute, authenticated resource URL for a
- * direct GET. A host-absolute href resolves against the base URL's origin;
+ * direct GET. A host-absolute href resolves against the collection's origin
+ * (a discovered calendar can live on a sibling host of the configured one,
+ * as iCloud's do), or the base URL's when the collection has no origin;
  * anything else is a resource name inside the target collection.
  */
 export function resolveResourceUrl(collectionUrl: string, baseUrl: string, eventId: string): string {
   const trimmed = eventId.trim();
+  const origin = /^https?:\/\//i.test(collectionUrl.trim()) ? originOf(collectionUrl) : originOf(baseUrl);
   const candidate = trimmed.startsWith('/')
-    ? `${originOf(baseUrl)}${trimmed}`
+    ? `${origin}${trimmed}`
     : joinUrl(collectionUrl, trimmed);
   // `..` segments are resolved by the HTTP client, so an id could otherwise
   // name any path on the server under the account's credentials.

@@ -27,6 +27,10 @@ export const CURATED_PRIVATE_SUFFIXES: readonly string[] = [
   'github.io', 'gitlab.io', 'pages.dev', 'workers.dev', 'vercel.app', 'netlify.app',
   'herokuapp.com', 'azurewebsites.net', 'cloudfront.net', 'r2.dev', 'web.app', 'firebaseapp.com',
   's3.amazonaws.com', 'blogspot.com', 'wordpress.com', 'sharepoint.com', 'myshopify.com',
+  // Dynamic-DNS names: every customer's home server sits under one of these,
+  // so two of them are different registrants and must never share credentials.
+  'ddns.net', 'duckdns.org', 'dynu.net', 'dyndns.org', 'dynv6.net', 'hopto.org', 'mooo.com',
+  'myqnapcloud.com', 'synology.me', 'tplinkdns.com', 'zapto.org',
 ];
 
 export interface ParsedPublicSuffixList {

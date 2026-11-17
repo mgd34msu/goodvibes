@@ -266,6 +266,19 @@ function withinPin(pin: CredentialPin, target: URL): boolean {
   return domainOf(target.hostname) === pin.domain;
 }
 
+/**
+ * Whether `candidate` may receive the credentials chosen for `chosen`: the
+ * same pin a discovery follows (scheme, port and registrable domain, or the
+ * exact host for an address with none). False for anything that is not a URL.
+ */
+export function withinCredentialPin(chosen: string, candidate: string): boolean {
+  try {
+    return withinPin(credentialPin(new URL(chosen)), new URL(candidate));
+  } catch {
+    return false;
+  }
+}
+
 export class CalDavClient {
   private readonly http: CalDavHttpPort;
   private readonly auth: CalDavAuth;

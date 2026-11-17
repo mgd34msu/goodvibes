@@ -263,9 +263,9 @@ the sender. Accepting it puts that sender on the user list and records the
 policy's `ownerId` and `ownerSince`; declining it is remembered, so the same
 sender is not asked about again. At most three claims per surface are open at
 once. For a shared channel, set the surface policy `open: true`: every sender
-is admitted while the lists are empty and no claim is raised. A host without an
-owner inbox makes the first identified sender the owner and records the same
-two fields.
+is admitted while the lists are empty and no claim is raised. The daemon always
+raises claims; only an embedding host without an owner inbox makes the first
+identified sender the owner and records the same two fields.
 
 The surface's owner (`ownerId`) is the one sender who can answer a permission
 ask, a purchase approval or veto, and send `status`, `cancel` or `retry`. Anyone

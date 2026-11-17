@@ -172,15 +172,23 @@ export function admitByAllowlists(
  * why, in words a person or an agent can act on. The same rule ingress applies.
  */
 export function describeActorAdmission(
-  policy: ChannelAllowlists,
+  policy: ChannelAllowlists & { readonly open?: boolean | undefined },
   actorId: string | undefined,
 ): { readonly admitted: boolean; readonly reason: string } {
   const decision = admitByAllowlists(policy, { conversationKind: 'direct', userId: actorId });
+  const unowned = policy.allowlistUserIds.length === 0 && policy.allowlistGroupIds.length === 0 && policy.allowlistChannelIds.length === 0;
+  if (decision.allowed && unowned && !policy.open) {
+    // Nobody is admitted on an unowned surface until the owner accepts a claim: speaking first does not make anyone the owner.
+    return {
+      admitted: false,
+      reason: 'No owner is set on this surface yet. The first message from an unknown sender raises an owner claim (in /questions, or the web UI inbox); accept it to make that sender the owner, or set the surface policy open for a shared channel.',
+    };
+  }
   if (decision.allowed) {
     return {
       admitted: true,
       reason: policy.allowlistUserIds.length === 0
-        ? 'No owner is set on this surface yet. The first message from an unknown sender raises an owner claim (in /questions, or the web UI inbox); accept it to make that sender the owner, or set the surface policy open for a shared channel.'
+        ? (policy.open ? 'The surface policy is open: any sender may write to it.' : 'The surface has no user list, so a direct sender is admitted.')
         : `Actor '${actorId}' is on the surface's user list.`,
     };
   }

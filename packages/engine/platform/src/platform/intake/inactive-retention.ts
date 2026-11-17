@@ -1,14 +1,18 @@
 /** Workspace-owned deletion of expired local previews. No adapter, credentials,
- * source projection, judgment port, or scope-derived authorization is involved. */
-import { lstatSync, opendirSync, realpathSync, type Dir } from 'node:fs';
+ * source projection, judgment port, or scope-derived authorization is involved.
+ *
+ * An inbox mirror is a SQLite file in WAL mode. It is opened in place, under
+ * the mirror's owner lock, through the same SQLite the owner uses, so commits
+ * still in a `-wal` file after an unclean exit are part of what is read and
+ * the deletes land in the same journal; nothing is copied out and renamed
+ * back over the file. */
+import { chmodSync, lstatSync, opendirSync, realpathSync, type Dir } from 'node:fs';
 import { join } from 'node:path';
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { capturePrivateSqliteDirectory, readPrivateSqliteImage } from '../state/private-sqlite-path.js';
+import { capturePrivateSqliteDirectory } from '../state/private-sqlite-path.js';
+import { openSqliteFile, type SqliteFile } from '../state/sqlite-file.js';
 import { fileObservationIdentity } from '../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
-import { writeFileAtomic } from '../state/durable-file-io.js';
-import { loadSqlJsEngine, type SqlDatabase } from '../state/sqlite-store.js';
-import { createSqlJsDatabase } from '../state/sqljs-database.js';
 import { OwnedWork } from '../utils/owned-work.js';
 import { INBOX_SWEEP_INTERVAL_MS, isInboxRetentionPolicy, type InboxRetentionPolicy } from './cursor-store.js';
 import { isActiveInboxStore } from './active-stores.js';
@@ -53,6 +57,13 @@ function selectedStore(name: string): { provider?: string; lockName: string; his
   }
   const owned = /^inbox-owned-([0-9a-f]{64})\.sqlite$/.exec(name);
   return owned ? { lockName: `inbox-triage-${owned[1]!}.sqlite.owner.lock`, historicalNative: false } : null;
+}
+/** The two calls the checks below make, over the mirror's SQLite connection. */
+interface SqlDatabase {
+  exec(sql: string, params?: (string | number)[]): { readonly values: unknown[][] }[];
+}
+function sweepDatabase(file: SqliteFile): SqlDatabase {
+  return { exec(sql, params = []) { const values = file.db.query(sql).values(...params) as unknown[][]; return values.length ? [{ values }] : []; } };
 }
 function scalar(db: SqlDatabase, sql: string, params?: (string | number)[]): number {
   const value = db.exec(sql, params)[0]?.values[0]?.[0]; if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw unavailable(); return value;
@@ -123,7 +134,6 @@ export function createInactiveInboxRetentionOwner(input: InactiveInboxRetentionO
         catch (error) { if (missing(error)) return result; throw error; }
       }
       current();
-      const SQL = await loadSqlJsEngine(); current();
       directory ??= opendirSync(storage.directory); current();
       let visited = 0;
       while (result.examined < limit && visited < 256) {
@@ -134,37 +144,40 @@ export function createInactiveInboxRetentionOwner(input: InactiveInboxRetentionO
         const path = join(storage.directory, entry.name), lock = join(storage.directory, selected.lockName);
         if (isActiveInboxStore(path)) { result.busy++; continue; }
         const release = tryAcquireCrossProcessLock(lock); if (!release) { result.busy++; continue; }
-        let db: SqlDatabase | undefined;
+        let file: SqliteFile | undefined;
         try {
           const lease = fileObservationIdentity(lock);
           const assertOwner = () => { current(); if (isActiveInboxStore(path) || fileObservationIdentity(lock) !== lease) throw unavailable(); };
-          assertOwner(); const stat = lstatSync(path);
-          if (stat.size > 64 * 1024 * 1024) throw unavailable();
-          const original = readPrivateSqliteImage(path, assertOwner); if (!original) continue;
-          const assertOriginal = () => { assertOwner(); if (fileObservationIdentity(path) !== original.physical) throw unavailable(); };
-          assertOriginal(); db = createSqlJsDatabase(SQL.Database, original.bytes);
-          if (db.exec('PRAGMA quick_check')[0]?.values[0]?.[0] !== 'ok') throw unavailable();
+          assertOwner();
+          const stat = lstatSync(path, { throwIfNoEntry: false });
+          if (!stat) continue;
+          // A plain, single-linked file only (the identity read refuses links); kept private as the owner keeps it.
+          fileObservationIdentity(path);
+          if (!stat.isFile()) throw unavailable();
+          if ((stat.mode & 0o777) !== 0o600) chmodSync(path, 0o600);
+          assertOwner();
+          file = openSqliteFile(path, { name: `${entry.name} retention`, migrations: [], busyTimeoutMs: 100 });
+          const db = sweepDatabase(file);
           knownSchema(db);
           if (selected.provider && scalar(db, 'SELECT COUNT(*) FROM items WHERE provider != ? OR id NOT LIKE ?', [selected.provider, `${selected.provider}:%`]) !== 0) throw unavailable();
           const policy = policyFor(db, selected.historicalNative ? options.historicalNativePolicy : undefined);
           if (!policy) { result.unknownPolicy++; continue; }
           const now = options.now?.() ?? Date.now(); if (!Number.isSafeInteger(now)) throw unavailable();
-          assertOriginal(); db.run('DELETE FROM items WHERE receivedAt < ?', [now - policy.itemTtlMs]);
-          const expired = scalar(db, 'SELECT changes()');
-          db.run('DELETE FROM items WHERE id NOT IN (SELECT id FROM items ORDER BY receivedAt DESC, id ASC LIMIT ?)', [policy.itemCap]);
-          const capped = scalar(db, 'SELECT changes()');
-          // A triage label lives and dies with its row.
-          if ((expired || capped) && scalar(db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'triage_receipts'") !== 0) {
-            db.run('DELETE FROM triage_receipts WHERE id NOT IN (SELECT id FROM items)');
-          }
-          if (expired || capped) {
-            // Only expiration/cap deletion is authorized. No source interpretation,
-            // cursor change, receipt fabrication, or reconstruction is performed.
-            assertOriginal(); writeFileAtomic(path, db.export(), { durable: true, mode: 0o600, cleanupStaleTemps: false, assertCurrent: assertOriginal });
-            result.expired += expired; result.capped += capped;
-          }
+          const receipts = scalar(db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'triage_receipts'") !== 0;
+          assertOwner();
+          // Only expiration/cap deletion is authorized. No source interpretation,
+          // cursor change, receipt fabrication, or reconstruction is performed.
+          const sqlite = file;
+          const { expired, capped } = sqlite.tx(() => {
+            const expiredRows = sqlite.db.run('DELETE FROM items WHERE receivedAt < ?', [now - policy.itemTtlMs]).changes;
+            const cappedRows = sqlite.db.run('DELETE FROM items WHERE id NOT IN (SELECT id FROM items ORDER BY receivedAt DESC, id ASC LIMIT ?)', [policy.itemCap]).changes;
+            // A triage label lives and dies with its row.
+            if ((expiredRows || cappedRows) && receipts) sqlite.db.run('DELETE FROM triage_receipts WHERE id NOT IN (SELECT id FROM items)');
+            return { expired: expiredRows, capped: cappedRows };
+          });
+          result.expired += expired; result.capped += capped;
         } catch { result.unavailable++; }
-        finally { try { db?.close(); } finally { release(); } }
+        finally { try { file?.close(); } finally { release(); } }
       }
       result.more = true; return result;
     });

@@ -70,8 +70,15 @@ export interface NativeHostCredentialOptions {
   /** A live operation owns its observations; passive reads share the config owner. */
   readonly observation?: OwnedSelectionObservation;
 }
-/** Preserve explicit syntax for validation instead of silently stripping paths. */
+/**
+ * The origin native work talks to, chosen in the same order as every other
+ * verb (resolveControlPlaneBaseUrl): the connected daemon first, then an
+ * explicit public base URL, then the bind. The public base URL keeps its exact
+ * syntax so a path or query is refused rather than silently stripped.
+ */
 export function resolveTuiHostOrigin(config: ConfigManager): string | null {
+  const connected = readConnectedDaemonOrigin((key) => config.get(key));
+  if (connected) return canonicalizePairingHost(connected.baseUrl);
   const explicit: unknown = config.get('controlPlane.publicBaseUrl' as never);
   const selected = typeof explicit === 'string' && explicit.length > 0 ? explicit : resolveControlPlaneBaseUrl(config);
   return selected === null ? null : canonicalizePairingHost(selected);

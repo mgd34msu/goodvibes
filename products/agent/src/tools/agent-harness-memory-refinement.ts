@@ -288,6 +288,7 @@ export async function runMemoryRefinement(context: CommandContext, args: AgentHa
   if (!service?.runRefinement) {
     return {
       status: 'unavailable',
+      done: false,
       error: 'Agent Knowledge semantic refinement runner is not available in this runtime.',
       inspectRoute: 'memory action:"refinement" includeParameters:true',
     };
@@ -308,6 +309,7 @@ export async function runMemoryRefinement(context: CommandContext, args: AgentHa
   const partial = Boolean(run.truncated) || Boolean(run.budgetExhausted);
   return {
     status: run.errors.length > 0 || run.blockedGaps > 0 || partial ? 'completed-with-attention' : 'completed',
+    done: true,
     ...(partial ? { partial: true, partialReason: run.budgetExhausted ? 'The run budget was used up before every candidate gap was processed.' : 'The run stopped at its gap limit before every candidate gap was processed.' } : {}),
     result: {
       scannedGaps: run.scannedGaps,

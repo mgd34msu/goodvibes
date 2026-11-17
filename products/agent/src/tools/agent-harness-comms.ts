@@ -419,6 +419,7 @@ export async function channelDraftSaveHandoff(
   return {
     mode: 'channel_draft_save',
     status: 'saved',
+    done: true,
     draft: redactDraftWebhook(result.draft),
     path: harnessDisplayPath(result.path, shellPaths.homeDirectory),
     daemon: result.daemon,
@@ -527,6 +528,7 @@ export async function channelDraftSendHandoff(
       return {
         mode: 'channel_draft_send',
         status: 'held',
+        done: false,
         draftId: publicReference,
         reason: publicText(held.reason),
         ...(held.fix ? { next: publicText(held.fix) } : {}),
@@ -545,6 +547,7 @@ export async function channelDraftSendHandoff(
     return {
       mode: 'channel_draft_send',
       status: 'sent',
+      done: true,
       draftId: publicReference,
       responseId: result.responseId ? publicText(result.responseId) : null,
       draft: sentDraft ? publicDraft(sentDraft) : sentDraft,
@@ -572,6 +575,8 @@ export async function channelDraftSendHandoff(
       return {
         mode: 'channel_draft_send',
         status: recorded ? 'sent' : 'sent_unrecorded',
+        // The message went out; only its receipt is missing.
+        done: true,
         draftId: publicReference,
         responseId: delivered.responseId ? publicText(delivered.responseId) : null,
         ...(recorded ? { draft: publicDraft(recorded) } : {}),
@@ -592,6 +597,7 @@ export async function channelDraftSendHandoff(
     return {
       mode: 'channel_draft_send',
       status: markedFailed ? 'failed' : 'held',
+      done: false,
       draftId: publicReference,
       error: errorMessage,
       policy: markedFailed
@@ -695,6 +701,7 @@ export async function channelRoutingAssignHandoff(
   return {
     mode: 'channel_routing_assign',
     status: 'assigned',
+    done: true,
     created: result.created,
     route: result.route,
     path: harnessDisplayPath(result.path, shellPaths.homeDirectory),
@@ -742,6 +749,7 @@ export async function channelRoutingRemoveHandoff(
     return {
       mode: 'channel_routing_remove',
       status: 'not_found',
+      done: false,
       removed: false,
       routeId: given,
       routes: { list: 'agent_harness mode:"channel_routing"' },
@@ -758,6 +766,7 @@ export async function channelRoutingRemoveHandoff(
     mode: 'channel_routing_remove',
     // A daemon refusal removed nothing, so it is a failed result; an assignment already gone is a real no-op.
     status: refused ? 'not_applied' : result.removed ? 'removed' : 'already_removed',
+    done: !refused,
     removed: result.removed,
     routeId: target.id,
     daemon: result.daemon,

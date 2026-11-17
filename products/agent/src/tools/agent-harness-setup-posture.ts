@@ -243,6 +243,7 @@ export async function markSetupCheckpoint(context: CommandContext, args: Record<
   if (!step) {
     return {
       status: 'no_checkpoint_written',
+      done: false,
       mode: 'mark_setup_checkpoint',
       reason: requestedStepId
         ? `Unknown setup wizard step ${requestedStepId}.`
@@ -260,6 +261,7 @@ export async function markSetupCheckpoint(context: CommandContext, args: Record<
   if (step.sourceStatus === 'ready') {
     return {
       status: 'no_checkpoint_written',
+      done: false,
       mode: 'mark_setup_checkpoint',
       reason: `Setup wizard step ${step.label} is already ready.`,
       step,
@@ -281,6 +283,7 @@ export async function markSetupCheckpoint(context: CommandContext, args: Record<
   const updatedWizard = buildSetupWizard(plan, context, smoke);
   return {
     status: 'checkpoint_saved',
+    done: true,
     mode: 'mark_setup_checkpoint',
     explicitUserRequest: previewHarnessText(readString(args.explicitUserRequest), 160),
     step,
@@ -311,6 +314,7 @@ export function clearSetupCheckpoint(context: CommandContext, args: Record<strin
   const checkpoint = clearSetupWizardCheckpoint(shellPaths);
   return {
     status: 'checkpoint_cleared',
+    done: true,
     mode: 'clear_setup_checkpoint',
     explicitUserRequest: previewHarnessText(readString(args.explicitUserRequest), 160),
     checkpoint,
@@ -331,6 +335,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
   if (setupItemId && setupItemId !== 'connected-host-auth') {
     return {
       status: 'unsupported_setup_item',
+      done: false,
       usage: 'provision_connected_host_token supports setupItemId:"connected-host-auth" only.',
     };
   }
@@ -338,7 +343,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
   const shellPaths = requireShellPaths(context);
   const pairing = readAgentHostPairing(shellPaths.homeDirectory, resolveConnectedHostBaseUrl(context.platform.configManager));
   if (pairing.status !== 'missing') return {
-    status: 'blocked', mode: 'provision_connected_host_token', setupItemId: 'connected-host-auth',
+    status: 'blocked', done: false, mode: 'provision_connected_host_token', setupItemId: 'connected-host-auth',
     mutation: { performed: false },
     error: 'Agent host-bound pairing already exists or requires review. Use /setup pair; this route will not rewrite shared-token storage to bypass it.',
   };
@@ -347,6 +352,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
   if (before.token && before.path.startsWith('env:')) {
     return {
       status: 'already_usable_env_token',
+      done: true,
       mode: 'provision_connected_host_token',
       setupItemId: 'connected-host-auth',
       explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
@@ -381,6 +387,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
     if (!after.token) {
       return {
         status: 'failed',
+        done: false,
         mode: 'provision_connected_host_token',
         setupItemId: 'connected-host-auth',
         explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
@@ -403,6 +410,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
       : before.present ? 'repaired' : 'created';
     return {
       status: result,
+      done: true,
       mode: 'provision_connected_host_token',
       setupItemId: 'connected-host-auth',
       explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
@@ -441,6 +449,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
   } catch (error) {
     return {
       status: 'failed',
+      done: false,
       mode: 'provision_connected_host_token',
       setupItemId: 'connected-host-auth',
       explicitUserRequest: previewHarnessText(explicitUserRequest, 160),
@@ -469,6 +478,7 @@ export async function runSetupInstallSmoke(context: CommandContext, args: AgentH
   if (setupItemId && setupItemId !== 'install-smoke') {
     return {
       status: 'unsupported_setup_item',
+      done: false,
       usage: 'run_setup_smoke currently supports setupItemId:"install-smoke" only.',
     };
   }
@@ -480,6 +490,7 @@ export async function runSetupInstallSmoke(context: CommandContext, args: AgentH
   if (!smokePlan) {
     return {
       status: 'missing_smoke_plan',
+      done: false,
       usage: 'Install smoke plan is not available. Inspect mode:"setup_posture" for setup readiness.',
     };
   }
@@ -507,8 +518,9 @@ export async function runSetupInstallSmoke(context: CommandContext, args: AgentH
   const ignoredFields = ignoredSetupSmokeEvidenceFields(args.fields);
   return {
     // Nothing is executed here: the plan is read and a snapshot saved, so the
-    // top-level status names what the snapshot found.
+    // top-level status names what the snapshot found and `done` says whether the evidence was saved.
     status: result,
+    done: artifact.status === 'saved',
     mode: 'run_setup_smoke',
     setupItemId: 'install-smoke',
     capturedAt,

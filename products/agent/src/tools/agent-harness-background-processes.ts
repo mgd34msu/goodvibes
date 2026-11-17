@@ -642,6 +642,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
   if (!manager) {
     return {
       status: 'unavailable',
+      done: false,
       reason: 'ProcessManager is not wired into this runtime.',
       policy: 'Use foreground exec or connected-host delegation until background process lifecycle is available.',
     };
@@ -651,6 +652,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     return {
       ...((await capabilities(context, options)).pty as Record<string, unknown>),
       status: 'unsupported',
+      done: false,
       capability: 'pty',
     };
   }
@@ -667,9 +669,9 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     if (!processId) throw new Error('Background process input requires processId.');
     if (!data) throw new Error('Background process input requires nonempty data.');
     const entry = manager.getStatus(processId);
-    if (!entry) return { status: 'not_found', processId, reason: `No tracked process matched "${processId}"; nothing was written. Use process action:"list" to see the tracked ids.` };
+    if (!entry) return { status: 'not_found', done: false, processId, reason: `No tracked process matched "${processId}"; nothing was written. Use process action:"list" to see the tracked ids.` };
     if (entry.done) {
-      return { status: 'not_running', processId, exitCode: entry.exitCode, ...(entry.signal ? { signal: entry.signal } : {}),
+      return { status: 'not_running', done: false, processId, exitCode: entry.exitCode, ...(entry.signal ? { signal: entry.signal } : {}),
         reason: `The process has ended (${entry.signal ? `signal ${entry.signal}` : `exit code ${entry.exitCode}`}); nothing was written.`,
         next: [`process action:"log" processId:"${processId}"`, 'process action:"start" to run it again'] };
     }
@@ -678,12 +680,13 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
       if (entry.done) throw new Error(`Process ${processId} ended while its input was being written; check process action:"log" processId:"${processId}".`);
     };
     const bytesWritten = await manager.writeInput(processId, data, { signal: options.signal, assertCurrent });
-    return { status: 'written', processId,
+    return { status: 'written', done: true, processId,
       bytesWritten, policy: 'Input was written and flushed to the captured native stdin pipe. Bytes already handed to the child cannot be recalled.' };
   }
   if (action === 'capabilities' || action === 'doctor' || action === 'parity') {
     return {
       status: 'available',
+      done: true,
       capabilities: await capabilities(context, options),
       methods: PROCESS_PARITY_METHODS,
       policy: 'This is a read-only process UX contract report. It does not start, stop, or write to any process.',
@@ -697,6 +700,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
       if (privileged !== false) {
         return {
           status: 'blocked',
+          done: false,
           capability: 'sudo',
           reason: privileged === null
             ? assessment === 'uncertain'
@@ -722,6 +726,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
       }
       return {
         status: 'started',
+        done: true,
         lifetime,
         killOnTimeout,
         lifetimeBehavior: lifetime === 'detached'
@@ -756,7 +761,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     const earlier = !manager.getStatus(processId) && context.workspace.shellPaths ? findDetachedProcess(context.workspace.shellPaths, processId) : undefined;
     if (earlier && context.workspace.shellPaths) {
       const signalled = stopDetachedProcess(context.workspace.shellPaths, earlier);
-      return { status: signalled ? 'stopped' : 'not_found', processId, lifetime: 'detached',
+      return { status: signalled ? 'stopped' : 'not_found', done: signalled, processId, lifetime: 'detached',
         policy: signalled ? 'SIGTERM was sent to the detached process group started in an earlier session, and its record removed.' : 'The detached process had already ended; its record was removed.' };
     }
     const stopped = manager.stop(processId);
@@ -764,6 +769,7 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     if (stopped && context.workspace.shellPaths) forgetDetachedProcess(context.workspace.shellPaths, processId);
     return {
       status: stopped ? 'stopped' : 'not_found',
+      done: stopped,
       processId,
       policy: stopped
         ? 'The process was signaled and removed from the shared ProcessManager.'
@@ -781,6 +787,8 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     waiting.assertCurrent();
     return {
       status: entry?.done ? 'completed' : entry ? 'still_running' : 'not_found',
+      // A wait is an observation: it succeeded when the process was found, running or not.
+      done: entry !== undefined,
       processId,
       timeoutMs,
       ...(entry ? { process: await describeProcessEntry(context, manager, entry, { ...waiting, includeParameters: true }) } : {}),
@@ -788,12 +796,13 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
     };
   }
 
-  if (action === 'list') return backgroundProcessSummary(context, args, options);
+  if (action === 'list') return { ...await backgroundProcessSummary(context, args, options), done: true };
   if (action === 'status' || action === 'log' || action === 'output') {
     const resolved = await describeBackgroundProcess(context, args, options);
-    if (resolved.status === 'found') return resolved.process;
+    if (resolved.status === 'found') return { ...resolved.process, done: true };
     return {
       status: resolved.status,
+      done: false,
       ...(resolved.status === 'ambiguous' ? { input: resolved.input, candidates: resolved.candidates } : { usage: resolved.usage }),
     };
   }

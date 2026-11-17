@@ -384,6 +384,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
         })
         : {
           status: 'not_opened',
+          done: false,
           surface: surface.id,
           kind: surface.kind,
           model: result.model,
@@ -502,6 +503,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
         })
         : {
           status: 'not_opened',
+          done: false,
           surface: surface.id,
           kind: surface.kind,
           target: target ?? 'selected',
@@ -567,6 +569,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
         ? opened(surface, { query: query ?? '' })
         : {
           status: 'not_opened',
+          done: false,
           surface: surface.id,
           kind: surface.kind,
           query: query ?? '',
@@ -591,6 +594,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
         ? opened(surface, { command: '/commands' })
         : {
           status: 'not_opened',
+          done: false,
           surface: surface.id,
           kind: surface.kind,
           note: 'The slash-command registry did not handle /commands in the current runtime.',
@@ -634,6 +638,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
         ? opened(surface)
         : {
           status: 'not_opened',
+          done: false,
           surface: surface.id,
           kind: surface.kind,
           note: 'The shell opener requires an empty prompt and a nearby rendered conversation block.',
@@ -903,11 +908,12 @@ export async function openHarnessUiSurface(context: CommandContext, args: AgentH
       const resolved = await resolveHarnessUiSurface(context, args, readingOptions);
       readingOptions.assertCurrent?.();
       if (resolved?.status === 'ambiguous') {
-        return { status: 'ambiguous_ui_surface', input: resolved.input, candidates: resolved.candidates };
+        return { status: 'ambiguous_ui_surface', done: false, input: resolved.input, candidates: resolved.candidates };
       }
       if (!resolved) {
         return {
           status: 'unknown_ui_surface',
+          done: false,
           surfaceId: readString(args.surfaceId || args.query || args.target) || '<missing>',
           availableSurfaces: UI_SURFACES.map((entry) => entry.id),
         };

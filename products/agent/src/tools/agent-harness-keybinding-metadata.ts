@@ -101,7 +101,7 @@ function readFieldMap(value: unknown): Readonly<Record<string, string>> {
 
 /** The refusal every keybinding operation returns: what did not happen, why, and what to do next. */
 function refused(status: 'unavailable' | 'not_found' | 'ambiguous' | 'not_applied', reason: string, next: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return { status, reason, next, ...extra };
+  return { status, done: false, reason, next, ...extra };
 }
 
 const NO_MANAGER = (): Record<string, unknown> => refused('unavailable',
@@ -616,6 +616,7 @@ function unknownKeybinding(mode: string, args: HarnessKeybindingArgs): Record<st
 function runUnavailable(action: KeyAction, route: KeybindingOperationRoute, reason?: string): Record<string, unknown> {
   return {
     status: 'keybinding_route_unavailable',
+    done: false,
     action,
     modelOperation: route,
     ...(reason ? { reason } : {}),
@@ -642,6 +643,7 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
   if (!route.supported) {
     return {
       status: 'unsupported_keybinding_action',
+      done: false,
       action: resolved.action,
       keybinding: descriptor,
       modelOperation: route,
@@ -653,15 +655,15 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
     case 'screen-clear':
       if (!context.clearScreen) return runUnavailable(resolved.action, route, 'Clear-screen route is unavailable.');
       context.clearScreen();
-      return { status: 'executed', action: resolved.action, effect: 'screen-clear', keybinding: descriptor };
+      return { status: 'executed', done: true, action: resolved.action, effect: 'screen-clear', keybinding: descriptor };
     case 'workspace-picker':
       if (context.openWorkspacePicker) {
         context.openWorkspacePicker();
-        return { status: 'executed', action: resolved.action, effect: 'agent-workspace-opened', route: 'openWorkspacePicker', keybinding: descriptor };
+        return { status: 'executed', done: true, action: resolved.action, effect: 'agent-workspace-opened', route: 'openWorkspacePicker', keybinding: descriptor };
       }
       if (context.openAgentWorkspace) {
         context.openAgentWorkspace('home');
-        return { status: 'executed', action: resolved.action, effect: 'agent-workspace-opened', route: 'openAgentWorkspace', categoryId: 'home', keybinding: descriptor };
+        return { status: 'executed', done: true, action: resolved.action, effect: 'agent-workspace-opened', route: 'openAgentWorkspace', categoryId: 'home', keybinding: descriptor };
       }
       return runUnavailable(resolved.action, route, 'No workspace picker or Agent workspace route is available.');
     case 'workspace-close': {
@@ -669,7 +671,7 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
       const dismissedAgentWorkspace = context.dismissAgentWorkspace();
       if (dismissedAgentWorkspace) {
         return {
-          status: 'executed',
+          status: 'executed', done: true,
           action: resolved.action,
           effect: 'agent-workspace-dismissed',
           route: 'dismissAgentWorkspace',
@@ -677,14 +679,14 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
         };
       }
       // The real shortcut only dismisses the workspace; focusing the prompt here would be an effect it does not have.
-      return { status: 'nothing_to_dismiss', action: resolved.action, reason: 'No Agent workspace is open, so nothing was dismissed.', keybinding: descriptor };
+      return { status: 'nothing_to_dismiss', done: true, action: resolved.action, reason: 'No Agent workspace is open, so nothing was dismissed.', keybinding: descriptor };
     }
     case 'workspace-close-all': {
       if (!context.dismissAgentWorkspace) return runUnavailable(resolved.action, route, 'Agent workspace dismiss route is unavailable.');
       const dismissedAgentWorkspace = context.dismissAgentWorkspace();
       if (dismissedAgentWorkspace) {
         return {
-          status: 'executed',
+          status: 'executed', done: true,
           action: resolved.action,
           effect: 'agent-workspace-dismissed',
           route: 'dismissAgentWorkspace',
@@ -692,27 +694,27 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
         };
       }
       // The real shortcut only dismisses the workspace; focusing the prompt here would be an effect it does not have.
-      return { status: 'nothing_to_dismiss', action: resolved.action, reason: 'No Agent workspace is open, so nothing was dismissed.', keybinding: descriptor };
+      return { status: 'nothing_to_dismiss', done: true, action: resolved.action, reason: 'No Agent workspace is open, so nothing was dismissed.', keybinding: descriptor };
     }
     case 'history-search': {
       if (!context.openPromptHistorySearch) return runUnavailable(resolved.action, route, 'Prompt history search route is unavailable.');
       const query = readString(args.value);
       context.openPromptHistorySearch(query || undefined);
-      return { status: 'executed', action: resolved.action, effect: 'prompt-history-search-opened', query, keybinding: descriptor };
+      return { status: 'executed', done: true, action: resolved.action, effect: 'prompt-history-search-opened', query, keybinding: descriptor };
     }
     case 'search': {
       if (!context.openConversationSearch) return runUnavailable(resolved.action, route, 'Conversation search route is unavailable.');
       const query = readString(args.value);
       context.openConversationSearch(query || undefined);
-      return { status: 'executed', action: resolved.action, effect: 'conversation-search-opened', query, keybinding: descriptor };
+      return { status: 'executed', done: true, action: resolved.action, effect: 'conversation-search-opened', query, keybinding: descriptor };
     }
     case 'paste': {
       if (!context.pasteFromClipboard) return runUnavailable(resolved.action, route, 'This Agent shell does not give commands a clipboard paste route. Ctrl+V in the prompt still pastes; ask the user to paste directly.');
       const pasted = context.pasteFromClipboard();
       if (!pasted.pasted) {
-        return { status: 'not_pasted', action: resolved.action, effect: 'paste-from-clipboard', reason: 'The clipboard holds no supported text or image data, so nothing was pasted.', pasted, keybinding: descriptor };
+        return { status: 'not_pasted', done: false, action: resolved.action, effect: 'paste-from-clipboard', reason: 'The clipboard holds no supported text or image data, so nothing was pasted.', pasted, keybinding: descriptor };
       }
-      return { status: 'executed', action: resolved.action, effect: 'paste-from-clipboard', pasted, keybinding: descriptor };
+      return { status: 'executed', done: true, action: resolved.action, effect: 'paste-from-clipboard', pasted, keybinding: descriptor };
     }
     case 'block-copy':
     case 'bookmark': {
@@ -721,6 +723,7 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
       return opened
         ? {
           status: 'visible_interaction_required',
+          done: true,
           action: resolved.action,
           effect: 'block-actions-opened',
           keybinding: descriptor,
@@ -728,6 +731,7 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
         }
         : {
           status: 'not_opened',
+          done: false,
           action: resolved.action,
           effect: 'block-actions',
           keybinding: descriptor,
@@ -737,6 +741,7 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
     default:
       return {
         status: 'unsupported_keybinding_action',
+        done: false,
         action: resolved.action,
         keybinding: descriptor,
         modelOperation: route,
@@ -796,6 +801,7 @@ export async function setHarnessKeybinding(context: KeybindingContext, args: Har
   ];
   return {
     status: 'updated',
+    done: true,
     configPath,
     keybinding,
     lookup: resolved.lookup,
@@ -825,6 +831,7 @@ export async function resetHarnessKeybinding(context: KeybindingContext, args: H
   const warnings = [...loadNotices];
   return {
     status: 'reset',
+    done: true,
     configPath,
     keybinding,
     lookup: resolved.lookup,

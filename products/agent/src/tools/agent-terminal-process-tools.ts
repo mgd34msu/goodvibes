@@ -56,15 +56,14 @@ function error(message: string): { readonly success: false; readonly error: stri
   return { success: false, error: message };
 }
 
-const NOT_DONE_STATUSES = new Set(['unavailable', 'unsupported', 'blocked', 'not_found', 'not_running']);
-
 /**
  * A launch, stop or wait that did nothing is a failure, not a success with a
  * status to decode. The full body stays in `output`; `error` says why.
  */
 function processOutcome(result: Record<string, unknown>): { readonly success: boolean; readonly output: string; readonly error?: string } {
-  const status = typeof result.status === 'string' ? result.status : '';
-  if (!NOT_DONE_STATUSES.has(status)) return output(result);
+  // The process handler says whether its action happened; only `done: true` is a success.
+  if (result.done === true) return output(result);
+  const status = typeof result.status === 'string' ? result.status : 'not_done';
   const id = typeof result.processId === 'string' ? result.processId : '';
   const reason = typeof result.reason === 'string' ? result.reason
     : status === 'not_found' ? `No tracked process matched ${id ? `"${id}"` : 'that id'}. Use process action:"list" to see the tracked ids.`

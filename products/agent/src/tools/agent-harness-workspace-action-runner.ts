@@ -134,13 +134,11 @@ export async function runWorkspaceAction(
     const result = operation === 'clear'
       ? clearSetupCheckpoint(deps.commandContext, args, options)
       : await markSetupCheckpoint(deps.commandContext, args, options);
-    const innerStatus = (result as { readonly status?: unknown }).status;
-    const written = innerStatus === 'checkpoint_saved' || innerStatus === 'checkpoint_cleared';
-    const body = { status: written ? 'checkpoint_action_completed' : typeof innerStatus === 'string' ? innerStatus : 'checkpoint_not_written',
-      action: describeWorkspaceAction(category, action, { lookup }), result };
-    if (written) return output(body);
-    const reason = (result as { readonly reason?: unknown }).reason;
-    return { success: false, output: JSON.stringify(body, null, 2), error: `${body.status}: ${typeof reason === 'string' ? reason : 'no setup checkpoint was written.'}` };
+    const innerStatus = result.status;
+    const written = result.done === true;
+    return effectOutput({ status: written ? 'checkpoint_action_completed' : typeof innerStatus === 'string' ? innerStatus : 'checkpoint_not_written',
+      done: written, reason: typeof result.reason === 'string' ? result.reason : 'no setup checkpoint was written.',
+      action: describeWorkspaceAction(category, action, { lookup }), result });
   }
   if (action.kind === 'editor' && action.editorKind) {
     const editorContext = buildWorkspaceEditorContext(deps.commandContext, args);

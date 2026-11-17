@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createSetupSmokeReferenceCapture, resolveSetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { runSetupInstallSmoke } from './agent-harness-setup-posture.ts';
-import { effectOutput, output, requireConfirmedAction } from './agent-harness-tool-utils.ts';
+import { effectOutput, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentSetupAction =
@@ -199,8 +199,8 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           setupItemId, includeParameters: args.includeParameters, explicitUserRequest: args.explicitUserRequest,
         }), ownership, options?.signal);
         ownership.assertCurrent();
-        // The evidence snapshot is the effect: a blocked plan is still a saved result.
-        return result.status === 'missing_smoke_plan' ? effectOutput(result) : output(result);
+        // The evidence snapshot is the effect: a blocked plan is still a saved result (done says whether it was saved).
+        return effectOutput(result);
       }
       if (action === 'finish') {
         return run('agent_harness', {

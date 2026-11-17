@@ -183,30 +183,19 @@ export function nestedToolOutput(
   return { success: false, output: text, error: `${typeof body.tool === 'string' ? `${body.tool} failed: ` : ''}${reason}` };
 }
 
-const EFFECT_FAILURE_STATUSES: ReadonlySet<string> = new Set([
-  'held', 'unavailable', 'blocked', 'unsupported', 'failed', 'not_found', 'no_checkpoint_written',
-  'keybinding_route_unavailable', 'model_tool_failed', 'missing_action', 'unsupported_setup_item', 'missing_smoke_plan',
-  // The handler ran its check and did not do what was asked: the binding is not live, the clipboard or surface was not used,
-  // or the request named nothing / more than one thing, so no effect was chosen.
-  'not_applied', 'unsupported_keybinding_action', 'not_pasted', 'not_opened', 'ambiguous', 'missing_lookup', 'reading-held',
-  'ambiguous_ui_surface', 'unknown_ui_surface',
-]);
-
 /**
- * Reports the result of an effect handler. A handler says whether the effect
- * happened with `done`; `done: false` is a failed tool result, with the
- * handler's own body kept in `output`, so the result flag and tool cards
- * agree with what happened. A handler that does not say is read by its
- * status: one of the failure statuses fails. Real no-ops
- * (`nothing_to_recover`, `completed`) stay successes.
+ * Reports the result of an effect handler. Every effect handler says whether
+ * its effect happened with `done` (a real no-op such as nothing to recover is
+ * `done: true`). Only `done: true` is a successful tool result; anything else
+ * fails, with the handler's own body kept in `output`, so the result flag and
+ * tool cards agree with what happened.
  */
 export function effectOutput(value: unknown): { readonly success: boolean; readonly output: string; readonly error?: string } {
   const body = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null;
-  const status = body?.status;
-  const done = typeof body?.done === 'boolean' ? body.done : undefined;
-  if (!body || done === true || (done === undefined && (typeof status !== 'string' || !EFFECT_FAILURE_STATUSES.has(status)))) return output(value);
-  const reason = [body.error, body.reason, body.usage, body.note].find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
-  return { success: false, output: JSON.stringify(value, null, 2), error: `${status}: ${reason ?? (Array.isArray(body.candidates) ? 'the request matched more than one target, so nothing was done. Repeat with one exact id from candidates.' : 'the requested effect did not happen.')}` };
+  if (body?.done === true) return output(value);
+  const status = typeof body?.status === 'string' ? body.status : 'not_done';
+  const reason = body ? [body.error, body.reason, body.usage, body.note].find((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : undefined;
+  return { success: false, output: JSON.stringify(value, null, 2), error: `${status}: ${reason ?? (Array.isArray(body?.candidates) ? 'the request matched more than one target, so nothing was done. Repeat with one exact id from candidates.' : 'the requested effect did not happen.')}` };
 }
 
 export function error(message: string): { readonly success: false; readonly error: string } { return { success: false, error: message }; }

@@ -553,8 +553,8 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const ownership = resolveSetupSmokeNativeEvidence(rawArgs, options, deps.commandContext);
           const result = await runSetupInstallSmoke(deps.commandContext, args, ownership, signal);
           ownership.assertCurrent();
-          // The evidence snapshot is the effect: a blocked plan is still a saved result.
-          return result.status === 'missing_smoke_plan' ? effectOutput(result) : output(result);
+          // The evidence snapshot is the effect: a blocked plan is still a saved result (done says whether it was saved).
+          return effectOutput(result);
         }
         if (dispatchMode === 'run_local_model_smoke') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Local model smoke');

@@ -117,27 +117,27 @@ export function fileRecoverySummary(context: FileRecoveryContext, args: AgentHar
 
 export function runFileRecovery(context: FileRecoveryContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): Record<string, unknown> {
   if (!harnessCatalogInvocationAuthority(args, options, 'write')) {
-    return { status: 'held', error: `File recovery requires current recorded effect admission. ${RECOVERY_NEXT_STEP}` };
+    return { status: 'held', done: false, error: `File recovery requires current recorded effect admission. ${RECOVERY_NEXT_STEP}` };
   }
   const manager = context.workspace.fileUndoManager;
   if (!manager) {
     return {
-      status: 'unavailable',
+      status: 'unavailable', done: false,
       error: 'No file recovery manager is available in this runtime.',
     };
   }
   const action = recoveryActionFromArgs(args);
   if (!action) {
     return {
-      status: 'missing_action',
+      status: 'missing_action', done: false,
       usage: 'run_file_recovery requires recoveryAction:"undo" or recoveryAction:"redo". Use execution action:"recovery" first to inspect depth.',
     };
   }
   const next = action === 'undo' ? manager.peekUndo() : manager.peekRedo();
-  if (!next) return { status: 'nothing_to_recover', recoveryAction: action, summary: managerStatus(context) };
+  if (!next) return { status: 'nothing_to_recover', done: true, recoveryAction: action, summary: managerStatus(context) };
   const root = context.workspace.shellPaths?.workingDirectory;
   // Re-inspecting cannot supply a workspace, so this one names the step that can.
-  if (!root) return { status: 'held', error: 'File recovery restores files only inside the active workspace, and this session has none. Nothing was changed. Run the recovery from an Agent session started in the project folder.' };
+  if (!root) return { status: 'held', done: false, error: 'File recovery restores files only inside the active workspace, and this session has none. Nothing was changed. Run the recovery from an Agent session started in the project folder.' };
   // One entry may restore several files (one tool call); every one must be inside the workspace.
   for (const operation of next.operations ?? [next]) {
     try {
@@ -146,7 +146,7 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
       // Inspect that final component independently before restoring any bytes.
       if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) realpathSync(target);
     } catch {
-      return { status: 'held', error: `File recovery target ${workspacePath(context, operation.path)} is outside the active workspace, or cannot be resolved (missing, or a dangling or escaping symlink). ${RECOVERY_NEXT_STEP}` };
+      return { status: 'held', done: false, error: `File recovery target ${workspacePath(context, operation.path)} is outside the active workspace, or cannot be resolved (missing, or a dangling or escaping symlink). ${RECOVERY_NEXT_STEP}` };
     }
   }
   let result: ReturnType<typeof manager.undo>;
@@ -157,7 +157,7 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
     const following = action === 'undo' ? summary.nextUndo : undefined;
     if (failure instanceof FileUndoConflictError) {
       return {
-        status: 'conflict',
+        status: 'conflict', done: false,
         recoveryAction: action,
         path: workspacePath(context, failure.path),
         reason: `The file was changed after that ${failure.direction === 'undo' ? 'edit' : 'undo'}, so restoring it would overwrite the later change. No file was changed and that history entry was dropped.`,
@@ -168,7 +168,7 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
       };
     }
     return {
-      status: 'failed',
+      status: 'failed', done: false,
       recoveryAction: action,
       path: workspacePath(context, next.path),
       reason: failure instanceof Error ? failure.message : String(failure),
@@ -178,13 +178,13 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
   }
   if (!result) {
     return {
-      status: 'nothing_to_recover',
+      status: 'nothing_to_recover', done: true,
       recoveryAction: action,
       summary: managerStatus(context),
     };
   }
   return {
-    status: 'applied',
+    status: 'applied', done: true,
     recoveryAction: action,
     path: workspacePath(context, result.path),
     ...(result.paths.length > 1 ? { paths: result.paths.map((path) => workspacePath(context, path)) } : {}),

@@ -310,6 +310,7 @@ export async function runLocalModelServerSmoke(context: CommandContext, args: Ag
       kind: 'local-model-smoke',
       liveProbe: 'not-run',
       ...selection.unresolved,
+      done: false,
       policy: 'No local model endpoint was probed because the requested endpoint lookup did not resolve exactly.',
     };
   }
@@ -318,6 +319,8 @@ export async function runLocalModelServerSmoke(context: CommandContext, args: Ag
     return {
       kind: 'local-model-smoke',
       status: 'no-candidates',
+      // Nothing to check is a real no-op, not a failed check.
+      done: true,
       liveProbe: 'not-run',
       endpoints: [],
       nextActions: ['Use the local model cookbook to start a local server or configure a local provider endpoint.'],
@@ -346,6 +349,7 @@ export async function runLocalModelServerSmoke(context: CommandContext, args: Ag
   return {
     kind: 'local-model-smoke',
     status: passed.length > 0 ? 'ready' : blocked.length === results.length ? 'blocked' : 'needs-attention',
+    done: passed.length > 0 || blocked.length !== results.length,
     liveProbe: probed === 0 ? 'not-run' : probed < results.length ? 'partial' : 'confirmed',
     checkedAt,
     timeoutMs,

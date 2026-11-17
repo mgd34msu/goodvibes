@@ -68,6 +68,7 @@ export const KNOWLEDGE_MAP_OUTPUT_SCHEMA = objectSchema({
   edgeCount: NUMBER_SCHEMA,
   totalNodeCount: NUMBER_SCHEMA,
   totalEdgeCount: NUMBER_SCHEMA,
+  nextCursor: STRING_SCHEMA,
   facets: KNOWLEDGE_MAP_FACETS_SCHEMA,
   nodes: arraySchema(KNOWLEDGE_MAP_NODE_SCHEMA),
   edges: arraySchema(KNOWLEDGE_MAP_EDGE_SCHEMA),

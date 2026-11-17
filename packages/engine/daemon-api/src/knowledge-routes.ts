@@ -367,6 +367,7 @@ function readKnowledgeMapFilters(url: URL): Omit<KnowledgeMapQuery, 'limit' | 'i
   return {
     ...readKnowledgeSpaceQuery(url),
     ...(url.searchParams.get('query') ? { query: url.searchParams.get('query')! } : {}),
+    ...(url.searchParams.get('cursor') ? { cursor: url.searchParams.get('cursor')! } : {}),
     ...(minConfidence !== undefined && Number.isFinite(minConfidence) ? { minConfidence } : {}),
     recordKinds: requestedKinds.filter((kind): kind is KnowledgeSubjectKind => isOneOf(KNOWLEDGE_SUBJECT_KINDS, kind)),
     ids: readStringList(url, 'ids', 'id'),

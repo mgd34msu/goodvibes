@@ -643,12 +643,13 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
   methodDescriptor({
     id: 'knowledge.map',
     title: 'Map Knowledge Graph',
-    description: 'Return a deterministic visual map of structured knowledge nodes, sources, edges, and optional issues.',
+    description: 'Return a deterministic visual map of structured knowledge nodes, sources, edges, and optional issues, most relevant first (the records named by `ids`/`linkedToIds`, then their neighbours, then the most connected; every record kind gets a share). When more records match than `limit`, `nextCursor` is set: pass it back as `cursor` with the same filters for the next slice.',
     category: 'knowledge',
     scopes: ['read:knowledge'],
     http: { method: 'GET', path: '/api/knowledge/map' },
     inputSchema: objectSchema({
       limit: NUMBER_SCHEMA,
+      cursor: STRING_SCHEMA,
       ...KNOWLEDGE_SPACE_INPUT_FIELDS,
       includeSources: BOOLEAN_SCHEMA,
       includeIssues: BOOLEAN_SCHEMA,

@@ -293,6 +293,7 @@ function readMapFiltersFromUrl(url: URL): Partial<HomeGraphMapInput> {
   const minConfidence = readOptionalBoundedInteger(url.searchParams.get('minConfidence'), 0, 100);
   return {
     ...(url.searchParams.get('query') ? { query: url.searchParams.get('query')! } : {}),
+    ...(url.searchParams.get('cursor') ? { cursor: url.searchParams.get('cursor')! } : {}),
     ...(minConfidence !== undefined ? { minConfidence } : {}),
     recordKinds: readRecordKinds(url, 'recordKinds', 'recordKind'),
     ids: readList(url, 'ids', 'id'),

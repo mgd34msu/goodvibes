@@ -356,11 +356,12 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.map',
     title: 'Map Home Graph',
-    description: 'Return a visual Home Graph node/edge map with deterministic layout data and SVG.',
+    description: 'Return a visual Home Graph node/edge map with deterministic layout data and SVG, most relevant first. When more records match than `limit`, `nextCursor` is set: pass it back as `cursor` (body, or ?cursor= on GET) with the same filters for the next slice.',
     method: 'POST',
     path: '/api/homeassistant/home-graph/map',
     inputSchema: objectSchema({
       ...SPACE_QUERY_PROPS,
+      cursor: STRING_SCHEMA,
       includeSources: BOOLEAN_SCHEMA,
       includeIssues: BOOLEAN_SCHEMA,
       includeGenerated: BOOLEAN_SCHEMA,

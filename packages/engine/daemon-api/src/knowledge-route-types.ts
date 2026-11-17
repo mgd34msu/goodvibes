@@ -93,6 +93,8 @@ export interface KnowledgeListingResult {
 
 export interface KnowledgeMapQuery extends KnowledgeSpaceScope {
   readonly limit?: number | undefined;
+  /** `nextCursor` of an earlier map of the same request: the next slice. */
+  readonly cursor?: string | undefined;
   readonly includeSources?: boolean | undefined;
   readonly includeIssues?: boolean | undefined;
   readonly includeGenerated?: boolean | undefined;

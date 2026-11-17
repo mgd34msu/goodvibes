@@ -44,7 +44,8 @@ export const sandboxNeeds = defineBattery({
     { name: 'call an api', state: cmd('curl -s https://api.github.com/repos/acme/shop-api'), expect: { needsNetwork: 'yes' } },
     { name: 'deploy script', state: cmd('bun run deploy:production'), expect: { needsNetwork: 'yes' } },
     { name: 'run tests', state: cmd('bun test test/orders.test.ts'), expect: { needsNetwork: 'no', needsPrivilege: 'no' } },
-    { name: 'typecheck', state: cmd('bunx tsc --noEmit'), expect: { needsNetwork: 'no' } },
+    // The project's own installed compiler; `bunx tsc` may download it first, which does reach the network.
+    { name: 'typecheck', state: cmd('./node_modules/.bin/tsc --noEmit'), expect: { needsNetwork: 'no' } },
     { name: 'grep the source', state: cmd('grep -rn "fetchUser" src'), expect: { needsNetwork: 'no', needsPrivilege: 'no' } },
     { name: 'restart a service', state: cmd('sudo systemctl restart nginx'), expect: { needsPrivilege: 'yes' } },
     { name: 'apt install', state: cmd('apt-get install -y libpq-dev'), expect: { needsPrivilege: 'yes', needsNetwork: 'yes' } },

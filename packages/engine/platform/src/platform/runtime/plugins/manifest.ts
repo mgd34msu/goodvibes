@@ -166,17 +166,6 @@ export function isHighRiskCapability(capability: PluginCapability): boolean {
 }
 
 /**
- * hasCapability, Returns whether a plugin has been granted a specific
- * capability after manifest resolution.
- */
-export function hasCapability(
-  manifest: PluginCapabilityManifest,
-  capability: PluginCapability,
-): boolean {
-  return manifest.granted.includes(capability);
-}
-
-/**
  * A plugin name becomes part of tool names, command names and gateway ids, so
  * spaces, dots and capitals would produce invalid or colliding identifiers.
  */

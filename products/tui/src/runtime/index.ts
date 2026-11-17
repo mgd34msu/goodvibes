@@ -233,11 +233,9 @@ export {
   ALL_CAPABILITIES,
   PLUGIN_CAPABILITIES,
   HIGH_RISK_CAPABILITIES,
-  PluginQuarantineEngine,
   PluginTrustStore,
   SAFE_CAPABILITIES,
   filterCapabilitiesByTrust,
-  hasCapability,
   isHighRiskCapability,
   isPluginOperational,
   isPluginReloadable,
@@ -316,7 +314,7 @@ export {
 // (TS2484). This applies to every class name in the grouped re-export above
 // (AcpTaskAdapter, OpsControlPlane, OpsIllegalActionError,
 // OpsTargetNotFoundError, ToolContractVerifier, McpLifecycleManager,
-// McpPermissionManager, McpSchemaFreshnessTracker, PluginQuarantineEngine,
+// McpPermissionManager, McpSchemaFreshnessTracker,
 // PluginTrustStore, RemoteRunnerRegistry,
 // RemoteSupervisor, DistributedRuntimeManager), their instance types are
 // forwarded automatically and are not redeclared below.

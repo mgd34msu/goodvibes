@@ -22,9 +22,9 @@ import {
   type PluginTrustRecord,
   type SignatureValidationResult,
 } from '../runtime/plugins/trust.js';
-import { PluginQuarantineEngine, type QuarantineRecord } from '../runtime/plugins/quarantine.js';
-import { declaredPluginCapabilities, isHighRiskCapability, resolveCapabilityManifest, resolvePluginGrant } from '../runtime/plugins/manifest.js';
-import type { PluginCapability, PluginManifestV2 } from '../runtime/plugins/types.js';
+import { isQuarantineActive, readQuarantineRecords, type QuarantineRecord } from '../runtime/plugins/quarantine.js';
+import { declaredPluginCapabilities, isHighRiskCapability, resolvePluginGrant } from '../runtime/plugins/manifest.js';
+import type { PluginCapability } from '../runtime/plugins/types.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS, PluginClosedError, PluginInFlightTracker } from './in-flight.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -192,8 +192,6 @@ export class PluginManager {
 
   /** Trust store, manages tier records for all plugins. */
   private readonly trustStore = new PluginTrustStore();
-  /** Quarantine engine, manages plugin quarantine state. */
-  private readonly quarantineEngine = new PluginQuarantineEngine();
   private readonly subscribers = new Set<() => void>();
   private readonly pathOptions: PluginPathOptions;
   private readonly stateFilePath: string;
@@ -237,7 +235,7 @@ export class PluginManager {
         enabled: this.isEnabled(d.manifest.name),
         active: loaded?.active ?? false,
         trustTier: this.trustStore.getTier(d.manifest.name),
-        quarantined: this.quarantineEngine.isQuarantined(d.manifest.name),
+        quarantined: this.isQuarantined(d.manifest.name),
       };
     });
   }
@@ -253,7 +251,11 @@ export class PluginManager {
   }
 
   getQuarantineRecord(name: string): Readonly<QuarantineRecord> | undefined {
-    return this.quarantineEngine.getRecord(name);
+    return this.state.quarantine[name];
+  }
+
+  private isQuarantined(name: string): boolean {
+    return isQuarantineActive(this.state.quarantine[name]);
   }
 
   /**
@@ -406,11 +408,8 @@ export class PluginManager {
   }
 
   /**
-   * quarantine, Apply quarantine to a plugin.
-   *
-   * This is the high-level operator path. It resolves the plugin's declared
-   * capability manifest using the current trust tier, then applies quarantine
-   * immediately to the resolved capability set.
+   * quarantine, Records the quarantine, then stops the plugin. A quarantined
+   * plugin is not loaded again until the quarantine is lifted.
    */
   quarantine(
     name: string,
@@ -422,27 +421,13 @@ export class PluginManager {
       return { ok: false, error: this.notFoundError(name) };
     }
 
-    if (this.quarantineEngine.isQuarantined(name)) {
+    if (this.isQuarantined(name)) {
       return { ok: false, error: `Plugin '${name}' is already quarantined` };
     }
 
-    const trustTier = this.trustStore.getTier(name);
-    const capabilityManifest = resolveCapabilityManifest(
-      name,
-      discovered.manifest as PluginManifestV2,
-      undefined,
-      trustTier,
-    );
-
-    const record = new PluginQuarantineEngine().quarantine(name, capabilityManifest, reason);
-    if (!record) {
-      return { ok: false, error: `Failed to quarantine '${name}'` };
-    }
-
-    const stored = { ...record, revokedCapabilities: [...record.revokedCapabilities] };
-    const failure = this.commitState(() => { this.state.quarantine[name] = stored; }, this.undoQuarantine(name));
+    const record: QuarantineRecord = { pluginName: name, quarantinedAt: Date.now(), reason, lifted: false };
+    const failure = this.commitState(() => { this.state.quarantine[name] = record; }, this.undoQuarantine(name));
     if (failure) return { ok: false, error: `Quarantine of '${name}' was not saved, ${failure}` };
-    this.quarantineEngine.importRecords({ [name]: stored });
     logger.warn(`[plugins] ${name}: quarantined, ${reason}`);
 
     // Plugins run in this process, so quarantine means "not running". The
@@ -469,15 +454,14 @@ export class PluginManager {
    */
   liftQuarantine(name: string): { ok: boolean; error?: string } {
     if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
-    if (!this.quarantineEngine.isQuarantined(name)) {
+    if (!this.isQuarantined(name)) {
       return { ok: false, error: `Plugin '${name}' is not quarantined` };
     }
-    const current = this.quarantineEngine.getRecord(name);
+    const current = this.state.quarantine[name];
     if (!current) return { ok: false, error: `Plugin '${name}' is not quarantined` };
-    const lifted = { ...current, revokedCapabilities: [...current.revokedCapabilities], lifted: true, liftedAt: Date.now() };
+    const lifted: QuarantineRecord = { ...current, lifted: true, liftedAt: Date.now() };
     const failure = this.commitState(() => { this.state.quarantine[name] = lifted; }, this.undoQuarantine(name));
     if (failure) return { ok: false, error: `Lifting the quarantine of '${name}' was not saved, ${failure}` };
-    this.quarantineEngine.importRecords({ [name]: lifted });
     logger.info(`[plugins] ${name}: quarantine lifted`);
     this.notifySubscribers();
     return { ok: true };
@@ -497,7 +481,7 @@ export class PluginManager {
         return { ok: false, error: this.notFoundError(name) };
       }
 
-      if (this.quarantineEngine.isQuarantined(name)) {
+      if (this.isQuarantined(name)) {
         return { ok: false, error: `Plugin '${name}' is quarantined and will not load; lift the quarantine first` };
       }
 
@@ -616,7 +600,7 @@ export class PluginManager {
           for (const d of this.enabledCandidates()) {
             if (this.closed) break;
             if (notDrained.has(d.manifest.name)) continue;
-            if (this.quarantineEngine.isQuarantined(d.manifest.name)) {
+            if (this.isQuarantined(d.manifest.name)) {
               quarantined.push(d.manifest.name);
               logger.warn(`[plugins] ${d.manifest.name}: not loaded, plugin is quarantined`);
               continue;
@@ -831,7 +815,7 @@ export class PluginManager {
         catch (error) { if (!(error instanceof PluginCleanupError)) throw error; this.cleanupErrors.add(error); }
         finally { this.plugins.delete(name); }
         const discovered = this.findDiscoveredPlugin(name);
-        if (!discovered || !this.isEnabled(name) || this.quarantineEngine.isQuarantined(name)) return { ok: true };
+        if (!discovered || !this.isEnabled(name) || this.isQuarantined(name)) return { ok: true };
         const { loaded: next, failure } = await this.acquireOrFail(discovered, deps);
         if (next) { this.plugins.set(name, next); return { ok: true }; }
         return { ok: false, error: `'${name}' did not start again at its new trust tier: ${failure ?? 'see the log for the reason'}` };
@@ -864,7 +848,7 @@ export class PluginManager {
     let firstCleanupError: PluginCleanupError | undefined;
     for (const d of this.enabledCandidates()) {
       if (this.closed) break;
-      if (this.quarantineEngine.isQuarantined(d.manifest.name)) {
+      if (this.isQuarantined(d.manifest.name)) {
         logger.warn(`[plugins] ${d.manifest.name}: not loaded, plugin is quarantined`);
         continue;
       }
@@ -950,14 +934,10 @@ export class PluginManager {
         this.state.enabledDirs = parsed.enabledDirs ?? {};
         this.state.config = parsed.config ?? {};
         this.state.trust = parsed.trust ?? {};
-        this.state.quarantine = parsed.quarantine ?? {};
+        this.state.quarantine = readQuarantineRecords(parsed.quarantine);
         this.state.publisherKeys = parsed.publisherKeys ?? {};
-        // Restore trust and quarantine state into their engines.
         if (Object.keys(this.state.trust).length > 0) {
           this.trustStore.importRecords(this.state.trust);
-        }
-        if (Object.keys(this.state.quarantine).length > 0) {
-          this.quarantineEngine.importRecords(this.state.quarantine);
         }
       }
     } catch (err) {

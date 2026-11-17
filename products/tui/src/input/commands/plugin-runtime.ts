@@ -437,7 +437,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         }
         if (action === 'lift') {
           const result = pluginManager.liftQuarantine(name);
-          ctx.print(result.ok ? `Plugin '${name}' quarantine lifted. Reload to restore safe capabilities.` : `Error: ${result.error}`);
+          ctx.print(result.ok ? `Plugin '${name}' quarantine lifted; it can load again. Run /plugin reload to load it.` : `Error: ${result.error}`);
           return;
         }
         const reason = args.slice(2).join(' ') || 'quarantined by operator';

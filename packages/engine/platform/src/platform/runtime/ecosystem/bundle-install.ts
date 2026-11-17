@@ -10,8 +10,7 @@
  *      never receives more than its tier permits;
  *   2. decide quarantine, if the bundle declared high-risk capabilities the
  *      tier does not grant, the bundle activates QUARANTINED with those
- *      capabilities revoked (the same posture the runtime quarantine engine
- *      applies to a live plugin), rather than being granted them;
+ *      capabilities withheld, rather than being granted them;
  *   3. hand back a deny-by-default surface guard for the granted set.
  *
  * This is where "quarantine machinery applies on install" is realized: an

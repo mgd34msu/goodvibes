@@ -4,7 +4,7 @@
  * The plugin manager (`platform/plugins/manager.ts`) is the one owner of
  * plugin loading, reloading, trust and quarantine; it publishes the lifecycle
  * events. This module holds the pieces it uses: the capability manifest, the
- * trust tiers, the quarantine engine and the lifecycle state machine.
+ * trust tiers, the quarantine record and the lifecycle state machine.
  */
 
 export type {
@@ -28,7 +28,6 @@ export {
 
 export {
   resolveCapabilityManifest,
-  hasCapability,
   validateManifestV2,
 } from './manifest.js';
 
@@ -47,6 +46,6 @@ export {
 } from './trust.js';
 
 export type { QuarantineRecord } from './quarantine.js';
-export { PluginQuarantineEngine } from './quarantine.js';
+export { isQuarantineActive } from './quarantine.js';
 
 export { isHighRiskCapability } from './manifest.js';

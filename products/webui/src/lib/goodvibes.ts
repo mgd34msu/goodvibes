@@ -15,7 +15,8 @@ import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type Tele
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/platform/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
 import type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentOperationView, PaymentOperationCancellation } from '@goodvibes-jev/engine/platform/platform/payments';
-import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperation, readPaymentOperationCancellation, PAYMENT_PURCHASE_RECONCILE_HTTP } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import type { PaymentSecurityCodeRequestView, PaymentSecurityCodeAcceptance } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance, readPaymentOperation, readPaymentOperationCancellation, PAYMENT_PURCHASE_RECONCILE_HTTP } from '@goodvibes-jev/engine/platform/platform/payments/browser';
 import { readClientCompatibilityFloor, recordObservedClientCompatibilityFloor } from './client-compatibility';
 // The union profile.forget accepts as a target (a field id OR a raw line index), named in
 // lib/owner-profile.ts beside the readers for the same verbs' output. The generated
@@ -545,6 +546,39 @@ async function answerPurchaseWindow(action: 'approve' | 'deny' | 'cancel', input
   const purchaseId = input.purchaseId, windowId = input.windowId;
   const result = readPaymentWindowAnswer(await requestJson(route.path, { method: 'POST', body: { purchaseId, windowId, confirm: true }, explicitUserRequest: true, signal }));
   if (result.purchaseId !== purchaseId || result.windowId !== windowId) throw new Error('The purchase answer did not match the selected window. Refresh its status.');
+  return result;
+}
+/** The owner's own POST payment acts other than window answers, by their catalog route. */
+function ownerPaymentRoute(methodId: 'payments.purchase.securityCode' | 'payments.checkout.approve'): RouteDefinition {
+  const route = EXTRA_METHOD_ROUTES[methodId];
+  if (!route || route.method !== 'POST') throw new Error(`The connected daemon does not provide ${methodId}.`);
+  return route;
+}
+/** Hand the typed card security code to the one purchase waiting for it. The code is sent once and kept nowhere here. */
+async function supplyPurchaseSecurityCode(input: Pick<PaymentSecurityCodeRequestView, 'purchaseId' | 'windowId'>, code: string, signal?: AbortSignal): Promise<PaymentSecurityCodeAcceptance> {
+  const route = ownerPaymentRoute('payments.purchase.securityCode');
+  const purchaseId = input.purchaseId, windowId = input.windowId;
+  const result = readPaymentSecurityCodeAcceptance(await requestJson(route.path, { method: 'POST',
+    body: { purchaseId, windowId, code, confirm: true }, explicitUserRequest: true, signal }));
+  if (result.purchaseId !== purchaseId || result.windowId !== windowId) throw new Error('The acknowledgement did not match the selected purchase. Refresh its status.');
+  return result;
+}
+/** What payments.checkout.approve recorded: one single-use approval bound to these three fields. */
+export interface PaymentAdvanceApproval {
+  readonly merchantDomain: string;
+  readonly item: string;
+  readonly amount: string;
+  readonly expiresAt: string;
+}
+/** Approve one purchase in advance: the merchant's domain, the item, and the most it may cost. */
+async function approvePurchaseInAdvance(input: { merchantDomain: string; item: string; amount: string }, signal?: AbortSignal): Promise<PaymentAdvanceApproval> {
+  const route = ownerPaymentRoute('payments.checkout.approve');
+  const raw = asRecord(await requestJson(route.path, { method: 'POST', body: { ...input, confirm: true }, explicitUserRequest: true, signal }));
+  const field = (key: string): string => { const value = raw[key]; return typeof value === 'string' ? value : ''; };
+  const result = { merchantDomain: field('merchantDomain'), item: field('item'), amount: field('amount'), expiresAt: field('expiresAt') };
+  if (raw.approved !== true || !result.merchantDomain || !result.item || !result.amount || !result.expiresAt) {
+    throw new Error('The daemon did not confirm the approval. Nothing is known to be approved; try again.');
+  }
   return result;
 }
 async function stopPurchaseOperation(input: Pick<PaymentOperationView, 'purchaseId' | 'operationId'>, signal?: AbortSignal): Promise<PaymentOperationCancellation> {
@@ -1131,6 +1165,11 @@ export const client = {
         approve: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('approve', input, signal),
         deny: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('deny', input, signal),
         cancel: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('cancel', input, signal),
+        securityCode: supplyPurchaseSecurityCode,
+      },
+      checkout: {
+        // The owner approves one purchase in advance; a matching begin within five minutes spends it.
+        approve: approvePurchaseInAdvance,
       },
       cards: {
         // list() also carries `defaultCardId`, the card the daemon would charge.

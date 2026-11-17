@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { isLivePaymentOperation, canReconcilePaymentOperation, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
+import { isLivePaymentOperation, canReconcilePaymentOperation, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes-jev/engine/platform/platform/payments/browser';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
 import { minorUnitsToMajorText } from '../../lib/money';
 import { getClientLifetime, subscribeClientLifetime } from '../../lib/client-lifetime';
 import { Button } from '../ui/Button';
+import { Field, Input } from '../ui/Field';
+import { useConfirm } from '../ui/ConfirmDialog';
 import { SettingsBlock } from './dialog/parts';
 
 const QUERY_KEY = ['payments', 'purchase-windows'] as const;
@@ -24,11 +26,16 @@ export function PaymentWindows() {
   const [message, setMessage] = useState('');
   const [finding, setFinding] = useState<{ operation: PaymentOperationView; outcome: 'purchased' | 'not-purchased' } | null>(null);
   const [inspected, setInspected] = useState(false);
+  // The security code being typed, for one waiting purchase at a time; cleared once sent.
+  const [code, setCode] = useState<{ windowId: string; value: string }>({ windowId: '', value: '' });
+  const [advance, setAdvance] = useState({ merchantDomain: '', item: '', amount: '' });
+  const confirm = useConfirm();
   const identity = useSyncExternalStore(subscribeClientLifetime, () => getClientLifetime().revision, () => 0);
   const windows = useQuery({ queryKey: [...QUERY_KEY, identity], queryFn: ({ signal }) => platformClient.operator.payments.purchase.status(signal),
     refetchInterval: (query) => {
       const data = query.state.data;
-      const active = data !== undefined && (data.windows.length > 0 || data.operations.some((operation) => isLivePaymentOperation(operation.state)));
+      const active = data !== undefined && (data.windows.length > 0 || data.securityCodes.length > 0
+        || data.operations.some((operation) => isLivePaymentOperation(operation.state)));
       return active ? ACTIVE_POLL_MS : IDLE_POLL_MS;
     },
     retry: false, gcTime: 0 });
@@ -37,7 +44,7 @@ export function PaymentWindows() {
     // An aborted answer may already have been applied; say so rather than going silent.
     const interrupted = active.current !== null;
     active.current?.abort(); active.current = null;
-    setPending(null); setFinding(null); setInspected(false);
+    setPending(null); setFinding(null); setInspected(false); setCode({ windowId: '', value: '' });
     setMessage(interrupted ? 'The connection changed while a request was being sent, so whether the daemon applied it is unknown. Refresh the purchase status before answering again, and do not place another order.' : '');
   }), []);
 
@@ -83,6 +90,52 @@ export function PaymentWindows() {
     }
   };
 
+  const supplyCode = async (request: PaymentSecurityCodeRequestView) => {
+    const typed = code.windowId === request.windowId ? code.value.trim() : '';
+    if (active.current || !/^\d{3,4}$/.test(typed)) return;
+    const controller = new AbortController(); active.current = controller;
+    setPending(request.windowId); setMessage('');
+    // The code leaves this page once, in this request; it is not kept in the form.
+    setCode({ windowId: '', value: '' });
+    try {
+      await platformClient.operator.payments.purchase.securityCode(request, typed, controller.signal);
+      if (controller.signal.aborted) return;
+      setMessage('Security code accepted; the purchase continues. Its outcome appears here.');
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setMessage(`The security code was not accepted: ${formatError(error)} Refresh purchases; if the request is still open, type the code again.`);
+    } finally {
+      if (active.current === controller) active.current = null;
+      if (!controller.signal.aborted) { setPending(null); void queryClient.invalidateQueries({ queryKey: QUERY_KEY }); }
+    }
+  };
+
+  const approveInAdvance = async () => {
+    const requested = { merchantDomain: advance.merchantDomain.trim(), item: advance.item.trim(), amount: advance.amount.trim() };
+    if (active.current || !requested.merchantDomain || !requested.item || !requested.amount) return;
+    const ok = await confirm.ask({
+      title: 'Approve this purchase in advance?',
+      target: `${requested.item} from ${requested.merchantDomain}, at most ${requested.amount}`,
+      description: 'A purchase matching these three, begun in the next five minutes, needs no further answer up to this amount. The approval is used once.',
+      confirmLabel: 'Approve',
+    });
+    if (!ok || active.current) return;
+    const controller = new AbortController(); active.current = controller;
+    setPending('advance'); setMessage('');
+    try {
+      const result = await platformClient.operator.payments.checkout.approve(requested, controller.signal);
+      if (controller.signal.aborted) return;
+      setMessage(`Approved in advance: ${result.item} from ${result.merchantDomain}, at most ${result.amount}, until ${new Date(result.expiresAt).toLocaleString()}.`);
+      setAdvance({ merchantDomain: '', item: '', amount: '' });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setMessage(`Nothing was approved: ${formatError(error)}`);
+    } finally {
+      if (active.current === controller) active.current = null;
+      if (!controller.signal.aborted) setPending(null);
+    }
+  };
+
   const reconcile = async () => {
     if (active.current || !finding || !inspected) return;
     const selected = finding, controller = new AbortController(); active.current = controller;
@@ -104,8 +157,30 @@ export function PaymentWindows() {
     <Button size="sm" onClick={() => { void windows.refetch(); }} disabled={windows.isFetching}>Refresh purchases</Button>
     {windows.error && <p role="alert">{formatError(windows.error)}</p>}
     {windows.isPending && <p>Loading purchase windows…</p>}
-    {!windows.isPending && !windows.error && windows.data?.windows.length === 0 && <p>No purchase window is waiting for an answer.</p>}
+    {!windows.isPending && !windows.error && windows.data?.windows.length === 0 && windows.data.securityCodes.length === 0 && <p>No purchase window is waiting for an answer.</p>}
     {message && <p role="status">{message}</p>}
+    {windows.data?.securityCodes.map(request => <section key={request.windowId} aria-label={`Security code for purchase ${request.purchaseId}`}>
+      <h4>Security code needed</h4>
+      <p>The approved purchase from {request.merchantDomain} is ready to pay with the card ending {request.cardLast4} and waits for its security code. It is used for this purchase only and kept nowhere. Never send it in a chat.</p>
+      <p>Deadline: {new Date(request.deadlineMs).toLocaleString()}</p>
+      <form onSubmit={(event) => { event.preventDefault(); void supplyCode(request); }}>
+        <Field label="Card security code">
+          <Input
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={4}
+            pattern="[0-9]{3,4}"
+            value={code.windowId === request.windowId ? code.value : ''}
+            onChange={(event) => setCode({ windowId: request.windowId, value: event.target.value.replace(/\D/g, '') })}
+            disabled={pending !== null}
+          />
+        </Field>
+        <Button type="submit" disabled={pending !== null || code.windowId !== request.windowId || !/^\d{3,4}$/.test(code.value)}>
+          {pending === request.windowId ? 'Sending code…' : 'Hand the code to this purchase'}
+        </Button>
+      </form>
+    </section>)}
     {windows.data?.windows.map(window => <section key={window.windowId} aria-label={`Purchase ${window.purchaseId}`}>
       <h4>{window.kind === 'approval' ? 'Approval required' : 'Purchase veto window'}</h4>
       <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{window.notice}</pre>
@@ -143,5 +218,24 @@ export function PaymentWindows() {
         <Button variant="ghost" onClick={() => { setFinding(null); setInspected(false); }}>Leave purchase unchanged</Button>
       </fieldset>}
     </section>)}
+    <form aria-label="Approve a purchase in advance" onSubmit={(event) => { event.preventDefault(); void approveInAdvance(); }}>
+      <fieldset disabled={pending !== null}>
+        <legend>Approve a purchase in advance</legend>
+        <p>Approve one purchase before an agent starts it: the shop, the item and the most it may cost. Needed when every purchase must be approved first; one purchase begun within five minutes may use it.</p>
+        <Field label="Shop domain">
+          <Input value={advance.merchantDomain} placeholder="shop.example" onChange={(event) => setAdvance({ ...advance, merchantDomain: event.target.value })} />
+        </Field>
+        <Field label="Item">
+          <Input value={advance.item} placeholder="USB-C cable" onChange={(event) => setAdvance({ ...advance, item: event.target.value })} />
+        </Field>
+        <Field label="At most">
+          <Input value={advance.amount} inputMode="decimal" placeholder="25.00" onChange={(event) => setAdvance({ ...advance, amount: event.target.value })} />
+        </Field>
+        <Button type="submit" disabled={!advance.merchantDomain.trim() || !advance.item.trim() || !advance.amount.trim()}>
+          {pending === 'advance' ? 'Approving…' : 'Approve in advance'}
+        </Button>
+      </fieldset>
+    </form>
+    {confirm.element}
   </SettingsBlock>;
 }

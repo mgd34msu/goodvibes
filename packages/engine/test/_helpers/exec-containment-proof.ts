@@ -1,70 +1,8 @@
-/** Required CI proof cannot turn missing host support or early returns into green. */
-export const EXEC_CONTAINMENT_REQUIRED_ENV = 'GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT';
-export const EXEC_CONTAINMENT_FIXTURES = ['filesystem-boundary', 'sandboxed-answer'] as const;
-type Fixture = (typeof EXEC_CONTAINMENT_FIXTURES)[number];
-
-interface Host {
-  readonly pty: { readonly available: boolean; readonly reason: string };
-  readonly sandbox: {
-    readonly available: boolean;
-    readonly bwrapPath?: string | undefined;
-    readonly reason: string;
-    readonly networkIsolationGuaranteed: boolean;
-  };
-}
-
-export function execContainmentRequired(value: string | undefined): boolean {
-  if (value === undefined) return false;
-  if (value === '1') return true;
-  throw new Error(`${EXEC_CONTAINMENT_REQUIRED_ENV} must be unset or exactly 1`);
-}
-
-/** Optional local runs may skip unavailable capabilities; required CI never skips. */
-export function skipExecContainment(required: boolean, host: Host): boolean {
-  return !required && (!host.pty.available || !host.sandbox.available
-    || !host.sandbox.bwrapPath || !host.sandbox.networkIsolationGuaranteed);
-}
-
 /**
- * The required CI lane must fail, not skip, when a live capability a file's tests depend on is missing.
- * Without it a host lacking the capability turns every real-sandbox test into a silent skip.
+ * The live sandbox proofs (test/live/) run inside real bubblewrap. A host that
+ * lacks a capability one of them needs fails that file at load, naming what is
+ * missing: a missing sandbox is never a pass and never a skip.
  */
 export function requireLiveHost(capability: string, available: boolean): void {
-  if (!available && execContainmentRequired(process.env[EXEC_CONTAINMENT_REQUIRED_ENV])) {
-    throw new Error(`Required exec containment: ${capability} is unavailable`);
-  }
-}
-
-export function createExecContainmentProof(required: boolean, host: Host) {
-  const completed = new Set<Fixture>();
-  const assertHost = (): void => {
-    if (!required) return;
-    if (!host.pty.available) throw new Error(`Required exec containment: ${host.pty.reason}`);
-    if (!host.sandbox.available || !host.sandbox.bwrapPath) {
-      throw new Error(`Required exec containment: ${host.sandbox.reason}`);
-    }
-    if (!host.sandbox.networkIsolationGuaranteed) {
-      throw new Error('Required exec containment: network namespace isolation is not confirmed');
-    }
-  };
-  return {
-    assertHost,
-    // Call only AFTER every live fixture assertion. A successful availability
-    // probe alone is not evidence that either real containment fixture ran.
-    completed(fixture: Fixture): void {
-      if (completed.has(fixture)) throw new Error(`Duplicate exec containment fixture: ${fixture}`);
-      completed.add(fixture);
-    },
-    assertComplete(): void {
-      if (!required) return;
-      assertHost();
-      const missing = EXEC_CONTAINMENT_FIXTURES.filter((fixture) => !completed.has(fixture));
-      if (missing.length > 0) throw new Error(`Required exec containment fixtures did not complete: ${missing.join(', ')}`);
-    },
-  };
-}
-
-/** An optional local run without the containment backend skips its isolation proofs; say so instead of reporting a quiet green. */
-export function noteSkippedContainment(file: string, available: boolean): void {
-  if (!available) console.warn(`${file}: captured exec containment is unavailable here, so its isolation proofs are skipped (CI requires them with ${EXEC_CONTAINMENT_REQUIRED_ENV}=1)`);
+  if (!available) throw new Error(`Live sandbox proof: ${capability} is unavailable on this host`);
 }

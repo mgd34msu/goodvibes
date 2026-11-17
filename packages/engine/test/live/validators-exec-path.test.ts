@@ -7,11 +7,11 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FileStateCache } from '../platform/src/platform/state/file-cache.ts';
-import { createEditTool } from '../platform/src/platform/tools/edit/core.ts';
-import { createExecValidatorRunner } from '../platform/src/platform/tools/exec/runtime.ts';
-import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
-import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
+import { FileStateCache } from '../../platform/src/platform/state/file-cache.ts';
+import { createEditTool } from '../../platform/src/platform/tools/edit/core.ts';
+import { createExecValidatorRunner } from '../../platform/src/platform/tools/exec/runtime.ts';
+import { OverflowHandler } from '../../platform/src/platform/tools/shared/overflow.ts';
+import { ProcessManager } from '../../platform/src/platform/tools/shared/process-manager.ts';
 
 test('a project build script named by validate does not run on the host when the session requires containment', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-validate-contained-')));

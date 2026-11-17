@@ -1,11 +1,16 @@
+/**
+ * Inside real bubblewrap, an ordinary command cannot connect to a host runtime
+ * socket (a Unix socket outside the workspace), while it can still read the
+ * resolver configuration it needs.
+ */
 import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { buildBwrapArgv, detectSandboxAvailability, probeSandboxHost } from '../platform/src/platform/tools/exec/sandbox.js';
-import { requireLiveHost } from './_helpers/exec-containment-proof.ts';
+import { buildBwrapArgv, detectSandboxAvailability, probeSandboxHost } from '../../platform/src/platform/tools/exec/sandbox.js';
+import { requireLiveHost } from '../_helpers/exec-containment-proof.ts';
 
 // The same working-bubblewrap probe the sibling sandbox tests use: a bwrap that is
 // installed but cannot create a namespace is a missing capability, not a failure.
@@ -15,7 +20,7 @@ const bwrapPath = availability.bwrapPath;
 const python = Bun.which('python3', { PATH: '/usr/bin:/bin' });
 const hostReady = process.platform === 'linux' && availability.available && bwrapPath !== undefined && python !== null;
 requireLiveHost('bubblewrap and python3', hostReady);
-test.skipIf(!hostReady)('ordinary sandbox cannot connect to host runtime sockets', async () => {
+test('ordinary sandbox cannot connect to host runtime sockets', async () => {
   if (bwrapPath === undefined || python === null) throw new Error('host readiness was checked above');
   const workspace = mkdtempSync(join(tmpdir(), 'sandbox-socket-'));
   // /var/tmp was visible through the former root bind, unlike the isolated /tmp.

@@ -1,15 +1,22 @@
+/**
+ * Inside real bubblewrap, a command that needs the network runs only on the
+ * owner's escalation permit, and the permit is claimed at the final spawn: a
+ * permit revoked at that moment means nothing is spawned, in every exec mode
+ * (foreground, progress, until-pattern, PTY). A plain boolean approval from a
+ * callback cannot stand in for the owned permit.
+ */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
-import { withExternalOperationSource } from '../platform/src/platform/permissions/external-operation-scope.ts';
-import { brokerSandboxEscalation, resolveExecSandboxPlan, detectSandboxAvailability, probeSandboxHost, type SandboxEscalationPermit } from '../platform/src/platform/tools/exec/sandbox.ts';
-import { detectPtyAvailability, probePtyHost } from '../platform/src/platform/tools/exec/interactive.ts';
-import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
-import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
-import { useToolReadings } from './_helpers/tool-readings.ts';
-import { requireLiveHost } from './_helpers/exec-containment-proof.ts';
+import { createExecTool } from '../../platform/src/platform/tools/exec/runtime.ts';
+import { withExternalOperationSource } from '../../platform/src/platform/permissions/external-operation-scope.ts';
+import { brokerSandboxEscalation, resolveExecSandboxPlan, detectSandboxAvailability, probeSandboxHost, type SandboxEscalationPermit } from '../../platform/src/platform/tools/exec/sandbox.ts';
+import { detectPtyAvailability, probePtyHost } from '../../platform/src/platform/tools/exec/interactive.ts';
+import { ProcessManager } from '../../platform/src/platform/tools/shared/process-manager.ts';
+import { OverflowHandler } from '../../platform/src/platform/tools/shared/overflow.ts';
+import { useToolReadings } from '../_helpers/tool-readings.ts';
+import { requireLiveHost } from '../_helpers/exec-containment-proof.ts';
 
 const command = 'printf owned-final-spawn';
 useToolReadings([], [[command, { needsNetwork: true }]]);
@@ -21,7 +28,7 @@ let root: string | undefined;
 afterEach(() => { if (root) rmSync(root, { recursive: true, force: true }); root = undefined; });
 for (const mode of ['foreground', 'progress', 'until', 'pty'] as const) {
   for (const revoked of [false, true]) {
-    test.skipIf(!availability.available || (mode === 'pty' && !pty.available))(`${mode} claims exact admission at final spawn; revoked=${revoked}`, async () => {
+    test(`${mode} claims exact admission at final spawn; revoked=${revoked}`, async () => {
       root = mkdtempSync(join(tmpdir(), 'sandbox-final-spawn-'));
       const controller = new AbortController();
       let claims = 0; let closes = 0; let spawns = 0;
@@ -57,12 +64,12 @@ for (const mode of ['foreground', 'progress', 'until', 'pty'] as const) {
           expect(output.sandboxed).toBe(true); expect(output.sandbox_network).toBe('enabled');
         }
       } finally { spy.mockRestore(); await manager.close(); }
-    }, 10000);
+    });
   }
 }
 
 
-test.skipIf(!availability.available)('a canonical callback wrapper cannot downgrade an owned permit to boolean approval', async () => {
+test('a canonical callback wrapper cannot downgrade an owned permit to boolean approval', async () => {
   root = mkdtempSync(join(tmpdir(), 'sandbox-no-downgrade-'));
   const sandbox = { config: { enabled: true, egressAllowlist: ['printf'], workspaceWritable: [] }, availability, featureEnabled: true, requestEscalation: async () => true };
   const plan = resolveExecSandboxPlan({ ...sandbox, command, workspaceDir: root, cwd: root, needs: { needsNetwork: true, needsPrivilege: false } });

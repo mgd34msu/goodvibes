@@ -531,8 +531,14 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       orchestrator.bindNativeConversationProject(source.projectId);
       turnText = source.text;
       ownerTurnText = source.text;
-      await withUntrustedContentScope(contentScope, () => withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
-        origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } })));
+      // The permit proves the owner's own app sent this input and no turn is in
+      // flight (checked above), so it starts this session's next
+      // untrusted-content turn, as an operator's input does in `submit`.
+      await withUntrustedContentScope(contentScope, () => {
+        ledger.startTurn();
+        return withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
+          origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } }));
+      });
       const after = readNativeConversationTurnStatus(permit);
       if (after !== 'settled') throw new Error(after === 'retryable'
         ? 'The model provider failed before the turn changed anything; the same message can be sent again.'

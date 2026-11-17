@@ -12,7 +12,6 @@
  * never used decays first) via `lookup`. A memory whose use was never read is
  * "not assessed", never "never referenced".
  */
-import { existsSync, readFileSync } from 'node:fs';
 import type { MemoryConsolidationUsageSignal } from './memory-consolidation.js';
 
 export interface MemoryUsageEntry {
@@ -60,60 +59,17 @@ export interface MemoryUsageSource {
 export const MEMORY_USAGE_SIGNAL_NOTE =
   'Reference detection is a judgment reading: it says whether the model output used the injected memory\'s specific information, not ground truth that the memory changed the answer. A memory whose use was never read is counted as not assessed.';
 
-/** Read-only view of the counters file an older release wrote; nothing writes it any more. */
-function readLegacyCounters(filePath: string): MemoryUsageTopEntry[] {
-  if (!existsSync(filePath)) return [];
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf-8'));
-    const raw = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).entries : null;
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
-    return Object.entries(raw as Record<string, unknown>).flatMap(([id, value]) => {
-      if (!value || typeof value !== 'object') return [];
-      const entry = value as Record<string, unknown>;
-      if (typeof entry.injectedCount !== 'number' || typeof entry.referencedCount !== 'number') return [];
-      return [{
-        id,
-        injectedCount: entry.injectedCount,
-        // That file recorded only the reads that found a use.
-        assessedCount: entry.referencedCount,
-        referencedCount: entry.referencedCount,
-        lastInjectedAt: typeof entry.lastInjectedAt === 'number' ? entry.lastInjectedAt : null,
-        lastReferencedAt: typeof entry.lastReferencedAt === 'number' ? entry.lastReferencedAt : null,
-      }];
-    });
-  } catch {
-    return [];
-  }
-}
-
 export class MemoryUsageStatsStore {
-  private readonly source: MemoryUsageSource | null;
-  private readonly legacy: readonly MemoryUsageTopEntry[];
+  /** Over the memory store's own counters. */
+  public constructor(private readonly source: MemoryUsageSource) {}
 
-  /**
-   * Over the memory store's own counters. A string is the path of the counters
-   * file an older release kept beside the store: it is read, never written, so
-   * a reader that still passes a path shows the counts recorded before the
-   * counters moved onto the record.
-   */
-  public constructor(source: MemoryUsageSource | string) {
-    this.source = typeof source === 'string' ? null : source;
-    this.legacy = typeof source === 'string' ? readLegacyCounters(source) : [];
-  }
-
-  /** One turn's use, one store update. Not available over a legacy counters file. */
+  /** One turn's use, one store update. */
   public async record(change: MemoryUsageChange, at: number = Date.now()): Promise<void> {
-    await this.source?.recordUsage(change, at);
+    await this.source.recordUsage(change, at);
   }
 
   public get(id: string): MemoryUsageEntry | null {
-    if (this.source) return this.source.usage(id);
-    const entry = this.legacy.find((candidate) => candidate.id === id);
-    if (!entry) return null;
-    return {
-      injectedCount: entry.injectedCount, assessedCount: entry.assessedCount, referencedCount: entry.referencedCount,
-      lastInjectedAt: entry.lastInjectedAt, lastReferencedAt: entry.lastReferencedAt,
-    };
+    return this.source.usage(id);
   }
 
   /**
@@ -125,7 +81,7 @@ export class MemoryUsageStatsStore {
   }
 
   public summary(sampleLimit = 5): MemoryUsageSummary {
-    return summarizeMemoryUsage(this.source ? this.source.usageEntries() : this.legacy, sampleLimit);
+    return summarizeMemoryUsage(this.source.usageEntries(), sampleLimit);
   }
 }
 

@@ -10,7 +10,6 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceMemorySnapshot, type buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
 import { buildAgentWorkspaceSessionMemoryCount } from '../input/agent-workspace-snapshot-builders.ts';
 import { readConfigString } from '../input/agent-workspace-snapshot-config.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
@@ -169,7 +168,6 @@ async function protectMemoryDoctor(value: MemoryDoctorReport, options: CatalogRa
  * Per-memory usage counters (injected, assessed, referenced). The turn tracker
  * writes them as columns on the memory records, so the store this runtime
  * composed is the one to read; they cover exactly the memories that exist.
- * Without that store, the counters file an older release kept is read instead.
  */
 function readMemoryUsageSummary(context: CommandContext): MemoryUsageRead {
   const registry = context.extensions?.memoryRegistry;
@@ -181,43 +179,12 @@ function readMemoryUsageSummary(context: CommandContext): MemoryUsageRead {
       return { summary: null, readError: previewHarnessText(summarizeError(error), 160) };
     }
   }
-  const shellPaths = context.workspace?.shellPaths;
-  if (!shellPaths) return { summary: null };
-  try {
-    const store = new MemoryUsageStatsStore(shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'learning', 'memory-usage.json'));
-    const summary = store.summary();
-    // The counters file only ever grows, so a deleted or merged memory keeps its entry. Counting
-    // only memories that still exist keeps the totals and the sampled ids resolvable.
-    if (!memoryApi(context)) return { summary };
-    const liveIds = new Set(buildAgentWorkspaceMemorySnapshot(context).items.map((item) => item.id));
-    return { summary: liveUsageSummary(store, liveIds, summary.signalNote) };
-  } catch (error) {
-    logger.warn('Memory usage counters could not be read', { error: summarizeError(error) });
-    return { summary: null, readError: previewHarnessText(summarizeError(error), 160) };
-  }
-}
-
-export function liveUsageSummary(store: MemoryUsageStatsStore, liveIds: ReadonlySet<string>, signalNote: string, sampleLimit = 5): MemoryUsageSummary {
-  const all = [...liveIds].flatMap((id) => { const entry = store.get(id); return entry ? [{ id, ...entry }] : []; });
-  const everInjected = all.filter((entry) => entry.injectedCount > 0);
-  const everReferenced = all.filter((entry) => entry.referencedCount > 0);
-  const neverReferenced = everInjected.filter((entry) => entry.referencedCount === 0);
-  return {
-    totalTracked: all.length,
-    everInjected: everInjected.length,
-    everReferenced: everReferenced.length,
-    neverReferenced: neverReferenced.length,
-    mostReferenced: [...everReferenced]
-      .sort((left, right) => right.referencedCount - left.referencedCount || (right.lastReferencedAt ?? 0) - (left.lastReferencedAt ?? 0))
-      .slice(0, sampleLimit),
-    neverReferencedSample: [...neverReferenced].sort((left, right) => right.injectedCount - left.injectedCount).slice(0, sampleLimit),
-    signalNote,
-  };
+  return { summary: null };
 }
 
 interface MemoryUsageRead {
   readonly summary: MemoryUsageSummary | null;
-  /** Set when the counters file could not be read, as opposed to there being none. */
+  /** Set when the counters could not be read, as opposed to there being none. */
   readonly readError?: string;
 }
 

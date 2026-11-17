@@ -1,4 +1,5 @@
 import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { captureStatefulCatalogRequest, rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
@@ -26,7 +27,7 @@ function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);
 }
 
-function routeUnavailable(surface: UiSurfaceDefinition): Record<string, unknown> {
+function routeUnavailable(surface: UiSurfaceDefinition): EffectResult {
   return {
     status: 'route_unavailable',
     done: false,
@@ -35,7 +36,7 @@ function routeUnavailable(surface: UiSurfaceDefinition): Record<string, unknown>
   };
 }
 
-function opened(surface: UiSurfaceDefinition, extra: Record<string, unknown> = {}): Record<string, unknown> {
+function opened(surface: UiSurfaceDefinition, extra: Record<string, unknown> = {}): EffectResult {
   return {
     status: 'opened',
     done: true,
@@ -46,7 +47,7 @@ function opened(surface: UiSurfaceDefinition, extra: Record<string, unknown> = {
   };
 }
 
-function notOpened(surface: UiSurfaceDefinition, reason: string): Record<string, unknown> {
+function notOpened(surface: UiSurfaceDefinition, reason: string): EffectResult {
   return { status: 'not_opened', done: false, surface: surface.id, kind: surface.kind, note: reason };
 }
 
@@ -93,7 +94,7 @@ function openAgentWorkspaceCategory(
   surface: UiSurfaceDefinition,
   categoryId: string,
   extra: Record<string, unknown> = {},
-): Record<string, unknown> {
+): EffectResult {
   if (!context.openAgentWorkspace) return routeUnavailable(surface);
   context.openAgentWorkspace(categoryId);
   return opened(surface, { categoryId, ...extra });
@@ -108,7 +109,7 @@ function openNamedWorkspaceSurface(
     readonly categoryId: string;
     readonly opener?: (() => void) | undefined;
   },
-): Record<string, unknown> {
+): EffectResult {
   if (context.openAgentWorkspace) {
     context.openAgentWorkspace(options.categoryId);
     return opened(surface, { categoryId: options.categoryId, workspaceId: options.workspaceId });
@@ -120,7 +121,7 @@ function openNamedWorkspaceSurface(
   return routeUnavailable(surface);
 }
 
-function openSimpleContextSurface(context: CommandContext, surfaceId: string, openerKey: keyof CommandContext): Record<string, unknown> {
+function openSimpleContextSurface(context: CommandContext, surfaceId: string, openerKey: keyof CommandContext): EffectResult {
   const surface = findSurfaceById(surfaceId)!;
   const opener = context[openerKey] as unknown;
   if (typeof opener !== 'function') return routeUnavailable(surface);
@@ -900,8 +901,8 @@ export async function describeHarnessUiSurface(context: CommandContext, args: Ag
   });
 }
 
-export async function openHarnessUiSurface(context: CommandContext, args: AgentHarnessUiSurfaceArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  let routed: Record<string, unknown> | undefined;
+export async function openHarnessUiSurface(context: CommandContext, args: AgentHarnessUiSurfaceArgs, options: CatalogRankingOptions = {}): Promise<EffectResult> {
+  let routed: EffectResult | undefined;
   try {
     return await withUiReadingRequest(context, args, options, async (request, readingOptions) => {
       args = request.input;
@@ -929,7 +930,7 @@ export async function openHarnessUiSurface(context: CommandContext, args: AgentH
     // The surface is already open (a browser may be launched) and the reading source's own
     // checks run after the callback returns, so the guard is here: reporting a failure would
     // make the caller open it a second time.
-    if (routed?.status !== 'opened' || !(err instanceof ToolInputProjectionError)) throw err;
+    if (!routed || routed.status !== 'opened' || !(err instanceof ToolInputProjectionError)) throw err;
     return { ...routed, descriptorUnavailable: 'The surface opened, but its descriptor could not be read because the source changed afterwards. Do not call open_ui_surface again; inspect it with mode:"ui_surface".' };
   }
 }

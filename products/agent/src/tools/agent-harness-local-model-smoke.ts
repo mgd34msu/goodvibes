@@ -1,4 +1,5 @@
 import type { CommandContext } from '../input/command-registry.ts';
+import type { EffectResult } from './agent-harness-tool-utils.ts';
 import type { AgentHarnessModelRoutingArgs, LocalModelServerDefaultEndpoint, LocalModelServerEndpoint, LocalModelSmokeTarget } from './agent-harness-model-routing-types.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { readLimit, readRecord, readString } from './agent-harness-model-routing-utils.ts';
@@ -294,7 +295,7 @@ async function smokeOneLocalModelTarget(target: LocalModelSmokeTarget, timeoutMs
   }
 }
 
-export async function runLocalModelServerSmoke(context: CommandContext, args: AgentHarnessModelRoutingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export async function runLocalModelServerSmoke(context: CommandContext, args: AgentHarnessModelRoutingArgs, options: CatalogRankingOptions = {}): Promise<EffectResult> {
   const signal = options.signal, callerCurrent = options.assertCurrent;
   const assertCaller = () => {
     signal?.throwIfAborted();

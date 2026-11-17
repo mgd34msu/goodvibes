@@ -1,4 +1,5 @@
 import { withBackgroundPrivilegeCheck } from './agent-harness-background-privilege.ts';
+import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { realpathSync } from 'node:fs';
@@ -637,7 +638,7 @@ async function waitForProcess(manager: ProcessManager, processId: string, timeou
 
 export async function runBackgroundProcessAction(context: CommandContext, args: AgentHarnessBackgroundProcessArgs,
   options: ProcessClassificationOptions & CatalogRankingOptions = {}, originalArgs?: Record<string, unknown>, executionOptions?: Parameters<Tool['execute']>[1],
-): Promise<Record<string, unknown>> {
+): Promise<EffectResult> {
   const manager = managerFrom(context);
   if (!manager) {
     return {

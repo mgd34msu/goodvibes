@@ -1,4 +1,5 @@
 import { processClassificationOptions } from './agent-harness-process-launch.ts';
+import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { createProcessInputProjector } from './agent-process-ingress.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -60,7 +61,7 @@ function error(message: string): { readonly success: false; readonly error: stri
  * A launch, stop or wait that did nothing is a failure, not a success with a
  * status to decode. The full body stays in `output`; `error` says why.
  */
-function processOutcome(result: Record<string, unknown>): { readonly success: boolean; readonly output: string; readonly error?: string } {
+function processOutcome(result: EffectResult): { readonly success: boolean; readonly output: string; readonly error?: string } {
   // The process handler says whether its action happened; only `done: true` is a success.
   if (result.done === true) return output(result);
   const status = typeof result.status === 'string' ? result.status : 'not_done';

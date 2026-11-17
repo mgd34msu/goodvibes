@@ -47,7 +47,7 @@ import {
 } from '../agent/channel-profile-routing.ts';
 import { buildAgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
 import { deliverAgentChannelMessage } from '../agent/channel-delivery.ts';
-import { requireConfirmedAction } from './agent-harness-tool-utils.ts';
+import { requireConfirmedAction, type EffectResult } from './agent-harness-tool-utils.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import {
   createDaemonOperatorInvoke,
@@ -390,7 +390,7 @@ export async function channelDraftSaveHandoff(
   context: CommandContext,
   args: Record<string, unknown>,
   options?: Parameters<Tool['execute']>[1],
-): Promise<Record<string, unknown> | string> {
+): Promise<EffectResult | string> {
   const confirmationError = requireConfirmedAction(args, options, 'Channel draft save');
   if (confirmationError) return confirmationError;
 
@@ -441,7 +441,7 @@ export async function channelDraftSendHandoff(
   context: CommandContext,
   args: Record<string, unknown>,
   options?: Parameters<Tool['execute']>[1],
-): Promise<Record<string, unknown> | string> {
+): Promise<EffectResult | string> {
   const confirmationError = requireConfirmedAction(args, options, 'Channel draft send');
   if (confirmationError) return confirmationError;
   const nativeReference = resolveChannelDraftNativeReference(args, options);
@@ -674,7 +674,7 @@ export async function channelRoutingAssignHandoff(
   context: CommandContext,
   args: Record<string, unknown>,
   options?: Parameters<Tool['execute']>[1],
-): Promise<Record<string, unknown> | string> {
+): Promise<EffectResult | string> {
   const confirmationError = requireConfirmedAction(args, options, 'Channel routing assignment');
   if (confirmationError) return confirmationError;
 
@@ -726,7 +726,7 @@ export async function channelRoutingRemoveHandoff(
   context: CommandContext,
   args: Record<string, unknown>,
   options?: Parameters<Tool['execute']>[1],
-): Promise<Record<string, unknown> | string> {
+): Promise<EffectResult | string> {
   const confirmationError = requireConfirmedAction(args, options, 'Channel routing removal');
   if (confirmationError) return confirmationError;
 

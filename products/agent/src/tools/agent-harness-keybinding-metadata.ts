@@ -1,4 +1,5 @@
 import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';
 import type { CommandContext } from '../input/command-registry.ts';
@@ -100,11 +101,11 @@ function readFieldMap(value: unknown): Readonly<Record<string, string>> {
 }
 
 /** The refusal every keybinding operation returns: what did not happen, why, and what to do next. */
-function refused(status: 'unavailable' | 'not_found' | 'ambiguous' | 'not_applied', reason: string, next: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+function refused(status: 'unavailable' | 'not_found' | 'ambiguous' | 'not_applied', reason: string, next: string, extra: Record<string, unknown> = {}): EffectResult {
   return { status, done: false, reason, next, ...extra };
 }
 
-const NO_MANAGER = (): Record<string, unknown> => refused('unavailable',
+const NO_MANAGER = (): EffectResult => refused('unavailable',
   'This Agent runtime has no live keybinding manager, so keybindings can be listed (defaults) but not run or changed.',
   'Ask the owner to edit keybindings.json directly, or run this from the interactive Agent.');
 
@@ -607,13 +608,13 @@ export async function describeHarnessKeybinding(context: KeybindingContext, args
   } : null;
 }
 
-function unknownKeybinding(mode: string, args: HarnessKeybindingArgs): Record<string, unknown> {
+function unknownKeybinding(mode: string, args: HarnessKeybindingArgs): EffectResult {
   const given = readString(args.actionId) || readString(args.target) || readString(args.key) || readString(args.query);
   return refused('not_found', given ? `No keybinding action matches ${JSON.stringify(given)}, so nothing was done.` : `${mode} needs an actionId, key, target or query.`,
     'List the actions with workspace action:"keybindings" and repeat with one actionId.');
 }
 
-function runUnavailable(action: KeyAction, route: KeybindingOperationRoute, reason?: string): Record<string, unknown> {
+function runUnavailable(action: KeyAction, route: KeybindingOperationRoute, reason?: string): EffectResult {
   return {
     status: 'keybinding_route_unavailable',
     done: false,
@@ -623,7 +624,7 @@ function runUnavailable(action: KeyAction, route: KeybindingOperationRoute, reas
   };
 }
 
-export async function runHarnessKeybinding(context: KeybindingExecutionContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export async function runHarnessKeybinding(context: KeybindingExecutionContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<EffectResult> {
   const sources = readKeybindingSources(context, options);
   const manager = sources.manager;
   if (!manager) return NO_MANAGER();
@@ -768,7 +769,7 @@ function chordConflicts(manager: KeybindingsManager, action: KeyAction, combos: 
   return conflicts;
 }
 
-export async function setHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export async function setHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<EffectResult> {
   const sources = readKeybindingSources(context, options);
   const manager = sources.manager;
   if (!manager) return NO_MANAGER();
@@ -811,7 +812,7 @@ export async function setHarnessKeybinding(context: KeybindingContext, args: Har
   };
 }
 
-export async function resetHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export async function resetHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<EffectResult> {
   const sources = readKeybindingSources(context, options);
   const manager = sources.manager;
   if (!manager) return NO_MANAGER();

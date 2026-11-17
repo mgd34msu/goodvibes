@@ -183,6 +183,12 @@ export function nestedToolOutput(
   return { success: false, output: text, error: `${typeof body.tool === 'string' ? `${body.tool} failed: ` : ''}${reason}` };
 }
 
+/** What an effect handler returns: its own body, and whether the effect happened. */
+export interface EffectResult {
+  readonly done: boolean;
+  readonly [field: string]: unknown;
+}
+
 /**
  * Reports the result of an effect handler. Every effect handler says whether
  * its effect happened with `done` (a real no-op such as nothing to recover is
@@ -190,7 +196,7 @@ export function nestedToolOutput(
  * fails, with the handler's own body kept in `output`, so the result flag and
  * tool cards agree with what happened.
  */
-export function effectOutput(value: unknown): { readonly success: boolean; readonly output: string; readonly error?: string } {
+export function effectOutput(value: EffectResult): { readonly success: boolean; readonly output: string; readonly error?: string } {
   const body = typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : null;
   if (body?.done === true) return output(value);
   const status = typeof body?.status === 'string' ? body.status : 'not_done';

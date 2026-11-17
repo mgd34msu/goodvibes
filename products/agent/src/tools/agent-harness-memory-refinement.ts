@@ -1,3 +1,4 @@
+import type { EffectResult } from './agent-harness-tool-utils.ts';
 import {
   ACTIVE_REFINEMENT_STATES,
   type KnowledgeRefinementTaskRecord,
@@ -283,7 +284,7 @@ export function memoryRefinementSummary(context: CommandContext, args: AgentHarn
   };
 }
 
-export async function runMemoryRefinement(context: CommandContext, args: AgentHarnessMemoryRefinementArgs): Promise<Record<string, unknown>> {
+export async function runMemoryRefinement(context: CommandContext, args: AgentHarnessMemoryRefinementArgs): Promise<EffectResult> {
   const service = knowledgeService(context);
   if (!service?.runRefinement) {
     return {

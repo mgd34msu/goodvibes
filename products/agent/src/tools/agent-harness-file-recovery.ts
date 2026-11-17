@@ -1,4 +1,5 @@
 import { isAbsolute, relative } from 'node:path';
+import type { EffectResult } from './agent-harness-tool-utils.ts';
 import { lstatSync, realpathSync } from 'node:fs';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -115,7 +116,7 @@ export function fileRecoverySummary(context: FileRecoveryContext, args: AgentHar
   };
 }
 
-export function runFileRecovery(context: FileRecoveryContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): Record<string, unknown> {
+export function runFileRecovery(context: FileRecoveryContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): EffectResult {
   if (!harnessCatalogInvocationAuthority(args, options, 'write')) {
     return { status: 'held', done: false, error: `File recovery requires current recorded effect admission. ${RECOVERY_NEXT_STEP}` };
   }

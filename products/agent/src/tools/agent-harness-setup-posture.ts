@@ -24,7 +24,7 @@ import { buildSetupPlan, SETUP_PLAN_ROW_IDS } from './agent-harness-setup-plan.t
 import { buildSetupWizard, describeInstallSmokeCheck, ignoredSetupSmokeEvidenceFields, installSmokeNextAction, SETUP_SMOKE_EVIDENCE_FIELD_DEFINITIONS, installSmokeRunResult, installSmokeRunSummary, latestSetupSmokeEvidence, saveSetupSmokeArtifact, setupCompletionMarkerExists, setupSmokeEvidenceArtifacts, setupSmokeEvidenceHistory, setupWizardCheckpoint } from './agent-harness-setup-smoke.ts';
 import { confirmedRepairCandidates, describeCandidate, describeHandoffCard, describeItem, describePlanItem, describeRepairCard, describeRepairDecision, describeServiceLifecycleDecision, nextSetupHandoffSummaries, planSummary, primarySetupRepairDecision, setupRepairTarget } from './agent-harness-setup-describe.ts';
 import { setupHandoffsForItem } from './agent-harness-setup-handoffs.ts';
-import { homeRelativePath } from './agent-harness-tool-utils.ts';
+import { homeRelativePath, type EffectResult } from './agent-harness-tool-utils.ts';
 import { collectServicePosture, collectSnapshot, lookupFromArgs, quoteRouteValue, readLimit, readString, safeFileMode, safeIso, summarizeLocalBehavior } from './agent-harness-setup-posture-utils.ts';
 
 /**
@@ -228,7 +228,7 @@ export async function setupCheckpointSummary(context: CommandContext, options: C
   });
 }
 
-export async function markSetupCheckpoint(context: CommandContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): Promise<Record<string, unknown>> {
+export async function markSetupCheckpoint(context: CommandContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): Promise<EffectResult> {
   const assertCurrent = captureHarnessLocalEffect(context, args, options, paths => [setupWizardCheckpointPath(paths)]);
   const platform = context.platform, config = platform.configManager, incarnation = config.getConfigurationIncarnation();
   const { smoke, plan } = await observeSetup(context, { signal: options?.signal, assertCurrent });
@@ -307,7 +307,7 @@ export async function markSetupCheckpoint(context: CommandContext, args: Record<
   };
 }
 
-export function clearSetupCheckpoint(context: CommandContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): Record<string, unknown> {
+export function clearSetupCheckpoint(context: CommandContext, args: Record<string, unknown>, options?: Parameters<Tool['execute']>[1]): EffectResult {
   const assertCurrent = captureHarnessLocalEffect(context, args, options, paths => [setupWizardCheckpointPath(paths)]);
   const shellPaths = requireShellPaths(context);
   assertCurrent();
@@ -330,7 +330,7 @@ export function clearSetupCheckpoint(context: CommandContext, args: Record<strin
   };
 }
 
-export function provisionConnectedHostOperatorToken(context: CommandContext, args: AgentHarnessSetupArgs): Record<string, unknown> {
+export function provisionConnectedHostOperatorToken(context: CommandContext, args: AgentHarnessSetupArgs): EffectResult {
   const setupItemId = readString(args.setupItemId);
   if (setupItemId && setupItemId !== 'connected-host-auth') {
     return {
@@ -472,7 +472,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
   }
 }
 
-export async function runSetupInstallSmoke(context: CommandContext, args: AgentHarnessSetupArgs, ownership: SetupSmokeNativeEvidence, signal?: AbortSignal): Promise<Record<string, unknown>> {
+export async function runSetupInstallSmoke(context: CommandContext, args: AgentHarnessSetupArgs, ownership: SetupSmokeNativeEvidence, signal?: AbortSignal): Promise<EffectResult> {
   ownership.assertCurrent();
   const setupItemId = readString(args.setupItemId);
   if (setupItemId && setupItemId !== 'install-smoke') {

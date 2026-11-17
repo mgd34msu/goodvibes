@@ -1105,9 +1105,8 @@ export const client = {
       // A plain status read is receipt-NEUTRAL (never consumes). Once per
       // daemon connect, not per poll, pass { receipts: 'peek' } to receive
       // undelivered update/crash/migration receipts without marking them, then
-      // { receipts: 'ack', ids } for the ones shown. 'consume' marks on read
-      // and is only for a daemon that predates peek.
-      status: (input?: { receipts?: 'consume' | 'peek' | 'ack'; ids?: string }) => scopedPlatform.operator.invoke('control.status', input ?? {}),
+      // { receipts: 'ack', ids } for the ones shown.
+      status: (input?: { receipts?: 'peek' | 'ack'; ids?: string }) => scopedPlatform.operator.invoke('control.status', input ?? {}),
       snapshot: () => scopedPlatform.operator.invoke('control.snapshot', {}),
       // methodInfo: a read-only capability probe. The method being checked can be any
       // string, including one this daemon build has never heard of: an unregistered id

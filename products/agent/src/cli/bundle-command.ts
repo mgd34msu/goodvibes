@@ -1,7 +1,6 @@
 import { createSupportBundleCommand } from '@goodvibes-jev/engine/terminal-shell/support-bundle-command';
 import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
 import { existsSync } from 'node:fs';
-import 'node:path';
 import { createShellPathService } from '@/runtime/index.ts';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
@@ -11,6 +10,10 @@ import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvi
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { CliCommandRuntime } from './management.ts';
 import { routeConfigWrite } from '../config/daemon-config-routing.ts';
+import { getPackageVersion } from './help.ts';
+import { classifyProviderSetup } from './provider-classification.ts';
+import { buildCliServicePosture } from './service-posture.ts';
+import { appendTemporalLabel } from './temporal-label.ts';
 
 /** The connected host's base URL when it is on another machine; undefined for this machine's daemon. */
 function remoteHostBaseUrl(runtime: CliCommandRuntime): string | undefined {
@@ -22,12 +25,6 @@ function remoteHostBaseUrl(runtime: CliCommandRuntime): string | undefined {
     return undefined;
   }
 }
-
-import { getPackageVersion } from './help.ts';
-import { classifyProviderSetup } from './provider-classification.ts';
-import { buildCliServicePosture } from './service-posture.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { appendTemporalLabel } from './temporal-label.ts';
 
 function readAuthPosture(runtime: CliCommandRuntime) {
   const shellPaths = createShellPathService({

@@ -14,7 +14,8 @@ import {
   restoreSetupTransferChanges,
   settleSetupTransferChanges,
 } from './local-setup-transfer.ts';
-import { buildSetupReviewSnapshot, exportSetupSupportBundle, renderSetupSandboxReview } from './local-setup-review.ts';
+import { buildSetupReviewSnapshot, exportSetupSupportBundle, inspectSetupSupportBundle, renderSetupSandboxReview } from './local-setup-review.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
 import { openOnboardingWizard, requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
@@ -36,9 +37,9 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
     name: 'setup',
     aliases: ['startup'],
     description: 'Launch the onboarding wizard and review startup readiness, service posture, and sandbox bring-up',
-    usage: '[review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]',
+    usage: '[review|doctor|services|hooks|remote|sandbox|onboarding|support-bundle <dir> [--overwrite]|support-bundle inspect <dir>|export <path> [--overwrite]|transfer <export [--overwrite]|inspect|import> <path>|link <surface> [target]|open-link <uri>]',
     subcommands: {
-      'support-bundle': '<dir> [--overwrite]', export: '<path> [--overwrite]',
+      'support-bundle': '<dir> [--overwrite] | inspect <dir>', export: '<path> [--overwrite]',
       transfer: '<export [--overwrite]|inspect|import> <path>', link: '<surface> [target]', 'open-link': '<uri>',
     },
     confirm(args, ctx) {
@@ -168,6 +169,20 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
       if (sub === 'onboarding') {
         openOnboardingWizard(ctx, { mode: 'edit', reset: true });
         ctx.print('Opening onboarding wizard.');
+        return;
+      }
+
+      if (sub === 'support-bundle' && args[1] === 'inspect') {
+        // Reads a bundle back: the install, storage, helper and sandbox facts it carries.
+        if (!args[2]) throw commandRefusal('Usage: /setup support-bundle inspect <dir>', 'Export one first with /setup support-bundle <dir>');
+        const bundleDir = getShellPaths().resolveWorkspacePath(args[2]);
+        let text: string;
+        try {
+          text = inspectSetupSupportBundle(bundleDir);
+        } catch (error) {
+          throw commandRefusal(`Could not read the support bundle in ${bundleDir}: ${summarizeError(error)}`, 'Export one with /setup support-bundle <dir>', 'BUNDLE_UNREADABLE');
+        }
+        ctx.print(text);
         return;
       }
 

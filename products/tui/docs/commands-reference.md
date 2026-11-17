@@ -299,7 +299,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/setup` | `/startup` | `[review\|doctor\|services\|hooks\|remote\|sandbox\|onboarding\|support-bundle <dir> [--overwrite]\|export <path> [--overwrite]\|transfer <export [--overwrite]\|inspect\|import> <path>\|link <surface> [target]\|open-link <uri>]` | Launch the onboarding wizard and review startup readiness, service posture, and sandbox bring-up |
+| `/setup` | `/startup` | `[review\|doctor\|services\|hooks\|remote\|sandbox\|onboarding\|support-bundle <dir> [--overwrite]\|support-bundle inspect <dir>\|export <path> [--overwrite]\|transfer <export [--overwrite]\|inspect\|import> <path>\|link <surface> [target]\|open-link <uri>]` | Launch the onboarding wizard and review startup readiness, service posture, and sandbox bring-up |
 
 ## Mail & Calendar
 
@@ -361,7 +361,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | `/panel` | `/panels` | `[<name> \| open <name> [--target <id>[:<kind>]] \| list]` | Open a view by its old pane name (fleet, tokens, git, …) in its modal; /panel list shows where each goes |
 | `/prev-error` | `/pe` | None | Jump to the previous error message in the conversation |
 | `/profiles` | None | None | Browse and load config profiles |
-| `/settings` | `/cfg-ui` | None | Open the fullscreen configuration workspace |
+| `/settings` | `/cfg-ui` | `[category\|key]` | Open the fullscreen configuration workspace, at that category or setting; other text becomes the settings search and is reported |
 | `/tool` | None | `verify <name> \| verify-all \| contract show <name>` | Verify registered tool contracts |
 
 ## Owner Profile

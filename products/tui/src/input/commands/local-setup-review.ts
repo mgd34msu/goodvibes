@@ -1,6 +1,6 @@
 import { createSetupReviewCollector } from '@goodvibes-jev/engine/terminal-shell/setup-review';
 import { join } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
 import { discoverSkills } from '../../views/skills-discovery.ts';
 import {
@@ -97,6 +97,45 @@ export async function exportSetupSupportBundle(targetDirArg: string, snapshot: S
     writeFileSync(join(targetDir, name), JSON.stringify(maskLiteralSecrets(parsed, masked, name), null, 2) + '\n', 'utf-8');
   }
   return { targetDir, masked: masked.length };
+}
+
+const textList = (value: unknown): readonly string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []);
+const asRecord = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
+
+/**
+ * Reads back a support bundle `/setup support-bundle <dir>` wrote: the files it
+ * holds and, from platform-review.json, the install, secure-storage,
+ * integration-helper, sandbox and deep-link facts (key names only, as written).
+ * Throws when the directory holds no platform review.
+ */
+export function inspectSetupSupportBundle(targetDir: string): string {
+  const reviewPath = join(targetDir, 'platform-review.json');
+  if (!existsSync(reviewPath)) throw new Error(`${targetDir} holds no support bundle (no platform-review.json)`);
+  const review = asRecord(JSON.parse(readFileSync(reviewPath, 'utf-8')) as unknown);
+  const install = asRecord(review['install']);
+  const storage = asRecord(review['storage']);
+  const helpers = review['integrationHelpers'];
+  const sandbox = asRecord(review['sandbox']);
+  const indent = (text: unknown): string[] => (typeof text === 'string' && text.trim() ? text.trimEnd().split('\n').map((line) => `    ${line}`) : ['    (not recorded)']);
+  const storedKeys = textList(storage['storedKeys']);
+  const overridden = textList(storage['overriddenByEnv']);
+  let files: string[] = [];
+  try { files = readdirSync(targetDir).filter((name) => name.endsWith('.json')).sort(); } catch { files = ['platform-review.json']; }
+  return [
+    `Support Bundle Review: ${targetDir}`,
+    `  files: ${files.join(', ')}`,
+    `  install: app ${String(install['appVersion'] ?? 'unknown')}, working directory ${String(install['workingDirectory'] ?? 'unknown')}, ${String(install['profileCount'] ?? 0)} profile(s)`,
+    `  secure storage: ${storedKeys.length} stored key(s)${overridden.length > 0 ? `, ${overridden.length} overridden by the environment` : ''}`,
+    ...storedKeys.map((key) => `    ${key}${overridden.includes(key) ? ' (environment override)' : ''}`),
+    typeof helpers === 'string'
+      ? `  integration helpers: ${helpers}`
+      : `  integration helpers: ${textList(asRecord(helpers)['apiFamilies']).length} API family(ies), ${textList(asRecord(helpers)['routes']).length} route(s)`,
+    '  sandbox review:',
+    ...indent(sandbox['review']),
+    '  sandbox recommendation:',
+    ...indent(sandbox['recommendation']),
+    `  deep links: ${textList(review['deepLinks']).length}`,
+  ].join('\n');
 }
 
 const collectSetupReview = createSetupReviewCollector<

@@ -2939,7 +2939,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "cancelledReason": "sample",
           "metadata": {}
         }
-      ]
+      ],
+      "defaultTimezone": "sample"
     }
   },
   "automation.schedules.run": {

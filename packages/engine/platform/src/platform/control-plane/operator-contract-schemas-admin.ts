@@ -613,6 +613,7 @@ export const AUTOMATION_HEARTBEAT_RESULT_SCHEMA = objectSchema({
 export const AUTOMATION_SCHEDULES_OUTPUT_SCHEMA = objectSchema({
   jobs: arraySchema(AUTOMATION_JOB_SCHEMA),
   runs: arraySchema(AUTOMATION_RUN_SCHEMA),
+  defaultTimezone: { ...STRING_SCHEMA, description: 'The IANA zone a cron schedule created without a timezone is stored in: the host\'s own zone.' },
 }, ['jobs', 'runs']);
 
 export const DELIVERY_SNAPSHOT_SCHEMA = objectSchema({

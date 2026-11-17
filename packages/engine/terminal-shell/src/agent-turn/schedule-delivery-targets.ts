@@ -310,6 +310,10 @@ export function findSameSchedule(listed: unknown, payload: ScheduleCreateInput):
   // The host stores the model as a provider-qualified key and the provider only when one was asked for.
   const model = comparableName(payload.model);
   const provider = comparableName(payload.provider);
+  // A cron written without a zone is stored in the host's own zone, which the
+  // list names; a host that does not name it leaves only an explicit zone compared.
+  const hostZone = isScheduleRecord(listed) && typeof listed.defaultTimezone === 'string' ? listed.defaultTimezone : '';
+  const zoneWanted = payload.timezone || hostZone;
   return jobs.find((job): job is Record<string, unknown> => {
     if (!isScheduleRecord(job) || job.name !== payload.name) return false;
     const execution = job.execution;
@@ -322,8 +326,7 @@ export function findSameSchedule(listed: unknown, payload: ScheduleCreateInput):
     if (!isScheduleRecord(schedule) || schedule.kind !== payload.kind) return false;
     if (payload.kind === 'cron') {
       const zone = typeof schedule.timezone === 'string' ? schedule.timezone : undefined;
-      // Without a timezone the host stores its own local zone, so only an explicit zone is compared.
-      return schedule.expression === payload.cron && (!payload.timezone || zone === payload.timezone);
+      return schedule.expression === payload.cron && (!zoneWanted || zone === zoneWanted);
     }
     if (payload.kind === 'every') return schedule.intervalMs === intervalMs;
     return typeof schedule.at === 'number' && schedule.at === Date.parse(String(payload.at));

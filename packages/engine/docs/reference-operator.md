@@ -20458,6 +20458,10 @@ Return schedule records.
         ],
         "additionalProperties": true
       }
+    },
+    "defaultTimezone": {
+      "type": "string",
+      "description": "The IANA zone a cron schedule created without a timezone is stored in: the host's own zone."
     }
   },
   "required": [

@@ -5878,7 +5878,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "cancelledReason": "sample",
           "metadata": {}
         }
-      ]
+      ],
+      "defaultTimezone": "sample"
     }
   },
   "automation.schedules.run": {

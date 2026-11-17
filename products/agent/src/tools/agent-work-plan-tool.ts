@@ -62,6 +62,12 @@ function output(text: string): { readonly success: true; readonly output: string
   return { success: true, output: text };
 }
 
+/** The changed item's lines plus one line on where the plan stands, taken from the write itself. */
+function changedOutput(store: WorkPlanStore, lines: readonly string[]): { readonly success: true; readonly output: string } {
+  const plan = store.lastWriteSummary?.();
+  return output([...lines, ...(plan ? [`  plan ${plan}`] : [])].join('\n'));
+}
+
 function requireId(args: AgentWorkPlanToolArgs): string {
   const id = readString(args.id);
   if (!id) throw new Error('id is required.');
@@ -232,46 +238,47 @@ export function createAgentWorkPlanTool(store: WorkPlanStore): Tool {
           source: readString(args.source) || 'main-conversation',
           notes: readString(args.notes) || undefined,
         }, effects);
-        return output([
+        return changedOutput(store, [
           'Created Agent todo',
           `  id ${item.id}`,
           `  title ${item.title}`,
-        ].join('\n'));
+        ]);
       }
       if (args.action === 'update') {
         const patch = updatePatch(args);
         if (Object.keys(patch).length === 0) return failure('Nothing to update: give at least one of title, status, owner, source or notes.');
         const item = store.updateItem(requireId(args), patch, effects);
-        return output([
+        return changedOutput(store, [
           'Updated Agent todo',
           `  id ${item.id}`,
           `  title ${item.title}`,
-        ].join('\n'));
+        ]);
       }
       if (args.action === 'set_status') {
         const status = readOptionalStatus(args.status);
         if (!status) throw new Error('status is required.');
         const item = store.setItemStatus(requireId(args), status, effects);
-        return output([
+        return changedOutput(store, [
           'Set Agent todo status',
           `  id ${item.id}`,
           `  status ${formatStatus(item.status)}`,
           `  title ${item.title}`,
-        ].join('\n'));
+        ]);
       }
       if (args.action === 'remove') {
         const item = store.removeItem(requireId(args), effects);
-        return output([
+        return changedOutput(store, [
           'Removed Agent todo',
           `  id ${item.id}`,
           `  title ${item.title}`,
-        ].join('\n'));
+        ]);
       }
       const count = store.clearCompleted(effects);
-      return output([
+      const cleared = [
         `Cleared ${count} done or cancelled Agent todos`,
         `  count ${count}`,
-      ].join('\n'));
+      ];
+      return count > 0 ? changedOutput(store, cleared) : output(cleared.join('\n'));
     },
   };
 }

@@ -404,6 +404,7 @@ export class WorkPlanStore implements RevisionSource {
 
   private observedIdentity: string | undefined;
   private revisionCounter = 0;
+  private lastSummary: string | null = null;
 
   constructor(options: WorkPlanStoreOptions) {
     this.options = Object.freeze({ ...options });
@@ -434,6 +435,16 @@ export class WorkPlanStore implements RevisionSource {
 
   listItems(): readonly WorkPlanItem[] {
     return this.getActivePlan().items;
+  }
+
+  /**
+   * One line on the plan as this store last wrote it (item count and counts by
+   * status), taken from the plan the write already held, so a caller that just
+   * changed one item can say where the plan stands without reading it again.
+   * Null before this store's first write.
+   */
+  lastWriteSummary(): string | null {
+    return this.lastSummary;
   }
 
   addItem(title: string, options: AddWorkPlanItemOptions = {}, effects?: WorkPlanEffectOptions): WorkPlanItem {
@@ -813,6 +824,7 @@ export class WorkPlanStore implements RevisionSource {
     effects?.assertCurrent?.();
     writeDocument(this.filePath, saved);
     effects?.onEffect?.(true);
+    this.lastSummary = summarizeWorkPlanItems(saved.items);
     return saved;
   }
 
@@ -849,6 +861,14 @@ export class WorkPlanStore implements RevisionSource {
       ...(item.completedAt !== undefined ? { completedAt: item.completedAt } : {}),
     };
   }
+}
+
+/** "12 items: 3 pending, 1 in progress, 8 done", statuses with no items left out. */
+export function summarizeWorkPlanItems(items: readonly WorkPlanItem[]): string {
+  const counts = new Map<WorkPlanItemStatus, number>();
+  for (const item of items) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+  const parts = WORK_PLAN_STATUSES.filter((status) => counts.has(status)).map((status) => `${counts.get(status)} ${status.replace(/_/g, ' ')}`);
+  return `${items.length} item${items.length === 1 ? '' : 's'}${parts.length ? `: ${parts.join(', ')}` : ''}`;
 }
 
 export interface WorkPlanItemsObservation {

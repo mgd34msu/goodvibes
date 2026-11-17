@@ -10,7 +10,8 @@ import {
 import { WORK_PLAN_TOOL_SCHEMA, type WorkPlanToolInput } from './schema.js';
 
 /** The slice of the project work plan the tool uses. */
-export type WorkPlanToolStore = Pick<WorkPlanStore, 'getActivePlan' | 'addItem' | 'updateItem' | 'setItemStatus' | 'removeItem' | 'clearCompleted'>;
+export type WorkPlanToolStore = Pick<WorkPlanStore, 'getActivePlan' | 'addItem' | 'updateItem' | 'setItemStatus' | 'removeItem' | 'clearCompleted'>
+  & Partial<Pick<WorkPlanStore, 'lastWriteSummary'>>;
 
 const SOURCE = 'agent';
 
@@ -31,6 +32,15 @@ function itemView(item: WorkPlanItem) {
     ...(item.notes ? { notes: item.notes } : {}),
     updatedAt: item.updatedAt,
   };
+}
+
+/**
+ * A change answers with the item it changed and one line on where the plan
+ * stands, taken from the write itself; `list` is how the model reads the plan.
+ */
+function changed(store: WorkPlanToolStore, result: Record<string, unknown>): string {
+  const plan = store.lastWriteSummary?.();
+  return JSON.stringify(plan ? { ...result, plan } : result);
 }
 
 /**
@@ -73,7 +83,7 @@ export function createWorkPlanTool(store: WorkPlanToolStore): Tool {
               ...(owner ? { owner } : {}),
               ...(notes ? { notes } : {}),
             });
-            return { success: true, output: JSON.stringify(itemView(item)) };
+            return { success: true, output: changed(store, itemView(item)) };
           }
           case 'update': {
             const id = text(input.id);
@@ -85,22 +95,24 @@ export function createWorkPlanTool(store: WorkPlanToolStore): Tool {
               ...(owner !== undefined ? { owner } : {}),
               ...(notes !== undefined ? { notes } : {}),
             });
-            return { success: true, output: JSON.stringify(itemView(item)) };
+            return { success: true, output: changed(store, itemView(item)) };
           }
           case 'set_status': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'set_status requires "id".' };
             if (!isStatus(input.status)) return { success: false, error: `set_status requires "status", one of: ${WORK_PLAN_STATUSES.join(', ')}.` };
-            return { success: true, output: JSON.stringify(itemView(store.setItemStatus(id, input.status))) };
+            return { success: true, output: changed(store, itemView(store.setItemStatus(id, input.status))) };
           }
           case 'remove': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'remove requires "id".' };
             const item = store.removeItem(id);
-            return { success: true, output: JSON.stringify({ removed: item.id, title: item.title }) };
+            return { success: true, output: changed(store, { removed: item.id, title: item.title }) };
           }
-          case 'clear_completed':
-            return { success: true, output: JSON.stringify({ cleared: store.clearCompleted() }) };
+          case 'clear_completed': {
+            const cleared = store.clearCompleted();
+            return { success: true, output: cleared > 0 ? changed(store, { cleared }) : JSON.stringify({ cleared }) };
+          }
           default:
             return { success: false, error: `Unknown action "${String((args as { action?: unknown }).action)}". Use list, add, update, set_status, remove or clear_completed.` };
         }

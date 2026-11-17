@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readDocument, writeDocument, logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { runStoreFileUpdateSync } from './store-file.js';
+import { storeFileChangeStamp } from './store-change-stamp.js';
 import type { LearningProposalTarget, LearningScores } from './learning-curator-types.js';
 
 /**
@@ -10,8 +12,9 @@ import type { LearningProposalTarget, LearningScores } from './learning-curator-
  * model again. Every verdict carries the content hash of what it was read
  * from; a verdict whose hash no longer matches the record is simply not used,
  * and the next pass reads that record again. The document is held in memory
- * by its owner (one per store path per process) and written whole on a real
- * change.
+ * by its owner (one per store path per process), read again when another
+ * process changed the file, and saved under the store lock with this
+ * process's changes merged over the file's.
  */
 
 export interface StoredLearningGrade {
@@ -82,34 +85,82 @@ function validate(parsed: unknown): LearningCurationDocument {
   return { version: 1, lastPassAt, proposals: section('proposals'), pairs: section('pairs'), survivors: section('survivors'), grades: section('grades') };
 }
 
+type PendingSection = Map<string, Verdict<unknown> | null>;
+
+function readStoredDocument(path: string): LearningCurationDocument | null {
+  return readDocument(path, {
+    label: 'agent/learning-curation', validate,
+    recovery: 'The learning curator starts with no stored verdicts; the next memory action:"curate" pass reads the records again.',
+  });
+}
+
 export class LearningCurationStore {
   #document: LearningCurationDocument;
-  #dirty = false;
+  /** The file stamp the held document was read at or last written as. */
+  #stamp: string;
+  /** What this process changed since its last save (null: removed), laid over a fresher file on reload and save. */
+  #pending: Record<Section, PendingSection> = { proposals: new Map(), pairs: new Map(), survivors: new Map(), grades: new Map() };
+  #pendingPassAt: number | undefined;
 
-  private constructor(private readonly path: string | undefined, document: LearningCurationDocument) {
+  private constructor(private readonly path: string | undefined, document: LearningCurationDocument, stamp: string) {
     this.#document = document;
+    this.#stamp = stamp;
   }
 
   static #owners = new Map<string, LearningCurationStore>();
 
-  /** The one owner of the curation document under these paths; an in-memory store when there is no workspace. */
+  /**
+   * The one owner of the curation document under these paths; an in-memory
+   * store when there is no workspace. Another process (the daemon's hosted
+   * Agent turn, a second terminal) may have run a pass since this one read the
+   * file, so one stat per acquire decides whether the held copy is still the
+   * file's; a changed file is read again with this process's unsaved verdicts
+   * laid over it.
+   */
   static forPaths(paths: Pick<ShellPathService, 'resolveUserPath'> | undefined): LearningCurationStore {
-    if (!paths) return new LearningCurationStore(undefined, emptyDocument());
+    if (!paths) return new LearningCurationStore(undefined, emptyDocument(), 'absent');
     const path = paths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'learning', 'learning-curation.json');
     const owned = LearningCurationStore.#owners.get(path);
-    if (owned) return owned;
+    if (owned) { owned.#refresh(); return owned; }
     let document = emptyDocument();
+    let stamp = 'absent';
     try {
-      document = readDocument(path, {
-        label: 'agent/learning-curation', validate,
-        recovery: 'The learning curator starts with no stored verdicts; the next memory action:"curate" pass reads the records again.',
-      }) ?? emptyDocument();
+      stamp = storeFileChangeStamp(path);
+      document = readStoredDocument(path) ?? emptyDocument();
     } catch (error) {
       logger.warn('Learning curation verdicts could not be read; starting without them', { error: summarizeError(error) });
     }
-    const store = new LearningCurationStore(path, document);
+    const store = new LearningCurationStore(path, document, stamp);
     LearningCurationStore.#owners.set(path, store);
     return store;
+  }
+
+  #refresh(): void {
+    if (!this.path) return;
+    try {
+      const stamp = storeFileChangeStamp(this.path);
+      if (stamp === this.#stamp) return;
+      this.#document = this.#overlay(readStoredDocument(this.path) ?? emptyDocument());
+      this.#stamp = stamp;
+    } catch (error) {
+      logger.warn('Learning curation verdicts could not be read again; keeping the ones held', { error: summarizeError(error) });
+    }
+  }
+
+  #overlay(document: LearningCurationDocument): LearningCurationDocument {
+    for (const section of ['proposals', 'pairs', 'survivors', 'grades'] as const) {
+      const entries: Record<string, Verdict<unknown>> = document[section];
+      for (const [key, verdict] of this.#pending[section]) {
+        if (verdict === null) delete entries[key];
+        else entries[key] = verdict;
+      }
+    }
+    if (this.#pendingPassAt !== undefined) document.lastPassAt = this.#pendingPassAt;
+    return document;
+  }
+
+  #hasPending(): boolean {
+    return this.#pendingPassAt !== undefined || Object.values(this.#pending).some(section => section.size > 0);
   }
 
   get lastPassAt(): number | null { return this.#document.lastPassAt; }
@@ -123,8 +174,9 @@ export class LearningCurationStore {
     const entries: Record<string, Verdict<unknown>> = this.#document[section];
     const previous = entries[key];
     if (previous && previous.hash === hash && JSON.stringify(previous.value) === JSON.stringify(value)) return;
-    entries[key] = { hash, value };
-    this.#dirty = true;
+    const verdict = { hash, value };
+    entries[key] = verdict;
+    this.#pending[section].set(key, verdict);
   }
 
   proposal(key: string, hash: string): StoredLearningProposal | undefined { return this.#get('proposals', key, hash) as StoredLearningProposal | undefined; }
@@ -140,16 +192,32 @@ export class LearningCurationStore {
   retainOnly(live: Readonly<Record<Section, ReadonlySet<string>>>): void {
     for (const section of ['proposals', 'pairs', 'survivors', 'grades'] as const) {
       const entries: Record<string, Verdict<unknown>> = this.#document[section];
-      for (const key of Object.keys(entries)) if (!live[section].has(key)) { delete entries[key]; this.#dirty = true; }
+      for (const key of Object.keys(entries)) if (!live[section].has(key)) { delete entries[key]; this.#pending[section].set(key, null); }
     }
   }
 
-  markPass(at: number): void { this.#document.lastPassAt = at; this.#dirty = true; }
+  markPass(at: number): void { this.#document.lastPassAt = at; this.#pendingPassAt = at; }
 
-  /** One write when something changed; a failed write is logged and the verdicts stay in memory for this process. */
+  /**
+   * One locked write when something changed. Under the store lock the file is
+   * read again only when its stamp moved since this process read or wrote it,
+   * and this pass's changed keys are laid over what another process stored, so
+   * neither process's paid verdicts are lost. A failed write is logged and the
+   * changes stay pending in memory for the next save.
+   */
   save(): void {
-    if (!this.#dirty || !this.path) return;
-    try { writeDocument(this.path, this.#document, { indent: null }); this.#dirty = false; }
-    catch (error) { logger.warn('Learning curation verdicts could not be saved', { error: summarizeError(error) }); }
+    const path = this.path;
+    if (!path || !this.#hasPending()) return;
+    try {
+      runStoreFileUpdateSync(path, () => {
+        const stamp = storeFileChangeStamp(path);
+        const document = stamp === this.#stamp ? this.#document : this.#overlay(readStoredDocument(path) ?? emptyDocument());
+        writeDocument(path, document, { indent: null });
+        this.#document = document;
+        this.#stamp = storeFileChangeStamp(path);
+        for (const section of Object.values(this.#pending)) section.clear();
+        this.#pendingPassAt = undefined;
+      });
+    } catch (error) { logger.warn('Learning curation verdicts could not be saved', { error: summarizeError(error) }); }
   }
 }

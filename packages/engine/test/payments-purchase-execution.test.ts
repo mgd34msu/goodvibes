@@ -35,6 +35,7 @@ import {
   type PurchaseRequest,
 } from '../platform/src/platform/payments/checkout-flow.js';
 import { extractCheckout } from '../platform/src/platform/payments/checkout-extraction.js';
+import { readRepricedCheckoutInCode } from '../platform/src/platform/payments/checkout-repricing.js';
 import { BudgetLedger, type BudgetLimits } from '../platform/src/platform/payments/budget.js';
 import type { CardMetadata } from '../platform/src/platform/payments/types.js';
 /**
@@ -484,6 +485,26 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
       expect(approved.notices[0]?.kind).toBe('approval');
       expect(bought.kind).toBe('purchased'); expect(beta.submissions).toHaveLength(1);
     } finally { retire(); }
+  });
+
+  test('with no decision model in use, a changed checkout yields a new quote only when its printed amounts add up to one total', () => {
+    const usd = currency('USD');
+    const previous = { submitTarget: 'place', merchantDomain: 'shop.example', currency: usd, lines: [{ label: 'Cable', quantity: 1, unitMinorUnits: 1_000 }],
+      taxMinorUnits: 100, feesMinorUnits: 0, feeLabels: [], shippingLabel: 'Standard', shippingMinorUnits: 200, totalMinorUnits: 1_300 };
+    const reading = { lines: [{ label: 'Cable', quantity: '1', unitPrice: '10.00' }], tax: '1.00', fees: [],
+      shippingOptions: [{ label: 'Standard', cost: '2.00' }, { label: 'Express', cost: '4.00' }], statedTotal: '13.00', currency: 'USD', orderSummaryText: 'Cable x1' };
+    const page = (text: string) => ({ documents: [{ checkout: { text } }] });
+    const read = (text: string) => readRepricedCheckoutInCode({ previous, reading, current: page(text) });
+    // New prices that add up are the page's own amounts, for the owner to approve again.
+    const repriced = read('Cable x1: USD 12.00\nSubtotal: USD 12.00\nTax: USD 1.20\nStandard selected: USD 2.00\nExpress: USD 4.00\nOrder total: USD 15.20');
+    expect(repriced).not.toBeNull();
+    const extracted = repriced === null ? null : extractCheckout(repriced, usd);
+    expect(extracted?.ok && extracted.checkout.lines.map(line => [line.quantity, line.unitMinorUnits])).toEqual([[1, 1_200]]);
+    expect(repriced?.statedTotal).toBe('15.20');
+    // A changed quantity, an added item, or a total no choice of amounts reaches is no quote.
+    expect(read('Cable x2: USD 24.00\nTax: USD 2.40\nStandard selected: USD 2.00\nExpress: USD 4.00\nOrder total: USD 28.40')).toBeNull();
+    expect(read('Cable: USD 12.00\nGift wrap: USD 3.00\nTax: USD 1.20\nStandard: USD 2.00\nExpress: USD 4.00\nTotal: USD 18.20')).toBeNull();
+    expect(read('Cable: USD 12.00\nTax: USD 1.20\nStandard: USD 2.00\nExpress: USD 4.00\nTotal: USD 99.00')).toBeNull();
   });
 
   test('a claimed storefront cannot make an unrecognised checkout look recognised', async () => {

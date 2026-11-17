@@ -106,7 +106,7 @@ import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js'
 import { registrableDomain } from '../security/public-suffix.js';
 import type { RawCheckoutReading } from './checkout-extraction.js';
 import type { MarketplaceListing } from './marketplace-listing.js';
-import { readRepricedCheckout } from './checkout-repricing.js';
+import { readRepricedCheckout, readRepricedCheckoutInCode } from './checkout-repricing.js';
 import { markPaymentCheckoutAction } from '../security/order-submission.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 import { minorUnitExponent } from './money-parsing.js';
@@ -477,9 +477,21 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
 
   async readCurrentQuote(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },
     ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<RawCheckoutReading | null> {
-    // A replacement quote is a reading of the changed page; without a decision
-    // model none is established and the purchase stops with nothing submitted.
-    return decisionOrClassic(() => this.readReplacementQuote(original, ownership), () => null);
+    // Without a decision model, code reads the changed page
+    // (`readRepricedCheckoutInCode`): a quote only when exactly one choice of
+    // its printed amounts adds up to its printed total. The owner approves it.
+    return decisionOrClassic(() => this.readReplacementQuote(original, ownership), () => this.readReplacementQuoteInCode(original, ownership));
+  }
+
+  private async readReplacementQuoteInCode(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },
+    ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<RawCheckoutReading | null> {
+    const retained = captureOwnedJson(original) as unknown as typeof original;
+    const observed = await this.observePage(retained.terms, ownership);
+    if (!observed) return null;
+    await observed.current();
+    const next = readRepricedCheckoutInCode({ previous: retained.terms, reading: retained.reading, current: observed.state });
+    observed.assertActive();
+    return next;
   }
 
   private async readReplacementQuote(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },

@@ -84,7 +84,7 @@ import {
   type MerchantVerdict,
 } from './merchant-recourse.js';
 import type { MarketplaceListing } from './marketplace-listing.js';
-import { renderCancellationReport, renderPurchaseNotice, renderPurchaseReport, renderSecurityCodeRequest } from './message.js';
+import { formatMinorUnits, renderCancellationReport, renderPurchaseNotice, renderPurchaseReport, renderSecurityCodeRequest } from './message.js';
 import type { SecurityCodeRequests, TypedSecurityCode } from './security-code-requests.js';
 import { validateLinkTarget } from '../security/link-validation.js';
 import { sanitizeNoticeField } from '../security/notice-text.js';
@@ -118,6 +118,7 @@ import type {
   CommandAuthorityChannel,
   CurrencyCode,
   ExecutionRefusalCode,
+  MinorUnits,
   OwnerSuppliedText,
   RefusalCode,
   ShippingStepDown,
@@ -191,6 +192,7 @@ import { PaymentReplyWindowError } from './reply-inbox.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowResumption } from './checkout-window-checkpoint.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 
 export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
   readonly resumeWindow?: CheckoutWindowResumption | undefined;
@@ -383,6 +385,8 @@ interface CheckoutExecutionLifetime {
   keepOnStop: () => boolean;
   resumption?: CheckoutWindowResumption | undefined;
   resumedHold?: ReturnType<typeof retainResumedCheckoutHold> | undefined;
+  /** The total of the quote a changed page replaced, when code (no decision model) read the replacement; the next notice says so. */
+  repricedInCode?: { readonly totalMinorUnits: MinorUnits; readonly currency: CurrencyCode } | undefined;
 }
 
 type CheckoutAttemptOutcome = CheckoutOutcome | { readonly kind: 'reprice'; readonly reading: RawCheckoutReading };
@@ -577,6 +581,11 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     ...(recurring.outcome === 'not-checked' ? ['this is a single payment, not a subscription, renewal or trial that turns into a paid plan'] : []),
     ...(shippingRead.value.speedRead ? [] : ['delivery: I took the cheapest option as standard; which option is faster was not read']),
   ];
+  if (lifecycle.repricedInCode) {
+    notChecked.push(`the checkout changed after the earlier quote of ${formatMinorUnits(lifecycle.repricedInCode.totalMinorUnits, lifecycle.repricedInCode.currency)}; `
+      + 'I read the new amounts from the page by code, where they add up to its total, and did not re-read which items and quantities it holds');
+    lifecycle.repricedInCode = undefined;
+  }
 
   // ── 4. The decision, on OUR integers ────────────────────────────────────
   const cardLast4 = metadata?.last4 ?? '????';
@@ -760,7 +769,11 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     await release(); addressCurrent();
     if (typeof readCurrentQuote !== 'function') return refused('total-changed', 'The checkout terms changed and this browser cannot read a verified replacement quote. Nothing was submitted.');
     const next = await readCurrentQuote.call(driver, { terms: expectedTerms, reading }, { signal, assertCurrent: addressCurrent });
-    if (!next) return refused('total-changed', 'The changed checkout could not establish a complete replacement quote for the same purchase. Nothing was submitted.');
+    // Without a decision model the page is read again by whoever started the
+    // purchase, through the same start that read it the first time.
+    if (!next) return refused('total-changed', isClassicOperation()
+      ? 'The checkout changed after the quote you were sent, and its new amounts do not add up to one total I can read from the page by code (no decision model is in use). Nothing was submitted. Read the checkout page again and start the purchase with the amounts it shows now; the owner is asked to approve the new total.'
+      : 'The changed checkout could not establish a complete replacement quote for the same purchase. Nothing was submitted.');
     const retained = captureOwnedJson(next) as unknown as RawCheckoutReading;
     const extracted = extractCheckout(retained, deps.budgetCurrency);
     if (!extracted.ok) return refused('extraction-failed', extracted.reason);
@@ -775,7 +788,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         const original = checkout.shippingOptions[index];
         return original && option.costMinorUnits === original.costMinorUnits;
       });
-    if (samePrices) return refused('total-changed', 'The earlier quote could not be verified, and no changed price was established. Nothing was submitted.');
+    if (samePrices) return refused('total-changed', isClassicOperation()
+      ? `The checkout amounts are unchanged, but code could not find the approved total together with the delivery option '${sanitizeNoticeField(expectedTerms.shippingLabel, 60)}' on the page (no decision model is in use). Nothing was submitted. Make sure that option is selected, read the checkout page again and start the purchase with what it shows.`
+      : 'The earlier quote could not be verified, and no changed price was established. Nothing was submitted.');
+    if (isClassicOperation()) lifecycle.repricedInCode = { totalMinorUnits: expectedTerms.totalMinorUnits, currency: expectedTerms.currency };
     // Iterative re-entry avoids retaining earlier request/window stacks. The
     // next attempt reads the live budget and creates a completely new window.
     return { kind: 'reprice', reading: retained };

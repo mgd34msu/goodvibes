@@ -10,7 +10,7 @@ import { askAs, checkEachFixture, choice, decisionHeader, fixtureCheck, noul, re
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
 import { sanitizeNoticeField } from '../security/notice-text.js';
 import { extractCheckout, readingDecimalMark, type RawCheckoutReading } from './checkout-extraction.js';
-import { parseMinorUnits, type DecimalMark } from './money-parsing.js';
+import { minorUnitExponent, parseMinorUnits, type DecimalMark } from './money-parsing.js';
 import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js';
 import type { CheckoutTerms } from './checkout-page.js';
 
@@ -196,6 +196,185 @@ function checkoutTexts(current: object): readonly string[] | null {
     texts.push(text);
   }
   return texts.length ? texts : null;
+}
+
+/** Choices one code reading may weigh before it gives up as ambiguous. */
+const MAX_CODE_COMBINATIONS = 4_096;
+const TAX_LINE = /\b(?:tax|taxes|vat|gst|hst|pst|qst)\b/u;
+const NOT_TAX_LINE = /\b(?:before|pre|excl|excluding|incl|including)\b/u;
+const TOTAL_LINE = /\b(?:total|amount due|to pay|you pay|pay now)\b/u;
+const NOT_TOTAL_LINE = /\b(?:subtotal|sub|before|pre|excl|excluding|items?|savings?|save|saved)\b/u;
+const QUANTITY_ON_LINE = /(?:^|[^\p{L}\p{N}])(?:x|×|qty|quantity)\s*:?\s*(\d{1,4})(?![\d.,])|(?:^|[^\p{L}\p{N}.,])(\d{1,4})\s*(?:x|×)(?![\p{L}\p{N}])/u;
+
+/** The words of a line or label with its printed prices taken out, lower case, single-spaced. */
+function wordKey(text: string, currency: string): string {
+  const exponent = minorUnitExponent(currency);
+  const price = new RegExp(`(?:${currency}|\\p{Sc})\\s*\\d[\\d.,]*|\\d[\\d.,]*\\s*(?:${currency}|\\p{Sc})${exponent === 0 ? '' : `|\\d+[.,]\\d{${String(exponent)}}(?!\\d)`}`, 'giu');
+  return text.normalize('NFKC').replace(price, ' ').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/** A label with its printed price taken out, as the page would still print it. */
+function labelWithoutPrice(label: string, currency: string): string {
+  const exponent = minorUnitExponent(currency);
+  const price = new RegExp(`(?:${currency}|\\p{Sc})\\s*\\d[\\d.,]*|\\d[\\d.,]*\\s*(?:${currency}|\\p{Sc})${exponent === 0 ? '' : `|\\d+[.,]\\d{${String(exponent)}}(?!\\d)`}`, 'giu');
+  return label.replace(price, ' ').replace(/\s+/gu, ' ').replace(/^[\s:–—\-,]+|[\s:–—\-,]+$/gu, '').trim();
+}
+
+function formatAmount(minorUnits: number, currency: string, mark: DecimalMark | undefined): string {
+  const exponent = minorUnitExponent(currency);
+  if (exponent === 0) return String(minorUnits);
+  const scale = 10 ** exponent;
+  return `${String(Math.floor(minorUnits / scale))}${mark ?? '.'}${String(minorUnits % scale).padStart(exponent, '0')}`;
+}
+
+interface CodeAmount { readonly literal: string; readonly minorUnits: number }
+interface PricedSpan extends CodeAmount { readonly words: string; readonly line: string }
+
+/**
+ * The replacement quote code reads when no decision model reads the changed
+ * page. Every amount is one the page prints, taken from a line that names its
+ * component: the cart line's label (a line stating another quantity does not
+ * count), a tax word, the delivery option's label, a total word, the fee's
+ * label. A quote is returned only when exactly one choice of those amounts adds
+ * up, to the minor unit, to a total printed on the page; anything less is null
+ * and nothing is bought. The quote authorizes nothing: the flow releases the
+ * old hold, decides again, and the owner approves the new total explicitly.
+ */
+export function readRepricedCheckoutInCode(input: {
+  readonly previous: CheckoutTerms; readonly reading: RawCheckoutReading; readonly current: object;
+}): RawCheckoutReading | null {
+  const previous = captureOwnedJson(input.previous) as unknown as CheckoutTerms;
+  const reading = captureOwnedJson(input.reading) as unknown as RawCheckoutReading;
+  const current = captureOwnedJson(input.current);
+  if (!current || typeof current !== 'object' || Array.isArray(current)) return null;
+  const texts = checkoutTexts(current); if (!texts) return null;
+  const currency = previous.currency;
+  const priorLayout = readingDecimalMark(reading, currency);
+  const mark = priorLayout.ok ? priorLayout.mark : undefined;
+  const candidates = checkoutAmountCandidates(texts, currency, mark); if (!candidates) return null;
+  const exponent = minorUnitExponent(currency);
+  const decimals = exponent === 0 ? null : new RegExp(`[.,]\\d{${String(exponent)}}$`, 'u');
+  const spans: PricedSpan[] = [];
+  for (const candidate of candidates) {
+    const { document, start, end, literal } = candidate.content;
+    const text = texts[document] ?? '';
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = text.indexOf('\n', end);
+    const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+    // A price is printed as one: with its minor digits or beside a currency
+    // mark. A quantity, a date or a count is not a price to weigh.
+    const before = text.slice(Math.max(lineStart, start - 6), start), after = text.slice(end, end + 6);
+    const marked = /\p{Sc}\s*$/u.test(before) || /^\s*\p{Sc}/u.test(after)
+      || before.toUpperCase().includes(currency) || after.toUpperCase().includes(currency);
+    if (decimals !== null && !decimals.test(literal) && !marked) continue;
+    const minorUnits = parseMinorUnits(literal, currency, mark);
+    if (minorUnits === null) continue;
+    spans.push({ literal, minorUnits, words: ` ${wordKey(line, currency)} `, line: line.normalize('NFKC').toLowerCase() });
+  }
+  const pageLines = texts.flatMap(text => text.split('\n')).map(line => ({ words: ` ${wordKey(line, currency)} `, line: line.normalize('NFKC').toLowerCase() }));
+  /** Lines naming the label; a line naming a longer label that holds this one belongs to that label. */
+  const naming = <T extends { readonly words: string }>(lines: readonly T[], label: string, others: readonly string[]): T[] => {
+    const key = wordKey(label, currency);
+    if (key.length === 0) return [];
+    const longer = others.map(other => wordKey(other, currency)).filter(other => other !== key && ` ${other} `.includes(` ${key} `));
+    return lines.filter(line => line.words.includes(` ${key} `) && !longer.some(other => line.words.includes(` ${other} `)));
+  };
+  const distinct = (amounts: readonly CodeAmount[]): CodeAmount[] =>
+    [...new Map(amounts.map(amount => [amount.minorUnits, { literal: amount.literal, minorUnits: amount.minorUnits }])).values()];
+  const zero: CodeAmount = { literal: '0', minorUnits: 0 };
+
+  const lineLabels = previous.lines.map(line => line.label);
+  const lineOptions: CodeAmount[][] = [];
+  for (const line of previous.lines) {
+    const options: CodeAmount[] = [];
+    for (const span of naming(spans, line.label, lineLabels)) {
+      const stated = QUANTITY_ON_LINE.exec(span.line);
+      if (stated && Number(stated[1] ?? stated[2]) !== line.quantity) continue;
+      options.push(span);
+      // A line may print its extended total instead of the unit price.
+      if (line.quantity > 1 && span.minorUnits % line.quantity === 0) {
+        const unit = span.minorUnits / line.quantity;
+        options.push({ literal: formatAmount(unit, currency, mark), minorUnits: unit });
+      }
+    }
+    if (options.length === 0) return null;
+    lineOptions.push(distinct(options));
+  }
+
+  const taxSpans = spans.filter(span => TAX_LINE.test(span.words) && !NOT_TAX_LINE.test(span.words));
+  const taxOptions = taxSpans.length > 0 ? distinct(taxSpans) : [zero];
+
+  const deliveryLabels = reading.shippingOptions.map(option => option.label);
+  const selectedIndex = deliveryLabels.indexOf(previous.shippingLabel);
+  if (selectedIndex === -1) return null;
+  const deliveryOptions: CodeAmount[][] = [];
+  for (const [index, label] of deliveryLabels.entries()) {
+    const free = naming(pageLines, label, deliveryLabels).some(line => / free /u.test(line.words));
+    const options = distinct([...naming(spans, label, deliveryLabels), ...(free ? [zero] : [])]);
+    // The total settles the selected option; every other one prints one price.
+    if (options.length === 0 || (index !== selectedIndex && options.length !== 1)) return null;
+    deliveryOptions.push(options);
+  }
+  // The selected option must be named on the page as the terms check will look
+  // for it: its label as read, or that label without the price it printed.
+  const selectedRaw = deliveryLabels[selectedIndex] ?? '';
+  const printed = (label: string): boolean => label.length > 0 && pageLines.some(line => line.line.includes(label.normalize('NFKC').toLowerCase()));
+  const selectedLabel = printed(selectedRaw) ? selectedRaw : labelWithoutPrice(selectedRaw, currency);
+  if (!printed(selectedLabel)) return null;
+
+  const feeLabels = reading.fees.map(fee => fee.label);
+  const feeOptions: CodeAmount[][] = reading.fees.map(fee => {
+    const found = distinct(naming(spans, fee.label, feeLabels));
+    // A fee whose label is gone from the page is no longer charged; one still
+    // named with no amount beside it is not read.
+    return found.length > 0 ? found : naming(pageLines, fee.label, feeLabels).length > 0 ? [] : [zero];
+  });
+  if (feeOptions.some(options => options.length === 0)) return null;
+
+  const totalOptions = distinct(spans.filter(span => TOTAL_LINE.test(span.words) && !NOT_TOTAL_LINE.test(span.words)));
+  if (totalOptions.length === 0) return null;
+  const discountMinorUnits = (previous.discounts ?? []).reduce((sum, discount) => sum + discount.amountMinorUnits, 0);
+
+  const selectedOptions = deliveryOptions[selectedIndex] ?? [];
+  const roles: readonly (readonly CodeAmount[])[] = [...lineOptions, taxOptions, selectedOptions, ...feeOptions, totalOptions];
+  if (roles.reduce((count, options) => count * options.length, 1) > MAX_CODE_COMBINATIONS) return null;
+  const taxAt = lineOptions.length, deliveryAt = taxAt + 1, feesAt = deliveryAt + 1, totalAt = feesAt + feeOptions.length;
+  const solutions = new Map<string, readonly CodeAmount[]>();
+  const choose = (at: number, picked: readonly CodeAmount[]): void => {
+    if (at < roles.length) { for (const option of roles[at] ?? []) choose(at + 1, [...picked, option]); return; }
+    const amount = (index: number): number => picked[index]?.minorUnits ?? Number.NaN;
+    let payable = -discountMinorUnits + amount(taxAt) + amount(deliveryAt);
+    for (const [index, line] of previous.lines.entries()) payable += amount(index) * line.quantity;
+    for (let index = feesAt; index < totalAt; index++) payable += amount(index);
+    if (Number.isSafeInteger(payable) && payable === amount(totalAt)) solutions.set(picked.map(option => option.minorUnits).join(':'), picked);
+  };
+  choose(0, []);
+  // Two different quotes that both add up are two readings; code does not pick between them.
+  if (solutions.size !== 1) return null;
+  const [picked] = solutions.values();
+  const literal = (index: number): string | undefined => picked?.[index]?.literal;
+  const unitPrices = previous.lines.map((_, index) => literal(index));
+  const tax = literal(taxAt), delivery = literal(deliveryAt), total = literal(totalAt);
+  if (unitPrices.some(price => price === undefined) || tax === undefined || delivery === undefined || total === undefined) return null;
+  const next: RawCheckoutReading = {
+    lines: previous.lines.map((line, index) => ({ label: reading.lines[index]?.label ?? line.label, quantity: String(line.quantity), unitPrice: unitPrices[index] ?? '' })),
+    tax,
+    fees: reading.fees.flatMap((fee, index) => {
+      const amount = picked?.[feesAt + index];
+      return amount && amount.minorUnits > 0 ? [{ label: fee.label, amount: amount.literal }] : [];
+    }),
+    ...(reading.discounts?.length ? { discounts: reading.discounts } : {}),
+    shippingOptions: reading.shippingOptions.map((option, index) => index === selectedIndex
+      ? { label: selectedLabel, cost: delivery }
+      : { label: option.label, cost: deliveryOptions[index]?.[0]?.literal ?? '' }),
+    statedTotal: total, currency, orderSummaryText: reading.orderSummaryText,
+  };
+  // The same arithmetic the decision model's quote must pass, on what extraction parsed.
+  const extracted = extractCheckout(next, currency); if (!extracted.ok) return null;
+  const selected = extracted.checkout.shippingOptions[selectedIndex];
+  const nextLayout = readingDecimalMark(next, currency);
+  if (!selected || !nextLayout.ok || extracted.checkout.subtotalMinorUnits + selected.costMinorUnits !== parseMinorUnits(total, currency, nextLayout.mark)) return null;
+  return next;
 }
 
 /** Returns source strings only after full fresh quote verification. It never

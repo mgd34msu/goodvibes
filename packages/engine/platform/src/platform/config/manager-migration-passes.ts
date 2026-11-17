@@ -10,6 +10,7 @@ import { acknowledgeConfigFileWrite } from './config-file-watcher.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import {
   migrateControlPlaneBaseUrlRemoval,
+  migrateControlPlaneNetworkServing,
   migrateDaemonConnectedHostSplit,
   migrateDaemonEmbedInProcessRemoval,
   migrateDangerDaemonAlias,
@@ -198,6 +199,37 @@ export function applyControlPlaneBaseUrlMigrationPass(
     receipt(`settings-migration-control-plane-base-url:${sourcePath}`, receiptText);
   } catch (err) {
     logger.warn(`controlPlane.baseUrl removal receipt could not be queued: ${summarizeError(err)}`);
+  }
+  return result.config;
+}
+
+/**
+ * A file that binds the control plane to the network and never stated
+ * `controlPlane.enabled` gets it stated `true`, with a receipt, so other
+ * machines it served before that setting took effect are still served. Runs
+ * over surface files and the daemon tier, since `controlPlane.*` was written to
+ * both before ownership moved.
+ */
+export function applyControlPlaneNetworkServingMigrationPass(
+  parsed: Record<string, unknown>,
+  sourcePath: string,
+  receipt: MigrationReceiptSink,
+  ownership: MigrationOwnership = OWNS_FILE,
+): Record<string, unknown> {
+  const result = migrateControlPlaneNetworkServing(parsed);
+  if (!result.migrated) return parsed;
+  if (!ownership.ownsFile || ownership.beforeWrite?.() === false) return result.config;
+  if (!persistMigratedFile(sourcePath, result.config, 'controlPlane.enabled statement')) return result.config;
+  const receiptText =
+    `Setting added: controlPlane.enabled is now true in ${sourcePath}, because that file binds the control plane `
+    + `to the network (hostMode ${result.binding ?? 'network'}). The daemon now serves other machines only with this `
+    + 'setting on; before, it changed nothing. Your devices on the network keep working. Set controlPlane.enabled '
+    + 'to false to serve this machine only.';
+  logger.info(receiptText);
+  try {
+    receipt(`settings-migration-control-plane-network-serving:${sourcePath}`, receiptText);
+  } catch (err) {
+    logger.warn(`controlPlane.enabled statement receipt could not be queued: ${summarizeError(err)}`);
   }
   return result.config;
 }
@@ -572,7 +604,8 @@ export function runDaemonTierMigrationPasses(
   const updated = applyDaemonReleaseFeedMigrationPass(parsed, sourcePath, ownership);
   const renamed = applyPaymentsBudgetMigrationPass(updated, sourcePath, receipt, ownership);
   const retired = applyRetiredSettingsMigrationPass(renamed, sourcePath, receipt, ownership);
-  return applyOccasionsFinalStretchMigrationPass(retired, sourcePath, receipt, ownership);
+  const serving = applyControlPlaneNetworkServingMigrationPass(retired, sourcePath, receipt, ownership);
+  return applyOccasionsFinalStretchMigrationPass(serving, sourcePath, receipt, ownership);
 }
 
 /**
@@ -601,6 +634,7 @@ export function runLoadMigrationPasses(
   config = applyLegacySettingsMigrationPass(config, sourcePath, receipt, ownership);
   config = applyFleetMaxSizeMigrationPass(config, sourcePath, receipt, ownership);
   config = applyControlPlaneBaseUrlMigrationPass(config, sourcePath, receipt, ownership);
+  config = applyControlPlaneNetworkServingMigrationPass(config, sourcePath, receipt, ownership);
   config = applyDaemonEmbedInProcessMigrationPass(config, sourcePath, receipt, ownership);
   // After the danger.daemon alias pass above, so a file whose only statement of
   // `daemon.enabled: false` arrived via that alias is split too.

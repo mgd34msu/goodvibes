@@ -124,7 +124,10 @@ do not assume the URL itself changes the listener.
 The bundled WebUI uses the control-plane origin, not `web.port`. `webui status`
 reports configured serving/exposure, and `webui status --json` reports declared
 `web.*` development binding without probing a listener. `webui enable --lan`
-explicitly widens network binding; `webui enable --loopback` narrows it. Confirm
+explicitly widens network binding and turns `controlPlane.enabled` on;
+`webui enable --loopback` narrows the binding. A device on another machine that
+gets `403 CONTROL_PLANE_LOCAL_ONLY` is reaching a daemon with
+`controlPlane.enabled` off. Confirm
 this exposure is intended and that the bundle exists before enabling it.
 
 ## Installed and running disagree

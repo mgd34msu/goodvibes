@@ -397,6 +397,50 @@ export function migrateControlPlaneBaseUrlRemoval(
   };
 }
 
+/** Outcome of stating `controlPlane.enabled: true` for a file that binds the network. */
+export interface ControlPlaneNetworkServingMigrationResult {
+  readonly config: Record<string, unknown>;
+  /** True when `controlPlane.enabled: true` was written in. */
+  readonly migrated: boolean;
+  /** The bind the file states, for the receipt. */
+  readonly binding?: string | undefined;
+}
+
+function isLoopbackBindHost(host: string): boolean {
+  const name = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return name === 'localhost' || name === '::1' || /^127\./.test(name);
+}
+
+/**
+ * Write `controlPlane.enabled: true` into a file that binds the control-plane
+ * listener to the network and never stated the setting.
+ *
+ * `controlPlane.enabled` used to change nothing, so a machine set up for LAN
+ * access (`controlPlane.hostMode: network`, or `custom` with a non-loopback
+ * host) served every device it could reach with the setting at its default,
+ * off. The listener now answers other machines only with it on. Writing it in
+ * keeps that machine's phones, browsers and paired devices working, and says
+ * so where the owner can see and change it.
+ *
+ * Deliberately narrow: a file that states `controlPlane.enabled` at either
+ * value is untouched (an explicit off is the owner's choice, now honoured), and
+ * so is one that binds loopback, which nothing outside the machine reaches.
+ * Idempotent: after one run the file states the setting.
+ */
+export function migrateControlPlaneNetworkServing(
+  parsed: Record<string, unknown>,
+): ControlPlaneNetworkServingMigrationResult {
+  const section = parsed.controlPlane;
+  if (!isPlainObject(section) || 'enabled' in section) return { config: parsed, migrated: false };
+  const mode = section.hostMode;
+  const host = typeof section.host === 'string' ? section.host.trim() : '';
+  const bindsNetwork = mode === 'network' || (mode === 'custom' && host.length > 0 && !isLoopbackBindHost(host));
+  if (!bindsNetwork) return { config: parsed, migrated: false };
+  const config = structuredClone(parsed);
+  (config.controlPlane as Record<string, unknown>).enabled = true;
+  return { config, migrated: true, binding: mode === 'custom' ? `custom (${host})` : 'network' };
+}
+
 /** Outcome of dropping a stored `daemon.embedInProcess`. */
 export interface DaemonEmbedInProcessMigrationResult {
   readonly config: Record<string, unknown>;

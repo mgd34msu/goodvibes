@@ -8,7 +8,10 @@
  *   (a loopback peer or one of this machine's own addresses), whatever
  *   `controlPlane.hostMode` binds; a request from anywhere else is refused with
  *   the setting named. The outbound relay has its own switch and does not pass
- *   through the listener, so it is not affected.
+ *   through the listener, so it is not affected. A channel webhook
+ *   (`/webhook/...`) is the channel's provider delivering to its own surface,
+ *   not a control-plane client: it is answered from anywhere, and its surface's
+ *   own switch and sender signature decide it in the router.
  * - `controlPlane.streamMode`: which live update stream is served. `sse`
  *   serves `GET /api/control-plane/events` only, `websocket` serves the
  *   `/api/control-plane/ws` upgrade only, `both` serves both.
@@ -20,6 +23,8 @@ import { jsonErrorResponse } from './error-response.js';
 
 export const CONTROL_PLANE_EVENTS_PATH = '/api/control-plane/events';
 export const CONTROL_PLANE_SOCKET_PATH = '/api/control-plane/ws';
+/** Channel deliveries (Slack, Telegram, GitHub, ...): decided by each surface's own switch, not by controlPlane.enabled. */
+const CHANNEL_WEBHOOK_PREFIX = '/webhook/';
 
 /** The setting as served; an unreadable value serves both rather than cutting a client off. */
 export function readControlPlaneStreamingMode(value: unknown): ControlPlaneStreamingMode {
@@ -78,9 +83,13 @@ export interface ListenerAdmissionInput {
 
 /** The refusal for a request this listener does not serve, or null to let it through. */
 export function refuseUnservedListenerRequest(req: Request, input: ListenerAdmissionInput): Response | null {
+  // The URL is parsed only when a decision needs the path, and at most once.
+  let parsedPath: string | undefined;
+  const path = (): string => (parsedPath ??= new URL(req.url).pathname);
   // Both the socket and a trusted forwarded client must be this machine: a
   // forwarding header alone is whatever the sender wrote.
-  if (!input.servesOtherMachines && !(isThisMachine(input.peerAddress) && isThisMachine(input.clientAddress))) {
+  if (!input.servesOtherMachines && !(isThisMachine(input.peerAddress) && isThisMachine(input.clientAddress))
+    && !path().startsWith(CHANNEL_WEBHOOK_PREFIX)) {
     return jsonErrorResponse({
       error: 'This daemon serves only its own machine',
       code: 'CONTROL_PLANE_LOCAL_ONLY',
@@ -92,7 +101,7 @@ export function refuseUnservedListenerRequest(req: Request, input: ListenerAdmis
     }, { status: 403 });
   }
   if (input.streamMode === 'both' || req.method !== 'GET') return null;
-  const { pathname } = new URL(req.url);
+  const pathname = path();
   if (pathname === CONTROL_PLANE_SOCKET_PATH && input.streamMode === 'sse') {
     return jsonErrorResponse({
       error: 'This daemon serves live updates over Server-Sent Events, not WebSocket',

@@ -59,7 +59,7 @@ export const ENUM_VALUE_DESCRIPTIONS: Record<string, Record<string, string>> = {
   },
   'controlPlane.hostMode': {
     local: 'Bind only to this computer.',
-    network: 'Bind for LAN access using the default network host.',
+    network: 'Bind for LAN access using the default network host; other machines are served once controlPlane.enabled is on.',
     custom: 'Use the explicit host value in the related host setting.',
   },
   'httpListener.hostMode': {

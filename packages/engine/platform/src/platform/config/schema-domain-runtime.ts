@@ -271,7 +271,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.enabled',
     type: 'boolean',
     default: false,
-    description: 'Whether the control plane is served to other machines. Off (default): the daemon listener answers only requests from this machine (loopback or one of its own addresses), whatever controlPlane.hostMode binds, and refuses any other address with CONTROL_PLANE_LOCAL_ONLY naming this setting. On: every address the binding reaches is served (paired devices, the web UI from another device, a reverse proxy). Takes effect on the next request; the outbound relay has its own switch (relay.enabled).',
+    description: 'Whether the control plane is served to other machines. Off (default): the daemon listener answers only requests from this machine (loopback or one of its own addresses), whatever controlPlane.hostMode binds, and refuses any other address with CONTROL_PLANE_LOCAL_ONLY naming this setting. On: every address the binding reaches is served (paired devices, the web UI from another device, a reverse proxy). Channel webhooks under /webhook/ are answered either way; each surface\'s own switch decides them. Takes effect on the next request; the outbound relay has its own switch (relay.enabled). goodvibes-daemon webui enable --lan turns it on with the network binding.',
   },
   {
     key: 'controlPlane.gateway',
@@ -283,7 +283,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'controlPlane.hostMode',
     type: 'enum',
     default: 'local',
-    description: 'Network binding mode for the control-plane listener: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (the host and port below). This and host decide what the listener binds.',
+    description: 'Network binding mode for the control-plane listener: local (127.0.0.1, default port), network (0.0.0.0, default port), custom (the host and port below). This and host decide what the listener binds; whether another machine is then served is controlPlane.enabled.',
     enumValues: ['local', 'network', 'custom'],
   },
   {

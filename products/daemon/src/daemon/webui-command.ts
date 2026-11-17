@@ -33,7 +33,9 @@
 // listener's host mode in either direction, so a fresh install serves the web UI
 // on loopback (the shipped `controlPlane.hostMode` default) and a host already
 // deliberately bound to the LAN keeps that binding. Widening is its own explicit
-// act: `--lan`. Narrowing back is `--loopback`. Both are stated in the receipt.
+// act: `--lan`, which binds every interface and turns `controlPlane.enabled` on,
+// because the listener answers other machines only with that setting on.
+// Narrowing back is `--loopback`. Both are stated in the receipt.
 // ---------------------------------------------------------------------------
 
 import { isAbsolute, join, resolve } from 'node:path';
@@ -192,11 +194,17 @@ function describeBundleProblem(
   return null;
 }
 
-function postureLines(origin: string, loopback: boolean, alternate?: string): string[] {
+function postureLines(origin: string, loopback: boolean, servesOtherMachines: boolean, alternate?: string): string[] {
   if (loopback) {
     return [
       '  reachable from this machine only (the control-plane listener is bound to loopback).',
       '  To reach it from another device on your network:  goodvibes-daemon webui enable --lan',
+    ];
+  }
+  if (!servesOtherMachines) {
+    return [
+      `  bound to your network at ${origin}, but only this machine is served: controlPlane.enabled is off, so other devices are refused.`,
+      '  To serve other devices on your network:  goodvibes-daemon webui enable --lan',
     ];
   }
   return [
@@ -306,6 +314,8 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
     const mode = parsed.posture === 'lan' ? 'network' : 'local';
     values['controlPlane.hostMode'] = mode;
     values['web.hostMode'] = mode;
+    // Binding the LAN serves it only with this on; --loopback leaves it, since a loopback bind already keeps others out.
+    if (parsed.posture === 'lan') values['controlPlane.enabled'] = true;
   }
   const getCurrent = (config.get as (key: keyof DaemonConfigPatch) => unknown).bind(config);
   const projected = { get: ((key: keyof DaemonConfigPatch) =>
@@ -339,7 +349,7 @@ export function runWebuiCommand(argv: readonly string[], deps: WebuiCommandDeps)
   if (!serving.recognized) {
     lines.push('  note: controlPlane.hostMode is not one of local|network|custom; the daemon cannot bind until that is corrected.');
   }
-  lines.push(...postureLines(serving.origin, serving.loopback, serving.alternate));
+  lines.push(...postureLines(serving.origin, serving.loopback, projected.get('controlPlane.enabled') === true, serving.alternate));
   lines.push('  Restart the daemon for this to take effect on a running process.');
   return { exitCode: 0, lines };
 }
@@ -383,7 +393,7 @@ function renderStatus(
   if (currentPublic && currentPublic !== serving.origin) {
     lines.push(`  note: web.publicBaseUrl is ${currentPublic}; links use that, the bundle is served at the URL above.`);
   }
-  lines.push(...postureLines(serving.origin, serving.loopback, serving.alternate));
+  lines.push(...postureLines(serving.origin, serving.loopback, config.get('controlPlane.enabled') === true, serving.alternate));
   return { exitCode: 0, lines };
 }
 

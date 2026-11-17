@@ -38,6 +38,7 @@ import {
   availablePairingOffers,
   defaultPairingTokenName,
   formatPairingOffers,
+  isLoopbackHost,
   resolvePairingWebOrigin,
   type PairingHandoffOfferKind,
 } from '@goodvibes-jev/engine/platform/platform/pairing';
@@ -235,7 +236,32 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
     };
   }
 
-  return { exitCode: 0, lines: [...banner.lines, ...(fromFiles.length > 0 ? ['', ...fromFiles] : [])] };
+  return {
+    exitCode: 0,
+    lines: [
+      ...banner.lines,
+      ...(fromFiles.length > 0 ? ['', ...fromFiles] : []),
+      ...localOnlyNotice(input.configManager, origin.origin),
+    ],
+  };
+}
+
+/**
+ * The listener answers another machine only with `controlPlane.enabled` on, so
+ * a link to a network address is useless to a phone while it is off. A tunnel
+ * or proxy on this machine that does not forward the client address is still
+ * served, hence the hedge.
+ */
+export function localOnlyNotice(config: Pick<ConfigManager, 'get'>, origin: string): readonly string[] {
+  if (config.get('controlPlane.enabled') === true) return [];
+  let host: string;
+  try { host = new URL(origin).hostname; } catch { return []; }
+  if (isLoopbackHost(host)) return [];
+  return [
+    '',
+    'note: controlPlane.enabled is off, so this daemon serves only this machine; a device opening this link directly is refused.',
+    'To serve other devices: goodvibes-daemon config set controlPlane.enabled true',
+  ];
 }
 
 /** The plan `pair --host <target>` prints before it will act, absent `-y`. Nothing is called yet. */

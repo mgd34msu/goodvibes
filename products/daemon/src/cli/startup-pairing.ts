@@ -3,6 +3,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import { availablePairingOffers, resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { renderPairingBanner } from '../core/pairing-banner.js';
+import { localOnlyNotice } from '../daemon/pair-command.js';
 import { SHIPPED_PUBLIC_BASE_URL, hasReadableWebuiBundle } from '../config/webui-bundle.js';
 
 export function renderDaemonStartupPairing(
@@ -36,5 +37,5 @@ export function renderDaemonStartupPairing(
   const reprint = bound.port === declaredPort ? 'goodvibes-daemon pair' : `goodvibes-daemon pair --port ${bound.port}`;
   return [...renderPairingBanner({ version, origin, token,
     offers: availablePairingOffers({ relayEnabled: config.get('relay.enabled') === true, stepUpAvailable: true }),
-  }).lines, `(print this again: ${reprint})`].join('\n');
+  }).lines, `(print this again: ${reprint})`, ...localOnlyNotice(config, origin)].join('\n');
 }

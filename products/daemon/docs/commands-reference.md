@@ -430,8 +430,9 @@ origin, not the declared `web.port`.
 | `status --json` | read-only versioned configured `web.*` binding for development clients; not the daemon listener or proof it is running |
 
 `enable` changes no network exposure on its own. A daemon bound to loopback keeps
-serving to this machine only. `--lan` binds every interface, `--loopback` takes it
-back, and both are stated in the receipt.
+serving to this machine only. `--lan` binds every interface and turns
+`controlPlane.enabled` on, since the listener answers other devices only with that
+setting on; `--loopback` takes the binding back. Both are stated in the receipt.
 
 ### `provision-wake-model`
 

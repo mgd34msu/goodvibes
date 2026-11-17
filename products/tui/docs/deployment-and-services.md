@@ -139,7 +139,7 @@ The control-plane daemon and the webhook listener each carry the same shape of T
 | Key (per prefix) | What it does |
 | --- | --- |
 | `controlPlane.hostMode` / `controlPlane.host` / `controlPlane.port`, `httpListener.host` / `httpListener.port` | The bind address and port; `hostMode` takes `local`, `network`, or `custom` |
-| `controlPlane.enabled` | Whether the control plane is served to other machines. Off (the default), the daemon answers only requests from this machine, whatever `hostMode` binds, and refuses others with `CONTROL_PLANE_LOCAL_ONLY`; turn it on to serve paired devices, the web UI from another device, or a reverse proxy |
+| `controlPlane.enabled` | Whether the control plane is served to other machines. Off (the default), the daemon answers only requests from this machine, whatever `hostMode` binds, and refuses others with `CONTROL_PLANE_LOCAL_ONLY`; turn it on to serve paired devices, the web UI from another device, or a reverse proxy (`goodvibes-daemon webui enable --lan` turns it on with the network binding). Channel webhooks under `/webhook/` are answered either way; each surface's own switch decides them. A settings file from before this setting took effect that binds the network and never stated it is given `true` once at load, with a notice, so a LAN setup keeps working |
 | `controlPlane.streamMode` | Which live update stream is served: `sse` (`GET /api/control-plane/events`), `websocket` (`/api/control-plane/ws`) or `both` (the default). The terminal apps and the web UI read the SSE stream |
 | `<prefix>.tls.mode` | `off` (plain HTTP), `proxy` (a reverse proxy terminates HTTPS), or `direct` (GoodVibes terminates HTTPS itself) |
 | `<prefix>.trustProxy` | Trust proxy forwarding headers such as `X-Forwarded-For` |

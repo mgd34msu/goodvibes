@@ -46,7 +46,7 @@ test('a metadata address is never opened, and a local one not after a stranger w
   });
 
   const ledger = new UntrustedContentLedger();
-  const sessions = new BrowserSessionManager({ profileRoot: join(dir, 'profiles'), homeDirectory: dir });
+  const sessions = new BrowserSessionManager({ profileRoot: join(dir, 'profiles'), homeDirectory: dir, surfaceRoot: 'agent' });
   const engine = new BrowserEngine(sessions, {
     screenshotDirectory: join(dir, 'shots'),
     untrusted: createUntrustedContentPort({ surface: 'web-page', toolName: 'browser', ledger }),

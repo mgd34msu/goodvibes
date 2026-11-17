@@ -25,7 +25,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
-import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
+import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
 import { gateReadingsPort } from './_helpers/gate-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
@@ -187,14 +187,14 @@ test('a call the decision model refused stays refused when the model then fails,
   let down = false;
   let recorded = 0;
   const readings = gateReadingsPort();
+  const refuser = fakePort((_name, question) => choiceAnswer(question, 'reject', 0.97));
   const decisionModel: JudgmentPort = {
     model: 'fixture',
     recorder: { recordReadings() {}, recordAction() {} },
     async ask(request) {
       if (down) throw new JudgmentError('unavailable', 'the decision model is down');
-      const name = Object.keys(request.questions).find((key) => key.endsWith('disposition'));
-      const result = name === undefined ? await readings.port.ask(request)
-        : { ...(await readings.port.ask({ ...request, questions: {} })), answers: { [name]: choiceAnswer(request.questions[name]!, 'reject', 0.97) } as never };
+      const disposition = Object.keys(request.questions).some((key) => key.endsWith('disposition'));
+      const result = await (disposition ? refuser : readings).port.ask(request);
       return { ...result, decisionId: `fixture-${++recorded}` };
     },
   };

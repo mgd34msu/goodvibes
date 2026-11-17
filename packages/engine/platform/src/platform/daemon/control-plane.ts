@@ -47,6 +47,21 @@ import {
 } from './http-policy.js';
 
 /** What a socket closed for a revoked credential is told last. */
+/**
+ * The text frame of a delivered event, kept per payload object: the gateway
+ * hands every socket the same payload object for one event, so the event is
+ * serialised once, not once per connected client.
+ */
+const socketEventFrames = new WeakMap<object, { readonly event: string; readonly frame: string }>();
+function socketEventFrame(event: string, payload: unknown): string {
+  if (payload === null || typeof payload !== 'object') return JSON.stringify({ type: 'event', event, payload });
+  const kept = socketEventFrames.get(payload);
+  if (kept && kept.event === event) return kept.frame;
+  const frame = JSON.stringify({ type: 'event', event, payload });
+  socketEventFrames.set(payload, { event, frame });
+  return frame;
+}
+
 const SOCKET_REVOKED_FRAME = JSON.stringify({
   type: 'closed', reason: 'credential-revoked', next: 'Sign in again or pair this device again, then reconnect.',
 });
@@ -770,7 +785,7 @@ export class DaemonControlPlaneHelper {
         return;
       }
       // What the socket may receive was decided by the gateway when it subscribed.
-      this.sendFrame(ws, JSON.stringify({ type: 'event', event, payload }));
+      this.sendFrame(ws, socketEventFrame(event, payload));
     }, () => this.closeRevokedSocket(ws));
     ws.data.clientId = connection.clientId;
   }

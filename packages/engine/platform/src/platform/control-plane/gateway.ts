@@ -112,6 +112,23 @@ interface LiveControlPlaneClient {
   readonly close?: ((reason: string) => void) | undefined;
 }
 
+const sseEncoder = new TextEncoder();
+/**
+ * The encoded SSE frame of a delivered event, kept per payload object: one
+ * event fans out to every stream with the same payload object and id, so it
+ * is serialised and encoded once, not once per client.
+ */
+const sseFrames = new WeakMap<object, { readonly event: string; readonly id: string | undefined; readonly bytes: Uint8Array }>();
+function sseFrame(event: string, payload: unknown, id?: string): Uint8Array {
+  const encode = () => sseEncoder.encode(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+  if (payload === null || typeof payload !== 'object') return encode();
+  const kept = sseFrames.get(payload);
+  if (kept && kept.event === event && kept.id === id) return kept.bytes;
+  const bytes = encode();
+  sseFrames.set(payload, { event, id, bytes });
+  return bytes;
+}
+
 interface WebSocketControlPlaneClient {
   readonly clientId: string;
   readonly traceId: string;
@@ -684,7 +701,6 @@ export class ControlPlaneGateway {
         ...(withheld.length > 0 ? { withheldDomains: withheld } : {}),
       }, { status: 403 });
     }
-    const encoder = new TextEncoder();
     const lastEventId = request.headers.get('last-event-id')?.trim() || undefined;
     const clientId = options.clientId ?? `cp-${randomUUID().slice(0, 8)}`;
     const label = options.label ?? `${options.clientKind ?? 'web'}:${clientId}`;
@@ -754,7 +770,7 @@ export class ControlPlaneGateway {
         let dropped = 0;
         let lastDeliveredId: string | undefined;
         const write = (event: string, payload: unknown, id?: string): void => {
-          controller.enqueue(encoder.encode(`${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
+          controller.enqueue(sseFrame(event, payload, id));
         };
         // Set once the teardown below exists; ends the stream from the daemon side.
         let closeFromDaemon = (_reason: string): void => {};

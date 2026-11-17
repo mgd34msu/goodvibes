@@ -130,7 +130,8 @@ import { CacheRegistry, PauseController, wireDaemonMemoryGovernance } from './me
 import { createSessionStorageServices } from './session-storage-services.js';
 import { createChannelComposition } from './channel-composition.js';
 import { createRemoteExecutionServices } from './remote-execution-composition.js';
-import { createCodeIndexServices, codeIndexDbPath, isCodeInjectionSettingEnabled } from './code-index-services.js';
+import { createCodeIndexServices, codeIndexDbPath, isCodeInjectionSettingEnabled, type CodeIndexServices } from './code-index-services.js';
+import { claimSurfaceHome } from './home-single-writer.js';
 import { createDurabilityServices } from './durability-services.js';
 import { wireIdlePowerAndLiveTurn } from './idle-power-services.js';
 import { wireVoiceSetup } from './voice-setup-services.js';
@@ -165,6 +166,16 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const configManager = seams.configManager;
   const nativeDataWriter = seams.nativeDataWriter ?? configManager.getNativeDataWriter();
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
+  // The single-writer claim comes before anything writes under the home, so a
+  // refused second process has changed nothing.
+  if (product.homeSingleWriter === 'claim') {
+    const claim = claimSurfaceHome({ homeDirectory, surfaceRoot });
+    scope.registry.add('surface home claim', () => claim.release());
+  }
+  // Approvals, watchers and channel policies: per project, or one set per user.
+  const resolveStatePath = (...segments: string[]): string => roots.stateScope === 'home'
+    ? shellPaths.resolveUserPath(surfaceRoot, ...segments)
+    : shellPaths.resolveProjectPath(surfaceRoot, ...segments);
   // Built before anything that touches session state: every session path derives from it.
   const { surface, sessionManager } = createSessionStorageServices({ nativeDataWriter: seams.nativeDataWriter, surfaceRoot, workingDirectory, homeDirectory });
   const featureFlags = resolveRuntimeFeatureFlags({ configManager, featureFlags: seams.featureFlags });
@@ -235,10 +246,14 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const stepUpService = new StepUpService({ secrets: secretsManager });
   // Per-pairing named revocable operator tokens. The cap is read per mint, so a
   // `device.nodes.maxPaired` change applies to the next pairing without a restart.
-  const pairingTokens = new PairingTokenManager(roots.pairingTokenPath ?? controlPlaneStorePath(shellPaths, surfaceRoot, 'pairing-tokens.json'), {
-    maxPaired: () => configManager.get('device.nodes.maxPaired'),
-    nativeDataWriter,
-  });
+  // Opened at start, or on first read for a product that chose `on-demand`.
+  let pairingTokensOpened: PairingTokenManager | undefined;
+  const pairingTokens = (): PairingTokenManager => pairingTokensOpened ??= new PairingTokenManager(
+    roots.pairingTokenPath ?? controlPlaneStorePath(shellPaths, surfaceRoot, 'pairing-tokens.json'),
+    { maxPaired: () => configManager.get('device.nodes.maxPaired'), nativeDataWriter },
+  );
+  const pairingTokensAtStart = (product.pairingTokens ?? 'open') === 'open';
+  if (pairingTokensAtStart) pairingTokens();
   const localUserAuthManager = seams.localUserAuthManager ?? new UserAuthManager({
     bootstrapFilePath: shellPaths.resolveUserPath(surfaceRoot, 'auth-users.json'),
     bootstrapCredentialPath: shellPaths.resolveUserPath(surfaceRoot, 'auth-bootstrap.txt'),
@@ -249,7 +264,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // featureFlags is required in practice: a registry without one treats
   // `watchers.enabled` as on, so turning the setting off would change nothing.
   const watcherRegistry = new WatcherRegistry({
-    storePath: shellPaths.resolveProjectPath(surfaceRoot, 'watchers.json'),
+    storePath: resolveStatePath('watchers.json'),
     featureFlags,
     recoveryWindowMinutes: () => Number(configManager.get('watchers.recoveryWindowMinutes')),
     resolveHeaderValue: (value) => resolveSecretInput(value, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }),
@@ -274,11 +289,16 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // The late-binding holder for the personal-capture port: the gateway verb
   // groups fill it (they own the owner-profile store and the occasions service).
   const personalCapture = new PersonalCaptureHolder();
-  const hookDispatcher = new HookDispatcher({ agentManager, toolLLM, projectRoot: workingDirectory }, hookActivityTracker);
+  const hookDispatcher = new HookDispatcher({
+    // Withheld only when the product says so by name: an agent hook then spawns nothing.
+    ...((product.hookAgentRuns ?? 'attach') === 'attach' ? { agentManager } : {}),
+    toolLLM,
+    projectRoot: workingDirectory,
+  }, hookActivityTracker);
   scope.registry.add('config hook attachment', configManager.attachHookDispatcher(hookDispatcher));
   const hookWorkbench = createHookWorkbench({ hookDispatcher, configManager });
   const approvalBroker = new ApprovalBroker({
-    storePath: shellPaths.resolveProjectPath(surfaceRoot, 'control-plane', 'approvals.json'),
+    storePath: resolveStatePath('control-plane', 'approvals.json'),
   });
   const sessionBroker = new SharedSessionBroker({
     storePath: roots.sessionStorePath ?? controlPlaneStorePath(shellPaths, surfaceRoot, 'sessions.json'),
@@ -319,7 +339,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const memoryRegistry = new MemoryRegistry(memoryStore);
   // Local-until-adopted access for spine-shaped consumers; a client activates
   // the wire transport when it adopts a daemon, the daemon always serves local.
-  const memorySpine = new MemorySpineClient({ local: createLocalMemoryAccess(memoryRegistry) });
+  const memorySpine = new MemorySpineClient({ local: createLocalMemoryAccess(memoryRegistry), log: logger });
   const deliveryManager = new AutomationDeliveryManager({
     configManager,
     // The delivery router replies leave through: without the secrets manager it
@@ -347,28 +367,44 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     ...createAutomationAgentControls(agentManager),
   });
 
-  // Knowledge: the wiki, the agent's own knowledge and the home graph, each with
-  // its semantic service, all under governor backpressure.
-  const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { nativeDataWriter, family: 'wiki' });
-  scope.registry.add('knowledge store', () => knowledgeStore.close());
-  const agentKnowledgeStore = KnowledgeStore.forFamily({ nativeDataWriter, configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' });
+  // Knowledge: the project's store (the wiki, or for a product that chose
+  // `agent` the agent's own knowledge, with no wiki), the agent's own knowledge
+  // and the home graph, each with its semantic service, all under governor backpressure.
+  const wikiStore = product.knowledge === 'agent'
+    ? undefined
+    : createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { nativeDataWriter, family: 'wiki' });
+  if (wikiStore) scope.registry.add('knowledge store', () => wikiStore.close());
+  const agentKnowledgeStore = wikiStore
+    ? KnowledgeStore.forFamily({ nativeDataWriter, configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' })
+    : createConfiguredPlanningStore(configManager, GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, { nativeDataWriter, family: 'agent' });
   scope.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
   const homeGraphKnowledgeStore = KnowledgeStore.forFamily({ nativeDataWriter, configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
   scope.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
-  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore] });
+  // The store planning, the work ledger and native intake read and write.
+  const knowledgeStore = wikiStore ?? agentKnowledgeStore;
+  const knowledgeStores = [...(wikiStore ? [wikiStore] : []), agentKnowledgeStore, homeGraphKnowledgeStore];
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: knowledgeStores });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, { timeoutMs: 20_000, maxConcurrent: 1 });
-  const knowledgeSemanticService = new KnowledgeSemanticService(knowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork });
-  scope.registry.add('regular knowledge semantic service', () => knowledgeSemanticService.dispose());
+  const wikiSemanticService = wikiStore
+    ? new KnowledgeSemanticService(wikiStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork })
+    : undefined;
+  if (wikiSemanticService) scope.registry.add('regular knowledge semantic service', () => wikiSemanticService.dispose());
   const homeGraphSemanticService = new KnowledgeSemanticService(homeGraphKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, objectProfiles: HOME_GRAPH_KNOWLEDGE_EXTENSION.objectProfiles, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork });
   scope.registry.add('home graph semantic service', () => homeGraphSemanticService.dispose());
   const agentKnowledgeSemanticService = new KnowledgeSemanticService(agentKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork });
   scope.registry.add('agent knowledge semantic service', () => agentKnowledgeSemanticService.dispose());
-  const knowledgeService = new KnowledgeService(knowledgeStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: knowledgeSemanticService, admitExpensiveWork });
-  scope.ownUntilRegistered('knowledge service', () => knowledgeService.dispose());
-  knowledgeService.attachRuntimeBus(runtimeBus);
+  const wikiService = wikiStore && wikiSemanticService
+    ? new KnowledgeService(wikiStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: wikiSemanticService, admitExpensiveWork })
+    : undefined;
+  if (wikiService) {
+    scope.ownUntilRegistered('knowledge service', () => wikiService.dispose());
+    wikiService.attachRuntimeBus(runtimeBus);
+  }
   const agentKnowledgeService = new KnowledgeService(agentKnowledgeStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: agentKnowledgeSemanticService, admitExpensiveWork });
   scope.ownUntilRegistered('agent knowledge service', () => agentKnowledgeService.dispose());
   agentKnowledgeService.attachRuntimeBus(runtimeBus);
+  // With no wiki, the project's knowledge service is the agent's own.
+  const knowledgeService = wikiService ?? agentKnowledgeService;
   const homeGraphService = new HomeGraphService(homeGraphKnowledgeStore, artifactStore, { semanticService: homeGraphSemanticService, admitExpensiveWork });
   const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(knowledgeStore, configManager, workingDirectory, {
     waitForStartup: () => knowledgeService.whenReady(),
@@ -399,10 +435,10 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     serviceRegistry, featureFlags, configManager, localhostFetchApprovalSource: () => localhostFetchApprovalForSearch,
   }));
   for (const [semantic, ingest] of [
-    [knowledgeSemanticService, knowledgeService],
-    [agentKnowledgeSemanticService, agentKnowledgeService],
-    [homeGraphSemanticService, homeGraphService],
-  ] as const) {
+    ...(wikiSemanticService && wikiService ? [[wikiSemanticService, wikiService] as const] : []),
+    [agentKnowledgeSemanticService, agentKnowledgeService] as const,
+    [homeGraphSemanticService, homeGraphService] as const,
+  ]) {
     semantic.setGapRepairer(createWebKnowledgeGapRepairer({ searchService: webSearchService, ingestService: ingest }));
   }
   const mediaProviders = new MediaProviderRegistry();
@@ -420,7 +456,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });
   scope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));
   const channelPolicy = new ChannelPolicyManager({
-    storePath: shellPaths.resolveProjectPath(surfaceRoot, 'channels', 'policies.json'),
+    storePath: resolveStatePath('channels', 'policies.json'),
   });
   const distributedRuntime = new DistributedRuntimeManager(shellPaths.resolveProjectPath(surfaceRoot, 'remote', 'distributed-runtime.json'));
   distributedRuntime.attachRuntime({
@@ -437,11 +473,12 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   scope.registry.add('MCP connections', closeMcpConnections);
   // The security.tokenAudit.* settings decide the audit; findings reach the security domain.
   const tokenAuditor = createConfiguredTokenAuditor({ configManager, featureFlags, runtimeBus });
-  scope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens, tokenAuditor));
+  if (pairingTokensAtStart) scope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens(), tokenAuditor));
   const healthSystem = createWiredHealthSystem(runtimeBus);
   scope.registry.add('runtime health event bridge', bindHealthDomainEvents(runtimeBus, healthSystem.wiring));
-  // One worktree register per working directory, shared by every surface over it.
-  const worktreeRegistry = new WorktreeRegistry(workingDirectory);
+  // One worktree register per working directory, shared by every surface over it,
+  // unless the product brings its own.
+  const worktreeRegistry = seams.worktreeRegistry?.(workingDirectory) ?? new WorktreeRegistry(workingDirectory);
   const notificationsMetadataOnly = seams.notificationsMetadataOnly
     ?? ((): boolean => readNotificationsMetadataOnly(() => configManager.get(NOTIFICATIONS_METADATA_ONLY_KEY as never)));
   const webhookNotifier = new WebhookNotifier([], { metadataOnly: notificationsMetadataOnly });
@@ -476,7 +513,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const processManager = new ProcessManager();
   scope.registry.add('background processes', () => processManager.close());
   // The source-tree index shares memory embeddings; its build is setting-gated.
-  const { codeIndexStore, codeIndexReindexScheduler } = createCodeIndexServices({
+  // Opened now, or on first read for a product that chose `on-demand`.
+  let codeIndexOpened: CodeIndexServices | undefined;
+  const openCodeIndex = (): CodeIndexServices => codeIndexOpened ??= createCodeIndexServices({
     workingDirectory,
     // A workspace swap moves the project index; relative reindex paths follow it.
     getWorkingDirectory: () => projectIndex.baseDir,
@@ -487,10 +526,14 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     whenReindexResumed: () => pauseController.whenResumed('code-index-reindex'),
     admitExpensiveWork,
   });
-  scope.registry.add('code index store', () => codeIndexStore.close());
-  scope.ownUntilRegistered('code-index reindex scheduler', () => codeIndexReindexScheduler.dispose());
+  const codeIndexAtStart = (product.codeIndex ?? 'open') === 'open' ? openCodeIndex() : undefined;
+  scope.registry.add('code index store', () => codeIndexOpened?.codeIndexStore.close());
+  scope.ownUntilRegistered('code-index reindex scheduler', () => codeIndexOpened?.codeIndexReindexScheduler.dispose());
   // A host that asked for the index at start builds it whatever the setting says.
-  if (seams.autoStartCodeIndex === true) void codeIndexStore.init().then(() => codeIndexStore.scheduleBuild());
+  if (seams.autoStartCodeIndex === true) {
+    const { codeIndexStore } = openCodeIndex();
+    void codeIndexStore.init().then(() => codeIndexStore.scheduleBuild());
+  }
   const isCodeIndexEnabled = (): boolean => seams.autoStartCodeIndex === true || isCodeInjectionSettingEnabled(configManager);
   // Store snapshots, the append-only sweep, durable remembered-approval rules,
   // the live credential chain and the config file watch.
@@ -502,6 +545,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     codeIndexDbPath: codeIndexDbPath(workingDirectory, surfaceRoot),
     surface,
     shellPaths,
+    ...(roots.logDir === undefined ? {} : { logDir: roots.logDir }),
+    ...(roots.telemetryDir === undefined ? {} : { telemetryDir: roots.telemetryDir }),
     ...(seams.currentSessionId ? { currentSessionId: seams.currentSessionId } : {}),
   });
   scope.ownUntilRegistered('config file watch', stopConfigWatch);
@@ -643,7 +688,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     runtimeBus,
     priceUsage,
     priceProvenance,
-    codeIndexService: codeIndexStore,
+    codeIndexService: codeIndexAtStart?.codeIndexStore,
     acpHost,
     observedAgents: seams.observeExternalAgents ? new ObservedAgentSource() : undefined,
   });
@@ -672,7 +717,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     configManager,
     memoryRegistry: seams.consolidationTarget?.(memoryRegistry, memorySpine) ?? memoryRegistry,
     runtimeBus,
-    isIdle: () => sessionBroker.countBusySessions() === 0
+    isIdle: () => (seams.busySessionCount?.() ?? sessionBroker.countBusySessions()) === 0
       && !pauseController.isPaused('memory-consolidation')
       && admitExpensiveWork('memory consolidation').allowed,
     snapshotTick: () => storeSnapshotScheduler.tick(),
@@ -680,6 +725,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       if (runsRoutines(automationManager)) await automationManager.triggerHeartbeat({ source: 'wake-catchup' });
     },
     ...(seams.powerSeam ? { powerSeam: seams.powerSeam } : {}),
+    ...(seams.onConsolidationReceipt ? { onConsolidationReceipt: seams.onConsolidationReceipt } : {}),
   });
   scope.ownUntilRegistered('memory consolidation scheduler', () => memoryConsolidationScheduler.stop());
   scope.registry.add('runtime power', () => powerManager.stop());
@@ -700,7 +746,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     pauseController,
     jobIds: MEMORY_BACKGROUND_JOB_IDS,
     receiptPath: shellPaths.resolveProjectPath(surfaceRoot, 'memory', 'tripwire-receipt.json'),
-    knowledgeStores: [knowledgeStore, agentKnowledgeStore, homeGraphKnowledgeStore],
+    knowledgeStores,
     sessionBroker,
     // Async store snapshots keep the governor's 10s shutdown ceiling enforceable.
     onTripwireShutdown: async () => { await storeSnapshotScheduler.snapshotAllAsync('tripwire'); },
@@ -756,10 +802,13 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     remoteRunnerRegistry,
     knowledgeService,
     memoryRegistry,
-    codeIndex: codeIndexStore,
     memoryEmbeddingRegistry,
-    isCodeInjectionSettingEnabled: isCodeIndexEnabled,
-    codeIndexReindexScheduler,
+    // An index opened on demand is not handed to agents: their turns then search no source tree.
+    ...(codeIndexAtStart ? {
+      codeIndex: codeIndexAtStart.codeIndexStore,
+      isCodeInjectionSettingEnabled: isCodeIndexEnabled,
+      codeIndexReindexScheduler: codeIndexAtStart.codeIndexReindexScheduler,
+    } : {}),
     toolExecutionObserver: (toolName, args, success) => ciAutoWatchObserver?.(toolName, args, success),
     archetypeLoader,
     configManager,
@@ -782,7 +831,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       approvalBroker, watcherRegistry, userPermissionRuleStore, shellPaths, surfaceRoot, runtimeBus, sessionPresence, configManager,
       runtimeStore, channelDeliveryRouter, providerRegistry, automationManager, sessionLister: sessionBroker, sessionIntake: sessionBroker,
       channelPolicy, workingDirectory, attemptsController: contractRunner.fleetControls(), contractOperator, stepUpService, memoryRegistry,
-      pairingTokens, acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup,
+      pairingTokens: pairingTokens(), acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup,
       credentialWrites: { config: configManager, secrets: secretsManager }, approvalRaise: approvalBroker, approvalList: approvalBroker, disposal: scope.registry,
       personalCapture, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; },
     });
@@ -797,7 +846,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const cancelHostedAgentRuns = (): number => cancelAllAgentRuns(agentManager);
   registerRuntimePollers(scope.registry, {
     stopConfigWatch, watcherRegistry: { dispose: stopRequests.watchers }, storeSnapshotScheduler, appendOnlyRetentionScheduler,
-    memoryConsolidationScheduler, codeIndexReindexScheduler, sessionOrchestration,
+    memoryConsolidationScheduler, codeIndexReindexScheduler: { dispose: () => codeIndexOpened?.codeIndexReindexScheduler.dispose() }, sessionOrchestration,
     knowledgeService, agentKnowledgeService, contractRunner: contracts, homeGraphService: { dispose: stopRequests.homeGraph },
     processRegistry, memoryGovernor: { stop: stopRequests.memoryGovernor }, triggerManager, agentOrchestrator, cancelHostedAgentRuns,
   });
@@ -855,8 +904,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     memoryRegistry,
     memorySpine,
     judgment,
-    codeIndexStore,
-    codeIndexReindexScheduler,
+    // Getters: a product that chose `on-demand` opens these on first read.
+    get codeIndexStore(): CodeIndexServices['codeIndexStore'] { return openCodeIndex().codeIndexStore; },
+    get codeIndexReindexScheduler(): CodeIndexServices['codeIndexReindexScheduler'] { return openCodeIndex().codeIndexReindexScheduler; },
     storeSnapshotScheduler,
     appendOnlyRetentionScheduler,
     stopDurabilityHousekeeping,
@@ -869,7 +919,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     stepUpService,
     subscriptionManager,
     localUserAuthManager,
-    pairingTokens,
+    get pairingTokens(): PairingTokenManager { return pairingTokens(); },
     profileManager,
     bookmarkManager,
     sessionManager,
@@ -920,6 +970,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     agentOrchestrator,
     agentToolDependencies,
     personalCapture,
+    featureAnnouncementStore: announcementStore,
+    fileCache,
+    projectIndex,
     contextAccountingHolder,
     sessionLiveTurnControls,
     contractRunner,

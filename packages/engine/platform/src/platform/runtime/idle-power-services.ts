@@ -13,7 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ConfigManager } from '../config/index.js';
-import type { MemoryRegistry } from '../state/index.js';
+import type { MemoryConsolidationRunReceipt, MemoryRegistry } from '../state/index.js';
 import { MemoryConsolidationScheduler } from '../state/index.js';
 import { SessionLiveTurnControlsHolder } from '../control-plane/index.js';
 import { PowerManager, wireRuntimePower, createUnavailablePowerSeam } from '../power/index.js';
@@ -31,6 +31,8 @@ export interface IdlePowerServicesDeps {
   readonly snapshotTick: () => void;
   /** Wake catch-up: fire the automation heartbeat. */
   readonly heartbeat: () => Promise<void>;
+  /** Where a run's receipt goes; absent: the attach-time notice queue (a run with nothing to report records nothing). */
+  readonly onConsolidationReceipt?: ((receipt: MemoryConsolidationRunReceipt) => void) | undefined;
   /**
    * Host power seam. platform 1.9.0 makes wireRuntimePower default an absent seam to
    * the REAL host seam (createHostPowerSeam, which spawns systemd-inhibit and a
@@ -58,10 +60,10 @@ export function wireIdlePowerAndLiveTurn(deps: IdlePowerServicesDeps): IdlePower
     memoryRegistry: deps.memoryRegistry,
     configSource: deps.configManager,
     isIdle: deps.isIdle,
-    onReceipt: (receipt) => {
+    onReceipt: deps.onConsolidationReceipt ?? ((receipt) => {
       const text = formatConsolidationReceipt(receipt);
       if (text) consolidationReceiptStore.notify(`memory-consolidation:${receipt.runId}`, text);
-    },
+    }),
   });
   memoryConsolidationScheduler.start();
   const sessionLiveTurnControls = new SessionLiveTurnControlsHolder();

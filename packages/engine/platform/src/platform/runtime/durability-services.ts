@@ -58,6 +58,10 @@ export interface DurabilityServicesInput {
    */
   readonly surface: SessionSurface;
   readonly shellPaths: { resolveUserPath(...segments: string[]): string };
+  /** Where this product writes its activity log; default `<home>/.goodvibes/logs`. */
+  readonly logDir?: string | undefined;
+  /** Where this product writes its telemetry ledger; default `<home>/.goodvibes/telemetry`. */
+  readonly telemetryDir?: string | undefined;
   /**
    * The session id this process is currently using, read at each sweep. When
    * omitted the crash-residue reap still protects live artefacts through its
@@ -142,8 +146,8 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
     workingDirectory: input.surface.workingDirectory,
     surfaceRoot: input.surface.surfaceRoot,
     homeDirectory: input.surface.homeDirectory,
-    logDir: input.shellPaths.resolveUserPath('logs'),
-    telemetryDir: input.shellPaths.resolveUserPath('telemetry'),
+    logDir: input.logDir ?? input.shellPaths.resolveUserPath('logs'),
+    telemetryDir: input.telemetryDir ?? input.shellPaths.resolveUserPath('telemetry'),
   };
   const appendOnlyRetentionConfigGet = (k: string): unknown => configManager.get(k as never);
   runStartupAppendOnlySweep(appendOnlyRetentionRoots, appendOnlyRetentionConfigGet);

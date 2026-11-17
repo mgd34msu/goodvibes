@@ -46,9 +46,6 @@ export { processOutputError, processOutputEndpoint } from './batteries/process-o
 
 export {
   attachWsOnlyGatewayVerbHandlers,
-  createArchivableFleetRegistry,
-  createFleetServices,
-  type FleetServicesDeps,
   type GatewayVerbGroupDeps,
   type ProcessRegistryDeps,
   type ArchivableProcessRegistry,

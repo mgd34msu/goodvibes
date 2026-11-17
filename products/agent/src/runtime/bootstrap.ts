@@ -62,7 +62,7 @@ import { foldLegacySpineStore } from '@goodvibes-jev/engine/platform/platform/ru
 import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '../agent/prompt-context-receipts.ts';
-import { recordCompletedTurnAnchor, startAnchorDurabilityHousekeeping } from './rewind-anchor-wiring.ts';
+import { recordCompletedTurnAnchor } from './rewind-anchor-wiring.ts';
 import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
 import { watchOccasionAnnouncements } from './client/occasion-announcements.ts';
@@ -674,14 +674,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     },
   };
   wireTerminalMcpReload(services.shellPaths, services.mcpRegistry, mcpServers, bootstrapUnsubs, systemMessageRouter, requestRender);
-  // The reclaim half of what the anchors above write. The live session id is
-  // read at sweep time, so a resume repointing it is respected.
-  bootstrapUnsubs.push(
-    startAnchorDurabilityHousekeeping({
-      surface: services.surface,
-      currentSessionId: () => runtimeSessionIdRef.value,
-    }),
-  );
 
   // ── Phase 12: Session:start lifecycle hook ─────────────────────────────
 

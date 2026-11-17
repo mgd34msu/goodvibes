@@ -1,6 +1,6 @@
 /**
- * rewind-anchor-wiring.ts, the Agent's end of message-anchored rewind, and the
- * housekeeping that keeps its on-disk half bounded.
+ * rewind-anchor-wiring.ts, the Agent's end of message-anchored rewind. The
+ * runtime graph's durability housekeeping keeps its on-disk half bounded.
  *
  * A rewind is anchored to a `{ sessionId, turnId }`. Files-scope resolves that
  * turnId against the workspace checkpoint the turn engine stamped with the same
@@ -10,16 +10,14 @@
  * sidecar a rewind could only reach turns from the current run, and a resumed
  * session's earlier turns would resolve to nothing.
  *
- * The registry, the sidecar and the sweep are all the platform's
- * (platform/rewind, platform/runtime durability-housekeeping). What is here is
- * this product's wiring of them: which handle they run against, and when.
+ * The registry and the sidecar are the platform's (platform/rewind). What is
+ * here is this product's wiring of them: which handle they run against, and when.
  *
  * Every path is best-effort. A missed anchor must never break the turn that
- * produced it, and a sweep must never break boot.
+ * produced it.
  */
 import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { startDurabilityHousekeeping } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 
 /** The conversation facts an anchor is built from, read at the moment of capture. */
@@ -78,21 +76,4 @@ function tellOnceThatAnchorWasNotSaved(
   } catch {
     // The notice is a courtesy; the warning already carries the cause.
   }
-}
-
-/**
- * Start the sweep that reclaims what no live session can use again: anchor
- * sidecars whose session is gone or whose content restores nothing, and the
- * staging files an interrupted write leaves behind. One pass now, then on a
- * cadence; the session in use is never a target, and whatever is removed is
- * disclosed. Returns the disposer.
- */
-export function startAnchorDurabilityHousekeeping(input: {
-  readonly surface: SessionSurface;
-  readonly currentSessionId: () => string;
-}): () => void {
-  return startDurabilityHousekeeping({
-    surface: input.surface,
-    currentSessionId: input.currentSessionId,
-  });
 }

@@ -29,10 +29,14 @@ import type { CodeIndexStore } from '../state/code-index-store.js';
 import type { CodeIndexReindexScheduler } from '../state/code-index-reindex.js';
 import type { StoreSnapshotScheduler } from '../state/store-snapshots.js';
 import type { MemoryConsolidationScheduler } from '../state/memory-consolidation-scheduler.js';
+import type { MemoryConsolidationRunReceipt } from '../state/index.js';
+import type { FileStateCache } from '../state/file-cache.js';
+import type { ProjectIndex } from '../state/project-index.js';
+import type { FeatureAnnouncementStore } from './feature-announcements.js';
 import type { PowerManager, PowerPlatformSeam } from '../power/index.js';
 import type { AppendOnlyRetentionScheduler } from './retention/append-only-registry.js';
 import { assertConfiguredProjectContextReady } from '../knowledge/index.js';
-import { REGULAR_KNOWLEDGE_DB_FILE } from '../knowledge/store-config.js';
+import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, REGULAR_KNOWLEDGE_DB_FILE } from '../knowledge/store-config.js';
 import { createRuntimeAcquisitionScope, type RuntimeAcquisitionScope } from './acquisition-scope.js';
 import { buildRuntimeGraph } from './runtime-graph.js';
 import type { JudgmentServices } from './judgment-services.js';
@@ -119,6 +123,16 @@ export interface SurfaceRoots {
   readonly sessionStorePath?: string | undefined;
   /** Override the pairing-token store path (default: this surface's control-plane store). */
   readonly pairingTokenPath?: string | undefined;
+  /**
+   * Where this surface keeps its approvals, watchers and channel policies:
+   * `project` (under the working directory, the default) or `home` (one set per
+   * user, for a product that runs once per home whatever directory it starts in).
+   */
+  readonly stateScope?: 'project' | 'home' | undefined;
+  /** The activity-log directory the retention sweep prunes; default `<home>/.goodvibes/logs`. */
+  readonly logDir?: string | undefined;
+  /** The telemetry-ledger directory the retention sweep prunes; default `<home>/.goodvibes/telemetry`. */
+  readonly telemetryDir?: string | undefined;
 }
 
 /**
@@ -226,6 +240,15 @@ export interface HostSeams {
     readonly configManager: ConfigManager;
     readonly shellPaths: ShellPathService;
   }) => WorkspaceCheckpointing) | undefined;
+  /** This product's worktree register; absent: the one register shared by every surface over the working directory. */
+  readonly worktreeRegistry?: ((workingDirectory: string) => WorktreeRegistry) | undefined;
+  /**
+   * How many sessions this process is running a turn for, the idle gate of memory consolidation.
+   * Absent: the session broker's busy count, right where the broker is the register of the sessions run here.
+   */
+  readonly busySessionCount?: (() => number) | undefined;
+  /** Where a consolidation run's receipt goes; absent: the attach-time notice queue every surface drains. */
+  readonly onConsolidationReceipt?: ((receipt: MemoryConsolidationRunReceipt) => void) | undefined;
 }
 
 /**
@@ -254,6 +277,31 @@ export interface ProductComposition<X extends object = Record<never, never>> {
   readonly automationSurfaceKind?: AutomationSurfaceKind | undefined;
   /** `platform` resumes contracts left on disk once the graph is up; `product` resumes them itself, later in its boot. Default `platform`. */
   readonly contractRecovery?: 'platform' | 'product' | undefined;
+  /**
+   * Which store holds the project's knowledge and plan. `wiki` (default): the project wiki, beside the
+   * agent's own knowledge and the home graph. `agent`: the agent's own knowledge store; there is no wiki
+   * store and `knowledgeService` is the agent's.
+   */
+  readonly knowledge?: 'wiki' | 'agent' | undefined;
+  /**
+   * `claim` makes this graph the single live writer of `<home>/.goodvibes/<surface root>/`: a second
+   * process composing over the same home is refused with the holder's pid. For a product that runs once
+   * per home. Default `off`.
+   */
+  readonly homeSingleWriter?: 'claim' | 'off' | undefined;
+  /** `withhold` keeps the agent manager from the hook dispatcher, so a `type: 'agent'` hook spawns nothing. Default `attach`. */
+  readonly hookAgentRuns?: 'attach' | 'withhold' | undefined;
+  /**
+   * `open` (default) opens the repo code index at start and gives it to agents' tools and the fleet.
+   * `on-demand` opens it only when something reads `codeIndexStore`, for a product whose agents do not
+   * search the source tree; its tools and fleet then carry no code index.
+   */
+  readonly codeIndex?: 'open' | 'on-demand' | undefined;
+  /**
+   * `open` (default) opens the pairing-token store at start and audits it. `on-demand` opens it only when
+   * something reads `pairingTokens`, for a product that serves no listener a paired device reaches.
+   */
+  readonly pairingTokens?: 'open' | 'on-demand' | undefined;
   extras?(base: ComposedRuntimeServices, scope: RuntimeAcquisitionScope): X;
 }
 
@@ -461,6 +509,11 @@ export interface ComposedRuntimeServices extends RuntimeServices {
   readonly agentToolDependencies: Parameters<AgentOrchestrator['setDependencies']>[0];
   /** The late-bound owner-profile capture port the gateway verb groups fill. */
   readonly personalCapture: PersonalCaptureHolder;
+  /** The announce-once notices (default-on feature receipts, settings fallbacks) every surface drains on attach. */
+  readonly featureAnnouncementStore: FeatureAnnouncementStore;
+  /** The file tools' state for the working directory: what was read, and the project's file index. */
+  readonly fileCache: FileStateCache;
+  readonly projectIndex: ProjectIndex;
   readonly checkpointsCurrentlyAllowed: () => boolean;
   readonly sandboxEscalationHandler: ApprovalDerivedHandlers['sandboxEscalationHandler'];
   readonly execPromptAnswerHandler: ApprovalDerivedHandlers['execPromptAnswerHandler'];
@@ -498,7 +551,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): Composed
  * registers is torn down before the graph's own owners.
  */
 export function composeRuntimeServices<X extends object = Record<never, never>>(product: ProductComposition<X>): Omit<ComposedRuntimeServices, keyof X> & X {
-  assertConfiguredProjectContextReady(product.hostSeams.configManager, product.roots.workingDir, REGULAR_KNOWLEDGE_DB_FILE);
+  assertConfiguredProjectContextReady(
+    product.hostSeams.configManager,
+    product.roots.workingDir,
+    product.knowledge === 'agent' ? GOODVIBES_AGENT_KNOWLEDGE_DB_FILE : REGULAR_KNOWLEDGE_DB_FILE,
+  );
   const scope = createRuntimeAcquisitionScope('RuntimeServices');
   // A constructor that throws part-way would otherwise leave every timer, watch and
   // store handle already started with no owner to stop it.
@@ -511,7 +568,13 @@ export function composeRuntimeServices<X extends object = Record<never, never>>(
   }
   if (!product.extras) return base as Omit<ComposedRuntimeServices, keyof X> & X;
   try {
-    return { ...base, ...product.extras(base, scope) };
+    // Merged by descriptor, not by spread: a member a product chose to open on
+    // demand stays a getter instead of being opened by the merge.
+    const extras = product.extras(base, scope);
+    return Object.defineProperties({}, {
+      ...Object.getOwnPropertyDescriptors(base),
+      ...Object.getOwnPropertyDescriptors(extras),
+    }) as Omit<ComposedRuntimeServices, keyof X> & X;
   } catch (error) {
     base.dispose();
     throw error;

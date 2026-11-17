@@ -1,4 +1,3 @@
-import { CacheRegistry, PauseController } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import { fireSessionStart } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { emitSessionStarted, emitSessionReady } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -6,23 +5,6 @@ import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { startMcpConfigAutoReload, type McpRuntimeReloadOptions } from './mcp-runtime-reload.js';
 
-export function createTerminalMemoryAdmission() {
-  const cacheRegistry = new CacheRegistry();
-  const pauseController = new PauseController();
-  const MEMORY_BACKGROUND_JOB_IDS = ['knowledge-self-improvement', 'memory-consolidation', 'code-index-reindex'];
-  const admitExpensiveWorkRef: { current: ((label: string) => { allowed: boolean; reason?: string | undefined }) | null } = {
-    current: null,
-  };
-  return {
-    cacheRegistry,
-    pauseController,
-    MEMORY_BACKGROUND_JOB_IDS,
-    admitExpensiveWorkRef,
-    admitExpensiveWork: (label: string): { allowed: boolean; reason?: string | undefined } =>
-      admitExpensiveWorkRef.current?.(label) ?? { allowed: true },
-    isKnowledgeBackgroundPaused: (): boolean => pauseController.isPaused('knowledge-self-improvement'),
-  };
-}
 export function createPluginCommandAdapter<Context>(registry: Pick<TerminalCommandRegistry<Context>, 'register' | 'unregister'>) {
   return {
     register(command: {
@@ -79,30 +61,3 @@ export function announceTerminalSessionStarted(
   emitSessionReady(bus, { sessionId, traceId: `${sessionId}:session-ready`, source: 'bootstrap' }, { sessionId });
 }
 
-/** Leaf cleanup registrations preserve order and resolve async drain handles only at teardown. */
-export function registerTerminalKnowledgeCleanup(
-  registry: { add(label: string, cleanup: () => void | Promise<void>): void },
-  ports: {
-    readonly closeAgentStore: () => void | Promise<void>;
-    readonly closeHomeGraphStore: () => void | Promise<void>;
-    readonly rewindDrain: () => void | Promise<void>;
-    readonly homeGraphDrain: () => void | Promise<void>;
-  },
-): void {
-  registry.add('agent knowledge store', ports.closeAgentStore);
-  registry.add('home graph knowledge store', ports.closeHomeGraphStore);
-  registerTerminalKnowledgeDrains(registry, ports);
-}
-
-/** Store creators register their owners immediately, then add these dependent
- * drains in the same order used by the combined cleanup compatibility helper. */
-export function registerTerminalKnowledgeDrains(
-  registry: { add(label: string, cleanup: () => void | Promise<void>): void },
-  ports: {
-    readonly rewindDrain: () => void | Promise<void>;
-    readonly homeGraphDrain: () => void | Promise<void>;
-  },
-): void {
-  registry.add('conversation rewind drain', ports.rewindDrain);
-  registry.add('home graph drain', ports.homeGraphDrain);
-}

@@ -10587,7 +10587,7 @@
     {
       "name": "SurfaceIngressDecision",
       "kind": "interface",
-      "text": "export interface SurfaceIngressDecision extends Pick<ChannelPolicyDecision, 'allowed' | 'reason'> { readonly consumed?: { readonly by: 'approval' | 'payment' | 'work-proposal'; readonly answer: string; } | undefined; readonly retryWillChange?: boolean | undefined; } ;; via ChannelPolicyDecision = export interface ChannelPolicyDecision { readonly allowed: boolean; readonly reason: string; readonly policy: ChannelPolicyRecord; readonly matchedGroupPolicy?: ChannelGroupPolicyRecord | undefined; readonly matchedScope?: ChannelPolicyMatchScope | undefined; readonly effectiveRequireMention?: boolean | undefined; readonly effectiveAllowedCommands?: readonly string[] | undefined; readonly revision?: number | undefined; }"
+      "text": "export interface SurfaceIngressDecision extends Pick<ChannelPolicyDecision, 'allowed' | 'reason'> { readonly consumed?: { readonly by: 'approval' | 'payment' | 'work-proposal'; readonly answer: string; } | undefined; } ;; via ChannelPolicyDecision = export interface ChannelPolicyDecision { readonly allowed: boolean; readonly reason: string; readonly policy: ChannelPolicyRecord; readonly matchedGroupPolicy?: ChannelGroupPolicyRecord | undefined; readonly matchedScope?: ChannelPolicyMatchScope | undefined; readonly effectiveRequireMention?: boolean | undefined; readonly effectiveAllowedCommands?: readonly string[] | undefined; readonly revision?: number | undefined; }"
     },
     {
       "name": "TrySpawnAgentFn",

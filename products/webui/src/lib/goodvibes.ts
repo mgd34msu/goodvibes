@@ -394,7 +394,9 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
  * works identically on both paths.
  */
 async function requestStream(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
-  const headers: HeadersInit = { ...(await authHeaders()), 'Content-Type': 'application/json' };
+  // Accept names audio so a relay-routed request opens a streamed answer and playback
+  // starts with the first bytes, rather than after the whole clip is buffered.
+  const headers: HeadersInit = { ...(await authHeaders()), 'Content-Type': 'application/json', Accept: 'audio/*, application/json' };
   const url = buildUrl(path);
   // routedFetch so this streamed POST also traverses the relay when routed (see requestJson).
   const response = await routedFetch(url, {

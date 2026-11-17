@@ -55,6 +55,12 @@ export interface JudgmentConfig {
   readonly fallbacks?: readonly JudgmentFallback[];
   /** Custom fetch, for tests and transport configuration. */
   readonly fetch?: Fetch;
+  /**
+   * Starts the per-attempt timeout: calls `expire` once `timeoutMs` has passed
+   * and returns what cancels it. Defaults to a timer; a proof passes its own
+   * so the timeout fires when the proof says, not after real time.
+   */
+  readonly attemptTimer?: (timeoutMs: number, expire: () => void) => () => void;
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '::1', '[::1]']);

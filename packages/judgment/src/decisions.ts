@@ -26,6 +26,7 @@ export { observeJudgmentModel, reuseObservedJudgmentResult, type JudgmentModelOb
 
 export { assertSynchronousJudgmentGuard, type SynchronousCheck } from './port/attempt-guard.ts';
 
+export { decisionModelFailureMessage, describeDecisionModelFailure, isDecisionModelFailure, type DecisionModelFailure } from './port/model-failure.ts';
 export {
   createJudgeCache,
   forgetProcessJudgments,

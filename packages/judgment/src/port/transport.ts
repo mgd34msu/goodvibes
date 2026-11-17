@@ -8,7 +8,7 @@ import { DEADLINE_COOLDOWN_MS, DEADLINE_MISSES_BEFORE_COOLDOWN } from './deadlin
 import { JudgmentContextLimitError, JudgmentError, type JudgmentFailureReason } from './errors.ts';
 import { checkInputBytes, requiresLongContextFor, serializeInput, validateQuestions, wireBody, wireBodyBytes } from './limits.ts';
 import { withRequestId } from './request-id.ts';
-import { delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
+import { connectionRefused, delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
 import { recordNativeModelObservation } from './model-observation.ts';
 import { captureJudgmentInput } from './input-snapshot.ts';
 import { cooldownNotice, DECISION_MODELS_UNAVAILABLE_NOTICE, missedDeadlineNotice, slowTargetsNotice } from './availability-notice.ts';
@@ -49,6 +49,10 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
   const fetch = config.fetch;
   const policy = retryPolicy(config.retry);
   const timeoutMs = config.timeoutMs || 30_000;
+  const startAttemptTimer = config.attemptTimer ?? ((ms: number, expire: () => void) => {
+    const timer = setTimeout(expire, ms);
+    return () => clearTimeout(timer);
+  });
   const cooldowns = targets.map(() => 0);
   // Why each target is cooling: missed deadlines, or a provider's Retry-After
   // with the status it came with (429 is a rate limit; anything else an outage).
@@ -176,7 +180,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
             const abortAttempt = () => attemptController.abort(controller.signal.reason);
             controller.signal.addEventListener('abort', abortAttempt, { once: true });
             let attemptTimedOut = false;
-            const attemptTimer = timeoutMs > 0 ? setTimeout(() => { attemptTimedOut = true; attemptController.abort(new APITimeoutError(timeoutMs)); }, timeoutMs) : undefined;
+            const stopAttemptTimer = timeoutMs > 0 ? startAttemptTimer(timeoutMs, () => { attemptTimedOut = true; attemptController.abort(new APITimeoutError(timeoutMs)); }) : undefined;
             let failure: unknown;
             try {
               validateBackendInput(target.endpoint, targetModel, { questions }, wireBodyBytes(serialized, targetModel));
@@ -257,7 +261,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
               // when no other target is ready to take the call and the wait fits
               // inside both the backoff ceiling and the remaining deadline.
               const laterTargetReady = eligible.slice(eligibleIndex + 1).some(next => cooldowns[next.endpointIndex]! <= Date.now());
-              if (!retried && !laterTargetReady && !controller.signal.aborted && retryable(failure)) {
+              if (!retried && !laterTargetReady && !controller.signal.aborted && retryable(failure) && !connectionRefused(failure)) {
                 const wait = retryDelay(failure, 0, policy);
                 if (wait <= policy.backoffMaxMs && (deadlineAt === undefined || wait < deadlineAt - performance.now())) retryWaitMs = wait;
               }
@@ -267,7 +271,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                 cooledStatus[endpointIndex] = failure.status;
               }
             } finally {
-              clearTimeout(attemptTimer);
+              stopAttemptTimer?.();
               controller.signal.removeEventListener('abort', abortAttempt);
             }
             checkCancellation();
@@ -310,7 +314,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         }
         const last = attempts.at(-1);
         // Exhausting backups cannot turn a malformed answer into an availability
-        // downgrade. Preferred may enter Classic only for actual unavailability.
+        // downgrade. Hybrid may enter Classic only for actual unavailability.
         if (malformedFailure) throw malformedFailure;
         // A chain no target answered is unavailable only when some target
         // failed in a way waiting can heal. When every target refused (a

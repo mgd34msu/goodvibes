@@ -10,6 +10,18 @@ const bad = (status = 503, id = 'failed', headers = {}) => Response.json({ error
 function config(fetch: NonNullable<JudgmentConfig['fetch']>, overrides: Partial<JudgmentConfig> = {}): JudgmentConfig {
   return { signal: new AbortController().signal, endpoint: primary, model: DEFAULT_MODEL, timeoutMs: 500, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 }, fallbacks: [{ endpoint: secondary, model: DEFAULT_MODEL }], fetch, ...overrides };
 }
+/** The per-attempt timeout, driven by the test: a hanging fetch expires its own attempt instead of waiting real time. */
+function drivenAttemptTimer() {
+  const started: (() => void)[] = [];
+  return {
+    attemptTimer: (_timeoutMs: number, expire: () => void) => {
+      started.push(expire);
+      return () => { const index = started.indexOf(expire); if (index >= 0) started.splice(index, 1); };
+    },
+    /** Ends the attempt now in flight, as its timeout would. */
+    expireCurrent: () => { queueMicrotask(() => started.at(-1)?.()); },
+  };
+}
 const failure = async (promise: Promise<unknown>): Promise<JudgmentError> => {
   try { await promise; throw new Error('expected rejection'); }
   catch (error) { expect(error).toBeInstanceOf(JudgmentError); return error as JudgmentError; }
@@ -146,10 +158,12 @@ describe('finite configured decision model failover', () => {
     const signals: AbortSignal[] = [];
     const retries: number[] = [];
     const controller = new AbortController();
+    const timer = drivenAttemptTimer();
     const port = createSystemOnePort(config(async (_url, init) => {
       if (init?.signal) signals.push(init.signal);
+      timer.expireCurrent();
       return await new Promise<Response>(() => {});
-    }, { timeoutMs: 15 }));
+    }, { timeoutMs: 600_000, attemptTimer: timer.attemptTimer }));
     using log = new SqliteDecisionLog(':memory:');
     const error = await failure(withDecisionLog(port, log).ask({ ...request, signal: controller.signal, onRetry: (event) => {
       retries.push(event.attempt.endpointIndex);
@@ -272,8 +286,14 @@ describe('finite configured decision model failover', () => {
 
   test('per-attempt timeout advances the configured chain without ending the reading', async () => {
     let calls = 0;
-    // The first attempt never answers and is ended by its own timeout; the second answers at once, well inside it.
-    const port = createSystemOnePort(config(async () => { calls += 1; return calls === 1 ? await new Promise<Response>(() => {}) : good(); }, { timeoutMs: 250 }));
+    // The first attempt never answers and is ended by its own timeout, which the test fires; the second answers.
+    const timer = drivenAttemptTimer();
+    const port = createSystemOnePort(config(async () => {
+      calls += 1;
+      if (calls !== 1) return good();
+      timer.expireCurrent();
+      return await new Promise<Response>(() => {});
+    }, { timeoutMs: 600_000, attemptTimer: timer.attemptTimer }));
     expect((await port.ask(request)).lineage?.attempts.map((a) => a.outcome)).toEqual(['unavailable', 'answered']);
     expect(calls).toBe(2);
   });
@@ -351,7 +371,7 @@ describe('finite configured decision model failover', () => {
     const unrelated = createSystemOnePort(config(async () => { unrelatedCalls++; return good('unrelated', 'other-model'); }));
     expect((await failure(unrelated.ask(request))).kind).toBe('invalid-response');
     // Each configured target may answer once. Exhausting malformed responses
-    // must preserve invalid-response rather than permit Preferred fallback.
+    // must preserve invalid-response rather than permit Hybrid fallback.
     expect({ driftCalls, unrelatedCalls }).toEqual({ driftCalls: 2, unrelatedCalls: 2 });
   });
 

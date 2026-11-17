@@ -30,6 +30,18 @@ export function retryable(error: unknown): boolean {
     || (error instanceof APIError && transientStatus(error.status));
 }
 
+/**
+ * Nothing is listening at the address. Unlike a timeout or a 5xx, a moment's
+ * wait does not change that, so the target is not asked again: the next target,
+ * or the decision's fallback, answers without the wait.
+ */
+export function connectionRefused(error: unknown): boolean {
+  if (!(error instanceof APIConnectionError)) return false;
+  const cause: unknown = (error as { readonly cause?: unknown }).cause;
+  const code = typeof cause === 'object' && cause !== null ? (cause as { readonly code?: unknown }).code : undefined;
+  return code === 'ConnectionRefused' || code === 'ECONNREFUSED';
+}
+
 /** The wait a server asked for, or the backoff; bounded to five minutes. A call waits only when it fits within `backoffMaxMs`. */
 export function retryDelay(error: unknown, attempt: number, policy: JudgmentRetryPolicy): number {
   // Clamp the exponent before multiplication: arbitrarily long outages must not overflow.

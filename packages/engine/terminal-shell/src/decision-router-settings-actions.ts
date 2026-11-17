@@ -6,6 +6,7 @@ import type { ModelDefinition } from '@goodvibes-jev/engine/platform/platform/pr
 import { effortLevelsForModel } from '@goodvibes-jev/engine/platform/platform/providers/reasoning-effort-surface';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { OpenSelection } from './selection-modal.js';
+import type { FileEditorOpener } from './external-editor.js';
 
 export interface DecisionRouterPickerContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic'> };
@@ -13,8 +14,8 @@ export interface DecisionRouterPickerContext {
   readonly openSelection?: OpenSelection | undefined;
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
-  /** Runs $VISUAL / $EDITOR on a file and returns when it exits; where present, the advanced settings are edited there. */
-  readonly openFileInEditor?: ((path: string, line?: number) => void) | undefined;
+  /** Runs $VISUAL / $EDITOR on a file and resolves when it exits; where present, the advanced settings are edited there. */
+  readonly openFileInEditor?: FileEditorOpener | undefined;
 }
 
 /** Why a typed routing configuration is refused, or undefined when it is valid. */
@@ -73,7 +74,7 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
         catch (error) { ctx.print('Unable to save routing settings: ' + summarizeError(error)); ctx.renderRequest(); }
       };
       if (ctx.openFileInEditor && editorConfigured()) {
-        editAdvancedInEditor(ctx, ctx.openFileInEditor, JSON.stringify(config.get('provider.decisionRouter'), null, 2), apply);
+        void editAdvancedInEditor(ctx, ctx.openFileInEditor, JSON.stringify(config.get('provider.decisionRouter'), null, 2), apply);
         return;
       }
       // No external editor: the whole configuration is typed on one line, and a refused value says why as it is typed.
@@ -121,28 +122,36 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
 const INVALID_ROUTING = '__invalid_routing__';
 
 /**
- * Edit the routing settings as pretty JSON in the user's editor. A refused
+ * Edit the routing settings as pretty JSON in the user's editor. The file is
+ * read back only after the editor exits, and removed after that. A refused
  * edit shows its validation error and offers to edit it again, starting from
  * what was typed, so nothing written is lost to a typo.
  */
-function editAdvancedInEditor(
+async function editAdvancedInEditor(
   ctx: DecisionRouterPickerContext,
-  openFileInEditor: (path: string, line?: number) => void,
+  openFileInEditor: FileEditorOpener,
   initial: string,
   apply: (text: string) => void,
-): void {
-  const dir = mkdtempSync(join(tmpdir(), 'goodvibes-routing-'));
-  const file = join(dir, 'decision-router.json');
+): Promise<void> {
+  let dir: string | undefined;
   let edited = initial;
   try {
+    dir = mkdtempSync(join(tmpdir(), 'goodvibes-routing-'));
+    const file = join(dir, 'decision-router.json');
     writeFileSync(file, `${initial}\n`, { encoding: 'utf8', mode: 0o600 });
-    openFileInEditor(file);
+    if (!(await openFileInEditor(file))) {
+      // The opener has already said why the editor did not finish.
+      ctx.print('Routing settings not saved: the editor did not exit cleanly. The saved settings stay as they were.');
+      ctx.renderRequest();
+      return;
+    }
     edited = readFileSync(file, 'utf8').trim();
   } catch (error) {
     ctx.print('Unable to edit routing settings: ' + summarizeError(error));
+    ctx.renderRequest();
     return;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
   }
   if (edited === initial.trim()) { ctx.print('Routing settings unchanged.'); ctx.renderRequest(); return; }
   const problem = routingProblem(edited);
@@ -153,7 +162,7 @@ function editAdvancedInEditor(
     { id: 'edit', label: 'Edit again', detail: problem, primaryAction: 'select' },
     { id: 'discard', label: 'Discard the edit', detail: 'The saved routing settings stay as they were.', primaryAction: 'select' },
   ], { allowSearch: false }, choice => {
-    if (choice?.item.id === 'edit') editAdvancedInEditor(ctx, openFileInEditor, edited, apply);
+    if (choice?.item.id === 'edit') void editAdvancedInEditor(ctx, openFileInEditor, edited, apply);
     else ctx.print('Routing settings not saved: ' + problem);
   });
 }

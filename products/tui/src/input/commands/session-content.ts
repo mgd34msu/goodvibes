@@ -160,8 +160,9 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           ctx.print(`No editor can be opened from this surface. The template is the file ${path}; edit it there, or set $VISUAL or $EDITOR.`);
           return;
         }
-        ctx.openFileInEditor(path);
-        ctx.print(`Opened template ${name} in the editor (${path}); /template use ${name} reads the saved file.`);
+        void ctx.openFileInEditor(path).then((exited) => {
+          if (exited) ctx.print(`Edited template ${name} (${path}); /template use ${name} reads the saved file.`);
+        });
       };
       const deleteTemplate = (name: string): void => {
         const deleted = templateManager.delete(name);

@@ -68,7 +68,7 @@ import { deriveComposerState } from './core/composer-state.ts';
 import { describePowerStatus } from './renderer/power-status.ts';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { installFocusModeExitGuard, markFocusModeEnabled, wrapRequestPermissionWithApprovalAlert } from './shell/terminal-focus-mode.ts';
-import { createTerminalLifecycle, installTerminalExitGuards } from '@goodvibes-jev/engine/terminal-shell';
+import { createTerminalLifecycle, installTerminalExitGuards, makeFileEditorOpener } from '@goodvibes-jev/engine/terminal-shell';
 import { prepareShellCliRuntime } from './cli/entrypoint.ts';
 import { reachabilityAtLaunch } from './runtime/path-shadow-startup.ts';
 import { selfUpdateAtLaunch } from './cli/launch-auto-update.ts';
@@ -396,6 +396,8 @@ async function main() {
   // sessionId of the offered recovery snapshot, or null when none is pending.
   let recoveryPending: string | null = null,
     daemonRepairPrompt: DaemonRepairPrompt | null = null;
+  /** True while $EDITOR owns the terminal: frames are held until it exits. */
+  let externalEditorOpen = false;
   // The window in which this app owns the screen: opened by the enter sequence below, closed by exitApp before the terminal-restore write. render() paints only inside it, see shell/terminal-paint-window.ts for what the early frames did to the boot surface and to the shell's screen.
   let terminalOutputGuard: ReturnType<typeof installFullScreenTerminalOutputGuard> | undefined;
   const terminalLifecycle = createTerminalLifecycle({
@@ -796,6 +798,18 @@ async function main() {
   commandContext.isGenerating = () => orchestrator.isBusy;
   commandContext.jumpToBookmark = jumpToBookmark;
   commandContext.scrollToLine = scrollToLine;
+  commandContext.openFileInEditor = makeFileEditorOpener({
+    stdin,
+    terminal: terminalLifecycle,
+    repaint: () => {
+      compositor.resetDiff();
+      render();
+    },
+    setHeld: (held) => { externalEditorOpen = held; },
+    cwd: workingDir,
+    env: process.env,
+    notify: (m) => systemMessageRouter.high(m),
+  });
   const commandUi = createCommandContextUi({
     compositor,
     stdout,
@@ -994,7 +1008,7 @@ async function main() {
   // that wiring, so the surface never repainted from any async source again.
   function render(): void {
     // Outside the window where this app owns the screen: the alternate screen does not exist yet, or the terminal has already been handed back. Never paint in either case.
-    if (!paintWindow.isOpen()) return;
+    if (!paintWindow.isOpen() || externalEditorOpen) return;
     uiEvents.observe(readUiFrame(input, sessionViews.focus.current));
     void herdrSession.update(
       buildAgentHerdrSessionUpdate({

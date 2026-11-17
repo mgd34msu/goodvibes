@@ -221,6 +221,8 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
       }
     | undefined;
   nativeWorkLedger?: import('../runtime/native-work-ledger.ts').NativeWorkLedgerView;
+  /** Open a file in $VISUAL / $EDITOR and resolve once the editor exits (true when it exited cleanly). */
+  openFileInEditor?: import('@goodvibes-jev/engine/terminal-shell').FileEditorOpener;
   readonly session: CommandSessionServices;
   readonly provider: CommandProviderServices;
   readonly workspace: CommandWorkspaceServices;

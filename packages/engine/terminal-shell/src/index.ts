@@ -61,6 +61,22 @@ export {
 } from './terminal-lifecycle.js';
 
 export {
+  resolveEditorCommand,
+  defaultEditorSpawn,
+  withEditorTerminal,
+  suspendForEditor,
+  resumeAfterEditor,
+  makeFileEditorOpener,
+  type EditorSpawn,
+  type EditorSpawnResult,
+  type EditorCommand,
+  type EditorInputStream,
+  type EditorTerminalDeps,
+  type FileEditorOpenerDeps,
+  type FileEditorOpener,
+} from './external-editor.js';
+
+export {
   installTerminalExitGuards,
   type TerminalExitGuardOptions,
   type TerminalStartupSteps,

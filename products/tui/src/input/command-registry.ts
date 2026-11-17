@@ -231,8 +231,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   }) => Promise<boolean>;
   /** The notification history. */
 
-  /** Open a file in $VISUAL / $EDITOR (at a line when the editor takes one). */
-  openFileInEditor?: (path: string, line?: number) => void;
+  /** Open a file in $VISUAL / $EDITOR (at a line when the editor takes one); resolves once the editor exits, true when it exited cleanly. */
+  openFileInEditor?: import('@goodvibes-jev/engine/terminal-shell').FileEditorOpener;
 
   openOpsView?: () => void;
   openCockpitView?: () => void;

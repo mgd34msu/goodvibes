@@ -241,6 +241,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         ...(services.browserGateway ? { browser: services.browserGateway } : {}),
         configManager: services.configManager,
         secretsManager: services.secretsManager,
+        // The memories the Agent's own prompt injected count toward decay as the Agent process's do.
+        memoryUsage: services.memoryUsageTracker,
       }),
     },
     // Each hosted loop's conversation, so rewind.plan/apply/undo serve it in this

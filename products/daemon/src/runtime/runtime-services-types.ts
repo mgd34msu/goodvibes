@@ -28,7 +28,7 @@ import type { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platf
 import type { MultimodalService } from '@goodvibes-jev/engine/platform/platform/multimodal';
 import type { AgentMessageBus, AgentOrchestrator, ArchetypeLoader } from '@goodvibes-jev/engine/platform/platform/agents';
 import type { AgentManager, ContextAccountingHolder, OverflowHandler, ProcessManager, WorkflowServices } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { FileUndoManager, MemoryConsolidationScheduler, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, CodeIndexStore, CodeIndexReindexScheduler } from '@goodvibes-jev/engine/platform/platform/state';
+import type { FileUndoManager, MemoryConsolidationScheduler, MemoryUsageTracker, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, CodeIndexStore, CodeIndexReindexScheduler } from '@goodvibes-jev/engine/platform/platform/state';
 import type { StoreSnapshotScheduler } from '@goodvibes-jev/engine/platform/platform/state/store-snapshots';
 import type { PermissionManager, UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
 import type { buildExecPromptAnswerHandler } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/exec-prompt-wiring';
@@ -279,6 +279,8 @@ export interface RuntimeServices {
   /** Stops the wake-word recovery sweep and a pending boot provision; a no-op unless `provisionWakeModelsAtBoot` was set. */
   readonly stopWakeHousekeeping: () => void;
   readonly memoryConsolidationScheduler: MemoryConsolidationScheduler;
+  /** The process's one per-turn memory usage tracker (the platform graph's); consolidation's decay reads its counters. */
+  readonly memoryUsageTracker: MemoryUsageTracker;
   readonly powerManager: PowerManager;
   /** The daemon's memory governor (default ON). Backs ops.memory.get and defends the daemon's footprint by tier. */
   readonly memoryGovernor: MemoryGovernor;

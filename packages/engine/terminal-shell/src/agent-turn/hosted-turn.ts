@@ -27,7 +27,7 @@ import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { joinPromptParts } from '../prompt-parts.js';
 import { GOODVIBES_AGENT_OPERATOR_POLICY } from './operator-policy.js';
-import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from './prompt-context-receipts.js';
+import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt, injectedMemoryIds } from './prompt-context-receipts.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { createProfileGatewayInvoke } from './profile-gateway.js';
 import { createOccasionsGatewayInvoke } from './occasions-gateway.js';
@@ -277,6 +277,13 @@ export interface AgentHostedTurnDeps {
   /** The daemon's settings and credential stores, which hold the Google account `google` uses. */
   readonly configManager: GoogleToolWiringDeps['configManager'];
   readonly secretsManager: GoogleToolWiringDeps['secretsManager'];
+  /**
+   * The daemon's memory usage tracker. The memories this turn's own prompt
+   * injected are counted on it (the prompt input carries no turn id, so they
+   * are counted unassessed at composition; the Orchestrator's injected
+   * memories are read at the turn's end as everywhere).
+   */
+  readonly memoryUsage?: { onComposed(turnId: string | null, injectedIds: readonly string[]): void } | undefined;
 }
 
 export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceTurn {
@@ -443,6 +450,7 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       signal?.throwIfAborted();
       try {
         receipts.record(composed.receipt);
+        deps.memoryUsage?.onComposed(null, injectedMemoryIds(composed.receipt));
       } catch (error) {
         // The receipt describes the prompt; failing to keep it must not fail the turn.
         logger.warn('Hosted Agent prompt receipt was not recorded', { sessionId: input.sessionId, error: summarizeError(error) });

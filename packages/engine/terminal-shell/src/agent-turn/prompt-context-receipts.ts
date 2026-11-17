@@ -82,6 +82,17 @@ export interface PromptContextReceiptDraft {
   readonly segments: readonly PromptContextReceiptSegment[];
 }
 
+/** The memory ids a composed prompt injected, read from its receipt's memory segment. */
+export function injectedMemoryIds(receipt: Pick<PromptContextReceiptDraft, 'segments'>): string[] {
+  const selected = receipt.segments.find((entry) => entry.id === 'memory')?.selected ?? [];
+  const ids: string[] = [];
+  for (const entry of selected) {
+    const id = entry.id;
+    if (typeof id === 'string' && id.trim()) ids.push(id);
+  }
+  return ids;
+}
+
 export interface PromptContextReceipt extends PromptContextReceiptDraft {
   readonly receiptId: string;
   readonly createdAt: number;

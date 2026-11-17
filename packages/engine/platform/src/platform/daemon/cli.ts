@@ -11,6 +11,7 @@ import { createHostPowerSeam } from '../power/runtime-wiring.js';
 import { DaemonServer } from './server.js';
 import { createHostShutdown, settleDaemonStart } from './cli-shutdown.js';
 import { HttpListener } from './http-listener.js';
+import { resolveDaemonServiceDefault } from './daemon-service-default.js';
 import { PlatformServiceManager } from './service-manager.js';
 import { VERSION } from '../version.js';
 import { configureActivityLogger, flushActivityLogSync, logger } from '../utils/logger.js';
@@ -35,7 +36,7 @@ function installServiceAndExit(config: ConfigManager, workingDir: string, homeDi
     homeDirectory,
     surfaceRoot: 'goodvibes',
     binaryBaseName: 'goodvibes',
-    defaultServiceName: 'goodvibes',
+    defaultServiceName: resolveDaemonServiceDefault(homeDirectory),
     defaultServiceDescription: 'goodvibes omnichannel daemon host',
   });
   try {

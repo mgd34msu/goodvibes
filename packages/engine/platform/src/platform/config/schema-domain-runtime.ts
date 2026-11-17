@@ -166,7 +166,7 @@ export const runtimeConfigDefaults = {
     autostart: false,
     restartOnFailure: true,
     platform: 'auto',
-    serviceName: 'goodvibes',
+    serviceName: '',
     logPath: '',
   },
   network: {
@@ -532,8 +532,8 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'service.serviceName',
     type: 'string',
-    default: 'goodvibes',
-    description: 'Service name used for host integration and install scripts. An unset value resolves per platform: goodvibes on Linux and Windows, sh.goodvibes.daemon on macOS (the launchd label).',
+    default: '',
+    description: 'Name of the daemon\'s service unit, used by the installer, the daemon\'s and the terminal apps\' service commands and onboarding alike. Empty (the default) uses the installer\'s name: goodvibes-jev on Linux and Windows (goodvibes when a unit an earlier build installed under that name is present and none holds goodvibes-jev), sh.goodvibes.daemon on macOS (the launchd label).',
   },
   {
     key: 'service.logPath',

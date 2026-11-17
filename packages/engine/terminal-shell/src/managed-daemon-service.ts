@@ -1,13 +1,15 @@
 /**
- * The managed daemon service definition both products install: the daemon
- * CLI's service subcommands and the terminal app's onboarding build the one
- * `PlatformServiceManager` here, so every path installs the identical unit.
+ * The managed daemon service definition every path installs: the daemon
+ * CLI's service subcommands and the terminal app's `service` commands build
+ * the one `PlatformServiceManager` here, under the platform's one unit name
+ * (daemon-service-default.ts), so every path installs, reports and starts the
+ * identical unit.
  */
 import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { PlatformServiceManager, resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon';
+import { DAEMON_SERVICE_NAME, DARWIN_DAEMON_SERVICE_LABEL, PlatformServiceManager, resolveDaemonServiceDefault } from '@goodvibes-jev/engine/platform/platform/daemon';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
  * platform's public `platform/daemon` entry point only re-exports the class and
@@ -18,10 +20,10 @@ type ManagedServiceManagerOptions = ConstructorParameters<typeof PlatformService
 type ManagedServiceDefinition = NonNullable<ManagedServiceManagerOptions['definitionOverride']>;
 export type ManagedServiceActionRunner = NonNullable<ManagedServiceManagerOptions['actionRunner']>;
 
-// Product defaults match the released installer's systemd name and Darwin
-// LaunchAgent label. The shared schema stays unchanged: any explicit stored
-// name (including 'goodvibes') or invocation overlay outranks this fallback.
-export const MANAGED_SERVICE_NAME = process.platform === 'darwin' ? 'sh.goodvibes.daemon' : 'goodvibes';
+// The release installer's systemd name and Darwin LaunchAgent label, owned by
+// the platform (daemon-service-default.ts). Any explicit stored name or
+// invocation overlay outranks this fallback.
+export const MANAGED_SERVICE_NAME = process.platform === 'darwin' ? DARWIN_DAEMON_SERVICE_LABEL : DAEMON_SERVICE_NAME;
 export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session broker + companion host)';
 
 /**
@@ -118,7 +120,8 @@ export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServi
     args: daemonHome === defaultDaemonHome ? [] : ['--daemon-home', daemonHome],
     // Service managers do not inherit the invoking shell's relocated tree.
     env: params.homeDir === params.unitHomeDir ? {} : { GOODVIBES_HOME: params.homeDir },
-    restartOnFailure: true,
+    // The owner's restart policy, the same one every other path honours.
+    restartOnFailure: configManager.get('service.restartOnFailure') !== false,
   };
   return new PlatformServiceManager(configManager, {
     workingDirectory,

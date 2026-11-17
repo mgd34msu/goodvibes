@@ -1,6 +1,5 @@
 import type { Database, Statement } from 'bun:sqlite';
 import type { JsonValue } from '../port/types.ts';
-import { opaqueUuid } from '../port/opaque-uuid.ts';
 import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionRetention, DecisionSummary, DecisionTruth, DecisionVolumeEntry, NewDecisionEntry } from './types.ts';
 import { decisionVolumeRow, type DecisionVolumeRow } from './volume-row.ts';
 import { COLUMNS, NOTES_TABLE, TABLE, openLog, rowsOf, type Params } from './sqlite-schema.ts';
@@ -163,13 +162,13 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   }
 
   record(entry: NewDecisionEntry): DecisionId {
-    const id = opaqueUuid(Bun.randomUUIDv7()) as DecisionId;
+    const id = Bun.randomUUIDv7() as DecisionId;
     this.#insert.run(toParams(id, entry));
     return id;
   }
 
   recordWithNotes(entry: NewDecisionEntry, notes: readonly DecisionNote[]): DecisionId {
-    const id = opaqueUuid(Bun.randomUUIDv7()) as DecisionId;
+    const id = Bun.randomUUIDv7() as DecisionId;
     this.#db.transaction(() => {
       this.#insert.run(toParams(id, entry));
       for (const note of notes) this.#note(id, note);

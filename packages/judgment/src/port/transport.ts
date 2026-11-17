@@ -10,7 +10,6 @@ import { checkInputBytes, requiresLongContextFor, serializeInput, validateQuesti
 import { withRequestId } from './request-id.ts';
 import { delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
 import { recordNativeModelObservation } from './model-observation.ts';
-import { opaqueUuid } from './opaque-uuid.ts';
 import { captureJudgmentInput } from './input-snapshot.ts';
 import { cooldownNotice, DECISION_MODELS_UNAVAILABLE_NOTICE, missedDeadlineNotice, slowTargetsNotice } from './availability-notice.ts';
 import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
@@ -76,7 +75,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
     }),
     async ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
       const started = performance.now();
-      const logicalRequestId = opaqueUuid();
+      const logicalRequestId = crypto.randomUUID();
       const attempts: JudgmentAttempt[] = [];
       let attemptCount = 0;
       const lineage = () => ({ logicalRequestId, attempts: [...attempts],

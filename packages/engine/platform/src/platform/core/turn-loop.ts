@@ -300,6 +300,10 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
   const breaker = new ConsecutiveErrorBreaker();
   const history: TurnCallObservation[] = [];
   const repeatReading = { pending: false };
+  // The readings that run beside the next request write to the conversation's
+  // host channel; they end with this turn, so a late one cannot reach the next turn.
+  const turnLifetime = new AbortController();
+  const turnSignal = AbortSignal.any([ctx.signal, turnLifetime.signal]);
   const outcome = (status: TurnOutcome['status'], text: string, extra: Partial<Pick<TurnOutcome, 'verified' | 'note' | 'stop'>> = {}): TurnOutcome =>
     ({ status, text, rounds, usage: { ...usage }, rejectedDrafts, ...extra });
   const ask = async (tools: boolean): Promise<TurnModelResponse> => {
@@ -394,8 +398,8 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
 
       // Interim text never holds its tools: it is read beside them, and a finding corrects the next request.
       if (response.content.trim() && ctx.checkProgress) {
-        void ctx.checkProgress(response.content, ctx.signal)
-          .then((correction) => { if (correction !== null && !ctx.signal.aborted) ctx.hostInstructions?.set('correction', correction, { once: true, append: true }); })
+        void ctx.checkProgress(response.content, turnSignal)
+          .then((correction) => { if (correction !== null && !turnSignal.aborted) ctx.hostInstructions?.set('correction', correction, { once: true, append: true }); })
           .catch(() => { /* An unsure or failed reading finds nothing. */ });
       }
 
@@ -425,7 +429,7 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
       sink.toolResults?.(calls, results);
       if (ctx.signal.aborted) return outcome('cancelled', '');
 
-      const stop = applyStopRules(ctx, sink, breaker, history, repeatReading, calls, results);
+      const stop = applyStopRules(ctx, turnSignal, sink, breaker, history, repeatReading, calls, results);
       if (stop) {
         const closing = await closingReply();
         if (closing === undefined) return outcome('cancelled', '');
@@ -441,6 +445,8 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
     if (error instanceof TurnCancelled) return outcome('cancelled', '');
     if (error instanceof TurnEnded) return outcome('ended', '', { note: error.reason });
     throw error;
+  } finally {
+    turnLifetime.abort();
   }
 }
 
@@ -451,7 +457,7 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
  * tells the model it has one closing reply and returns why the turn ends.
  * Nothing here waits: a reading of repeated calls runs beside the next request.
  */
-function applyStopRules(ctx: TurnContext, sink: TurnSink, breaker: ConsecutiveErrorBreaker, history: TurnCallObservation[],
+function applyStopRules(ctx: TurnContext, turnSignal: AbortSignal, sink: TurnSink, breaker: ConsecutiveErrorBreaker, history: TurnCallObservation[],
   repeatReading: { pending: boolean }, calls: readonly ToolCall[], results: readonly ToolResult[]): { readonly note: string; readonly stop: NonNullable<TurnOutcome['stop']> } | undefined {
   const tell = (text: string): void => ctx.hostInstructions?.set('breaker', text, { once: true, append: true });
   const finalReply = 'You have one final reply. Tools are no longer available and any tool call in it will not run. ';
@@ -503,11 +509,11 @@ function applyStopRules(ctx: TurnContext, sink: TurnSink, breaker: ConsecutiveEr
   if (runs.some((entry) => outcomeKey(entry) !== firstKey)) return undefined;
   const toolName = worst.slice(0, worst.indexOf('::'));
   const deadline = AbortSignal.timeout(REPEAT_READING_DEADLINE_MS);
-  const signal = AbortSignal.any([ctx.signal, deadline]);
+  const signal = AbortSignal.any([turnSignal, deadline]);
   repeatReading.pending = true;
   void judgeRepeat(runs, worst, signal)
     .then((reading) => {
-      if (!reading?.stuck || ctx.signal.aborted || deadline.aborted) return;
+      if (!reading?.stuck || turnSignal.aborted || deadline.aborted) return;
       tell(count >= REPEAT_REFUSE_THRESHOLD
         ? `You are repeating the same tool call. ${toolName} has been called ${count} times with identical arguments and no meaningful progress in the results. Do NOT call ${toolName} with these arguments again. Identify what you were trying to accomplish and take a different action.`
         : `You have already executed this exact call (${toolName}) ${count} times with identical arguments. The results from your previous calls are already in your conversation history. Review them and proceed to the next step.`);

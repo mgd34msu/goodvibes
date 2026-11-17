@@ -377,8 +377,13 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
       try {
         const evicted = await instance.evict(resourceGuards.get(instance), repositoryGuard);
         preservedCommit = evicted.preservedCommit;
+        if (evicted.keptIgnoredDir) {
+          logger.info('worktree-isolation: evicted worktree\'s ignored files were kept outside the repository history', {
+            itemId: item.id, path, branch: instance.branch, keptIn: evicted.keptIgnoredDir,
+          });
+        }
         if (evicted.droppedIgnored.length > 0) {
-          logger.warn('worktree-isolation: evicted worktree had ignored files too large to keep on its branch; they were removed with the directory', {
+          logger.warn('worktree-isolation: evicted worktree had ignored files too large to keep; they were removed with the directory', {
             itemId: item.id, path, branch: instance.branch, dropped: evicted.droppedIgnored,
           });
         }

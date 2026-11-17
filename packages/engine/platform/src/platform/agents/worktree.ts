@@ -1,5 +1,5 @@
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'fs';
-import { basename, dirname, join, resolve } from 'path';
+import { closeSync, constants, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'fs';
+import { basename, dirname, join, resolve, sep } from 'path';
 import { execFile } from 'node:child_process';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation, type FileObservation } from '../utils/file-observation.js';
@@ -95,8 +95,18 @@ export async function uniqueWork(rootDir: string, worktreePath: string, branch: 
   }
 }
 
-/** Ignored files an eviction commit carries at most, in bytes; past it the rest are listed as dropped. */
+/** Ignored files an eviction keeps at most, in bytes; past it the rest are listed as dropped. */
 const EVICTION_IGNORED_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Where an evicted worktree's ignored files are kept: under the repository's
+ * own ignored `.goodvibes/` area, never in a commit, named after the branch
+ * that holds the rest of the work.
+ */
+function evictedIgnoredDir(rootDir: string, branch: string): string {
+  const name = branch.replace(/[^A-Za-z0-9._-]+/g, '_');
+  return join(rootDir, '.goodvibes', 'evicted-ignored', `${name}-${Date.now()}`);
+}
 
 /**
  * The paths `git status --porcelain=v1 -z` lists: every changed, deleted and
@@ -563,10 +573,13 @@ export class IsolatedWorktree {
    * Evict this worktree under the kept-worktree cap. Eviction bounds DISK
    * usage, never work: any uncommitted state (modified and untracked files)
    * is first committed onto the item branch, then ONLY the directory is
-   * removed. Ignored files are carried too, force-added, up to
-   * {@link EVICTION_IGNORED_BYTES} in total; an ignored directory or a file
-   * past that bound is not committed and is returned in `droppedIgnored` so
-   * the caller can say what was let go. The branch is deliberately KEPT, so a
+   * removed. Ignored files never go into a commit: the owner's ignore rules
+   * keep them out of history (credentials and local databases among them), so
+   * they are copied, up to {@link EVICTION_IGNORED_BYTES} in total, into a
+   * directory only the owner can read under `.goodvibes/evicted-ignored/`,
+   * returned as `keptIgnoredDir`. An ignored directory or a file past that
+   * bound is not kept and is returned in `droppedIgnored` so the caller can
+   * say what was let go. The branch is deliberately KEPT, so a
    * conflicted/dirty tree evicted past the cap stays recoverable with
    * `git worktree add <path> <branch>` / `git show <branch>:<file>`.
    *
@@ -574,51 +587,75 @@ export class IsolatedWorktree {
    * removed (the error propagates), leaving an over-cap directory on disk is
    * always preferred over destroying uncommitted work.
    *
-   * @returns the preservation commit hash, or null when the tree was already
-   *          clean (nothing needed preserving), and the ignored paths not kept.
+   * @returns the preservation commit hash, or null when nothing tracked or
+   *          untracked needed preserving; the directory holding the kept
+   *          ignored files, or null when none were kept; and the ignored paths
+   *          not kept.
    */
-  async evict(beforeEvict?: () => void, beforeRepositoryWrite?: () => void): Promise<{ preservedCommit: string | null; droppedIgnored: readonly string[] }> {
+  async evict(beforeEvict?: () => void, beforeRepositoryWrite?: () => void): Promise<{ preservedCommit: string | null; keptIgnoredDir: string | null; droppedIgnored: readonly string[] }> {
     beforeRepositoryWrite?.(); beforeEvict?.();
     logger.debug('IsolatedWorktree.evict', { path: this.path, branch: this.branch });
     let preservedCommit: string | null = null;
+    let keptIgnoredDir: string | null = null;
     const droppedIgnored: string[] = [];
     if (existsSync(this.path) && !(await this.isClean())) {
       const wgit = await createSimpleGit({ baseDir: this.path });
       beforeRepositoryWrite?.(); beforeEvict?.();
       await wgit.raw(['add', '-A']);
       const porcelain: string = await wgit.raw(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching']);
-      const ignored = porcelain
-        .split('\0').filter((entry) => entry.startsWith('!! ')).map((entry) => entry.slice(3));
-      const carried: string[] = [];
+      const ignored: string[] = [];
+      let staged = false;
+      const fields = porcelain.split('\0');
+      for (let index = 0; index < fields.length; index += 1) {
+        const entry = fields[index]!;
+        if (entry.length < 4) continue;
+        const code = entry.slice(0, 2);
+        if (code === '!!') ignored.push(entry.slice(3));
+        else if (code !== '??') staged = true;
+        // A rename or copy is followed by a field holding its source path.
+        if (code[0] === 'R' || code[0] === 'C') index += 1;
+      }
+      const kept: string[] = [];
       let bytes = 0;
       for (const path of ignored) {
-        const stats = path.endsWith('/') ? undefined : lstatSync(join(this.path, path), { throwIfNoEntry: false });
+        const source = resolve(this.path, path);
+        const stats = path.endsWith('/') || !source.startsWith(resolve(this.path) + sep) ? undefined : lstatSync(source, { throwIfNoEntry: false });
         if (stats === undefined || !stats.isFile() || bytes + stats.size > EVICTION_IGNORED_BYTES) { droppedIgnored.push(path); continue; }
         bytes += stats.size;
-        carried.push(path);
+        kept.push(path);
       }
-      if (carried.length > 0) {
+      if (kept.length > 0) {
+        // Copied before anything is removed; a copy that fails leaves the worktree in place.
         beforeRepositoryWrite?.(); beforeEvict?.();
-        await wgit.raw(['add', '-f', '--', ...carried.map((path) => `:(literal)${path}`)]);
+        const target = evictedIgnoredDir(this.rootGit.getCwd(), this.branch);
+        mkdirSync(target, { recursive: true, mode: 0o700 });
+        for (const path of kept) {
+          const destination = join(target, path);
+          mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+          copyFileSync(join(this.path, path), destination, constants.COPYFILE_EXCL);
+        }
+        keptIgnoredDir = target;
       }
       const message = 'preserve uncommitted work at kept-cap eviction';
-      try {
-        beforeRepositoryWrite?.(); beforeEvict?.();
-        await wgit.raw(['commit', '--no-verify', '-m', message]);
-      } catch (err) {
-        // Most common cause: no committer identity configured in this
-        // environment. Preservation must not depend on host config, retry
-        // with an explicit fallback identity rather than lose the tree.
-        logger.debug('IsolatedWorktree.evict: commit failed, retrying with fallback identity', { path: this.path, error: summarizeError(err) });
-        beforeRepositoryWrite?.(); beforeEvict?.();
-        await wgit.raw(['-c', 'user.email=goodvibes@localhost', '-c', 'user.name=goodvibes-eviction', 'commit', '--no-verify', '-m', message]);
+      if (staged) {
+        try {
+          beforeRepositoryWrite?.(); beforeEvict?.();
+          await wgit.raw(['commit', '--no-verify', '-m', message]);
+        } catch (err) {
+          // Most common cause: no committer identity configured in this
+          // environment. Preservation must not depend on host config, retry
+          // with an explicit fallback identity rather than lose the tree.
+          logger.debug('IsolatedWorktree.evict: commit failed, retrying with fallback identity', { path: this.path, error: summarizeError(err) });
+          beforeRepositoryWrite?.(); beforeEvict?.();
+          await wgit.raw(['-c', 'user.email=goodvibes@localhost', '-c', 'user.name=goodvibes-eviction', 'commit', '--no-verify', '-m', message]);
+        }
+        preservedCommit = (await wgit.raw(['rev-parse', 'HEAD'])).trim();
       }
-      preservedCommit = (await wgit.raw(['rev-parse', 'HEAD'])).trim();
     }
     beforeRepositoryWrite?.();
     await this.removeDirectory(beforeEvict);
     // The branch is KEPT deliberately, no `branch -D` on the eviction path.
-    return { preservedCommit, droppedIgnored };
+    return { preservedCommit, keptIgnoredDir, droppedIgnored };
   }
 
   /** Native plain removal protects work added after a cleanliness check.

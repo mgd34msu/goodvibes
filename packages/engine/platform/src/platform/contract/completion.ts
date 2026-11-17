@@ -1306,8 +1306,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         if (outcome.status === 'committed' || outcome.status === 'applied' || outcome.status === 'skipped') {
           // The branch's work reached the project's tree: the contract worktree goes; the branch stays as the record of the work.
           await new IsolatedWorktree(contract.projectRoot, contract.worktreePath, contract.branch, contract.baseBranch ?? 'main').evict()
-            .then(({ droppedIgnored }) => {
-              if (droppedIgnored.length > 0) logger.warn('contract runner: ignored files in the contract worktree were too large to keep on its branch and were removed with it', { contractId: contract.id, dropped: droppedIgnored });
+            .then(({ keptIgnoredDir, droppedIgnored }) => {
+              if (keptIgnoredDir) logger.info('contract runner: ignored files in the contract worktree were kept outside the repository history', { contractId: contract.id, keptIn: keptIgnoredDir });
+              if (droppedIgnored.length > 0) logger.warn('contract runner: ignored files in the contract worktree were too large to keep and were removed with it', { contractId: contract.id, dropped: droppedIgnored });
             })
             .catch((error: unknown) => logger.warn('contract runner: the contract worktree was not removed', { contractId: contract.id, error: summarizeError(error) }));
         }

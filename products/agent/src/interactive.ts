@@ -551,7 +551,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     render: () => render(),
     notify: (message) => systemMessageRouter.userAction(message),
     record: (message) => systemMessageRouter.activity(message),
-    restoreDraft: (text) => restoreDraft(text),
   });
   unsubs.push(() => remoteConversation.dispose());
   // A cleared or replaced conversation must not keep steering into the hosted session of the one it left.
@@ -698,7 +697,12 @@ async function main(prepared: PreparedShellCliRuntime) {
     };
     const taken = (async (): Promise<boolean> => {
       try {
-        const routed = await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake);
+        // The hosted route refused it and nothing was sent: the shell output goes back and
+        // `notSent` decides where the text goes (the composer, or the held queue for a phone
+        // or plan message), and the caller is told it was not taken.
+        let hostRefused = false;
+        const routed = await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake, () => { hostRefused = true; });
+        if (hostRefused) return refused();
         if (routed && 'local' in routed) {
           await runLocal(routed.reason);
           return true;

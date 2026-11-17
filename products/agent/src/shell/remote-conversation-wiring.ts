@@ -39,8 +39,6 @@ export interface RemoteConversationWiringOptions {
    * the activity feed. Without it those lines go to `notify`.
    */
   readonly record?: ((message: string) => void) | undefined;
-  /** Hand refused, unsent text back to the composer so a refusal never costs the person their typing. */
-  readonly restoreDraft?: ((text: string) => void) | undefined;
 }
 
 export interface RemoteConversationWiring {
@@ -78,7 +76,10 @@ export interface NativeRemoteConversationWiring extends RemoteConversationWiring
    * awaits `completion`. Returns `null` when local routing was chosen, and a
    * {@link NativeLocalFallback} when the host cannot take the message and nothing
    * was sent for it: the caller runs the turn in this process and shows the reason.
-   * `onNotSent` runs when the message is refused before anything was submitted, so the caller can give back what it took for it. */
+   * `onNotSent` runs when the host route refused the message and nothing was sent for it; the
+   * returned handle is then inert. The caller alone decides where the message goes back (the
+   * composer for typed text, the held queue for a phone or plan message) and gives back what
+   * it took for it, so a refusal never reads as taken. */
   routeNativeOrExplain(source: NativeConversationInput, intake: NativeConversationIntakeActions | undefined, onNotSent?: () => void): Promise<RoutedTurnHandle | NativeLocalFallback | null>;
   /** Explicit recovery observes the exact saved original without submitting it again. */
   observeNative(state: NativeConversationIntakeState, intake: NativeConversationIntakeActions): Promise<RoutedTurnHandle>;
@@ -358,8 +359,7 @@ export function installRemoteConversationRouting(
       if (disposed) return detachedHandle();
       if (ctx.services.configManager.get('hostedSessions.routeConversationTurns') === false) return null;
       if (nativePending) {
-        options.notify('A native input is already pending. No second submission was created; your text is back in the composer.');
-        options.restoreDraft?.(source.text);
+        options.notify('A native input is already pending, so this message was not sent and no second submission was created.');
         onNotSent?.();
         return detachedHandle();
       }
@@ -387,13 +387,12 @@ export function installRemoteConversationRouting(
         report(state);
         if (disposed || sequence !== routeSequence) return detachedHandle();
         // Refused before anything was saved for it (an earlier message is unresolved): the text goes back.
-        if (state?.notSent) { options.restoreDraft?.(source.text); onNotSent?.(); }
+        if (state?.notSent) onNotSent?.();
         if (state?.hostedTurn) return await observeNative(state, intake);
         // A refusal by the intake itself created no request, so the message was
-        // not sent: give back the draft and what was taken for it. 'unknown'
-        // may have been delivered and stays with the intake status.
+        // not sent: the caller gives back the text and what was taken for it.
+        // 'unknown' may have been delivered and stays with the intake status.
         if (!state || (!state.notSent && (state.status === 'pending' || state.status === 'unavailable' || state.status === 'invalid'))) {
-          options.restoreDraft?.(source.text);
           onNotSent?.();
         }
         activity.end();

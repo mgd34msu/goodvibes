@@ -136,7 +136,8 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
   const next = action === 'undo' ? manager.peekUndo() : manager.peekRedo();
   if (!next) return { status: 'nothing_to_recover', recoveryAction: action, summary: managerStatus(context) };
   const root = context.workspace.shellPaths?.workingDirectory;
-  if (!root) return { status: 'held', error: `File recovery requires an active workspace, and none is set for this session. ${RECOVERY_NEXT_STEP}` };
+  // Re-inspecting cannot supply a workspace, so this one names the step that can.
+  if (!root) return { status: 'held', error: 'File recovery restores files only inside the active workspace, and this session has none. Nothing was changed. Run the recovery from an Agent session started in the project folder.' };
   // One entry may restore several files (one tool call); every one must be inside the workspace.
   for (const operation of next.operations ?? [next]) {
     try {

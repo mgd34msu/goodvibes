@@ -283,6 +283,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       hostsDaemon: true,
       ...(clientOwnedStore ? { clientOwnedStore } : {}),
     },
+    // The surface's own admission for read and settings, as its own process builds them.
+    ...(options.surfaceTurn?.platformToolAdmission ?? {}),
     archetypeLoader: services.archetypeLoader,
     ...(options.cloudflareAuthToken ? { cloudflareAuthToken: options.cloudflareAuthToken } : {}),
     configManager: services.configManager,

@@ -94,9 +94,13 @@ credential (credential kind `local`), and for a call the Agent makes on the owne
 a channel draft, a profile or occasion write) the Agent's delegated credential (credential kind `agent`), so
 the daemon judges that call as the Agent's. A purchase start or cancel therefore carries the owner's request
 as it does from the Agent itself. Its `accounts` tool keeps the Agent's register of the accounts
-it created, where a signup alias opens this daemon's own watch for the verification mail. Its platform tools carry the
-Agent's read-mode table, so a mode reads or changes exactly as it does in the Agent, and a
-`profile` or `occasions` call is admitted with the scopes the paired Agent's credential holds. The Agent tools that work through the Agent's own
+it created, where a signup alias opens this daemon's own watch for the verification mail. Its `profile` and `occasions` tools reach the
+daemon the same way, so a profile or occasion write the Agent makes for the owner runs under the Agent's pairing,
+with its scopes and its native authority, as it does from the Agent itself. Its platform tools carry the
+Agent's tool policy: the read-mode table, so a mode reads or changes exactly as it does in the Agent; `read`
+runs only under the admission recorded for its exact files; `goodvibes_settings` writes only what was
+prepared against the setting's owning store and judged (a client-owned key goes to the Agent's own settings
+file); and `goodvibes_context` is a read. The Agent tools that work through the Agent's own
 command session are named in that prompt with the platform tool that covers the
 same facts, and a call to one is refused with the reason and the next step. Creation submits `initialPrompt` without waiting for its turn to finish.
 A creation response therefore does not prove successful model execution.

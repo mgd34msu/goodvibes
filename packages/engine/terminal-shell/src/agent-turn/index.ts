@@ -38,6 +38,7 @@ export * from './catalog-data.js';
 export * from './home-path.js';
 export * from './operator-contract-routes.js';
 export * from './family-gateway.js';
+export * from './family-remote.js';
 export * from './profile-types.js';
 export * from './profile-gateway.js';
 export * from './profile-tool.js';

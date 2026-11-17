@@ -69,8 +69,22 @@ export interface HostedSurfaceTools {
   dispose?(): void | Promise<void>;
 }
 
+/**
+ * The admission policies a surface's own process builds the platform `read`
+ * and `goodvibes_settings` tools with. Each registers that tool's input
+ * projector (the read's recorded admission for its exact files; the settings
+ * write prepared against its owning store), which a surface's wrappers added
+ * in `registerTools` then require of every call.
+ */
+export interface HostedPlatformToolAdmission {
+  readonly readAdmissionPolicy?: 'agent-main-conversation' | undefined;
+  readonly settingsAdmissionPolicy?: 'agent-main-conversation' | undefined;
+}
+
 /** A product's turn for sessions created for its surface. */
 export interface HostedSurfaceTurn {
+  /** How the session's platform read and settings tools are built; omitted, the platform's own hosted policy. */
+  readonly platformToolAdmission?: HostedPlatformToolAdmission | undefined;
   /** Adds the surface's tools to one session's registry; returns what to release with the session, if anything. */
   registerTools(input: HostedSurfaceToolsInput): HostedSurfaceTools | undefined;
   /** The system prompt for one model request of a session. */

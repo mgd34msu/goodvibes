@@ -10,8 +10,9 @@
  * here refuses a call. The same table answers the Agent's policy explanation,
  * so what the Agent says matches what runs.
  */
-import type { ToolReadModes } from '@goodvibes-jev/engine/platform/platform/types';
+import type { Tool, ToolReadModes } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { wrapReadToolForAdmittedAgentPolicy, wrapSettingsToolForAdmittedAgentPolicy } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 
 const AGENT_READ_MODES: Readonly<Record<string, ToolReadModes>> = Object.freeze({
   remote: { field: 'mode', values: ['pools', 'contracts', 'artifacts', 'review'] },
@@ -61,6 +62,42 @@ export function declareAgentReadModes(registry: ToolRegistry): void {
     } else if (AGENT_READ_ONLY_TOOLS.has(name) && tool.definition.category === undefined
       && Array.isArray(tool.definition.sideEffects) && tool.definition.sideEffects.length === 0) {
       tool.definition = { ...tool.definition, category: 'read' };
+    }
+  }
+}
+
+/**
+ * The admission policies an Agent registry builds the platform `read` and
+ * `goodvibes_settings` tools with, in the Agent's own process (its main and
+ * worker registries) and in a session the daemon hosts for the Agent. Each
+ * registers that tool's input projector, which `installAgentToolPolicy`'s
+ * wrappers then require of every call.
+ */
+export const AGENT_PLATFORM_TOOL_ADMISSION = Object.freeze({
+  readAdmissionPolicy: 'agent-main-conversation',
+  settingsAdmissionPolicy: 'agent-main-conversation',
+} as const);
+
+/**
+ * The Agent's tool policy on one registry built with
+ * `AGENT_PLATFORM_TOOL_ADMISSION`: the read-mode table, a `read` that runs
+ * only under the admission recorded for its exact files, and a
+ * `goodvibes_settings` that writes only what its input projector prepared and
+ * the gate judged. `goodvibes_context` inspects and never changes anything,
+ * so it is a read here. `wrapContext` is the Agent process's view of it over
+ * `agent_harness`; a registry without the harness (a session the daemon
+ * hosts) keeps the platform's context tool, declared as the read it is.
+ */
+export function installAgentToolPolicy(registry: ToolRegistry, wrapContext?: (tool: Tool, registry: ToolRegistry) => void): void {
+  declareAgentReadModes(registry);
+  for (const tool of registry.list()) {
+    const name = tool.definition.name;
+    if (AGENT_READ_MODES[name]) continue;
+    if (name === 'read') wrapReadToolForAdmittedAgentPolicy(tool);
+    else if (name === 'goodvibes_settings') wrapSettingsToolForAdmittedAgentPolicy(tool);
+    else if (name === 'goodvibes_context') {
+      if (wrapContext) wrapContext(tool, registry);
+      else tool.definition = { ...tool.definition, sideEffects: [] };
     }
   }
 }

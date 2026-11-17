@@ -1,7 +1,9 @@
 /** Backend-owned SETTINGS preparation. All semantic observations precede common admission. */
+import { lstatSync } from 'node:fs';
 import type { ConfigWriteRoute } from '../../config/daemon-config-route.js';
-import { preparedReceiptWrites, type ConfigManager, type PreparedConfigMutationFacts } from '../../config/manager.js';
+import { preparedReceiptWrites, type ConfigManager, type PreparedConfigMutationFacts, type PreparedConfigMutationReceipt } from '../../config/manager.js';
 import { isValidConfigKey } from '../../config/schema.js';
+import { admitSettingValue } from '../../config/write-admission.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
 import { configKeyScope, describeConfigOwnership } from '../../config/config-ownership.js';
@@ -11,7 +13,20 @@ import { applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, capt
 import type { ToolExecuteOptions } from '../../types/tools.js';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolPreparedSettingsMutation } from '../input-projection.js';
 import { assertCurrentToolExecution, claimCurrentToolSettingsDispatch, commitCurrentToolSettings, currentToolSettingsPresentation } from '../registry.js';
-import { resolveRouterDeps, type ConfigRoutingOptions } from './config-routing.js';
+import { applyRoutedConfigWrite, readClientOwnedValue, resolveRouterDeps, type ClientOwnedStore, type ConfigRoutingOptions } from './config-routing.js';
+
+/**
+ * A client-owned key of the surface a hosted session was created for: that
+ * surface's own settings file, as it stood when the write was prepared, and
+ * the normalized value the write puts there.
+ */
+interface ClientStoreCapture {
+  readonly store: ClientOwnedStore;
+  readonly stamp: string;
+  readonly value: unknown;
+  readonly configManager: ConfigManager;
+  readonly routing: ConfigRoutingOptions;
+}
 
 interface Capture {
   readonly argsJson: string;
@@ -20,6 +35,7 @@ interface Capture {
   readonly local?: ToolPreparedSettingsMutation | undefined;
   readonly localFacts?: PreparedConfigMutationFacts | undefined;
   readonly remote?: RemoteSettingsPrecondition | undefined;
+  readonly client?: ClientStoreCapture | undefined;
   readonly source: string;
   readonly route: ConfigWriteRoute;
   released: boolean;
@@ -36,6 +52,30 @@ function assertCapture(capture: Capture): void {
     capture.local.owner.assertPreparedMutation(capture.local.mutation);
   }
   if (capture.remote) assertRemoteSettingsPrecondition(capture.remote);
+  if (capture.client && clientStoreStamp(capture.client.store.settingsPath) !== capture.client.stamp) throw new ToolInputProjectionError('stale');
+}
+/** File identity, size and change time of a surface's settings file; one `lstat`. */
+function clientStoreStamp(path: string): string {
+  try {
+    const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+    return stat ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}` : 'absent';
+  } catch {
+    return 'unreadable';
+  }
+}
+/**
+ * Writes the prepared value to the originating surface's file and reads it
+ * back there. One attempt: a write whose read-back fails may or may not have
+ * landed, so it is reported as unknown, never retried.
+ */
+async function applyClientStoreCapture(key: string, client: ClientStoreCapture): Promise<PreparedConfigMutationReceipt & { readonly verifiedInOwningStore: boolean }> {
+  if (!isValidConfigKey(key)) throw new ToolInputProjectionError('invalid');
+  try {
+    const applied = await applyRoutedConfigWrite(client.configManager, key, client.value, client.routing);
+    return Object.freeze({ status: 'committed' as const, completedPaths: Object.freeze([applied.persistedTo]), verifiedInOwningStore: true });
+  } catch {
+    return Object.freeze({ status: 'unknown' as const, completedPaths: Object.freeze([] as string[]), uncertainPath: client.store.settingsPath, verifiedInOwningStore: false });
+  }
 }
 function posture(value: unknown): Readonly<Record<string, unknown>> {
   return Object.freeze({ redacted: true, configured: value !== undefined && value !== null && value !== '' });
@@ -52,18 +92,32 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
       // The one refusal of a settings write, before any local or remote write is prepared.
       const refusal = agentSettingsWriteRefusal({ mode: args.mode, key, value: args.value });
       if (refusal) throw new ToolInputProjectionError('held', refusal);
-      // Hosted originating-surface files have a separate owner contract. The
-      // main Agent composition never supplies this override; never borrow the
-      // hosting manager's authority for a distinct file.
-      if (routing.clientOwnedStore && configKeyScope(key) === 'client') throw new ToolInputProjectionError('unconfigured');
+      // A client-owned key of the surface a hosted session was created for
+      // belongs to that surface's own file, never to the hosting manager's
+      // store: it is prepared against that file alone (see ClientStoreCapture).
+      const clientStore = routing.clientOwnedStore && configKeyScope(key) === 'client' ? routing.clientOwnedStore : undefined;
       const route = await resolvePreparedConfigWriteRoute(key, resolveRouterDeps(configManager, routing));
       request.assertCurrent(); request.signal?.throwIfAborted();
       let local: ToolPreparedSettingsMutation | undefined;
       let localFacts: PreparedConfigMutationFacts | undefined;
       let remote: RemoteSettingsPrecondition | undefined;
+      let client: ClientStoreCapture | undefined;
       let effect: Record<string, unknown>;
       let source: string;
-      if (route.mode === 'daemon') {
+      if (clientStore) {
+        const setting = configManager.getSchema().find(entry => entry.key === key);
+        if (!setting) throw new ToolInputProjectionError('invalid');
+        // A reset writes the schema default to that file, as the routed reset does.
+        const admitted = admitSettingValue(key, setting, args.mode === 'set' ? args.value : setting.default);
+        if (!admitted.ok) throw new ToolInputProjectionError('held', `${key} was not changed: ${admitted.reason}.`);
+        const stamp = clientStoreStamp(clientStore.settingsPath);
+        const previous = readClientOwnedValue(clientStore, key);
+        client = { store: clientStore, stamp, value: admitted.value, configManager, routing };
+        source = clientStore.settingsPath;
+        effect = { operation: args.mode, key, value: admitted.value,
+          destinations: [{ path: clientStore.settingsPath, operation: 'set', tier: 'global' }],
+          appliedBy: 'local', surface: clientStore.surface, previous: isSecretBearingConfigKey(key) ? posture(previous) : previous };
+      } else if (route.mode === 'daemon') {
         remote = await captureRemoteSettingsPrecondition(route.endpoint,
           args.mode === 'reset' ? { operation: 'reset-default', key } : { operation: 'set', key, value: args.value }, routing);
         request.assertCurrent(); request.signal?.throwIfAborted();
@@ -86,7 +140,7 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
       effect = captureOwnedJson(effect) as Record<string, unknown>;
       request.assertCurrent(); request.signal?.throwIfAborted();
       const context = Object.freeze({});
-      const capture: Capture = { argsJson: JSON.stringify(args), key, operation: args.mode, local, localFacts, remote, source, route,
+      const capture: Capture = { argsJson: JSON.stringify(args), key, operation: args.mode, local, localFacts, remote, client, source, route,
         released: false, spent: false };
       assertCapture(capture); captures.set(context, capture);
       const revision = `runtime-settings-${(++projectionSequence).toString(36)}`;
@@ -120,7 +174,10 @@ export async function executeAdmittedAgentSettings(args: Record<string, unknown>
   capture.spent = true;
   let receipt;
   if (capture.local) receipt = commitCurrentToolSettings(args, options);
-  else {
+  else if (capture.client) {
+    claimCurrentToolSettingsDispatch(args, options);
+    receipt = await applyClientStoreCapture(capture.key, capture.client);
+  } else {
     claimCurrentToolSettingsDispatch(args, options);
     receipt = await applyRemoteSettingsPrecondition(capture.remote!);
   }
@@ -141,7 +198,7 @@ export async function executeAdmittedAgentSettings(args: Record<string, unknown>
   return { success: receipt.status === 'committed', output: JSON.stringify({ key: capture.key, action: capture.operation,
     status: refused ? 'refused' : receipt.status, previous: presentation.previous,
     ...(receipt.status === 'committed' && verified && (capture.operation === 'set' || capture.remote) ? { current: presentation.current } : {}),
-    persistedTo: capture.source, appliedBy: capture.local ? 'local' : 'daemon', owner: configKeyScope(capture.key),
+    persistedTo: capture.source, appliedBy: capture.remote ? 'daemon' : 'local', owner: configKeyScope(capture.key),
     ownership: describeConfigOwnership(capture.key), verifiedInOwningStore: verified,
     completedPaths: receipt.completedPaths, ...(receipt.uncertainPath ? { uncertainPath: receipt.uncertainPath } : {}) }),
     ...(receipt.status !== 'committed' ? { error: settingsOutcomeError(receipt.status, refused) } : {}) };

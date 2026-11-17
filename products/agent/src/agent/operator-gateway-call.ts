@@ -5,12 +5,8 @@
  * classification. Never retries an operator mutation.
  */
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { operatorRouteLabel, type FamilyGatewayRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { delegatedOperatorConnection, forgetDelegatedCredential } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createConnectedHost, isHostFailure, type HostCallApplied, type HostRefusal } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { AgentConnectedHostConfigReader, AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
+import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export type OperatorGatewayCallFailureKind =
   | 'auth_required'
@@ -87,37 +83,4 @@ export function formatOperatorGatewayFailure(failure: OperatorGatewayCallFailure
     `  ${failure.error}`,
   ];
   return lines.filter(Boolean).join('\n');
-}
-
-// ── The connected-host route of a daemon-owned method family ──────────────
-
-/**
- * The route a profile or occasions call takes from this process when its own
- * catalog has no handler: the connected host. The credential is resolved once
- * per call into a value and verified there with one `lstat`; the caller's
- * check runs once more immediately before the request leaves. A call made on
- * the owner's behalf (`lifetime.delegation`) is sent with this Agent's
- * delegated credential, so the host judges it as the Agent's
- * (agent-delegation-credential.ts).
- */
-export function connectedHostFamilyRemote(options: { readonly configManager: AgentConnectedHostConfigReader; readonly homeDirectory: string }): FamilyGatewayRemote {
-  return async (methodId, body, lifetime, assertCurrent) => {
-    const ordinary = captureOperatorConnection(options, options.configManager, assertCurrent);
-    let delegated: Awaited<ReturnType<typeof delegatedOperatorConnection>> | undefined;
-    if (lifetime.delegation) {
-      try { delegated = await delegatedOperatorConnection(ordinary, options.homeDirectory, lifetime.signal); }
-      catch (error) {
-        lifetime.signal?.throwIfAborted();
-        return { ok: false, data: null, error: summarizeError(error), route: 'connected-host' };
-      }
-    }
-    const connection = delegated ?? ordinary;
-    const result = await invokeOperatorGatewayMethod(connection, methodId, operatorRouteLabel(methodId), body,
-      { signal: lifetime.signal, assertCurrent: connection.assertCurrent });
-    // A delegated credential the host no longer accepts is forgotten; the next call makes a new one.
-    if (!result.ok && result.refusal?.code === 'auth_rejected' && delegated) await forgetDelegatedCredential(delegated);
-    return result.ok
-      ? { ok: true, data: result.data, route: 'connected-host' }
-      : { ok: false, data: null, error: formatOperatorGatewayFailure(result), route: 'connected-host' };
-  };
 }

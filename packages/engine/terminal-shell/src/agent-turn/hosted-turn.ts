@@ -69,7 +69,8 @@ import { registerAgentChannelSendTool } from './channel-send-tool.js';
 import { registerAgentBrowserTool, type AgentBrowserToolOptions, type BrowserToolBackend } from './browser-tool.js';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './google-wiring.js';
 import { inProcessGoogleCalendarHost } from './google-tool.js';
-import { declareAgentReadModes } from './read-modes.js';
+import { AGENT_PLATFORM_TOOL_ADMISSION, installAgentToolPolicy } from './read-modes.js';
+import { connectedHostFamilyRemote } from './family-remote.js';
 import { registerAgentLocalRegistryTool } from './local-registry-tool.js';
 import { registerAgentLearningConsolidationTool } from './learning-consolidation-tool.js';
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
@@ -309,6 +310,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
   const calendarHost = inProcessGoogleCalendarHost(deps.gatewayMethods);
   const browser = deps.browser;
   return {
+    // read and goodvibes_settings are built with the Agent's admission, as in the Agent's own registries.
+    platformToolAdmission: AGENT_PLATFORM_TOOL_ADMISSION,
     registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests, providerRegistry }) {
       // The daemon keeps one project work plan, for its own project; a session in
       // another workspace has no plan of its own here and is told so on a call.
@@ -322,10 +325,16 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       const operatorHost = inProcessHostFor(daemonRequests);
       registerAgentTurnTools(registry, {
         ...(ownProject ? { workPlan: deps.workPlan } : {}),
-        inProcessCredentialKind: 'agent',
+        // Profile and occasions calls reach this daemon through its own request path
+        // with the Agent's credentials, the route the Agent's own calls take: a call
+        // for the owner presents the Agent's delegated credential, so the daemon gives
+        // it that pairing's scopes and native authority. Without a request path the
+        // catalog is called in process, admitted on the Agent pairing's grant.
+        ...(operatorHost
+          ? { remote: connectedHostFamilyRemote({ configManager: deps.settings, homeDirectory: deps.homeDirectory, inProcess: operatorHost }) }
+          : { gatewayMethods: deps.gatewayMethods, inProcessCredentialKind: 'agent' as const }),
         memoryRegistry: deps.memoryRegistry,
         memoryAccess: deps.memoryAccess,
-        gatewayMethods: deps.gatewayMethods,
         shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: deps.homeDirectory }),
         artifactStore: deps.artifactStore,
         notificationConfig: deps.notificationConfig,
@@ -378,8 +387,9 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       }
       registry.declareElsewhere(AGENT_SHELL_TOOL_NAMES, SHELL_REFUSAL);
       registry.declareElsewhere(AGENT_NOT_YET_HOSTED_TOOL_NAMES, NOT_YET_HOSTED_REFUSAL);
-      // The Agent's read-mode table, on the platform tools here as on the Agent's own registry.
-      declareAgentReadModes(registry);
+      // The Agent's tool policy (read-mode table, admitted read and settings,
+      // goodvibes_context as a read), as on the Agent's own registries.
+      installAgentToolPolicy(registry);
       return undefined;
     },
     async systemPrompt(input) {

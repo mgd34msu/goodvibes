@@ -239,7 +239,7 @@ export function localStorePathForKey(
  *, it is how a hosted agent turn was told the TUI's wake-word setting was its
  * own.
  */
-function readClientOwnedValue(store: ClientOwnedStore, key: string): unknown {
+export function readClientOwnedValue(store: ClientOwnedStore, key: string): unknown {
   const onDisk = readKeyFromFile(store.settingsPath, key);
   if (onDisk.present) return onDisk.value;
   return readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value;

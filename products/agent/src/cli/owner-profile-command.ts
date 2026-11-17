@@ -19,7 +19,7 @@ import { commandJsonOrText as jsonOrText } from '@goodvibes-jev/engine/terminal-
  */
 
 import { createProfileGatewayInvoke, type ProfileGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
+import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   narrowProfileGet,
   narrowProfilePerson,

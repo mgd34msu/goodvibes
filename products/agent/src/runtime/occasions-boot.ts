@@ -24,7 +24,7 @@ import type { ConfigManager } from '../config/index.ts';
 import type { ConversationManager } from '../core/conversation.ts';
 import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createOccasionsGatewayInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
+import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   createOccasionsNudgeSurface,
   type OccasionsNudgeSurface,

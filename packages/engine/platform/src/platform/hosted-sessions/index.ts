@@ -37,6 +37,7 @@ export { createHostedSessionRuntime, hostedAgentAsker, newHostedSessionId } from
 export type { HostedOwnerQuestions, HostedSessionContractSink, HostedSessionRuntime, HostedSessionRuntimeOptions } from './session-runtime.js';
 export type {
   HostedDaemonRequestPath,
+  HostedPlatformToolAdmission,
   HostedSessionProviderRegistry,
   HostedSurfacePromptInput,
   HostedSurfaceTools,

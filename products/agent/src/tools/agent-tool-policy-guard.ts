@@ -1,34 +1,20 @@
 import { readModeCategory } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { wrapAgentContextToolForAgentPolicy } from './agent-context-policy.ts';
-import { wrapReadToolForAgentPolicy } from './agent-read-policy.ts';
-import {
-  wrapSettingsToolForAdmittedAgentPolicy,
-  validateAgentSettingsMechanics,
-  type SettingsToolArgs,
-} from '@goodvibes-jev/engine/platform/platform/gate/policy';
+import { validateAgentSettingsMechanics, type SettingsToolArgs } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import type { AgentToolPolicyInvocationExplanation } from './agent-tool-policy-guard-types.ts';
-import { agentReadModesFor, declareAgentReadModes } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentReadModesFor, installAgentToolPolicy } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 export type { AgentToolPolicyInvocationExplanation } from './agent-tool-policy-guard-types.ts';
 
 /**
  * The Agent's tool policy, installed on the main registry and on every
- * worker's registry: each tool in the table gets its read modes on its
- * definition, and read, settings and goodvibes_context get the engine's
- * admission readers. A call is decided by the permission gate alone.
+ * worker's registry: the one policy a session the daemon hosts for the Agent
+ * gets too (agent-turn's installAgentToolPolicy), with goodvibes_context as
+ * this process's view over agent_harness. A call is decided by the permission
+ * gate alone.
  */
 export function installAgentToolPolicyGuard(registry: ToolRegistry): void {
-  declareAgentReadModes(registry);
-  for (const tool of registry.list()) {
-    if (agentReadModesFor(tool.definition.name)) continue;
-    if (tool.definition.name === 'read') {
-      wrapReadToolForAgentPolicy(tool);
-    } else if (tool.definition.name === 'goodvibes_context') {
-      wrapAgentContextToolForAgentPolicy(tool, registry);
-    } else if (tool.definition.name === 'goodvibes_settings') {
-      wrapSettingsToolForAdmittedAgentPolicy(tool);
-    }
-  }
+  installAgentToolPolicy(registry, wrapAgentContextToolForAgentPolicy);
 }
 
 export function explainAgentToolPolicyInvocation(

@@ -24,7 +24,7 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
 import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
-import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AGENT_PLATFORM_TOOL_ADMISSION, getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';
@@ -275,8 +275,7 @@ export async function initializeBootstrapCore(
       // The worker registry gets the admitted read and settings wrappers from
       // decorateAgentWorkerRegistry; they refuse any call whose tool was built
       // without the matching admission policy's input projector.
-      readAdmissionPolicy: 'agent-main-conversation',
-      settingsAdmissionPolicy: 'agent-main-conversation',
+      ...AGENT_PLATFORM_TOOL_ADMISSION,
     },
     permissionManager,
   );

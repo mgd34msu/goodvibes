@@ -9,9 +9,10 @@ import {
   getOutwardApprovalStore,
   OUTWARD_APPROVAL_GESTURE,
   registerAgentTurnTools,
+  AGENT_PLATFORM_TOOL_ADMISSION,
   type GoogleToolWiringDeps,
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
+import { connectedHostFamilyRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -88,8 +89,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     // A keyed state file is reclaimed only once no saved conversation carries its session id.
     isSessionResumable: (sessionToken) => services.sessionManager.has(sessionToken),
     controlSurfaces: controlSurfacesFor(services),
-    readAdmissionPolicy: 'agent-main-conversation',
-    settingsAdmissionPolicy: 'agent-main-conversation',
+    // The read and settings admission every Agent registry is built with, a hosted Agent session's included.
+    ...AGENT_PLATFORM_TOOL_ADMISSION,
     // ONE file cache and ONE project index for the process. registerAllTools
     // builds its own pair when none is passed, and then the file tools would read
     // an index the graph neither owns nor closes. Passing the graph's pair makes

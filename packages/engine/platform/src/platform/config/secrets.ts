@@ -107,6 +107,12 @@ export class SecretWriteCommittedError extends Error {
 }
 
 declare const secretWriteTransitionBrand: unique symbol;
+/** One project store a key was confirmed in, and what its value points at when it is a pointer. */
+export interface ConfirmedProjectSecret {
+  readonly path: string;
+  /** The stored pointer (`goodvibes://secrets/...`) when the confirmed value is one, not a credential. */
+  readonly pointsAt?: string | undefined;
+}
 export interface SecretWriteTransition { readonly [secretWriteTransitionBrand]: true }
 export interface SecretWriteTransitionFacts {
   readonly key: string;
@@ -954,9 +960,14 @@ export class SecretsManager {
     return this.options.globalHome;
   }
 
-  /** True unless `store` is this project's store and `key` in it was never confirmed. */
-  #usable(store: SecretStorePath, key: string, report = false): boolean {
-    if (store.scope !== 'project' || this.#approvals.isApproved(store.path, key)) return true;
+  /**
+   * True unless `store` is this project's store and `key` in it was not
+   * confirmed with this stored value (a value changed since, a pointer
+   * included, is unconfirmed again).
+   */
+  #usable(store: SecretStorePath, key: string, storedValue: unknown, report = false): boolean {
+    if (store.scope !== 'project') return true;
+    if (typeof storedValue === 'string' && this.#approvals.isApproved(store.path, key, storedValue)) return true;
     const id = `${store.path}\0${key}`;
     if (report && !this.#reportedUnconfirmed.has(id)) {
       this.#reportedUnconfirmed.add(id);
@@ -969,7 +980,13 @@ export class SecretsManager {
 
   #approveProjectWrite(store: SecretStorePath, keys: readonly string[]): void {
     if (store.scope !== 'project' || keys.length === 0) return;
-    try { this.#approvals.approve(store.path, keys); }
+    try {
+      // Bound to the values as this program just stored them.
+      const stored = (store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path)) ?? {};
+      const values: Record<string, string> = {};
+      for (const key of keys) if (typeof stored[key] === 'string') values[key] = stored[key]!;
+      this.#approvals.approve(store.path, values);
+    }
     catch (error) {
       logger.warn('SecretsManager: stored in the project store, but the confirmation could not be recorded; confirm it with /secrets trust', {
         keys, path: store.path, error: summarizeError(error),
@@ -978,18 +995,21 @@ export class SecretsManager {
   }
 
   /**
-   * The user confirms `key` found in this project's secret store, so it is used
-   * from now on. Returns the store files it was confirmed in; empty when this
-   * project's store does not hold the key.
+   * The user confirms `key` found in this project's secret store, with the
+   * value it holds now, so it is used from now on (until that value changes).
+   * Returns each store file it was confirmed in and, when the value is a
+   * pointer, what it points at; empty when this project's store does not hold the key.
    */
-  confirmProjectSecret(key: string): readonly string[] {
-    const confirmed: string[] = [];
+  confirmProjectSecret(key: string): readonly ConfirmedProjectSecret[] {
+    const confirmed: ConfirmedProjectSecret[] = [];
     for (const store of this.getAllCandidateStores()) {
       if (store.scope !== 'project') continue;
       const values = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
-      if (!values || !Object.hasOwn(values, key)) continue;
-      this.#approvals.approve(store.path, [key]);
-      confirmed.push(store.path);
+      if (!values || !Object.hasOwn(values, key) || typeof values[key] !== 'string') continue;
+      const value = values[key]!;
+      this.#approvals.approve(store.path, { [key]: value });
+      const pointer = decodeLiteralSecret(value) === null && isSecretRefInput(value) ? value : undefined;
+      confirmed.push({ path: store.path, ...(pointer !== undefined ? { pointsAt: pointer } : {}) });
     }
     if (confirmed.length) {
       this.credentialMutationGeneration += 2;
@@ -1050,7 +1070,7 @@ export class SecretsManager {
     for (const path of this.getReadOrder()) {
       const result = path.secure ? this.readEncryptedStore(path.path) : this.readPlaintextStore(path.path);
       if (result.status === 'unreadable') return { state: 'unsupported' };
-      if (result.status === 'ok' && Object.hasOwn(result.secrets, key) && this.#usable(path, key)) return capture(result.secrets[key]);
+      if (result.status === 'ok' && Object.hasOwn(result.secrets, key) && this.#usable(path, key, result.secrets[key])) return capture(result.secrets[key]);
     }
     return { state: 'absent' };
   }
@@ -1072,19 +1092,24 @@ export class SecretsManager {
       return value;
     };
     let current = key;
+    // A pointer read from a project store is followed only inside that same
+    // store: a checkout cannot name the user's own credentials or environment.
+    let within: SecretStorePath | null = null;
     for (let depth = 0; depth < 32; depth++) {
       if (seen.has(current)) return { state: 'unsupported', reason: 'stored references form a loop' };
       if (this.pendingLocalMutations.has(current)) return { state: 'unsupported', reason: 'write pending' };
-      if (ownEnvValue(current) !== undefined) return { state: 'unsupported', reason: 'set in the environment' };
+      if (within === null && ownEnvValue(current) !== undefined) return { state: 'unsupported', reason: 'set in the environment' };
       seen.add(current);
       let value: string | undefined;
-      for (const path of this.getReadOrder()) {
+      let from: SecretStorePath | undefined;
+      for (const path of within ? [within] : this.getReadOrder()) {
         const result = path.secure ? this.readEncryptedStore(path.path) : this.readPlaintextStore(path.path);
         if (result.status === 'unreadable') return { state: 'unsupported', reason: 'store unreadable' };
-        const found = result.status === 'ok' && Object.hasOwn(result.secrets, current) && this.#usable(path, current);
+        const found = result.status === 'ok' && Object.hasOwn(result.secrets, current) && this.#usable(path, current, result.secrets[current]);
         chain.push([current, path.path, path.secure, found]);
-        if (found) { value = result.secrets[current]; break; }
+        if (found) { value = result.secrets[current]; from = path; break; }
       }
+      if (from?.scope === 'project') within = from;
       if (value === undefined) {
         return depth === 0 ? { state: 'absent', revision: revision() } : { state: 'unsupported', reason: 'stored reference names a secret that is not stored' };
       }
@@ -1163,29 +1188,51 @@ export class SecretsManager {
         ? this.readEncryptedFile(path.path)
         : this.readPlaintextFile(path.path);
       if (secrets !== null && Object.hasOwn(secrets, key)) {
-        if (!this.#usable(path, key, true)) continue;
+        if (!this.#usable(path, key, secrets[key], true)) continue;
         logger.debug('SecretsManager: resolved from store', { key, source: path.source });
         const value = secrets[key]!;
         if (value === undefined) return null;
         // A wrapped literal is the credential itself, never a pointer to follow.
         const literal = decodeLiteralSecret(value);
         if (literal !== null) return literal;
-        return this.resolveMaybeReferencedValue(key, value, seen, path.scope === 'project');
+        return this.resolveMaybeReferencedValue(key, value, seen, path.scope === 'project' ? path : undefined);
       }
     }
 
     return null;
   }
 
-  private async resolveMaybeReferencedValue(key: string, value: string, seen: Set<string>, fromProjectStore = false): Promise<string | null> {
+  /** A GoodVibes pointer read from a project store, resolved against that store alone. */
+  private async resolveWithinProjectStore(key: string, value: string, seen: Set<string>, store: SecretStorePath): Promise<string | null> {
+    const ref = normalizeSecretRef(value);
+    if (!ref || ref.source !== 'goodvibes') return null;
+    const next = ref.id;
+    if (seen.has(next)) throw new Error(`Recursive GoodVibes secret reference for ${next}`);
+    const secrets = store.secure ? this.readEncryptedFile(store.path) : this.readPlaintextFile(store.path);
+    if (!secrets || !Object.hasOwn(secrets, next) || !this.#usable(store, next, secrets[next], true)) {
+      logger.warn('SecretsManager: a pointer in this project\'s secret store names a key that store does not hold (confirmed); a project pointer never reaches your own store or environment', { key, target: next });
+      return null;
+    }
+    const target = secrets[next]!;
+    const literal = decodeLiteralSecret(target);
+    if (literal !== null) return literal;
+    const nextSeen = new Set(seen);
+    nextSeen.add(next);
+    return this.resolveMaybeReferencedValue(next, target, nextSeen, store);
+  }
+
+  private async resolveMaybeReferencedValue(key: string, value: string, seen: Set<string>, projectStore?: SecretStorePath): Promise<string | null> {
     if (!isSecretRefInput(value)) return value;
 
     // A project store lives inside a directory that may have been cloned from
     // anywhere, so it is data, not a place to run commands or read files from.
-    // Only references that stay inside GoodVibes follow; an env: reference
-    // would let a checkout name any variable of the user's environment.
+    // Only a GoodVibes pointer follows, and only to another key of the same
+    // project store: an env: reference, or a pointer into the user's own store
+    // (which reads the environment first), would let a checkout name the
+    // user's credentials.
     const refSource = getSecretRefSource(value);
-    if (fromProjectStore && refSource !== 'goodvibes') {
+    if (projectStore && refSource === 'goodvibes') return this.resolveWithinProjectStore(key, value, seen, projectStore);
+    if (projectStore) {
       logger.warn('SecretsManager: refused a secret reference found in a project store; move it to the user store (scope user) to use it', {
         key,
         refSource: refSource ?? 'unknown',
@@ -1456,7 +1503,7 @@ export class SecretsManager {
           path: path.path,
           overriddenByEnv: envKeys.has(key),
           ...(refSource ? { refSource } : {}),
-          ...(this.#usable(path, key) ? {} : { unconfirmed: true as const }),
+          ...(this.#usable(path, key, values[key]) ? {} : { unconfirmed: true as const }),
         });
       }
     }

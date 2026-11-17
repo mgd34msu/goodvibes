@@ -202,7 +202,11 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         }
         const confirmed = store.confirmProjectSecret(key);
         if (!confirmed.length) throw commandRefusal(`[secrets] Nothing was confirmed: ${key} is not in this project's secret store.`, '/secrets list shows what is stored.');
-        context.print(`[secrets] ${key} from this project's secret store is used from now on (${confirmed.join(', ')}).`);
+        // Say what was confirmed: a pointer is resolved only inside this project's store, and any later change to the value needs confirming again.
+        const described = confirmed.map((entry) => entry.pointsAt
+          ? `${entry.path}, a pointer to ${describeSecretRef(entry.pointsAt)} inside this project's store`
+          : entry.path);
+        context.print(`[secrets] ${key} from this project's secret store is used from now on, until its value changes (${described.join('; ')}).`);
         return;
       }
       if (subcommand === 'get') {

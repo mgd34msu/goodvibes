@@ -5,6 +5,7 @@ import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev
 import { retainSurfaceRead, retainSurfaceMethods } from './agent-surface-effect.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '../agent/payments-channel-guard.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 interface AgentNotificationConfigReader {
   getCategory(category: string): unknown;
@@ -93,14 +94,8 @@ export function createAgentNotifyTool(
             type: 'string',
             description: 'Plain-text notification body.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional historical provenance; does not grant delivery authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request provenance; does not grant delivery authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
           preview: { type: 'boolean', description: 'Return a read-only preview without sending.' },
         },
         required: ['message'],

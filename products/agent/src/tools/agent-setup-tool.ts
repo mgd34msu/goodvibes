@@ -3,6 +3,7 @@ import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/e
 import { randomUUID } from 'node:crypto';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createSetupSmokeReferenceCapture, executeNestedSetupSmoke } from './agent-setup-smoke-reference.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentSetupAction =
   | 'status'
@@ -135,8 +136,8 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           fields: { type: 'object', description: 'Optional user-run setup smoke output.' },
           includeParameters: { type: 'boolean', description: 'Include bounded route details and parameters where supported.' },
           limit: { type: 'number', description: 'Optional status list limit.' },
-          confirm: { type: 'boolean', description: 'Optional context; never grants authority. Only import_settings reads it, as a legacy way to ask for apply (use apply_import).' },
-          explicitUserRequest: { type: 'string', description: 'Optional request context; never grants authority.' },
+          confirm: confirmParameter('Only import_settings reads it, as a legacy way to ask for apply (use apply_import).'),
+          explicitUserRequest: requestParameter(),
         },
         additionalProperties: false,
       },

@@ -4,6 +4,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
 import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
 import { createAgentComputerTool } from './agent-computer-tool.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentDeviceAction =
   | 'status'
@@ -189,8 +190,8 @@ export function createAgentDeviceTool(deps: AgentDeviceToolDeps): Tool {
           query: { type: 'string', description: 'Search text for status, capability, voice and provider. Omit it for the complete map.' },
           includeParameters: { type: 'boolean', description: 'Include detailed route contracts.' },
           limit: { type: 'number', description: 'Maximum rows.' },
-          confirm: { type: 'boolean', description: 'Optional provenance; does not grant authority. Opening is allowed only under the owner\'s recorded effect admission.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request provenance; does not grant authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         additionalProperties: false,
       },

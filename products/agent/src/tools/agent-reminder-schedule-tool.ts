@@ -7,6 +7,7 @@ import {
   parseReminderScheduleArgs,
 } from '../agent/reminder-schedule.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type ReminderScheduleKind = 'at' | 'every' | 'cron';
 
@@ -139,14 +140,8 @@ export function createAgentReminderScheduleTool(
             type: 'boolean',
             description: 'Create the schedule disabled.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional audit annotation; does not grant effect authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request provenance, recorded in the schedule prompt; does not grant effect authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('recorded in the schedule prompt'),
         },
         required: ['message', 'scheduleKind', 'scheduleValue'],
         additionalProperties: false,

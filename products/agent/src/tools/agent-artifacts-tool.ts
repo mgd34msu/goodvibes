@@ -7,6 +7,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
 import { toolErrorText } from './tool-error-text.ts';
 import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './agent-artifact-effect.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 import {
   packageArtifactFilename,
   safeArtifactExportFilename,
@@ -696,14 +697,8 @@ export function createAgentArtifactsTool(
             type: 'number',
             description: 'Maximum text bytes to preview for mode:"show".',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional request provenance. Recorded engine admission authorizes writes.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional user request provenance.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: ['mode'],
         additionalProperties: false,

@@ -11,6 +11,7 @@ import { isOperatorAutomationTargetMethod } from '../agent/operator-automation-t
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
 import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '../agent/operator-contract-routes.ts';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './agent-operator-input-projector.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -539,14 +540,8 @@ export function createAgentOperatorMethodTool(
             description: 'Method input; path keys are removed before query/body.',
             additionalProperties: true,
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional audit annotation; does not grant effect authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request provenance; does not grant effect authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
           dryRun: {
             type: 'boolean',
             description: 'Preview the route without calling the daemon.',

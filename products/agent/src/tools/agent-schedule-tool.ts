@@ -3,6 +3,7 @@ import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/e
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { randomUUID } from 'node:crypto';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type ScheduleAction =
   | 'list'
@@ -282,8 +283,8 @@ export function createAgentScheduleTool(
           disabled: { type: 'boolean', description: 'Create schedule disabled.' },
           query: { type: 'string', description: 'For action:list, show only schedules whose id or name contains this text.' },
           limit: { type: 'number', description: `For action:list, the most schedules to show (default ${DEFAULT_LIST_LIMIT}, max ${MAX_LIST_LIMIT}).` },
-          confirm: { type: 'boolean', description: 'Optional request provenance; does not grant permission.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request provenance; the original admitted source remains authoritative.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('kept as provenance; the original admitted source stays authoritative'),
         },
         additionalProperties: false,
       },

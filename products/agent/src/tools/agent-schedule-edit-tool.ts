@@ -8,6 +8,7 @@ import {
   scheduleEditKindFromValue,
 } from '../agent/schedule-edit.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export interface AgentScheduleEditToolArgs {
   readonly scheduleId?: unknown;
@@ -124,14 +125,8 @@ export function createAgentScheduleEditTool(
             type: 'string',
             description: 'Required with task; expected run outcome.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional audit annotation; does not grant effect authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request provenance, written into a prompt rebuilt from task; does not grant effect authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('written into the prompt rebuilt from task'),
         },
         anyOf: [{ required: ['scheduleId'] }, { required: ['jobId'] }],
         additionalProperties: false,

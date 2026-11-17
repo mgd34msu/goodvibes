@@ -10,6 +10,7 @@ import {
   formatAgentChannelDeliveryResult,
   type AgentChannelDeliveryInput,
 } from '../agent/channel-delivery.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export interface AgentReviewPacketShareToolArgs {
   readonly archiveArtifactId?: unknown;
@@ -220,14 +221,8 @@ export function createAgentReviewPacketShareTool(
             type: 'string',
             description: 'Delivery target: link. Exactly one of channel, route, webhook or link is required.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional request provenance. Recorded engine admission authorizes delivery.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional user request provenance.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: ['archiveArtifactId'],
         additionalProperties: false,

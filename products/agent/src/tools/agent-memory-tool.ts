@@ -4,6 +4,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentMemoryAction =
   | 'status'
@@ -188,8 +189,8 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
           reason: { type: 'string', description: 'Reason for stale/delete decisions.' },
           maxRunMs: { type: 'number', description: 'Maximum semantic refinement run budget in milliseconds.' },
           force: { type: 'boolean', description: 'Force semantic refinement reprocessing where supported.' },
-          confirm: { type: 'boolean', description: 'Optional audit annotation; does not grant authority. Memory writes and deletes need current recorded admission.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request text recorded with the effect; does not grant authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('recorded with the effect'),
         },
         additionalProperties: false,
       },

@@ -12,6 +12,7 @@ import {
   type AgentDocumentVersion,
 } from '../agent/document-registry.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export type AgentDocumentsToolMode = 'list' | 'show' | 'create' | 'update' | 'review' | 'comment' | 'resolveComment' | 'suggest' | 'acceptSuggestion' | 'rejectSuggestion' | 'export' | 'insertArtifact' | 'attachArtifact';
 
@@ -544,14 +545,8 @@ export function createAgentDocumentsTool(
             type: 'number',
             description: 'Maximum list rows.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional request provenance. Recorded engine admission authorizes writes.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional user request provenance.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         additionalProperties: false,
       },

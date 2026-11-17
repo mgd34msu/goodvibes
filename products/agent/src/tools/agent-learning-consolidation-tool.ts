@@ -15,6 +15,7 @@ import type { LearningCandidate } from './agent-harness-learning-curator.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import { captureCatalogData, captureCatalogMethods } from './agent-harness-catalog-ranking.ts';
 import { createHarnessCatalogInputProjector, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 function arrayField(snapshot: Record<string, unknown>, key: string): string[] {
   const value = snapshot[key];
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
@@ -764,14 +765,8 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
             type: 'number',
             description: 'Receipt list limit.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Legacy caller annotation; it grants no effect authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional audit text for the phase; current recorded effect admission supplies authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('kept as audit text for the phase'),
         },
         required: ['mode'],
         additionalProperties: false,

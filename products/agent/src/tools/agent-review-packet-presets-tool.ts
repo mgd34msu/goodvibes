@@ -4,6 +4,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { agentArtifactEffectGuard, captureAgentArtifactSource } from './agent-artifact-effect.ts';
 import { DEFAULT_LIST_LIMIT, MAX_FRESHNESS_ARTIFACT_SCAN, MAX_LIST_LIMIT, REVIEW_PACKET_PRESET_SCHEMA, auditPresetFreshness, buildPresetRecord, clamp, compactText, defaultPacketSummary, freshnessReferences, isPresetArtifact, packetFromMetadata, parseMode, parsePresetBody, presetCreateInput, readMetadataString, readNumber, readString, sourceArtifactId, type AgentReviewPacketPresetArtifactStore, type AgentReviewPacketPresetsToolArgs, type LoadedReviewPacketPreset, type ReviewPacketFreshnessAudit, type ReviewPacketPresetPacket, type ReviewPacketPresetRecord } from './agent-review-packet-presets-core.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 function formatPacketLines(packet: ReviewPacketPresetPacket): readonly string[] {
   return [
     `  summary ${packet.summary}`,
@@ -339,14 +340,8 @@ export function createAgentReviewPacketPresetsTool(
             type: 'number',
             description: 'Maximum presets to list.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional request provenance. Recorded engine admission authorizes writes.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional user request provenance.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: ['mode'],
         additionalProperties: false,

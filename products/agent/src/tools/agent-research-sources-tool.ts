@@ -11,6 +11,7 @@ import {
   type AgentResearchSourceStatus,
 } from '../agent/research-source-registry.ts';
 import { clampReadLimit } from './agent-harness-read-helpers.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export interface AgentResearchSourcesToolArgs {
   readonly mode?: unknown;
@@ -351,8 +352,8 @@ function createAgentResearchSourcesTool(shellPaths?: Pick<ShellPathService, 'res
           reportArtifactId: { type: 'string', description: 'Optional report artifact id when marking a source used.' },
           includeReportLines: { type: 'boolean', description: 'Include report-form source lines in list/search output.' },
           limit: { type: 'number', description: 'Maximum rows for bundle output.' },
-          confirm: { type: 'boolean', description: 'Optional legacy audit field; does not authorize writes.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request text retained as source provenance.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('kept as the source provenance'),
         },
         required: ['mode'],
         additionalProperties: false,

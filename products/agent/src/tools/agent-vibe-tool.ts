@@ -16,6 +16,7 @@ import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { assertActorMayMarkReviewed } from '../agent/review-authority.ts';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentVibeAction = 'status' | 'show' | 'init' | 'import_persona';
 
@@ -151,8 +152,8 @@ export function createAgentVibeTool(commandContext: CommandContext): Tool {
           review: { type: 'boolean', description: 'Refused: reviewing a persona is the owner\'s (they run /personas review <id>); nothing is imported when set.' },
           use: { type: 'boolean', description: 'Set imported persona active.' },
           includeParameters: { type: 'boolean', description: 'Include searched paths and route details.' },
-          confirm: { type: 'boolean', description: 'Optional provenance; never grants write authority.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request provenance; never grants write authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         additionalProperties: false,
       },

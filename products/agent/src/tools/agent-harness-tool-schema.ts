@@ -1,3 +1,5 @@
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+
 export const AGENT_HARNESS_MODES = [
   'summary', 'modes', 'mode', 'route_decision', 'cli_commands', 'cli_command',
   'ui_surfaces', 'ui_surface', 'open_ui_surface',
@@ -346,14 +348,8 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
     type: 'number',
     description: 'Maximum catalog entries to return.',
   },
-  confirm: {
-    type: 'boolean',
-    description: 'Context only. Confirmed harness effects run only under current recorded effect admission (a visible approval from the person); sending confirm:true does not grant it. Without admission the call is refused and names the missing approval.',
-  },
-  explicitUserRequest: {
-    type: 'string',
-    description: 'Request context for documented confirmed harness effects; never authority for settings set/reset.',
-  },
+  confirm: confirmParameter('Without admission the call is refused and names the missing approval.'),
+  explicitUserRequest: requestParameter(),
   peerId: {
     type: 'string',
     description: 'Remote peer id for remote_peers_invoke.',

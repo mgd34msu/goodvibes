@@ -15,6 +15,7 @@ import {
 import { AGENT_KNOWLEDGE_METHODS } from '../cli/agent-knowledge-methods.ts';
 import { formatBatchIngest, formatFailure, formatIngest } from '../cli/agent-knowledge-format.ts';
 import { readString } from './tool-args.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export type AgentKnowledgeIngestSourceKind =
   | 'url'
@@ -484,14 +485,8 @@ export function createAgentKnowledgeIngestTool(
             type: 'number',
             description: 'Optional browser_history lookback window in whole days; omit for no window.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional audit annotation; does not grant effect authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request provenance; does not grant effect authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: [],
         additionalProperties: false,

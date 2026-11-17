@@ -16,6 +16,7 @@ import {
   postOperatorAction,
   renderOperatorActionPath,
 } from '../agent/operator-actions.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export function createAgentOperatorActionTool(
   shellPaths: ShellPathService,
@@ -62,14 +63,8 @@ export function createAgentOperatorActionTool(
             type: 'boolean',
             description: 'Optional approval remember flag for approval actions only.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional audit annotation; does not grant effect authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request provenance; does not grant effect authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: ['action'],
         additionalProperties: false,

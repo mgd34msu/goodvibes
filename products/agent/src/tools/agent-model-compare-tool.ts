@@ -17,6 +17,7 @@ import { comparisonExportMarkdown, comparisonHandoffMarkdown, formatSideBySideRe
 import { buildComparisonHandoffArchivePayload, findRouteDecisionArtifactIdsForHandoff, formatExportPreview, formatExportResult, formatHandoffArchivePreview, formatHandoffArchiveResult, formatHandoffDiff, formatHandoffPreview, formatHandoffResult, loadHandoffArchiveArtifacts, loadHandoffDiffArtifact, loadHandoffFromArtifact, saveComparisonHandoffArchiveArtifact } from './agent-model-compare-handoff.ts';
 import { clamp, failure, output, previewText, readBenchmarkKind, readComparisonTag, readModelRefs, readNumber, readString, readStringList } from './agent-model-compare-utils.ts';
 import { readFlag } from './tool-args.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 export type { AgentModelCompareCatalogModel, AgentModelCompareModelCatalog, AgentModelCompareProviderRegistry, AgentModelCompareRouteUpdateResult, AgentModelCompareToolArgs, AgentModelCompareToolDeps } from './agent-model-compare-types.ts';
 
 /**
@@ -162,15 +163,9 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
             type: 'number',
             description: 'Max bytes per related artifact preview.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional legacy audit field; does not authorize provider calls or writes.',
-          },
+          confirm: confirmParameter(),
           preview: { type: 'boolean', description: 'For mode:run, inspect a comparison request without metered provider calls or result writes.' },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request text retained with route-decision receipts.',
-          },
+          explicitUserRequest: requestParameter('kept with route-decision receipts'),
         },
         required: ['mode'],
         additionalProperties: false,

@@ -11,6 +11,7 @@ import {
   type ProjectWorkPlanTaskStatus as WorkPlanItemStatus,
   type WorkPlanTaskPatch,
 } from '@goodvibes-jev/engine/platform/platform/knowledge';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 /** The slice of the project work plan this tool uses. */
 export type AgentWorkPlanStore = Pick<ProjectWorkPlan, 'projectRoot' | 'snapshot' | 'get' | 'add' | 'update' | 'setStatus' | 'remove' | 'clearCompleted'>;
@@ -208,8 +209,8 @@ export function createAgentWorkPlanTool(store: AgentWorkPlanStore): Tool {
           owner: { type: 'string', description: 'Optional owner label.' },
           source: { type: 'string', description: 'Optional source/provenance label.' },
           notes: { type: 'string', description: 'Optional work-plan notes.' },
-          confirm: { type: 'boolean', description: 'Optional caller provenance; never grants write authority.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request provenance; never grants write authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: ['action'],
         additionalProperties: false,

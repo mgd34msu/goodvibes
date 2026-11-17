@@ -5,6 +5,7 @@ import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/en
 import type { CommandContext } from '../input/command-registry.ts';
 import { backgroundProcessSummary, describeBackgroundProcess, runBackgroundProcessAction } from './agent-harness-background-processes.ts';
 import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 const READ_ONLY_PROCESS_ACTIONS = new Set(['list', 'status', 'poll', 'log', 'output', 'capabilities', 'doctor', 'parity']);
 
@@ -108,8 +109,8 @@ export function createAgentTerminalTool(commandContext: CommandContext, registry
           processClass: { type: 'string', enum: ['command', 'long_lived'], description: 'Older spelling: long_lived means the deadline leaves the process running (same as killOnTimeout:false).' },
           killOnTimeout: { type: 'boolean', description: 'Whether timeoutMs ends the process: true ends it, false leaves it running. Default: true for task, false for detached.' },
           pty: { type: 'boolean', description: 'Request PTY mode; returns unsupported until the platform publishes a typed PTY contract.' },
-          confirm: { type: 'boolean', description: 'Optional historical provenance; does not grant process authority.' },
-          explicitUserRequest: { type: 'string', description: 'Optional human request provenance; does not grant process authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: ['command', 'background'],
         additionalProperties: false,
@@ -162,8 +163,8 @@ export function createAgentProcessTool(commandContext: CommandContext, registry?
           target: { type: 'string', description: 'Process lookup text.' },
           limit: { type: 'number', description: 'Maximum list rows.' },
           includeParameters: { type: 'boolean', description: 'Include full bounded command/output metadata.' },
-          confirm: { type: 'boolean', description: 'Optional historical provenance; does not grant process authority.' },
-          explicitUserRequest: { type: 'string', description: 'Optional human request provenance; does not grant process authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         additionalProperties: false,
       },

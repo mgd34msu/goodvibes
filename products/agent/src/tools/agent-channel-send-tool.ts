@@ -14,6 +14,7 @@ import {
 } from '../agent/channel-delivery.ts';
 import { agentChannelDeliveryReceiptPath, recordAgentChannelDeliveryReceipt } from '../agent/channel-delivery-receipts.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export interface AgentChannelSendToolArgs {
   readonly message?: unknown;
@@ -79,18 +80,12 @@ export function createAgentChannelSendTool(
             type: 'string',
             description: 'http(s) webhook URL. Give exactly one of channel, route or webhook.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional historical provenance; does not grant delivery authority.',
-          },
+          confirm: confirmParameter(),
           preview: {
             type: 'boolean',
             description: 'Return a read-only delivery preview without sending.',
           },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional human request provenance; does not grant delivery authority.',
-          },
+          explicitUserRequest: requestParameter(),
         },
         required: ['message'],
         additionalProperties: false,

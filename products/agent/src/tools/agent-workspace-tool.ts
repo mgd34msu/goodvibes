@@ -5,6 +5,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 const WORKSPACE_ACTION_WORDS = ['status', 'actions', 'action', 'run', 'surfaces', 'surface', 'open', 'shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding', 'commands', 'command', 'run_command', 'cli_commands', 'cli_command'] as const;
 
@@ -253,8 +254,8 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
           value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }], description: 'Keybinding value such as Ctrl+G.' },
           includeParameters: { type: 'boolean', description: 'Include detailed schemas or route metadata.' },
           limit: { type: 'number', description: 'Maximum rows returned for catalog actions.' },
-          confirm: { type: 'boolean', description: 'Optional context; never grants authority. Opens and effects run only with a current recorded effect admission.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request context; never grants authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         additionalProperties: false,
       },

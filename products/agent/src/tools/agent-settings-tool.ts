@@ -9,6 +9,7 @@ import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { createAgentSettingsImportTool } from './agent-settings-import-tool.ts';
 import { executeAdmittedAgentSettingsImport } from './agent-settings-import-admission.ts';
 import { readSettingsAction, SETTINGS_ACTION_WORDS } from './agent-settings-action.ts';
+import { confirmParameter } from './agent-harness-effect-admission.ts';
 
 interface AgentSettingsToolArgs {
   readonly action?: unknown;
@@ -129,7 +130,7 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
           includeHidden: { type: 'boolean', description: 'Include scriptable or hidden settings.' },
           includeParameters: { type: 'boolean', description: 'Include full setting metadata.' },
           limit: { type: 'number', description: 'Maximum settings to return.' },
-          confirm: { type: 'boolean', description: 'Optional legacy context; never grants settings or import authority.' },
+          confirm: confirmParameter(),
         },
         additionalProperties: false,
       },

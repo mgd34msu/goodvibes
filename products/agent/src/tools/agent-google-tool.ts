@@ -82,6 +82,7 @@ import { describeDaemonExpectationState, getSessionExpectationBook, type DaemonE
 import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes-jev/engine/platform/platform/google';
 import { readVerificationArtifact } from '@goodvibes-jev/engine/platform/platform/google';
 import { isHostFailure, type ConnectedHost } from '../agent/connected-host-client.ts';
+import { confirmParameter } from './agent-harness-effect-admission.ts';
 
 const GOOGLE_ACTIONS = [
   'status',
@@ -466,7 +467,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
           clientId: { type: 'string', description: 'OAuth client id the user pasted, for connect.client.' },
           clientSecretRef: { type: 'string', description: 'Stored OAuth client-secret reference for connect.client; defaults to the native Google credential key.' },
           path: { type: 'string', description: 'Path to an OAuth client JSON the user named, for connect.clientFile.' },
-          confirm: { type: 'boolean', description: 'Optional historical provenance; does not grant effect authority.' },
+          confirm: confirmParameter(),
         },
         required: ['action'],
       },

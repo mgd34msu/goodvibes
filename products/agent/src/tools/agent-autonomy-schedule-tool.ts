@@ -7,6 +7,7 @@ import {
   parseAutonomyScheduleArgs,
 } from '../agent/autonomy-schedule.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AutonomyScheduleKind = 'at' | 'every' | 'cron';
 
@@ -149,14 +150,8 @@ export function createAgentAutonomyScheduleTool(
             type: 'boolean',
             description: 'Create the schedule disabled.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Accepted and ignored: it is not recorded and does not grant effect authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request provenance; does not grant effect authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: ['task', 'successCriteria', 'scheduleKind', 'scheduleValue'],
         additionalProperties: false,

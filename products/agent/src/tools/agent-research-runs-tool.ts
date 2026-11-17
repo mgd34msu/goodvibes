@@ -11,6 +11,7 @@ import {
   type AgentResearchRunRecord,
   type AgentResearchRunStatus,
 } from '../agent/research-run-registry.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export interface AgentResearchRunsToolArgs {
   readonly mode?: unknown;
@@ -328,8 +329,8 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
           error: { type: 'string', description: 'Failure note for fail mode.' },
           includeCheckpoints: { type: 'boolean', description: 'Include recent checkpoint lines in list/search output.' },
           includeLogTail: { type: 'boolean', description: 'Include recent run log tail in list/search output.' },
-          confirm: { type: 'boolean', description: 'Optional legacy audit field; does not authorize writes.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request text for the research run provenance.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('kept as the research run provenance'),
         },
         required: ['mode'],
         additionalProperties: false,

@@ -4,6 +4,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, forwardHarnessCatalogCall } from './agent-harness-catalog-ingress.ts';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentModelsAction =
   | 'status'
@@ -178,8 +179,8 @@ export function createAgentModelsTool(deps: AgentModelsToolDeps): Tool {
           includeParameters: { type: 'boolean', description: 'Include detailed route contracts.' },
           limit: { type: 'number', description: 'Maximum rows.' },
           timeoutMs: { type: 'number', description: 'Optional timeout for local model smoke checks.' },
-          confirm: { type: 'boolean', description: 'Optional audit annotation; does not grant authority. Local server smoke checks need current recorded effect admission.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request text recorded with the check; does not grant authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('recorded with the check'),
         },
         additionalProperties: false,
       },

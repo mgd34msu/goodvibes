@@ -8,6 +8,7 @@ import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platfo
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export interface AgentResearchReportToolArgs {
   readonly runId?: unknown;
@@ -584,8 +585,8 @@ export function createAgentResearchReportTool(
             description: 'Optional report tags.',
           },
           preview: { type: 'boolean', description: 'Read a privacy-qualified report preview without saving an artifact.' },
-          confirm: { type: 'boolean', description: 'Optional legacy audit field; does not authorize report writes.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request text retained with report metadata.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('kept with the report metadata'),
         },
         required: ['title', 'question'],
         additionalProperties: false,

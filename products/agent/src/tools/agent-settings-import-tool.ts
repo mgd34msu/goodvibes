@@ -6,6 +6,7 @@ import {
 } from '../input/agent-workspace-settings.ts';
 import { settingsThrownFailure } from './agent-settings-admission.ts';
 import { createAgentSettingsImportProjector, executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 interface AgentSettingsImportArgs {
   readonly action?: unknown;
@@ -40,8 +41,8 @@ export function createAgentSettingsImportTool(commandContext: CommandContext): T
             description: 'preview inspects sources; apply/import uses current recorded settings admission.',
           },
           mode: { type: 'string', description: 'Alias for action.' },
-          confirm: { type: 'boolean', description: 'Optional legacy context; never grants authority.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request context; never grants authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         additionalProperties: false,
       },

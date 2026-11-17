@@ -28,6 +28,7 @@ import {
   invalidAction,
 } from './agent-local-registry-args.ts';
 import { handleMemory, MEMORY_CLASSES, MEMORY_SCOPES } from './agent-local-registry-memory.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export type AgentLocalRegistryDomain = 'memory' | 'note' | 'persona' | 'skill' | 'skill_bundle' | 'routine';
 export type AgentLocalRegistryAction = 'list' | 'search' | 'get' | 'create' | 'update' | 'enable' | 'disable' | 'review' | 'stale' | 'use' | 'clear_active' | 'start' | 'delete';
@@ -611,8 +612,8 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
           enabled: { type: 'boolean', description: 'Skill, skill_bundle or routine: initial state on create, or the new state on update.' },
           activate: { type: 'boolean', description: 'Persona create or update: true makes it the active persona, false clears it if it is active.' },
           provenance: { type: 'string', description: 'Where the record came from.' },
-          confirm: { type: 'boolean', description: 'Optional caller audit field; recorded admission controls writes.' },
-          explicitUserRequest: { type: 'string', description: 'Optional audit note; it does not grant authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         required: ['domain', 'action'],
         additionalProperties: false,

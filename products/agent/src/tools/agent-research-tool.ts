@@ -10,6 +10,7 @@ import { createAgentResearchReportTool } from './agent-research-report-tool.ts';
 import { createAgentResearchRunsTool } from './agent-research-runs-tool.ts';
 import { runAdmittedResearchRunner, runPublicSearch } from './agent-research-runner.ts';
 import { createAgentResearchSourcesTool } from './agent-research-sources-tool.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentResearchAction =
   | 'briefing'
@@ -472,8 +473,8 @@ export function createAgentResearchTool(deps: AgentResearchToolDeps): Tool {
           previewBytes: { type: 'number', description: 'Maximum saved report preview bytes.' },
           limit: { type: 'number', description: 'Maximum rows.' },
           preview: { type: 'boolean', description: 'Inspect runner readiness or report preview without writing state.' },
-          confirm: { type: 'boolean', description: 'Optional legacy audit field; does not authorize writes.' },
-          explicitUserRequest: { type: 'string', description: 'Optional audit text retained with research records.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('kept with the research records'),
         },
         additionalProperties: false,
       },

@@ -10,6 +10,7 @@ import {
   formatAgentMediaGenerationResult,
   generateAgentMedia,
 } from '../agent/media-generation.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 export interface AgentMediaGenerateToolArgs {
   readonly prompt?: unknown;
@@ -78,14 +79,8 @@ export function createAgentMediaGenerateTool(
             type: 'string',
             description: 'Optional requested output MIME type, such as image/png or video/mp4.',
           },
-          confirm: {
-            type: 'boolean',
-            description: 'Optional historical provenance; does not grant generation authority.',
-          },
-          explicitUserRequest: {
-            type: 'string',
-            description: 'Optional request provenance; does not grant generation authority.',
-          },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
           preview: { type: 'boolean', description: 'Return a read-only preview without generation.' },
         },
         required: ['prompt'],

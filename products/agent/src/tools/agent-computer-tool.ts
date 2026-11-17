@@ -3,6 +3,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createHarnessFacade, registerHarnessFacade, type HarnessFacadeDeps } from './agent-harness-facade.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentComputerAction =
   | 'status'
@@ -125,8 +126,8 @@ export function createAgentComputerTool(deps: AgentComputerToolDeps): Tool {
           target: { type: 'string', description: 'Lookup or search target.' },
           query: { type: 'string', description: 'Search text for action:"mcp". When omitted the search is for "browser desktop", so the list is filtered, not complete; pass a broader query to see more.' },
           includeParameters: { type: 'boolean', description: 'Include detailed route contracts.' },
-          confirm: { type: 'boolean', description: 'Optional provenance; does not grant authority. Opening is allowed only under the owner\'s recorded effect admission.' },
-          explicitUserRequest: { type: 'string', description: 'Optional request provenance; does not grant authority.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter(),
         },
         additionalProperties: false,
       },

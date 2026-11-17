@@ -5,6 +5,7 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { facadeHarness } from './agent-harness-facade.ts';
 import { captureCatalogData } from './agent-harness-catalog-ranking.ts';
 import { forwardHarnessCatalogCall, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
+import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 
 type AgentPersonalOpsAction = 'briefing' | 'status' | 'queue' | 'intake' | 'lane' | 'read';
 
@@ -170,8 +171,8 @@ export function createAgentPersonalOpsTool(deps: AgentPersonalOpsToolDeps): Tool
           artifactTitle: { type: 'string', description: 'Optional title for a saved read-review artifact.' },
           includeParameters: { type: 'boolean', description: 'Include bounded operation schema and route detail where supported.' },
           limit: { type: 'number', description: 'Maximum briefing or intake rows.' },
-          confirm: { type: 'boolean', description: 'Optional caller annotation; grants no authority.' },
-          explicitUserRequest: { type: 'string', description: 'Optional audit context for the live read.' },
+          confirm: confirmParameter(),
+          explicitUserRequest: requestParameter('kept as audit context for the live read'),
         },
         additionalProperties: false,
       },

@@ -14,7 +14,8 @@ import { inboxProviderFacts, SCREENING_FACTS, subscribeInboxFacts, type InboxFac
 type MailInput = Omit<Parameters<typeof composeMailDeps>[0], 'registerDispose'> & {
   readonly configManager: Partial<Pick<ConfigManager, 'subscribe' | 'getIngestionQuarantine' | 'getConfigurationIncarnation'
     | 'captureDurableConfigurationIncarnation' | 'getDurableConfigurationIncarnation' | 'onDidChangeIncarnation'>>;
-  readonly secretsManager: Parameters<typeof composeMailDeps>[0]['secretsManager'] & Partial<HostedInboxScreeningHost['secrets']>;
+  readonly secretsManager: Parameters<typeof composeMailDeps>[0]['secretsManager'] & Partial<HostedInboxScreeningHost['secrets']>
+    & Partial<Pick<SecretsManager, 'onDidInvalidateCredentials'>>;
 };
 
 function hasHostedScreeningOwners(input: MailInput): input is MailInput & {

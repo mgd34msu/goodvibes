@@ -5,8 +5,10 @@
  * Three jobs:
  * - `snapshotStoreFile`, one consistent copy taken by SQLite itself
  *   (`VACUUM INTO`, so a store in WAL mode is copied with every committed
- *   change and needs no sidecar), checked for the SQLite header; used by the
- *   daily scheduler and before schema migrations;
+ *   change and needs no sidecar), checked for the SQLite header; used before
+ *   schema migrations. `snapshotStoreFileAsync` copies the file and its WAL
+ *   off the event loop under a held read transaction, for the daily
+ *   scheduler and the tripwire exit;
  * - `restoreStoreSnapshot`, ONE command back to a snapshot: parks the
  *   current file at `<db>.pre-restore` (replacing what an earlier restore
  *   parked there), then replaces it with the snapshot (latest when none is
@@ -92,7 +94,8 @@ function vacuumInto(dbPath: string, snapshotPath: string): boolean {
     // The copy keeps the source's mode (stores are private to their owner);
     // VACUUM INTO accepts an existing empty file.
     closeSync(openSync(snapshotPath, 'wx', statSync(dbPath).mode & 0o777));
-    db = new Ctor(dbPath, { create: false });
+    // Read-only: never creates the store, and never checkpoints it on close.
+    db = new Ctor(dbPath, { readonly: true });
     db.run('PRAGMA busy_timeout = 5000');
     db.run('VACUUM INTO ?', [snapshotPath]);
     return true;
@@ -290,14 +293,42 @@ export function defaultStoreSnapshotRetention(): RetentionPolicy {
 }
 
 /**
- * Daily snapshots of every registered store, with bounded retention driven
- * through the retention engine after every sweep. Time and timers are
- * injectable; the loop never keeps the process alive.
+ * A read transaction on the store, held until the returned release runs, or
+ * null when SQLite is unavailable or refuses (the copy is then unpinned).
+ * While it is held no checkpoint moves past its snapshot and the WAL cannot
+ * restart, so a copy of the file plus a copy of the WAL replays to one
+ * committed state. Read-only, so closing it never checkpoints the store.
  */
+function holdReadSnapshot(dbPath: string): (() => void) | null {
+  const Ctor = bunDatabase();
+  if (!Ctor) return null;
+  let db: Database | undefined;
+  try {
+    db = new Ctor(dbPath, { readonly: true });
+    db.run('PRAGMA busy_timeout = 5000');
+    // Outside WAL mode a held read would block the store's writers for the whole copy.
+    const mode = db.query('PRAGMA journal_mode').get() as { journal_mode?: unknown } | null;
+    if (mode?.journal_mode !== 'wal') { db.close(); return null; }
+    db.run('BEGIN');
+    db.query('SELECT count(*) FROM sqlite_master').get();
+    const held = db;
+    return () => {
+      try { held.run('ROLLBACK'); } catch { /* the transaction ends with the connection */ }
+      held.close();
+    };
+  } catch (error) {
+    db?.close();
+    logger.debug('store snapshot copies without a read transaction', { store: basename(dbPath), error: summarizeError(error) });
+    return null;
+  }
+}
+
 /**
- * Async twin of {@link snapshotStoreFile}: identical path/uniquify/mtime logic
- * with threadpool copies (fs/promises), for callers whose deadline must remain
- * enforceable while the disk stalls (the memory-governor tripwire exit).
+ * {@link snapshotStoreFile} off the event loop: the same path/uniquify/mtime
+ * logic with threadpool copies (fs/promises) of the file and its WAL, taken
+ * under a held read transaction so the pair is one consistent state. Used by
+ * the daily scheduler, and by callers whose deadline must remain enforceable
+ * while the disk stalls (the memory-governor tripwire exit).
  */
 export async function snapshotStoreFileAsync(
   dbPath: string,
@@ -313,13 +344,27 @@ export async function snapshotStoreFileAsync(
   for (let counter = 1; existsSync(snapshotPath); counter += 1) {
     snapshotPath = join(dir, `${timestampSlug(at)}-${counter}.${reason}${SNAPSHOT_SUFFIX}`);
   }
+  if (!hasSqliteHeader(dbPath)) throw new Error(`store snapshot source is not a SQLite database: ${dbPath}`);
   // Threadpool copies keep the event loop free on a stalled disk; the WAL
   // goes with the file so committed changes are not lost. The shared-memory
   // index is rebuilt on open and is not copied.
-  await copyFile(dbPath, snapshotPath);
-  try { assertCopyComplete(dbPath, snapshotPath); }
-  catch (error) { try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ } throw error; }
-  if (existsSync(`${dbPath}-wal`)) await copyFile(`${dbPath}-wal`, `${snapshotPath}-wal`);
+  const release = holdReadSnapshot(dbPath);
+  try {
+    const walPath = `${dbPath}-wal`;
+    const pinnedWal = release !== null && existsSync(walPath);
+    await copyFile(dbPath, snapshotPath);
+    try {
+      // Under a held snapshot a checkpoint may still write frames the WAL copy
+      // also carries into the file, so its size can move; the header still has to hold.
+      if (pinnedWal) { if (!hasSqliteHeader(snapshotPath)) throw new Error(`store snapshot copy is not a SQLite database: ${snapshotPath}`); }
+      else assertCopyComplete(dbPath, snapshotPath);
+      if (existsSync(walPath)) await copyFile(walPath, `${snapshotPath}-wal`);
+    } catch (error) {
+      try { unlinkSync(snapshotPath); } catch { /* nothing was kept */ }
+      removeSidecars(snapshotPath);
+      throw error;
+    }
+  } finally { release?.(); }
   try {
     const atSeconds = at / 1000;
     utimesSync(snapshotPath, atSeconds, atSeconds);
@@ -330,6 +375,11 @@ export async function snapshotStoreFileAsync(
   return snapshotPath;
 }
 
+/**
+ * Daily snapshots of every registered store, with bounded retention driven
+ * through the retention engine after every sweep. Time and timers are
+ * injectable; the loop never keeps the process alive.
+ */
 export class StoreSnapshotScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
@@ -376,7 +426,7 @@ export class StoreSnapshotScheduler {
         try {
           const newestDaily = listStoreSnapshots(store.dbPath).find((snapshot) => snapshot.reason === 'daily');
           if (!newestDaily || now - newestDaily.createdAt >= DAY_MS) {
-            snapshotStoreFile(store.dbPath, 'daily', { now: () => now });
+            await snapshotStoreFileAsync(store.dbPath, 'daily', { now: () => now });
           }
         } catch (error) {
           logger.warn('daily store snapshot failed', { store: store.name, error: summarizeError(error) });

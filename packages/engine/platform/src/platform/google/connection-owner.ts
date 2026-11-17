@@ -9,14 +9,15 @@
  * again on every attempt. The daemon holds one owner, and each Agent session
  * holds one, so calls share the manager.
  *
- * The held manager is replaced when the credential it was built from changes:
- * every `connection()` resolves the stored credential (the same secret-store
- * reads a call made before) and keeps the manager only while client id, client
- * secret and refresh token are the same values. A new consent writes a new
- * refresh token, so it gets a new manager and a latched dead grant does not
- * outlive it. The store is read rather than watched because the daemon and the
- * Agent write the same daemon-tier store from two processes, and the store's
- * change signal reaches only writers in this process.
+ * The held manager is replaced when the credential it was built from changes.
+ * With `onCredentialChange` (the secret store's per-key change and its watcher
+ * for another process's rewrite, and the OAuth client settings), the held
+ * connection is reused with no store read until that fires; then the next
+ * `connection()` resolves the stored credential once and keeps the manager
+ * only while client id, client secret and refresh token are the same values.
+ * Without it, every `connection()` resolves the stored credential. A new
+ * consent writes a new refresh token, so it gets a new manager and a latched
+ * dead grant does not outlive it.
  */
 
 import { buildGoogleConnection, resolveGoogleCredentials, type GoogleConnection, type GoogleConnectionSources } from './connection.js';
@@ -24,6 +25,9 @@ import type { GoogleApiFetchPort } from './api-client.js';
 import type { GoogleFetchPort } from './oauth-loopback.js';
 import type { GoogleOAuthCredentials } from './credential-adoption.js';
 import { checkGoogleCredentialsAtBoot, type GoogleBootCheckResult } from './token-manager.js';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from './setup-plan.js';
+import type { ConfigManager } from '../config/manager.js';
+import type { ConfigKey } from '../config/schema-types.js';
 
 export interface GoogleConnectionOwnerOptions {
   /** Where the credential is read from when a call does not supply its own guarded sources. */
@@ -31,6 +35,33 @@ export interface GoogleConnectionOwnerOptions {
   /** Used for the token refresh; a call's API requests may go through its own port. */
   readonly fetch: GoogleFetchPort & GoogleApiFetchPort;
   readonly now?: () => number;
+  /** Calls the listener when a Google credential or the OAuth client setting changes; see {@link subscribeGoogleCredentialChanges}. */
+  readonly onCredentialChange?: ((listener: () => void) => () => void) | undefined;
+}
+
+/** The settings and secrets a Google connection is built from. */
+const GOOGLE_CONNECTION_CONFIG_KEYS: readonly string[] = [
+  GOOGLE_CONFIG_KEYS.oauthClientId, GOOGLE_CONFIG_KEYS.oauthClientSecretRef, GOOGLE_CONFIG_KEYS.oauthRefreshToken,
+];
+const GOOGLE_CONNECTION_SECRET_KEYS: ReadonlySet<string> = new Set([GOOGLE_SECRET_KEYS.oauthClientSecret, GOOGLE_SECRET_KEYS.oauthRefreshToken]);
+
+/**
+ * One subscription that fires when the Google OAuth client settings or the two
+ * Google credentials change, here or (through the secret store watcher) in
+ * another process. Nothing is read per call.
+ */
+export function subscribeGoogleCredentialChanges(owners: {
+  readonly config?: Pick<ConfigManager, 'subscribe'> | undefined;
+  readonly secrets?: {
+    readonly onDidChange?: ((listener: (key: string) => void) => () => void) | undefined;
+    readonly onDidChangeElsewhere?: ((listener: () => void) => () => void) | undefined;
+  } | undefined;
+}, listener: () => void): () => void {
+  const stops: Array<() => void> = [];
+  for (const key of GOOGLE_CONNECTION_CONFIG_KEYS) if (owners.config) stops.push(owners.config.subscribe(key as ConfigKey, () => listener()));
+  if (owners.secrets?.onDidChange) stops.push(owners.secrets.onDidChange((key) => { if (GOOGLE_CONNECTION_SECRET_KEYS.has(key)) listener(); }));
+  if (owners.secrets?.onDidChangeElsewhere) stops.push(owners.secrets.onDidChangeElsewhere(listener));
+  return () => { for (const stop of stops.splice(0)) { try { stop(); } catch { /* already stopped */ } } };
 }
 
 function sameGrant(a: GoogleOAuthCredentials, b: GoogleOAuthCredentials): boolean {
@@ -46,6 +77,14 @@ export class GoogleConnectionOwner {
   #held: GoogleConnection | null = null;
   /** One resolution at a time, so callers arriving together share one manager. */
   #pending: Promise<GoogleConnection | null> | null = null;
+  /** Moves when a Google credential or client setting changes; a held connection is current while it is unchanged. */
+  #revision = 0;
+  /** The revision the held connection (or the stored absence) was resolved at; -1 when it must be resolved again. */
+  #resolvedAt = -1;
+  #subscribed = false;
+
+  /** Moves when the Google credentials or the OAuth client settings change (with `onCredentialChange`); compare it, never re-read the store. */
+  get revision(): number { return this.#revision; }
 
   constructor(options: GoogleConnectionOwnerOptions) {
     this.#options = options;
@@ -63,6 +102,12 @@ export class GoogleConnectionOwner {
     readonly sources?: GoogleConnectionSources;
     readonly signedInAccount?: string | null;
   } = {}): Promise<GoogleConnection | null> {
+    const watch = this.#options.onCredentialChange;
+    if (watch && !this.#subscribed) {
+      this.#subscribed = true;
+      watch(() => { this.#revision++; });
+    }
+    if (watch && this.#resolvedAt === this.#revision) return this.#held;
     const pending = this.#pending;
     if (pending !== null) return pending;
     const attempt = this.#resolve(options);
@@ -79,18 +124,23 @@ export class GoogleConnectionOwner {
     readonly signedInAccount?: string | null;
   }): Promise<GoogleConnection | null> {
     const sources = options.sources ?? this.#options.sources;
+    const revision = this.#revision;
     const credentials = await resolveGoogleCredentials(sources);
+    // A change that landed while the store was read leaves this resolution unmarked, so the next call reads again.
+    const settle = (): void => { if (this.#revision === revision) this.#resolvedAt = revision; };
     if (credentials === null) {
       this.#held = null;
+      settle();
       return null;
     }
     const held = this.#held;
-    if (held !== null && sameGrant(held.credentials, credentials)) return held;
+    if (held !== null && sameGrant(held.credentials, credentials)) { settle(); return held; }
     const built = buildGoogleConnection(credentials, sources, {
       fetch: this.#options.fetch,
       ...(options.signedInAccount === undefined ? {} : { signedInAccount: options.signedInAccount }),
     }, this.#now());
     this.#held = built;
+    settle();
     return built;
   }
 

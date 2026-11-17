@@ -247,6 +247,7 @@ export {
 export {
   GoogleConnectionOwner,
   sharedGoogleConnectionOwner,
+  subscribeGoogleCredentialChanges,
   type GoogleConnectionOwnerOptions,
 } from './connection-owner.js';
 

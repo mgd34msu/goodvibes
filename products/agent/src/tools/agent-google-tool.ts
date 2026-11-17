@@ -45,9 +45,7 @@ import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platfo
 
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { retainSurfaceMethods } from './agent-surface-effect.ts';
 import { captureStrictJudgmentJson, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { isDeepStrictEqual } from 'node:util';
 import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '../agent/payments-channel-guard.ts';
 import { assertDeliveryCurrent } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
@@ -55,6 +53,7 @@ import {
   GoogleApiClient,
   GoogleConnectionOwner,
   sharedGoogleConnectionOwner,
+  subscribeGoogleCredentialChanges,
   summarizeCredentials,
   type GoogleConnectionSources,
   type GoogleConsentSession,
@@ -211,6 +210,9 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
   const connections = sharedGoogleConnectionOwner(options.secretsManager ?? options, () => new GoogleConnectionOwner({
     sources,
     fetch: { fetch: (url, init) => fetchImpl(url, init) },
+    // Held until a Google credential or client setting changes; no store read per call.
+    ...(options.secretsManager ? { onCredentialChange: (listener: () => void) => subscribeGoogleCredentialChanges({
+      config: options.configManager, secrets: options.secretsManager }, listener) } : {}),
   }));
 
   /**
@@ -529,45 +531,30 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       }
 
       const effect = !READ_ONLY_ACTIONS.has(action);
-      const methods = retainSurfaceMethods(options, ['configGet', 'secretGet', ...(options.fetchImpl ? ['fetchImpl'] : []), ...(options.captureConnectionCurrent ? ['captureConnectionCurrent'] : [])]);
       if (effect && (options.configManager || options.secretsManager) && !(options.configManager && options.secretsManager)) throw new ToolInputProjectionError('held');
-      const nativeCurrent = effect && options.configManager && options.secretsManager
+      // An effect is bound to the input projection that admitted it; a read needs no fence.
+      const effectSourceCurrent = effect && options.configManager && options.secretsManager
         ? retainGooglePreparedEffectSource(rawArgs, executionOptions)
-        : options.captureConnectionCurrent?.() ?? captureNativeCurrent();
-      const configValues = new Map<string, unknown>();
-      const secretValues = new Map<string, string | null>();
-      const configGet = options.configGet, secretGet = options.secretGet;
+        : effect ? options.captureConnectionCurrent?.() ?? captureNativeCurrent() : undefined;
       const ledger = getSessionUntrustedContentLedger();
-      const ledgerMethods = retainSurfaceMethods(ledger, ['getPublicationRevision', 'originsThisTurn', 'exposuresThisTurn', 'taintSourcesThisTurn']);
-      const ledgerSnapshot = () => JSON.stringify([ledger.getPublicationRevision(), ledger.originsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
-      const ledgerVersion = ledgerSnapshot();
+      const ledgerRevision = ledger.getPublicationRevision();
+      const googleRevision = connections.revision;
+      // One owner per fact: the abort signal between requests; for an effect,
+      // its recorded admission, the Google credential revision (moved by the
+      // secret store and the OAuth client settings, never re-read here) and the
+      // untrusted-content ledger's revision. Checked before an effect, never
+      // between an effect and its report.
       const assertCurrent = () => {
         executionOptions?.signal?.throwIfAborted();
-        if (effect && (!assertCurrentToolEffect(rawArgs, executionOptions, 'send')
-          || (action === 'calendar.create' && !assertCurrentToolEffect(rawArgs, executionOptions, 'write')))) throw new ToolInputProjectionError('held');
-        if (!effect) assertDeliveryCurrent({ assertCurrent: () => executionOptions?.assertCurrent?.(rawArgs) });
-        methods(); ledgerMethods(); assertDeliveryCurrent({ assertCurrent: nativeCurrent });
-        if (!options.fetchImpl && fetch !== nativeFetch) throw new ToolInputProjectionError('stale');
-        for (const [key, value] of configValues) if (!isDeepStrictEqual(captureStrictJudgmentJson({ value: configGet(key) ?? null }), value)) throw new ToolInputProjectionError('stale');
-        if (effect && (getSessionUntrustedContentLedger() !== ledger || ledgerSnapshot() !== ledgerVersion)) throw new ToolInputProjectionError('stale');
-        methods(); assertDeliveryCurrent({ assertCurrent: nativeCurrent });
-      };
-      const assertCredentials = async () => {
-        assertCurrent();
-        for (const [key, value] of secretValues) {
-          if (await secretGet(key) !== value) throw new ToolInputProjectionError('stale');
-          assertCurrent();
-        }
+        if (!effect) { assertDeliveryCurrent({ assertCurrent: () => executionOptions?.assertCurrent?.(rawArgs) }); return; }
+        if (!assertCurrentToolEffect(rawArgs, executionOptions, 'send')
+          || (action === 'calendar.create' && !assertCurrentToolEffect(rawArgs, executionOptions, 'write'))) throw new ToolInputProjectionError('held');
+        if (effectSourceCurrent) assertDeliveryCurrent({ assertCurrent: effectSourceCurrent });
+        if (connections.revision !== googleRevision) throw new ToolInputProjectionError('stale');
+        if (getSessionUntrustedContentLedger() !== ledger || ledger.getPublicationRevision() !== ledgerRevision) throw new ToolInputProjectionError('stale');
       };
       assertCurrent();
-      const guardedSources: GoogleConnectionSources = { ...sources, configGet(key) {
-        assertCurrent(); const value = configGet(key); configValues.set(key, captureStrictJudgmentJson({ value: value ?? null })); assertCurrent(); return value;
-      }, async secretGet(key) {
-        assertCurrent(); const value = await secretGet(key); assertCurrent();
-        const previous = secretValues.get(key);
-        if (secretValues.has(key) && previous !== value) throw new ToolInputProjectionError('stale');
-        secretValues.set(key, value); return value;
-      } };
+      const guardedSources: GoogleConnectionSources = sources;
       let connection: Awaited<ReturnType<typeof connections.connection>>;
       try {
         connection = await connections.connection({ sources: guardedSources });
@@ -578,12 +565,11 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       }
       assertCurrent();
       if (connection === null) return failure(NOT_CONNECTED);
-      // The held token manager; this call's API requests go through this call's guards.
+      // The held token manager; this call's requests stop when the call is cancelled.
       const client = new GoogleApiClient(connection.tokens, { async fetch(url, init) {
-        await assertCredentials(); assertCurrent();
         const signal = executionOptions?.signal;
-        const result = await fetchImpl(url, { ...init, ...(signal ? { signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal } : {}) });
-        await assertCredentials(); assertCurrent(); return result;
+        signal?.throwIfAborted();
+        return await fetchImpl(url, { ...init, ...(signal ? { signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal } : {}) });
       } });
 
       // What the grant actually permits is only knowable AFTER a refresh.
@@ -799,7 +785,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         const card = await screenOutboundForCardMaterial({ surface: 'email', message: body, title: subject }, { signal: executionOptions?.signal, assertCurrent });
         assertCurrent(); if (card) throw new CardMaterialRefusedError(card);
         let result: Awaited<ReturnType<typeof client.sendMessage>>;
-        try { result = await client.sendMessage({ to, subject, body }); assertCurrent(); }
+        try { result = await client.sendMessage({ to, subject, body }); }
         catch { return failure('The Gmail send could not be confirmed: it may or may not have been sent. Inspect sent mail before retrying.'); }
         if (isFailure(result)) return describeFailure(result);
         return ok(`Sent to ${to} (message ${result.value.id}).`);
@@ -868,7 +854,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         end,
         ...(readString(args.location) ? { location: readString(args.location) } : {}),
         ...(readString(args.description) ? { description: readString(args.description) } : {}),
-      }); assertCurrent(); }
+      }); }
       catch { return failure('The Google Calendar write could not be confirmed: the event may or may not have been created. Inspect the calendar before retrying.'); }
       if (isFailure(created)) return describeFailure(created);
       return ok(`Created "${created.value.summary}" starting ${created.value.start}.`);

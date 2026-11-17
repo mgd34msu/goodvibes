@@ -49,6 +49,7 @@ import {
   removeGoogleCredentials,
   runGoogleSetupFlow,
   sharedGoogleConnectionOwner,
+  subscribeGoogleCredentialChanges,
   type GoogleBrowserPort,
   type GoogleClientIntakeChoice,
   type GoogleConfigPort,
@@ -207,9 +208,12 @@ async function openConnection(ctx: CommandContext, signedInAccount: string | nul
     configGet: (key: string) => googleConfigPort(ctx).get(key),
     secretGet: (key: string) => googleSecretPort(ctx).get(key),
   };
-  const owner = sharedGoogleConnectionOwner(requireSecretsManager(ctx), () => new GoogleConnectionOwner({
+  const secretsManager = requireSecretsManager(ctx);
+  const owner = sharedGoogleConnectionOwner(secretsManager, () => new GoogleConnectionOwner({
     sources,
     fetch: { fetch: (url: string, init: RequestInit) => fetch(url, init) },
+    onCredentialChange: (listener: () => void) => subscribeGoogleCredentialChanges({
+      config: ctx.platform.configManager, secrets: secretsManager }, listener),
   }));
   return await owner.connection({ sources, signedInAccount });
 }

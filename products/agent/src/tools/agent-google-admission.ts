@@ -11,27 +11,20 @@ export interface GoogleAdmissionOwners {
   readonly secretsManager: SecretsManager;
 }
 
+/**
+ * Admits an effect on the stored Google credentials once: both must be
+ * readable and no credential write may be in flight. Afterwards the check is
+ * the owners' identity only; a credential or client-setting change during the
+ * call is the Google connection owner's revision, which the tool compares.
+ */
 export function retainGoogleConnectionOwners(owners: GoogleAdmissionOwners): () => void {
   const config = owners.configManager, secrets = owners.secretsManager;
-  const configMethods = retainSurfaceMethods(config, ['getRaw', 'getConfigurationIncarnation']);
-  const secretMethods = retainSurfaceMethods(secrets, ['get', 'resolveLocalCredentialSnapshot', 'getCredentialMutationState', 'captureLocalCredentialReadset']);
-  const physicalCurrent = secrets.captureLocalCredentialReadset(), incarnation = config.getConfigurationIncarnation();
-  const state = secrets.getCredentialMutationState();
-  if (state.pending) throw new ToolInputProjectionError('held');
-  const credentials = [GOOGLE_SECRET_KEYS.oauthClientSecret, GOOGLE_SECRET_KEYS.oauthRefreshToken].map(key => {
-    const snapshot = secrets.resolveLocalCredentialSnapshot(key);
-    if (snapshot.state === 'unsupported') throw new ToolInputProjectionError('held');
-    return { key, revision: snapshot.revision };
-  });
+  if (secrets.getCredentialMutationState().pending) throw new ToolInputProjectionError('held');
+  for (const key of [GOOGLE_SECRET_KEYS.oauthClientSecret, GOOGLE_SECRET_KEYS.oauthRefreshToken]) {
+    if (secrets.resolveLocalCredentialSnapshot(key).state === 'unsupported') throw new ToolInputProjectionError('held');
+  }
   return () => {
-    configMethods(); secretMethods(); physicalCurrent();
-    if (owners.configManager !== config || owners.secretsManager !== secrets || config.getConfigurationIncarnation() !== incarnation) throw new ToolInputProjectionError('stale');
-    const latest = secrets.getCredentialMutationState();
-    if (latest.pending || latest.generation !== state.generation) throw new ToolInputProjectionError('stale');
-    for (const credential of credentials) {
-      const snapshot = secrets.resolveLocalCredentialSnapshot(credential.key);
-      if (snapshot.state === 'unsupported' || snapshot.revision !== credential.revision) throw new ToolInputProjectionError('stale');
-    }
+    if (owners.configManager !== config || owners.secretsManager !== secrets) throw new ToolInputProjectionError('stale');
   };
 }
 /** Where the owner enters a client secret; never the conversation. */

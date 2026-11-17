@@ -1,142 +1,87 @@
 /**
- * Release gate: assert that companion entry point dist bundles do not
- * transitively pull in any `node:*` imports or `Bun.*` API calls.
+ * The companion entry points (React Native, Expo, browser, web, Workers and the
+ * auth helpers) pull in no Node-only module and call no Bun API. Metro and the
+ * browser bundlers fail hard on a Node built-in, and a `Bun.*` call means the
+ * Bun-only agent surface leaked into a companion bundle.
  *
- * Metro and similar RN bundlers cannot handle `node:` protocol imports and
- * will hard-fail during release bundling. `Bun.*` API calls indicate the
- * agentic (Bun-only) surface has leaked into a companion bundle, this is a
- * hard architectural violation and must block release.
- *
- * This test enforces the companion bundle boundary.
+ * The check reads source, not built output, so it needs no build: from each
+ * entry's source target in the engine exports map it follows every runtime
+ * import (type-only imports are erased and are not followed), relative ones
+ * and ones into the workspace packages through their exports maps, and looks
+ * at each reached module's runtime code.
  */
+import { describe, expect, test } from 'bun:test';
+import { existsSync, readFileSync } from 'node:fs';
+import { isBuiltin } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { resolve, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, test } from 'bun:test';
+const ENGINE = join(import.meta.dir, '..');
+const JUDGMENT = join(ENGINE, '..', 'judgment');
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PLATFORM_DIST = resolve(__dirname, '../platform/dist');
+interface Manifest { readonly name: string; readonly exports: Record<string, string | Record<string, string>> }
+const workspacePackages = [ENGINE, JUDGMENT].map((root) => ({ root, manifest: JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as Manifest }));
 
-/**
- * Companion entry points that must be free of `node:*` imports and `Bun.*`
- * calls in the built output. These are the files Metro / Expo's bundler and
- * browser bundlers will trace from.
- */
-const COMPANION_ENTRIES = [
-  'react-native.js',
-  'expo.js',
-  'browser.js',
-  'browser-homeassistant.js',
-  'browser-knowledge.js',
-  'web.js',
-  'workers.js',
-  // The /auth subpath is also consumed by RN/browser consumers for token helpers.
-  'auth.js',
+/** The engine subpaths companion consumers import. */
+const COMPANION_SUBPATHS = [
+  './platform/react-native',
+  './platform/expo',
+  './platform/browser',
+  './platform/browser/homeassistant',
+  './platform/browser/knowledge',
+  './platform/web',
+  './platform/workers',
+  './platform/auth',
 ];
 
-/**
- * Patterns that must NOT appear in companion dist files.
- * - node: imports fail Metro bundling hard.
- * - Bun.* calls indicate a Bun-only API leaked into the companion surface.
- */
-const DISALLOWED: { pattern: RegExp; label: string }[] = [
-  { pattern: /from ['"]node:/, label: 'node: import' },
-  { pattern: /require\(['"]node:/, label: 'node: require' },
-  { pattern: /\bBun\.\w+/, label: 'Bun.* API call (Bun-only surface leak)' },
-];
+const transpiler = new Bun.Transpiler({ loader: 'ts' });
 
-/**
- * Relative specifiers a built JS file pulls in: `import ... from './x.js'`,
- * `export ... from './x.js'`, side-effect `import './x.js'` and dynamic
- * `import('./x.js')`. Bare package specifiers are not followed.
- */
-const RELATIVE_SPECIFIER =
-  /(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.{1,2}\/[^'"]+)['"]/g;
+/** The source file a specifier names: relative to `from`, or a workspace package subpath through its exports map. */
+function resolveSource(from: string, specifier: string): string | undefined {
+  if (specifier.startsWith('.')) {
+    const base = resolve(dirname(from), specifier);
+    return [base.replace(/\.js$/, '.ts'), base.replace(/\.js$/, '.tsx'), `${base}.ts`, join(base, 'index.ts')].find((candidate) => existsSync(candidate));
+  }
+  for (const { root, manifest } of workspacePackages) {
+    if (specifier !== manifest.name && !specifier.startsWith(`${manifest.name}/`)) continue;
+    const target = manifest.exports[`.${specifier.slice(manifest.name.length)}`];
+    return typeof target === 'object' && target.bun ? join(root, target.bun) : undefined;
+  }
+  return undefined;
+}
 
-/** Every file reachable from `entry` through relative specifiers (entry included). */
-export function reachableFiles(distRoot: string, entry: string): string[] {
+/** Every Node built-in import, `bun` import, `Bun.*` use or unresolvable relative import reachable from `entry`. */
+function violations(entry: string): { readonly files: number; readonly found: string[] } {
   const seen = new Set<string>();
-  const queue = [resolve(distRoot, entry)];
+  const queue = [entry];
+  const found: string[] = [];
+  const label = (file: string) => file.slice(join(ENGINE, '..').length + 1);
   while (queue.length > 0) {
-    const file = queue.shift() as string;
-    if (seen.has(file) || !existsSync(file)) continue;
+    const file = queue.shift()!;
+    if (seen.has(file)) continue;
     seen.add(file);
-    const text = readFileSync(file, 'utf8');
-    for (const m of text.matchAll(RELATIVE_SPECIFIER)) {
-      const target = resolve(dirname(file), m[1] as string);
-      queue.push(target.endsWith('.js') ? target : `${target}.js`);
+    const code = readFileSync(file, 'utf8');
+    for (const { path } of transpiler.scanImports(code)) {
+      if (isBuiltin(path) || path === 'bun' || path.startsWith('bun:')) { found.push(`${label(file)}: imports ${path}`); continue; }
+      const next = resolveSource(file, path);
+      if (next) queue.push(next);
+      else if (path.startsWith('.')) found.push(`${label(file)}: ${path} does not resolve`);
     }
+    const bunCall = /\bBun\.\w+/.exec(transpiler.transformSync(code));
+    if (bunCall) found.push(`${label(file)}: uses ${bunCall[0]}`);
   }
-  return [...seen];
+  return { files: seen.size, found };
 }
 
-/** Violations as `<file>: <label>` across every file reachable from `entry`. */
-export function findViolations(distRoot: string, entry: string): string[] {
-  const out: string[] = [];
-  for (const file of reachableFiles(distRoot, entry)) {
-    const content = readFileSync(file, 'utf8');
-    for (const { pattern, label } of DISALLOWED) {
-      const match = content.match(pattern);
-      if (match) out.push(`${file.slice(distRoot.length + 1)}: ${label} (${match[0]})`);
-    }
-  }
-  return out;
-}
-
-const fixtureDirs: string[] = [];
-afterEach(() => {
-  for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
-
-function makeFixtureDist(files: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), 'gv-rn-dist-'));
-  fixtureDirs.push(dir);
-  for (const [name, body] of Object.entries(files)) {
-    mkdirSync(dirname(join(dir, name)), { recursive: true });
-    writeFileSync(join(dir, name), body);
-  }
-  return dir;
-}
-
-describe('Companion bundle guard walker', () => {
-  test('flags a node: import in a module reached only through re-exports', () => {
-    const dist = makeFixtureDist({
-      'web.js': "export * from './client.js';\n",
-      'client.js': "import { sign } from './client-auth/sign.js';\nexport { sign };\n",
-      'client-auth/sign.js': "import fs from 'node:fs';\nexport const sign = () => fs;\n",
-    });
-    expect(findViolations(dist, 'web.js')).toEqual(['client-auth/sign.js: node: import (from \'node:)']);
+describe('companion entry points', () => {
+  test.each(COMPANION_SUBPATHS)('%s reaches no Node built-in and no Bun API', (subpath) => {
+    const target = workspacePackages[0]!.manifest.exports[subpath];
+    expect(typeof target === 'object' && typeof target.bun === 'string').toBe(true);
+    const { found } = violations(join(ENGINE, (target as Record<string, string>).bun!));
+    expect(found).toEqual([]);
   });
 
-  test('flags Bun.* and require(node:) in reached files, and follows dynamic and side-effect imports', () => {
-    const dist = makeFixtureDist({
-      'a.js': "import './b.js';\nconst m = await import('./c.js');\n",
-      'b.js': "export const x = Bun.file('x');\n",
-      'c.js': "const fs = require('node:fs');\n",
-    });
-    const found = findViolations(dist, 'a.js');
-    expect(found.some((v) => v.startsWith('b.js: Bun.*'))).toBe(true);
-    expect(found.some((v) => v.startsWith('c.js: node: require'))).toBe(true);
+  test('the walk follows imports across modules and packages', () => {
+    // A walk that stopped at the entry would pass every check above while reading one file.
+    expect(violations(join(ENGINE, 'platform/src/react-native.ts')).files).toBeGreaterThan(50);
   });
-
-  test('a clean graph (with a cycle and a node: import in an unreached file) has no violations', () => {
-    const dist = makeFixtureDist({
-      'a.js': "export * from './b.js';\n",
-      'b.js': "export * from './a.js';\nexport const ok = 1;\n",
-      'unreached.js': "import fs from 'node:fs';\n",
-    });
-    expect(findViolations(dist, 'a.js')).toEqual([]);
-  });
-});
-
-describe('Companion bundle guard: no node: imports or Bun.* calls reachable from the entry', () => {
-  for (const entry of COMPANION_ENTRIES) {
-    test(`dist/${entry} and everything it imports is free of node: and Bun.*`, () => {
-      // Fail loudly if dist was not built.
-      expect(existsSync(resolve(PLATFORM_DIST, entry))).toBe(true);
-      expect(findViolations(PLATFORM_DIST, entry)).toEqual([]);
-    });
-  }
 });

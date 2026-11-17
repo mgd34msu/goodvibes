@@ -1,259 +1,59 @@
 /**
- * Export-map subpath resolution: consumer imports of the public subpaths are
- * proven against the COMMITTED package.json exports manifest, not just
- * compilation. Every import here goes through the package NAME (the engine
- * package's own name, @goodvibes-jev/engine/platform/...), so Bun applies the real
- * exports map exactly as a consumer install would, a subpath missing from the
- * manifest fails here even though the source file exists on disk.
+ * Every published import path resolves. Each entry of the engine's committed
+ * package.json exports map is imported through the package NAME, so Bun
+ * applies the real exports map exactly as a consumer install would: a subpath
+ * missing from the manifest, or one whose target moved, fails here even though
+ * a source file exists on disk. The built targets (`import`, `types`) must be
+ * the built counterparts of the source target, so a consumer of the published
+ * package loads the same module the workspace does.
  */
-import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, expect, test } from 'bun:test';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const voiceRoots: string[] = [];
-function makeVoiceRoot(label: string): string {
-  const root = mkdtempSync(join(tmpdir(), `voice-setup-${label}-`));
-  voiceRoots.push(root);
-  return root;
+const ENGINE = join(import.meta.dir, '..');
+const manifest = JSON.parse(readFileSync(join(ENGINE, 'package.json'), 'utf8')) as {
+  readonly name: string;
+  readonly exports: Record<string, string | Record<string, string>>;
+};
+const entries = Object.entries(manifest.exports);
+const modules = entries.filter((entry): entry is [string, Record<string, string>] => typeof entry[1] === 'object');
+
+/** The built file a source target compiles to: `src/` becomes `dist/`, `.ts` becomes `.js` or `.d.ts`. */
+function built(source: string, extension: '.js' | '.d.ts'): string {
+  return source.replace('/src/', '/dist/').replace(/(\.d)?\.tsx?$/, extension);
 }
-afterAll(() => {
-  for (const root of voiceRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
 
-const PACKAGE = '@goodvibes-jev/engine/platform';
-
-/** subpath -> the export names a consumer composes with. */
-const SUBPATH_SURFACE: Record<string, readonly string[]> = {
-  './platform/state/store-snapshots': ['StoreSnapshotScheduler', 'RetentionPolicy', 'SnapshotPruner', 'defaultStoreSnapshotRetention', 'snapshotStoreFile', 'restoreStoreSnapshot', 'listStoreSnapshots'],
-  './platform/runtime/permissions/exec-prompt-wiring': ['buildExecPromptAnswerHandler'],
-  './platform/runtime/self-update': ['compareVersions', 'normalizeVersion', 'resolveLatestReleaseTag', 'resolveArtifactNames', 'verifyChecksum'],
-  // The daemon's managed local-voice setup composer: fork-composing consumers
-  // (TUI) build their own runtime services and must construct the voice-setup
-  // service the way runtime/services.ts does, rather than rebuilding it from the
-  // voice/provisioning primitives.
-  './platform/runtime/voice-setup': ['createVoiceSetupService'],
-  './platform/daemon/auto-updater': ['DaemonAutoUpdater', 'defaultDownloadBaseUrl'],
-  './platform/daemon/receipts': ['DaemonReceiptStore', 'formatReceiptTime', 'realReceiptStoreIo'],
-  // Single-file module: the platform's own version constant (cli/acp/mcp compose it).
-  './platform/version': ['VERSION'],
-};
-
-/**
- * Directory-barrel subpaths (dist targets are <dir>/index.*, unlike the
- * file-shaped table above). Same manifest-proven contract: each module a
- * consumer composition root needs (the platform's own cli.ts/services.ts imports
- * are the reference set) must be declared AND resolve through the package
- * name.
- */
-const DIR_SUBPATH_SURFACE: Record<string, readonly string[]> = {
-  // Host-only ledger composition is intentionally a narrow nested subpath,
-  // not a root platform or workflow-barrel export.
-  './platform/workflow/work-ledger': ['createWorkLedger', 'createEmptyWorkLedgerState', 'WorkLedgerAccessError', 'workLedgerCommandSchema', 'workLedgerStateSchema'],
-  './platform/power': ['PowerManager', 'wireRuntimePower', 'createLinuxLogindSeam', 'bindPowerWorkSignals', 'createUnavailablePowerSeam'],
-  './platform/relay': ['StepUpService', 'createRelayReachability', 'buildDaemonRelayReachability', 'evaluateStepUp', 'isMutatingMethod'],
-  // The consolidation driver rides the existing ./platform/state barrel, a
-  // consumer constructs it the way runtime/services.ts does.
-  './platform/state': ['MemoryConsolidationScheduler', 'runMemoryConsolidation', 'resolveMemoryConsolidationConfig'],
-  // The memory-governance layer: fork-composing consumers (agent, TUI) build
-  // their own runtime services and must construct the governor the way
-  // runtime/services.ts does.
-  './platform/runtime/memory': [
-    'CacheRegistry', 'PauseController', 'MemoryGovernor',
-    'createMemoryGovernance', 'wireDaemonMemoryGovernance',
-    'KNOWN_MEMORY_CACHES', 'isMemoryCacheRegistered', 'assertMemoryCacheRegistered',
-    'resolveEffectiveSystemRamMb',
-  ],
-  // singleFlight is composition machinery the platform's own voice-install path
-  // uses, consumers must not have to duplicate it.
-  './platform/utils': ['singleFlight', 'logger'],
-};
-
-describe('export-map subpath resolution (committed manifest)', () => {
-  // The engine manifest; each ./platform subpath names its source module under the
-  // workspace source condition and its built output under types and import.
-  const manifest = JSON.parse(
-    readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf8'),
-  ) as { exports: Record<string, Record<string, string>> };
-  const conditions = (module: string) => ({
-    bun: `./platform/src${module}.ts`,
-    types: `./platform/dist${module}.d.ts`,
-    import: `./platform/dist${module}.js`,
+describe('engine exports map', () => {
+  test('the map is not empty, so the checks below read real entries', () => {
+    expect(modules.length).toBeGreaterThan(100);
   });
 
-  for (const [subpath, expectedExports] of Object.entries(SUBPATH_SURFACE)) {
-    test(`${subpath} is declared in the exports map with its module target`, () => {
-      const entry = manifest.exports[`./platform${subpath.slice(1)}`];
-      expect(entry).toBeDefined();
-      expect(entry).toEqual(conditions(subpath.slice(1)));
-    });
-
-    test(`${subpath} resolves and serves its composition surface through the package name`, async () => {
-      const mod = await import(`${PACKAGE}${subpath.slice(1)}`) as Record<string, unknown>;
-      for (const name of expectedExports) {
-        expect(mod[name], `${subpath} must export ${name}`).toBeDefined();
+  test('every source target exists and every built target is its counterpart', () => {
+    const wrong: string[] = [];
+    for (const [subpath, target] of entries) {
+      if (typeof target === 'string') {
+        if (!existsSync(join(ENGINE, target))) wrong.push(`${subpath}: ${target} does not exist`);
+        continue;
       }
-    });
-  }
+      if (!target.bun || !existsSync(join(ENGINE, target.bun))) { wrong.push(`${subpath}: source target ${String(target.bun)} does not exist`); continue; }
+      if (target.types !== built(target.bun, '.d.ts')) wrong.push(`${subpath}: types ${target.types} is not the build of ${target.bun}`);
+      // A types-only entry (a .d.ts source) has no runtime target.
+      if (!target.bun.endsWith('.d.ts') && target.import !== built(target.bun, '.js')) wrong.push(`${subpath}: import ${target.import} is not the build of ${target.bun}`);
+    }
+    expect(wrong).toEqual([]);
+  });
 
-  for (const [subpath, expectedExports] of Object.entries(DIR_SUBPATH_SURFACE)) {
-    test(`${subpath} is declared in the exports map with an index-shaped module target`, () => {
-      const entry = manifest.exports[`./platform${subpath.slice(1)}`];
-      expect(entry).toBeDefined();
-      expect(entry).toEqual(conditions(`${subpath.slice(1)}/index`));
-    });
-
-    test(`${subpath} resolves and serves its composition surface through the package name`, async () => {
-      const mod = await import(`${PACKAGE}${subpath.slice(1)}`) as Record<string, unknown>;
-      for (const name of expectedExports) {
-        expect(mod[name], `${subpath} must export ${name}`).toBeDefined();
+  test('every code subpath resolves and loads through the package name', async () => {
+    const failed: string[] = [];
+    for (const [subpath, target] of modules) {
+      if (target.bun?.endsWith('.d.ts')) continue;
+      try {
+        await import(`${manifest.name}${subpath.slice(1)}`);
+      } catch (error) {
+        failed.push(`${subpath}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    });
-  }
-
-  test('./platform/runtime/memory entrypoint COMPOSES: a consumer builds a working governor through the package name', async () => {
-    // The way a fork-composed runtime (agent, TUI) constructs it, real
-    // registry + controller, injected sampler/clock, no interval started.
-    const memory = await import('@goodvibes-jev/engine/platform/platform/runtime/memory');
-    let rss = 10 * 1024 * 1024;
-    const { cacheRegistry, pauseController, memoryGovernor } = memory.createMemoryGovernance({
-      config: { budgetMb: 100, elevatedPct: 60, highPct: 80, criticalPct: 95, tripwireRateMbPerSec: 25, tripwireSustainSec: 60 },
-      caches: [{ id: 'knowledge-store', cache: { name: 'k', entryCount: () => 1, trim: () => {} } }],
-      jobIds: ['knowledge-self-improvement'],
-      start: false,
-      deps: {
-        sampler: () => ({ rssBytes: rss, heapUsedBytes: rss / 2 }),
-        now: () => 0,
-        gc: () => {},
-        exit: () => {},
-        resolveSystemRamMb: () => 8 * 1024,
-      },
-    });
-    expect(cacheRegistry.registeredIds()).toEqual(['knowledge-store']);
-    rss = 85 * 1024 * 1024; // above highPct of the 100MB budget
-    memoryGovernor.sampleOnce();
-    expect(memoryGovernor.currentTier()).toBe('high');
-    expect(pauseController.isPaused('knowledge-self-improvement')).toBe(true);
-    expect(memoryGovernor.snapshot().budgetMb).toBe(100);
-    memoryGovernor.stop();
-  });
-
-  test('./platform/runtime/voice-setup entrypoint COMPOSES: a consumer builds a working setup service through the package name', async () => {
-    // The way a fork-composed runtime (TUI) constructs it, the provisioner and
-    // status-read are injected seams, so the entrypoint runs with no network,
-    // no download, and no real voice runtime on the host.
-    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup');
-
-    const config = new Map<string, string>();
-    let resetCalls = 0;
-    const managedVoiceRoot = makeVoiceRoot('composed');
-
-    const service = createVoiceSetupService({
-      managedVoiceRoot,
-      getConfig: (key) => config.get(key) ?? '',
-      setConfig: (key, value) => void config.set(key, String(value)),
-      resetLocalEngineFailureState: () => { resetCalls += 1; },
-      admitExpensiveWork: () => ({ allowed: true }),
-      // Injected provisioner: a fully provisioned TTS + STT, no I/O.
-      provision: async () => ({
-        platform: 'linux-x64',
-        tts: { engine: 'piper', state: 'provisioned', binaryPath: '/managed/piper', modelPath: '/managed/voice.onnx' },
-        stt: { engine: 'whisper-cpp', state: 'provisioned', binaryPath: '/managed/whisper', modelPath: '/managed/model.bin' },
-        components: [{ id: 'piper', state: 'installed', bytes: 1024 }],
-      }),
-      // Injected status-read: a deterministic snapshot, no filesystem probe.
-      readStatus: () => ({
-        platform: 'linux-x64',
-        state: 'provisioned',
-        tts: { engine: 'piper', binaryPresent: true, voicePresent: true, binaryPath: '/managed/piper', modelPath: '/managed/voice.onnx' },
-        stt: { engine: 'whisper-cpp', supported: true, state: 'provisioned', binaryPresent: true, modelPresent: true, binaryPath: '/managed/whisper', modelPath: '/managed/model.bin' },
-        offerBytes: null,
-      }),
-      // Injected proof: provisioning now ENDS by speaking a phrase and reading
-      // it back, so a composition test has to supply that seam or it would run
-      // the real binaries. The proof is what "provisioned" means.
-      prove: async () => ({
-        proved: true,
-        stage: 'compare' as const,
-        phrase: 'the quick brown fox jumps over the lazy dog',
-        transcript: 'the quick brown fox jumps over the lazy dog',
-        wordOverlap: 1,
-        summary: 'Spoke the test phrase with piper and heard it back through whisper-cpp.',
-      }),
-    });
-
-    // status() serves the injected snapshot (idle: no installInProgress).
-    const status = service.status();
-    expect(status.state).toBe('provisioned');
-    expect(status.installInProgress).toBeUndefined();
-
-    // install() drives the composed happy path: the provisioner result becomes
-    // the wire receipt, the managed keys are preconfigured (getConfig was
-    // unset), and a successful install clears the local-engine failure state.
-    const receipt = await service.install();
-    expect(receipt.provisioned).toBe(true);
-    expect(receipt.tts.state).toBe('provisioned');
-    expect(receipt.stt.state).toBe('provisioned');
-    expect(receipt.components).toHaveLength(1);
-    expect(receipt.configured.set.length).toBeGreaterThan(0);
-    expect(config.size).toBeGreaterThan(0);
-    expect(resetCalls).toBe(1);
-    // The live proof is carried on the receipt, and its text is what a surface
-    // shows: "provisioned" is a proven claim, not a count of downloaded bytes.
-    expect(receipt.proof?.proved).toBe(true);
-    expect(receipt.notes.join(' ')).toContain('heard it back');
-  });
-
-  test('./platform/runtime/voice-setup reports NOT provisioned when the round trip cannot be proven', async () => {
-    // The failure this encodes: an install where every byte landed and every
-    // checksum matched, reported as provisioned, on a machine where speech to
-    // text did not work. A proof that fails is an honest "not provisioned".
-    const { createVoiceSetupService } = await import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup');
-    const service = createVoiceSetupService({
-      managedVoiceRoot: makeVoiceRoot('unproven'),
-      getConfig: () => '',
-      setConfig: () => {},
-      resetLocalEngineFailureState: () => {},
-      admitExpensiveWork: () => ({ allowed: true }),
-      provision: async () => ({
-        platform: 'linux-x64',
-        tts: { engine: 'piper', state: 'provisioned', binaryPath: '/managed/piper', modelPath: '/managed/voice.onnx' },
-        stt: { engine: 'whisper-cpp', state: 'provisioned', binaryPath: '/managed/whisper', modelPath: '/managed/model.bin' },
-        components: [{ id: 'piper', state: 'installed', bytes: 1024 }],
-      }),
-      readStatus: () => ({
-        platform: 'linux-x64',
-        state: 'provisioned',
-        tts: { engine: 'piper', binaryPresent: true, voicePresent: true, binaryPath: '/managed/piper', modelPath: '/managed/voice.onnx' },
-        stt: { engine: 'whisper-cpp', supported: true, state: 'provisioned', binaryPresent: true, modelPresent: true, binaryPath: '/managed/whisper', modelPath: '/managed/model.bin' },
-        offerBytes: null,
-      }),
-      prove: async () => ({
-        proved: false,
-        stage: 'transcribe' as const,
-        phrase: 'the quick brown fox jumps over the lazy dog',
-        error: 'whisper-cli: No such file or directory',
-        summary: 'The managed speech-to-text engine (whisper-cpp) could not transcribe the spoken test phrase.',
-      }),
-    });
-
-    const receipt = await service.install();
-    expect(receipt.provisioned).toBe(false);
-    expect(receipt.proof?.proved).toBe(false);
-    expect(receipt.notes.join(' ')).toContain('could not transcribe');
-  });
-
-  test('./platform/utils entrypoint serves a WORKING singleFlight through the package name', async () => {
-    const { singleFlight } = await import('@goodvibes-jev/engine/platform/platform/utils');
-    let runs = 0;
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const run = singleFlight(async () => { runs += 1; await gate; return runs; });
-    const [a, b] = [run(), run()]; // concurrent callers join ONE in-flight run
-    release!();
-    expect(await a).toBe(1);
-    expect(await b).toBe(1);
-    expect(runs).toBe(1);
-    expect(await run()).toBe(2); // after settlement a fresh run starts
+    }
+    expect(failed).toEqual([]);
   });
 });

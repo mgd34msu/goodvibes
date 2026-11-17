@@ -8,6 +8,7 @@ import { captureAgentExportPath } from './agent-artifact-effect.ts';
 import { harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { resolveChannelDraftNativeReference } from './agent-channel-draft-reference.ts';
 import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
+import { delegatedOperatorConnection, forgetDelegatedCredential } from '../agent/agent-delegation-credential.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger, labelUntrustedContent } from '../trust/untrusted-content.ts';
 import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '../agent/payments-channel-guard.ts';
 import {
@@ -136,7 +137,6 @@ function guardedCommsInvoke(context: CommandContext, args: Record<string, unknow
       || !harnessCatalogInvocationAuthority(args, options, 'send')) throw new ToolInputProjectionError('held');
   };
   const connection = captureOperatorConnection(paths, config, assertCurrent);
-  const invoke = createDaemonOperatorInvoke(() => connection);
   return async (method, input = {}, supplied = {}) => {
     assertCurrent();
     if (method !== CHANNEL_DRAFTS_SAVE_METHOD && method !== CHANNEL_ROUTING_ASSIGN_METHOD && method !== CHANNEL_ROUTING_DELETE_METHOD) throw new ToolInputProjectionError('held');
@@ -148,7 +148,7 @@ function guardedCommsInvoke(context: CommandContext, args: Record<string, unknow
       || (request.id !== nativeReference.draftId && request.id !== nativeReference.reference && request.id !== adopted))) {
       throw new ToolInputProjectionError('held');
     }
-    const nativeInput = { ...request, ...(nativeReference ? { id: adopted ?? nativeReference.reference } : {}), admission: 'autonomous' };
+    const nativeInput = { ...request, ...(nativeReference ? { id: adopted ?? nativeReference.reference } : {}) };
     assertCurrent();
     const payload = JSON.stringify(nativeInput);
     const refusal = await screenOutboundForCardMaterial({ surface: 'connected-host', message: payload }, { signal: options?.signal, assertCurrent });
@@ -159,8 +159,13 @@ function guardedCommsInvoke(context: CommandContext, args: Record<string, unknow
     assertCurrent();
     if (!decision.allowed) throw new Error([decision.reason ?? 'Outward channel synchronization held.', decision.fix].filter(Boolean).join(' '));
     const { explicitUserRequest: _userRequest, ...restrictions } = supplied;
-    return invoke(method, nativeInput, { ...restrictions, signal: options?.signal,
+    // Sent with this Agent's delegated credential: the host judges the call as the Agent acting for the owner.
+    const delegated = await delegatedOperatorConnection(connection, paths.homeDirectory, options?.signal);
+    const result = await createDaemonOperatorInvoke(() => delegated)(method, nativeInput, { ...restrictions, signal: options?.signal,
       assertCurrent: () => { supplied.assertCurrent?.(); assertCurrent(); } });
+    // A delegated credential the host no longer accepts is forgotten; the next call makes a new one.
+    if (!result.ok && result.refusal?.code === 'auth_rejected') await forgetDelegatedCredential(delegated).catch(() => {});
+    return result;
   };
 }
 

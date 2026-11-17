@@ -67,7 +67,7 @@ function readRequest(body: unknown): ScriptedDecisionRequest | undefined {
 }
 
 /**
- * A decision model on the HTTP wire (`POST /v1/systemone`) that answers every
+ * A decision model on the HTTP wire (`POST /v1/systemone`, `GET /v1/models`) that answers every
  * well-formed request at once from a script, so a program can run with a
  * decision model in use (the `Hybrid` policy) without a real one. A request it
  * cannot read is answered 400 and recorded, and assertNoUnexpected reports it.
@@ -78,7 +78,10 @@ export function startScriptedDecisionServer(options: { readonly script?: Decisio
   const requests: ScriptedDecisionRequest[] = [];
   const unreadable: unknown[] = [];
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
-    if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/systemone') return new Response('not found', { status: 404 });
+    const path = new URL(request.url).pathname;
+    // The model list a settings screen or picker reads: the one scripted model.
+    if (request.method === 'GET' && path === '/v1/models') return Response.json({ models: [{ name: model, description: 'Scripted decision model', release_date: '' }] });
+    if (request.method !== 'POST' || path !== '/v1/systemone') return new Response('not found', { status: 404 });
     let body: unknown;
     try { body = await request.json(); } catch { unreadable.push('(not JSON)'); return new Response('invalid JSON', { status: 400 }); }
     const decision = readRequest(body);

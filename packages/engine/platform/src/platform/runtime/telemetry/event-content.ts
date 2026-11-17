@@ -68,6 +68,8 @@ const EVENT_FIELD_CLASS = {
   ask: 'content',
   asksForAttempts: 'shown',
   authType: 'shown',
+  // Jev's decision record: ids and bindings are shown; its summary may restate the call.
+  autonomousDecision: { withhold: ['summary'] },
   availableTools: 'shown',
   bindingId: 'shown',
   body: 'content',
@@ -207,6 +209,7 @@ const EVENT_FIELD_CLASS = {
   sectionsIncluded: 'shown',
   serverId: 'shown',
   sessionId: 'shown',
+  sleepEdgeNote: 'shown',
   source: 'shown',
   sourceId: 'shown',
   sourceLayer: 'shown',

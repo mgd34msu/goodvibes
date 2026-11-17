@@ -61,6 +61,20 @@ test('deleted observed or unsafe evidence cannot be interpreted as unused storag
   expect(() => new DaemonApprovalStore(filePath).pendingCount()).toThrow(PaymentApprovalStoreError);
 });
 
+test('a spend renamed into place whose directory sync fails hands out nothing and is spent for good', () => {
+  const store = new DaemonApprovalStore(filePath); store.grant({ action: ACTION, content: CONTENT });
+  const directory = join(filePath, '..');
+  // Write and search, no read: the new file is renamed into place, then the directory cannot be opened to sync it.
+  fs.chmodSync(directory, 0o300);
+  try {
+    expect(() => store.take({ action: ACTION, content: CONTENT })).toThrow(expect.objectContaining({ kind: 'write-uncertain' }));
+    // The store stops rather than trusting its own copy.
+    expect(() => store.take({ action: ACTION, content: CONTENT })).toThrow(expect.objectContaining({ kind: 'unavailable' }));
+  } finally { fs.chmodSync(directory, 0o700); }
+  // A restarted daemon reads what was renamed into place: the approval is gone.
+  expect(new DaemonApprovalStore(filePath).take({ action: ACTION, content: CONTENT })).toEqual({ approval: null, mismatch: 'none' });
+});
+
 test.each([{ version: 2, approvals: [] }, { version: 1 }, { version: 1, approvals: [null] }])('unsupported or invalid storage is never rewritten', raw => {
   const bytes = JSON.stringify(raw); fs.writeFileSync(filePath, bytes);
   const store = new DaemonApprovalStore(filePath);

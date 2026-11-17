@@ -7,6 +7,7 @@ import { scan, scanLocalhost, loadPersistedProviders, persistProviders, scanMcpS
 import type { McpRegistry } from '../mcp/registry.js';
 import type { ShellPathService } from './shell-paths.js';
 import { summarizeError } from '../utils/error-display.js';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import { splitModelRegistryKey } from '../providers/registry-helpers.js';
 
 export interface RuntimeSelectionState {
@@ -64,12 +65,6 @@ export interface BackgroundRuntimeTaskHandle {
   readonly stopped: boolean;
   /** A handle that owns external resources returns the promise of their release; await it at shutdown. */
   stop(): void | Promise<void>;
-}
-
-/** Whether a discovered server runs on this computer. */
-function isLoopbackHost(host: string): boolean {
-  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  return normalized === 'localhost' || normalized === '::1' || /^127(\.\d{1,3}){3}$/.test(normalized);
 }
 
 const serverKey = (server: { readonly host: string; readonly port: number }): string => `${server.host}:${server.port}`;

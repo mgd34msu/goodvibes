@@ -12,6 +12,7 @@ import { UserAuthManager } from '../security/user-auth.js';
 import { ConfigManager } from '../config/manager.js';
 import { resolveInboundTlsContext, type ResolvedInboundTlsContext } from '../runtime/network/index.js';
 import { summarizeError } from '../utils/error-display.js';
+import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
@@ -96,12 +97,6 @@ function readCorsAllowedOrigins(configManager: ConfigManager): string[] {
 const WEBHOOK_HOOK_PHASES: ReadonlySet<string> = new Set(['Pre', 'Post', 'Fail', 'Change', 'Lifecycle']);
 /** The paths this listener answers; anything else is one `unmatched` metric label. */
 const LISTENER_ROUTES: ReadonlySet<string> = new Set(['/login', '/webhook', '/health']);
-
-/** Loopback addresses keep the listener reachable only from this machine. */
-function isLoopbackHost(host: string): boolean {
-  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
-  return normalized === 'localhost' || normalized === '::1' || /^127(\.\d{1,3}){3}$/.test(normalized);
-}
 
 /**
  * HttpListener, webhook listener, disabled by default.

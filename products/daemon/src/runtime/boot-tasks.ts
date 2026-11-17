@@ -21,6 +21,8 @@ export interface DaemonBootOperations {
   createWebhooks(): DaemonBootAttachment | Promise<DaemonBootAttachment>;
   createNotifier(): DaemonBootAttachment | Promise<DaemonBootAttachment>;
   synchronizeServices(): Promise<void>;
+  /** Ends the background checks synchronizeServices started (the daemon is stopping). */
+  stopServiceChecks?(): void | Promise<void>;
   initializePlugins(): Promise<void>;
   closePlugins(): Promise<void>;
   /** A failed step and its cause; the reporter masks the cause before it is written. */
@@ -85,7 +87,7 @@ export function createDaemonBootController(operations: DaemonBootOperations): Da
     }
   }
 
-  function own(label: 'provider watch' | 'webhooks' | 'notifier' | 'plugins', action: () => void | Promise<void>): () => Promise<void> {
+  function own(label: 'provider watch' | 'webhooks' | 'notifier' | 'configured services' | 'plugins', action: () => void | Promise<void>): () => Promise<void> {
     let cleanup: Promise<void> | undefined;
     const closeResource = (): Promise<void> => {
       if (cleanup) return cleanup;
@@ -132,7 +134,10 @@ export function createDaemonBootController(operations: DaemonBootOperations): Da
     });
     await runStep('webhooks', () => attach('webhooks', () => operations.createWebhooks()));
     await runStep('notifier', () => attach('notifier', () => operations.createNotifier()));
-    await runStep('configured-services', () => operations.synchronizeServices());
+    await runStep('configured-services', async () => {
+      own('configured services', () => operations.stopServiceChecks?.());
+      await operations.synchronizeServices();
+    });
     await runStep('plugins', async () => {
       own('plugins', () => operations.closePlugins());
       await operations.initializePlugins();

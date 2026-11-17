@@ -65,6 +65,8 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
       });
     }
   };
+  // Owned by the configured-services step: aborted when the boot scope closes.
+  const serviceChecks = new AbortController();
   // A workstream's start and ask come from its own record, so one started
   // before a restart is still announced with its real duration.
   const runtimeNotifications = {
@@ -172,16 +174,22 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
         close: () => { for (const unsubscribe of unsubscribers.splice(0)) unsubscribe(); return notifier.close(); },
       };
     },
+    // Ends the background Google check when the daemon stops before Google answers.
+    stopServiceChecks: () => { serviceChecks.abort(); },
     synchronizeServices: () => {
       // The Google grant is checked once, in the background, so a revoked one
       // is announced at start (a degraded row with the reason and the step)
       // instead of by the first call that fails; boot does not wait on Google.
+      const { signal } = serviceChecks;
       void checkDaemonGoogleAtBoot({
         configManager: runtime.configManager,
         secretsManager: runtime.secretsManager,
         homeDirectory: runtime.homeDirectory,
         files: nodeGoogleFilePort,
+        signal,
       }).then((check) => {
+        // Stopped mid-check: the runtime it would report to is being disposed.
+        if (signal.aborted) return;
         if (!check.usable && !check.needsReauthorization) return;
         if (check.needsReauthorization) logger.warn('The Google account needs to be connected again', { detail: check.detail });
         runtime.runtimeDispatch.syncIntegration({

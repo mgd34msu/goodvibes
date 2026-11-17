@@ -48,6 +48,8 @@ export type GoogleRefreshFn = (input: {
   readonly clientSecret: string;
   readonly refreshToken: string;
   readonly tokenUri: string;
+  /** Ends the request early; the outcome is then a transient failure. */
+  readonly signal?: AbortSignal | undefined;
 }) => Promise<GoogleRefreshOutcome>;
 
 export interface GoogleTokenManagerDeps {
@@ -165,14 +167,14 @@ export class GoogleTokenManager {
    * Force a refresh regardless of cached expiry. Used by the boot-time check,
    * which is specifically proving the refresh token still works.
    */
-  async forceRefresh(): Promise<GoogleAccessTokenOutcome> {
+  async forceRefresh(signal?: AbortSignal): Promise<GoogleAccessTokenOutcome> {
     // "Force" overrides the expiry cache, not the dead-grant verdict. Nothing
     // is gained by re-asking Google about a token it has already rejected.
     if (this.deadGrant !== null) return this.deadGrantOutcome();
 
     const existing = this.inFlight;
     if (existing !== null) return existing;
-    const attempt = this.performRefresh();
+    const attempt = this.performRefresh(signal);
     this.inFlight = attempt;
     try {
       return await attempt;
@@ -181,7 +183,7 @@ export class GoogleTokenManager {
     }
   }
 
-  private async performRefresh(): Promise<GoogleAccessTokenOutcome> {
+  private async performRefresh(signal?: AbortSignal): Promise<GoogleAccessTokenOutcome> {
     let outcome: GoogleRefreshOutcome;
     try {
       outcome = await this.deps.refresh({
@@ -189,6 +191,7 @@ export class GoogleTokenManager {
         clientSecret: this.credentials.clientSecret,
         refreshToken: this.credentials.refreshToken,
         tokenUri: this.credentials.tokenUri,
+        ...(signal === undefined ? {} : { signal }),
       });
     } catch (error) {
       // A refresh function that rejects is a failed attempt, not a dead grant: it may succeed next time.
@@ -247,6 +250,7 @@ export interface GoogleBootCheckResult {
 
 export async function checkGoogleCredentialsAtBoot(
   manager: GoogleTokenManager | null,
+  signal?: AbortSignal,
 ): Promise<GoogleBootCheckResult> {
   if (manager === null) {
     return {
@@ -257,7 +261,7 @@ export async function checkGoogleCredentialsAtBoot(
     };
   }
 
-  const outcome = await manager.forceRefresh();
+  const outcome = await manager.forceRefresh(signal);
   if (outcome.ok) {
     return {
       usable: true,

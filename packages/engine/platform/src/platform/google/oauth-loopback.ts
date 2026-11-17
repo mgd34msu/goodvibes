@@ -290,6 +290,8 @@ export interface RefreshTokenOptions {
   readonly clientId: string;
   readonly clientSecret: string;
   readonly refreshToken: string;
+  /** Ends the request early (the caller is shutting down); answered as not completed. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** Exchanges a refresh token for a fresh access token. */
@@ -303,7 +305,7 @@ export async function refreshAccessToken(
     refresh_token: options.refreshToken,
     grant_type: 'refresh_token',
   });
-  return postToken(fetchPort, body, [options.clientSecret, options.refreshToken]);
+  return postToken(fetchPort, body, [options.clientSecret, options.refreshToken], options.signal);
 }
 
 /** A token request that has not answered in this long has failed, not stalled forever. */
@@ -313,13 +315,19 @@ async function postToken(
   fetchPort: GoogleFetchPort,
   body: URLSearchParams,
   secretsToRedact: readonly string[],
+  cancel?: AbortSignal,
 ): Promise<TokenResponse> {
-  const signal = AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS);
-  const timedOut = (): TokenResponse => ({
+  const timeout = AbortSignal.timeout(TOKEN_REQUEST_TIMEOUT_MS);
+  const signal = cancel ? AbortSignal.any([timeout, cancel]) : timeout;
+  const timedOut = (): TokenResponse => cancel?.aborted ? {
+    ok: false,
+    problem: 'The token request was stopped before Google answered (the program is shutting down).',
+    fix: 'Nothing to do; the credential is checked again at the next start.',
+  } : {
     ok: false,
     problem: `The token endpoint did not answer within ${TOKEN_REQUEST_TIMEOUT_MS / 1000} seconds.`,
     fix: 'Check network access to oauth2.googleapis.com and try again.',
-  });
+  };
   let response: Response;
   try {
     response = await fetchPort.fetch(TOKEN_ENDPOINT, {

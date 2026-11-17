@@ -149,9 +149,9 @@ export class GoogleConnectionOwner {
    * revoked grant is found and latched once, at start, and the refreshed token
    * serves the first real call.
    */
-  async checkAtBoot(): Promise<GoogleBootCheckResult> {
+  async checkAtBoot(signal?: AbortSignal): Promise<GoogleBootCheckResult> {
     const connection = await this.connection();
-    return checkGoogleCredentialsAtBoot(connection?.tokens ?? null);
+    return checkGoogleCredentialsAtBoot(connection?.tokens ?? null, signal);
   }
 }
 

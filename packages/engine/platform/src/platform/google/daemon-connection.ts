@@ -23,6 +23,11 @@ export interface DaemonGoogleConnectionDeps {
   readonly fetch?: (GoogleFetchPort & GoogleApiFetchPort) | undefined;
 }
 
+/** The start-up check's inputs: the connection's, and the signal that ends it when the daemon stops. */
+export interface DaemonGoogleBootCheckDeps extends DaemonGoogleConnectionDeps {
+  readonly signal?: AbortSignal | undefined;
+}
+
 type SecretChanges = Parameters<typeof subscribeGoogleCredentialChanges>[0]['secrets'];
 
 function configSubscriber(config: DaemonGoogleConnectionDeps['configManager']): Pick<ConfigManager, 'subscribe'> | undefined {
@@ -65,9 +70,9 @@ export function daemonGoogleConnectionOwner(deps: DaemonGoogleConnectionDeps): G
  * revoked grant is found and latched at start instead of by the first failing
  * call. Never throws; a failure to check reads as not usable with the reason.
  */
-export async function checkDaemonGoogleAtBoot(deps: DaemonGoogleConnectionDeps): Promise<GoogleBootCheckResult> {
+export async function checkDaemonGoogleAtBoot(deps: DaemonGoogleBootCheckDeps): Promise<GoogleBootCheckResult> {
   try {
-    return await daemonGoogleConnectionOwner(deps).checkAtBoot();
+    return await daemonGoogleConnectionOwner(deps).checkAtBoot(deps.signal);
   } catch (error) {
     return {
       usable: false,

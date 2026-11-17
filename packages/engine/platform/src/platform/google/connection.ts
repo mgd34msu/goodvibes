@@ -170,9 +170,10 @@ function refreshFn(fetchPort: GoogleFetchPort, context: GrantContext) {
     readonly clientSecret: string;
     readonly refreshToken: string;
     readonly tokenUri: string;
+    readonly signal?: AbortSignal | undefined;
   }): Promise<GoogleRefreshOutcome> => {
     const response = await refreshAccessToken(
-      { clientId: input.clientId, clientSecret: input.clientSecret, refreshToken: input.refreshToken },
+      { clientId: input.clientId, clientSecret: input.clientSecret, refreshToken: input.refreshToken, signal: input.signal },
       fetchPort,
     );
     if (!response.ok) {

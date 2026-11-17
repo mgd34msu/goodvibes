@@ -10,6 +10,7 @@ import type {
 } from '@goodvibes-jev/engine/terminal-shell/command-context-contracts';
 
 import { createTerminalCommandRegistry, type TerminalSlashCommand } from '@goodvibes-jev/engine/terminal-shell/command-registry';
+import type { CommandSubcommandHints } from '@goodvibes-jev/engine/terminal-shell/command-args-hint';
 import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import type { NativeConversationIntakeActions, NativeConversationIntakeState } from '../runtime/native-conversation-intake.ts';
 
@@ -268,7 +269,15 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
   readonly invokedByModel?: boolean | undefined;
 }
 
-export type SlashCommand = TerminalSlashCommand<CommandContext>;
+/** A command as this app registers it. `subcommands` gives the composer's argument hint for each subcommand. */
+export type SlashCommand = TerminalSlashCommand<CommandContext> & CommandSubcommandHints;
 const platformCommands = createTerminalCommandRegistry<CommandContext>();
-export class CommandRegistry extends platformCommands.CommandRegistry {}
+export class CommandRegistry extends platformCommands.CommandRegistry {
+  override register(command: SlashCommand): void {
+    super.register(command);
+  }
+  override get(name: string): SlashCommand | undefined {
+    return super.get(name);
+  }
+}
 export const { isDirectOwnerCommandContext } = platformCommands;

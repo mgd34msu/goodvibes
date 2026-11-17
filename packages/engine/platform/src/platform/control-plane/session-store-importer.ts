@@ -29,7 +29,8 @@ import { join, resolve } from 'node:path';
 import { PersistentStore } from '../state/persistent-store.js';
 import { CompanionChatPersistence } from '../companion/companion-chat-persistence.js';
 import { defaultSessionsDir } from '../companion/companion-chat-persistence.js';
-import { loadSessionBrokerState, createSessionBrokerSnapshot } from './session-broker-state.js';
+import { loadSessionBrokerState, sortInputs, sortMessages } from './session-broker-state.js';
+import { SessionBrokerFileStorage, type SessionBrokerLoadResult, type SessionBrokerStateView } from './session-broker-store.js';
 import type { SharedSessionStoreSnapshot } from './session-broker-helpers.js';
 import type {
   SharedSessionMessage,
@@ -38,15 +39,6 @@ import type {
 import type { SharedSessionInputRecord } from './session-intents.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-
-/**
- * How many message bodies to retain PER SESSION when re-persisting the merged
- * store. Migration keeps every body (no cap): a per-session cap would drop old
- * messages from a transcript, and the snapshot would then stamp an honest
- * `retainedMessageCount` (see createSessionBrokerSnapshot). Migration therefore
- * never silently drops any session's transcript.
- */
-const MAX_PERSISTED_MESSAGES_PER_SESSION = Infinity;
 
 /** A legacy store to fold into the home store. */
 export interface LegacySessionSource {
@@ -142,27 +134,42 @@ export function discoverLegacySessionSources(input: {
 /**
  * Fold every source into the home store at `homeStorePath`, once per session.
  * A source session is added when the store does not hold it and no earlier run
- * folded it (the ledger); its messages and inputs come with it. The store is
- * written only when something was added (or it does not exist yet), and the
+ * folded it (the ledger); its messages and inputs come with it. The home store
+ * is read and written through the broker's own storage (the session index plus
+ * one log per session): an added session is one new log and one index write,
+ * the sessions already there are not rewritten, their counts stay what their
+ * logs state, and entries the index set aside are carried forward. A store in
+ * the older whole-store shape is moved to that layout by the same read, as the
+ * broker would move it. Nothing is written when nothing was added, and the
  * ledger only when it gained an id. The first run after the ledger existed
  * folds as before, so nothing a source holds is lost; from then on a session
  * deleted from the store stays deleted.
  *
- * @throws HomeSessionStoreUnreadableError when the home store exists but cannot
- *         be read. Nothing is written then: persisting the legacy-only merge
- *         would replace the unreadable file, and callers that retire a source
- *         after a successful fold must see that the fold did not happen.
+ * @throws HomeSessionStoreUnreadableError when the home store cannot be read.
+ *         Nothing is folded then, and callers that retire a source after a
+ *         successful fold must see that the fold did not happen.
  */
 export async function importLegacySessionStores(input: {
   readonly homeStorePath: string;
   readonly sources: readonly LegacySessionSource[];
 }): Promise<ImportLegacySessionsResult> {
-  const homeStore = new PersistentStore<SharedSessionStoreSnapshot>(input.homeStorePath);
-  const homeSnapshot = await loadHomeSnapshot(homeStore, input.homeStorePath);
-  const existing = loadSessionBrokerState(homeSnapshot);
+  const homeStore = new SessionBrokerFileStorage(input.homeStorePath);
+  try {
+    return await foldIntoHomeStore(homeStore, input);
+  } finally {
+    homeStore.close();
+  }
+}
+
+async function foldIntoHomeStore(
+  homeStore: SessionBrokerFileStorage,
+  input: { readonly homeStorePath: string; readonly sources: readonly LegacySessionSource[] },
+): Promise<ImportLegacySessionsResult> {
+  const existing = await loadHomeStore(homeStore, input.homeStorePath);
   const ledgerPath = foldedLedgerPath(input.homeStorePath);
   const ledgerStore = new PersistentStore<FoldedSessionLedger>(ledgerPath);
   const ledger = await loadFoldedLedger(ledgerStore, ledgerPath);
+  // Only added sessions bring messages and inputs; those of sessions already in the store stay in their logs.
   const state: MergeState = {
     sessions: new Map(existing.sessions),
     messages: new Map(),
@@ -170,8 +177,6 @@ export async function importLegacySessionStores(input: {
     folded: new Set(ledger?.sessionIds ?? []),
     added: new Set(),
   };
-  for (const bucket of existing.messages.values()) for (const m of bucket) state.messages.set(m.id, m);
-  for (const bucket of existing.inputs.values()) for (const i of bucket) state.inputs.set(i.id, i);
 
   const missingSources: string[] = [];
   const skippedFiles: string[] = [];
@@ -191,8 +196,7 @@ export async function importLegacySessionStores(input: {
   }
 
   // Only a change is written: a boot with nothing new leaves the store alone.
-  // A store that does not exist yet is created.
-  if (state.added.size > 0 || homeSnapshot === null) await homeStore.persist(buildSnapshot(state));
+  if (state.added.size > 0) await homeStore.write(addedSessionsView(state), new Set(state.added), true);
   if (ledger === null || state.folded.size !== ledger.sessionIds.length) {
     await ledgerStore.persist({ version: 1, sessionIds: [...state.folded].sort() });
   }
@@ -223,10 +227,7 @@ async function loadFoldedLedger(store: PersistentStore<FoldedSessionLedger>, pat
   return loaded;
 }
 
-async function loadHomeSnapshot(
-  store: PersistentStore<SharedSessionStoreSnapshot>,
-  storePath: string,
-): Promise<SharedSessionStoreSnapshot | null> {
+async function loadHomeStore(store: SessionBrokerFileStorage, storePath: string): Promise<SessionBrokerLoadResult> {
   try {
     return await store.load();
   } catch (error) {
@@ -375,21 +376,40 @@ function companionMessagesToShared(
   }));
 }
 
-function buildSnapshot(state: MergeState): SharedSessionStoreSnapshot {
+/**
+ * What the home store's writer is handed: every session the index lists (it
+ * rewrites the index whole), and the messages and inputs of the added ones,
+ * which become each one's new log.
+ */
+function addedSessionsView(state: MergeState): SessionBrokerStateView {
   const sessions = new Map(state.sessions);
-  const messages = new Map<string, readonly SharedSessionMessage[]>();
-  const inputs = new Map<string, readonly SharedSessionInputRecord[]>();
-  for (const message of state.messages.values()) {
-    messages.set(message.sessionId, [...(messages.get(message.sessionId) ?? []), message]);
-  }
-  for (const inputRecord of state.inputs.values()) {
-    inputs.set(inputRecord.sessionId, [...(inputs.get(inputRecord.sessionId) ?? []), inputRecord]);
-  }
+  const grouped = <T extends { readonly sessionId: string }>(records: Iterable<T>): Map<string, T[]> => {
+    const bySession = new Map<string, T[]>();
+    for (const record of records) {
+      if (!state.added.has(record.sessionId)) continue;
+      const bucket = bySession.get(record.sessionId);
+      if (bucket) bucket.push(record); else bySession.set(record.sessionId, [record]);
+    }
+    return bySession;
+  };
+  const messages = new Map<string, readonly SharedSessionMessage[]>(
+    [...grouped(state.messages.values())].map(([id, bucket]) => [id, sortMessages(bucket)]),
+  );
+  const inputs = new Map<string, readonly SharedSessionInputRecord[]>(
+    [...grouped(state.inputs.values())].map(([id, bucket]) => [id, sortInputs(bucket)]),
+  );
   // The winning record's own count can be lower than the bodies unioned from
   // other sources; the count must never claim fewer messages than are stored.
-  for (const [id, record] of sessions) {
+  for (const id of state.added) {
+    const record = sessions.get(id);
     const stored = messages.get(id)?.length ?? 0;
-    if (stored > record.messageCount) sessions.set(id, { ...record, messageCount: stored });
+    if (record && stored > record.messageCount) sessions.set(id, { ...record, messageCount: stored });
   }
-  return createSessionBrokerSnapshot({ sessions, messages, inputs }, MAX_PERSISTED_MESSAGES_PER_SESSION);
+  return {
+    sessions,
+    messages,
+    inputs,
+    peekMessages: (sessionId) => messages.get(sessionId),
+    peekInputs: (sessionId) => inputs.get(sessionId),
+  };
 }

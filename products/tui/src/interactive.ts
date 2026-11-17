@@ -1199,6 +1199,7 @@ async function main(prepared: PreparedShellCliRuntime) {
 
     const layers = buildConversationLayers({
       ...overlayContext,
+      providerInputTokens: orchestrator.lastInputTokens,
       screenWidth: width,
       screenHeight: height,
       headerRows: shellHeaderLines.length,

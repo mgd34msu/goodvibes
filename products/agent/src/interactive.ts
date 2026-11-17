@@ -1328,6 +1328,7 @@ async function main(prepared: PreparedShellCliRuntime) {
         headerRows: shellHeaderLines.length,
         footerRows: shellFooterLines.length,
         contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel) ?? 0,
+        providerInputTokens: orchestrator.lastInputTokens,
         permission: pendingPermission
           ? PermissionPromptUI.createPromptLayer(width, height, pendingPermission, { awaitingTab: cardAwaitsTab(pendingPermission, input.prompt.length === 0) })
           : null,

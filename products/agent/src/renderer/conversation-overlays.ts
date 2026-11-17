@@ -74,6 +74,13 @@ export interface ConversationLayerContext {
   readonly screenWidth: number;
   readonly screenHeight: number;
   readonly contextWindow?: number;
+  /**
+   * The provider's own input-token count of the last request (system prompt,
+   * tools and messages): the figure the status-line meter shows. The context
+   * inspector uses it as its total and shows the part the messages do not
+   * account for as one row. 0 before the first reply.
+   */
+  readonly providerInputTokens?: number;
   /** The permission dialog, when a request is waiting (drawn above the other modals). */
   readonly permission?: SurfaceLayer | null;
   /** Rows at the top of the screen held by the header (and the session chips row); toasts start below them. */
@@ -114,7 +121,7 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
     [
       'contextInspector',
       input.contextInspectorModal.active,
-      () => renderContextInspector(context.conversation, w, h, context.contextWindow, input.contextInspectorModal),
+      () => renderContextInspector(context.conversation, w, h, context.contextWindow, input.contextInspectorModal, context.providerInputTokens ?? 0),
     ],
     ['process', input.processModal.active, () => renderProcessModal(input.processModal, w, h)],
     ['liveTail', input.liveTailModal.active, () => renderLiveTailModal(input.liveTailModal, w, h)],

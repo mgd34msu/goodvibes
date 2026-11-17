@@ -496,6 +496,10 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
   try {
     const ownsCancelledConversation = captureCancelledConversationOwner(context, record);
     const providerRegistry = context.providerRegistry;
+    // An agent started at start-up (a contract unit resumed after a restart) waits for the home's provider
+    // files to load; read before that, its own model is not in the registry yet and the unit fails.
+    await providerRegistry.ready?.();
+    terminal.assertCurrent();
     const currentModel = lazyCurrentModel(providerRegistry);
     const primaryRoute = context.resolveProviderForRecord(providerRegistry, record, currentModel);
     const routingSignal = context.getCancellationSignal?.(record.id);

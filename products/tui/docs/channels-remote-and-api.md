@@ -111,6 +111,8 @@ The remote runtime is a distributed peer system. A peer joins through a pair req
 
 Work has a bounded life. Queued work with a `timeoutMs` expires that long after it was queued, and work whose lease lapses more than five times expires instead of being requeued again. A heartbeat renews the leases of the work a peer holds, and a peer silent for 90 seconds is listed as disconnected. A settled work item (completed, failed, cancelled or expired) is final: a later report for it is answered `409` with code `REMOTE_WORK_SETTLED` and the stored record. Approving a pair request that was rejected or expired is also `409`, verifying a settled request is `410`, and invoking a revoked peer is `409`; each response names the state it refused from.
 
+Approving a request creates no peer: the peer is created, under the id the approval returned, when the device verifies its challenge, so a request that expires or is rejected leaves nothing behind. Sending work to a peer that holds no access token is refused with `409` and code `REMOTE_PEER_NOT_PAIRED`. A heartbeat is recorded in memory; it is written, audited (`peer-connected`) and published (`remote-peer-heartbeat`) only when the peer comes back after being listed as disconnected or reports changed capabilities, commands, version, client mode or metadata, so heartbeats do not push pairing and token records out of the audit list.
+
 Key remote API paths:
 
 | Path | Purpose |

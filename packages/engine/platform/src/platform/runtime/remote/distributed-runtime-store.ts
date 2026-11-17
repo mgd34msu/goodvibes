@@ -263,6 +263,10 @@ async function loadDistributedRuntime(state: DistributedRuntimeManagerState): Pr
   }
   for (const peer of snapshot?.peers ?? []) {
     const normalized = requireDistributedRuntimeRecord(normalizePeer(peer));
+    // Earlier versions stored a peer when a request was approved, and a stand-in
+    // peer when work settled for one that was gone. A peer that never received a
+    // token never verified and can never pull; a later verification creates it.
+    if (normalized.tokens.length === 0 && normalized.verifiedAt === undefined) continue;
     state.peers.set(normalized.id, normalized);
   }
   for (const item of snapshot?.work ?? []) {

@@ -24,6 +24,7 @@ import {
   sanitizeToken,
 } from './distributed-runtime-utils.js';
 import {
+  DISTRIBUTED_PEER_PRESENCE_WINDOW_MS,
   expireDistributedPairRequests,
   pruneAndPersistDistributedRuntime,
   publishDistributedRuntimeEvent,
@@ -123,7 +124,8 @@ export async function approveDistributedPairRequest(
   if (!request) return null;
   if (request.status === 'verified') {
     // Approving again is idempotent: the device already holds its peer.
-    return { request: sanitizePairRequest(request), peer: sanitizePeer(ensurePeerFromRequest(state, request, input.label, input.metadata, false)) };
+    const held = findPeerForRequest(state, request);
+    if (held) return { request: sanitizePairRequest(request), peer: sanitizePeer(applyOperatorEdits(state, held, input.label, input.metadata)) };
   }
   if (request.status !== 'approved' && !pairRequestLifecycle.can(request.status, 'approved')) {
     // A rejected or expired request gets no peer: the device could never
@@ -133,20 +135,28 @@ export async function approveDistributedPairRequest(
       'REMOTE_PAIR_REQUEST_SETTLED',
     );
   }
-  const replaces = request.peerId ? undefined : [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId);
-  if (replaces && !input.confirmReplace) {
+  // Only a peer that verified exists: approval creates nothing, so a request
+  // that expires or is rejected leaves no peer behind.
+  const replaces = [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId);
+  if (replaces && request.status !== 'approved' && !input.confirmReplace) {
     throw new DistributedRuntimeRefusalError(
       `This request names the existing peer ${replaces.id} (${replaces.label}). Verifying it replaces that peer's capabilities, commands and tokens. Approve again with confirmReplace: true only if this is the same device re-pairing.`,
       'REMOTE_PAIR_REPLACES_PEER',
     );
   }
-  const peer = ensurePeerFromRequest(state, request, input.label, input.metadata, false);
+  // The operator's label and metadata apply to a peer that already exists; for
+  // a new device they are kept on the request and the peer is created from it
+  // when the device verifies, under the id returned here.
+  const peer = replaces
+    ? applyOperatorEdits(state, replaces, input.label, input.metadata)
+    : peerFromRequest(request, request.peerId ?? newPeerId(request.peerKind), input.label, input.metadata);
   const updated: StoredPairRequest = {
     ...request,
     status: 'approved',
-    approvedAt: Date.now(),
+    approvedAt: request.approvedAt ?? Date.now(),
     updatedAt: Date.now(),
     peerId: peer.id,
+    ...(!replaces && input.label?.trim() ? { label: input.label.trim() } : {}),
     ...(replaces ? { replacesPeerId: replaces.id } : {}),
     metadata: {
       ...request.metadata,
@@ -226,8 +236,8 @@ export async function verifyDistributedPairRequest(
       410,
     );
   }
-  const peerBefore = request.peerId ? state.peers.get(request.peerId) : [...state.peers.values()].find((entry) => entry.requestedId === request.requestedId);
-  const peer = ensurePeerFromRequest(state, request, undefined, input.metadata);
+  const peerBefore = findPeerForRequest(state, request);
+  const peer = ensurePeerFromRequest(state, request, input.metadata);
   const issued = issueToken(state, peer.id, 'pair-verified-token');
   const verifiedRequest: StoredPairRequest = {
     ...request,
@@ -415,9 +425,9 @@ export async function authenticateDistributedPeerToken(
         activeTokenId: updatedToken.id,
         tokens: peer.tokens.map((entry) => entry.id === updatedToken.id ? updatedToken : entry),
       };
-      // Last-use times ride along with the next write (a heartbeat, pull or
-      // completion persists the whole store anyway); a write per call would
-      // rewrite every record for a timestamp.
+      // Last-use times ride along with the next real write (a claim, a
+      // completion, a pairing change); a write per call would rewrite every
+      // record for a timestamp.
       state.peers.set(peer.id, updatedPeer);
       return {
         peer: sanitizePeer(updatedPeer),
@@ -443,11 +453,12 @@ export async function heartbeatDistributedPeer(
   await startDistributedRuntime(state);
   const peer = state.peers.get(auth.peer.id);
   if (!peer) throw new Error(`Unknown distributed peer: ${auth.peer.id}`);
+  const now = Date.now();
   const updated: StoredPeerRecord = {
     ...peer,
     status: nextDistributedPeerStatus(peer.status, 'connected'),
-    lastSeenAt: Date.now(),
-    lastConnectedAt: Date.now(),
+    lastSeenAt: now,
+    lastConnectedAt: now,
     lastRemoteAddress: input.remoteAddress ?? peer.lastRemoteAddress,
     capabilities: input.capabilities ? [...input.capabilities] : peer.capabilities,
     commands: input.commands ? [...input.commands] : peer.commands,
@@ -457,13 +468,37 @@ export async function heartbeatDistributedPeer(
   };
   state.peers.set(peer.id, updated);
   renewDistributedWorkLeases(state, peer.id, auth.token.id);
-  recordDistributedRuntimeAudit(state, buildAudit('peer-connected', peer.id, {
-    peerId: peer.id,
-    note: updated.label,
-  }));
+  // Presence (last seen, renewed leases) stays in memory and rides the next
+  // real write, as authentication does. Only a peer coming back (it was not
+  // presented as connected) or a changed description is audited, written and
+  // published, so heartbeats neither rewrite the store nor push the approval
+  // and token records out of the bounded audit list.
+  const cameBack = !isPresentlyConnected(peer, now);
+  const described = updated.metadata !== peer.metadata
+    || updated.version !== peer.version
+    || updated.clientMode !== peer.clientMode
+    || !sameList(updated.capabilities, peer.capabilities)
+    || !sameList(updated.commands, peer.commands);
+  if (!cameBack && !described) return sanitizePeer(updated);
+  if (cameBack) {
+    recordDistributedRuntimeAudit(state, buildAudit('peer-connected', peer.id, {
+      peerId: peer.id,
+      note: updated.label,
+    }));
+  }
   await pruneAndPersistDistributedRuntime(state);
   publishDistributedRuntimeEvent(state, 'remote-peer-heartbeat', sanitizePeer(updated));
   return sanitizePeer(updated);
+}
+
+function isPresentlyConnected(peer: StoredPeerRecord, now: number): boolean {
+  return peer.status === 'connected'
+    && peer.lastSeenAt !== undefined
+    && now - peer.lastSeenAt <= DISTRIBUTED_PEER_PRESENCE_WINDOW_MS;
+}
+
+function sameList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry === b[index]);
 }
 
 /** Free-form peer metadata is merged on every heartbeat, so its size is bounded. */
@@ -471,26 +506,31 @@ const MAX_PEER_METADATA_KEYS = 64;
 /** Serialized size of one metadata value, and of all values together; larger values are skipped. */
 const MAX_PEER_METADATA_VALUE_BYTES = 4_096;
 const MAX_PEER_METADATA_TOTAL_BYTES = 64 * 1_024;
-function serializedSize(value: unknown): number {
-  try { return JSON.stringify(value)?.length ?? 0; } catch { return Infinity; }
+function serialized(value: unknown): string | undefined {
+  try { return JSON.stringify(value) ?? ''; } catch { return undefined; }
 }
+/** The merged metadata, or `current` itself when the heartbeat changed nothing. */
 function mergeBoundedPeerMetadata(
   current: Record<string, unknown>,
   incoming: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   if (!incoming) return current;
   const merged = { ...current };
-  let total = serializedSize(merged);
+  let changed = false;
+  let total = serialized(merged)?.length ?? 0;
   for (const [key, value] of Object.entries(incoming)) {
     if (!(key in merged) && Object.keys(merged).length >= MAX_PEER_METADATA_KEYS) continue;
-    const size = serializedSize(value);
-    if (size > MAX_PEER_METADATA_VALUE_BYTES) continue;
-    const replaced = key in merged ? serializedSize(merged[key]) : 0;
-    if (total - replaced + size > MAX_PEER_METADATA_TOTAL_BYTES) continue;
-    total += size - replaced;
+    const next = serialized(value);
+    if (next === undefined || next.length > MAX_PEER_METADATA_VALUE_BYTES) continue;
+    const held = key in merged ? serialized(merged[key]) : undefined;
+    if (held === next) continue;
+    const replaced = held?.length ?? 0;
+    if (total - replaced + next.length > MAX_PEER_METADATA_TOTAL_BYTES) continue;
+    total += next.length - replaced;
     merged[key] = value;
+    changed = true;
   }
-  return merged;
+  return changed ? merged : current;
 }
 
 /**
@@ -514,48 +554,42 @@ function renewDistributedWorkLeases(state: DistributedRuntimeManagerState, peerI
   }
 }
 
-function ensurePeerFromRequest(
+function newPeerId(kind: DistributedPeerKind): string {
+  return `${kind}-${randomUUID().slice(0, 8)}`;
+}
+
+/** The peer a request names: the one it was approved for, else the one with its requested id. */
+function findPeerForRequest(state: DistributedRuntimeManagerState, request: StoredPairRequest): StoredPeerRecord | undefined {
+  return (request.peerId ? state.peers.get(request.peerId) : undefined)
+    ?? [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId);
+}
+
+/** An operator's label and metadata on an existing peer; the unauthenticated request changes nothing on it. */
+function applyOperatorEdits(
   state: DistributedRuntimeManagerState,
+  existing: StoredPeerRecord,
+  label: string | undefined,
+  metadata: Record<string, unknown> | undefined,
+): StoredPeerRecord {
+  if (!label?.trim() && !metadata) return existing;
+  const edited: StoredPeerRecord = {
+    ...existing,
+    label: label?.trim() || existing.label,
+    metadata: { ...existing.metadata, ...(metadata ?? {}) },
+  };
+  state.peers.set(existing.id, edited);
+  return edited;
+}
+
+/** The peer a request describes, not stored. */
+function peerFromRequest(
   request: StoredPairRequest,
+  id: string,
   labelOverride?: string,
   metadata?: Record<string, unknown>,
-  /**
-   * False at approval: the request is unauthenticated until its challenge is
-   * verified, so it must not rewrite a live peer it merely names by id.
-   */
-  applyRequest = true,
 ): StoredPeerRecord {
-  const existing = request.peerId ? state.peers.get(request.peerId) : [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId);
-  if (existing && !applyRequest) {
-    const operatorEdited: StoredPeerRecord = {
-      ...existing,
-      label: labelOverride?.trim() || existing.label,
-      metadata: { ...existing.metadata, ...(metadata ?? {}) },
-    };
-    if (labelOverride?.trim() || metadata) state.peers.set(existing.id, operatorEdited);
-    return operatorEdited;
-  }
-  if (existing) {
-    const merged: StoredPeerRecord = {
-      ...existing,
-      label: labelOverride?.trim() || existing.label,
-      platform: request.platform ?? existing.platform,
-      deviceFamily: request.deviceFamily ?? existing.deviceFamily,
-      version: request.version ?? existing.version,
-      clientMode: request.clientMode ?? existing.clientMode,
-      capabilities: request.capabilities.length > 0 ? request.capabilities : existing.capabilities,
-      commands: request.commands.length > 0 ? request.commands : existing.commands,
-      metadata: {
-        ...existing.metadata,
-        ...request.metadata,
-        ...(metadata ?? {}),
-      },
-    };
-    state.peers.set(existing.id, merged);
-    return merged;
-  }
-  const peer: StoredPeerRecord = {
-    id: `${request.peerKind}-${randomUUID().slice(0, 8)}`,
+  return {
+    id,
     kind: request.peerKind,
     label: labelOverride?.trim() || request.label,
     requestedId: request.requestedId,
@@ -580,26 +614,38 @@ function ensurePeerFromRequest(
       ...(metadata ?? {}),
     },
   };
-  state.peers.set(peer.id, peer);
-  return peer;
 }
 
-function ensurePlaceholderPeer(state: DistributedRuntimeManagerState, peerId: string, kind: DistributedPeerKind): StoredPeerRecord {
-  const existing = state.peers.get(peerId);
-  if (existing) return existing;
-  const peer: StoredPeerRecord = {
-    id: peerId,
-    kind,
-    label: peerId,
-    requestedId: peerId,
-    capabilities: [],
-    commands: [],
-    permissions: undefined,
-    status: 'idle',
-    pairedAt: Date.now(),
-    tokens: [],
-    metadata: {},
-  };
+/**
+ * At verification, once the device has proved it holds the challenge: the
+ * request's fields replace those of the peer it names, or a new peer is
+ * created under the id its approval returned.
+ */
+function ensurePeerFromRequest(
+  state: DistributedRuntimeManagerState,
+  request: StoredPairRequest,
+  metadata?: Record<string, unknown>,
+): StoredPeerRecord {
+  const existing = findPeerForRequest(state, request);
+  if (existing) {
+    const merged: StoredPeerRecord = {
+      ...existing,
+      platform: request.platform ?? existing.platform,
+      deviceFamily: request.deviceFamily ?? existing.deviceFamily,
+      version: request.version ?? existing.version,
+      clientMode: request.clientMode ?? existing.clientMode,
+      capabilities: request.capabilities.length > 0 ? request.capabilities : existing.capabilities,
+      commands: request.commands.length > 0 ? request.commands : existing.commands,
+      metadata: {
+        ...existing.metadata,
+        ...request.metadata,
+        ...(metadata ?? {}),
+      },
+    };
+    state.peers.set(existing.id, merged);
+    return merged;
+  }
+  const peer = peerFromRequest(request, request.peerId ?? newPeerId(request.peerKind), undefined, metadata);
   state.peers.set(peer.id, peer);
   return peer;
 }

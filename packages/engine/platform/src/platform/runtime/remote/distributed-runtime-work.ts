@@ -136,6 +136,13 @@ export async function enqueueDistributedWork(
       'REMOTE_PEER_REVOKED',
     );
   }
+  if (!peer.tokens.some((token) => !token.revokedAt)) {
+    // Only a verified device holds a token to pull with.
+    throw new DistributedRuntimeRefusalError(
+      `Remote peer ${peer.id} has not finished pairing (it holds no access token), so it could never pull this work. Ask the device to verify its pairing request, then send the work again.`,
+      'REMOTE_PEER_NOT_PAIRED',
+    );
+  }
   if (admission) {
     admission.signal.throwIfAborted(); admission.assertCurrent(); admission.signal.throwIfAborted();
     if (startingPeerRevision !== undefined && state.peerRevision(input.peerId) !== startingPeerRevision) throw new Error('Distributed peer changed during admission startup.');
@@ -267,7 +274,9 @@ export async function claimDistributedWork(
   const maxItems = Math.min(10, Math.max(1, Math.trunc(input.maxItems ?? 4)));
   const leaseMs = Math.max(5_000, Math.trunc(input.leaseMs ?? 45_000));
   // Work past its deadline expires here, before it can be claimed and offered to the peer.
+  // This is the pull's one expiry pass; the write below does not repeat it.
   requeueDistributedExpiredClaims(state);
+  let refused = false;
   const queued = sortWork(state.work.values())
     .filter((item) => item.peerId === peer.id && item.status === 'queued')
     .slice(0, maxItems);
@@ -279,7 +288,7 @@ export async function claimDistributedWork(
       // A stale pull cannot acquire fresh work, but genuinely stale owners are reaped first.
       if (owner && owner.peerTokenId !== auth.token.id) continue;
     }
-    catch { refuseAdmission(state, item.id); continue; }
+    catch { refuseAdmission(state, item.id); refused = true; continue; }
     const next: DistributedPendingWork = {
       ...item,
       status: 'claimed',
@@ -298,16 +307,17 @@ export async function claimDistributedWork(
       note: item.command,
     }));
   }
-  await pruneAndPersistDistributedRuntime(state);
+  // A pull that claimed and refused nothing changed nothing worth writing.
+  if (claimed.length > 0 || refused) await persistDistributedRuntime(state);
   if (claimed.length > 0) {
     publishDistributedRuntimeEvent(state, 'remote-work-claimed', {
-      peer: sanitizePeer(state.peers.get(peer.id)!),
+      peer: sanitizePeer(state.peers.get(peer.id) ?? peer),
       workIds: claimed.map((item) => item.id),
     });
   }
   const delivered: DistributedPendingWork[] = [];
   for (const claimedItem of claimed) {
-    // The prune above can expire a claim whose deadline fell after it was taken; never offer settled work.
+    // Another call during the write above can settle or requeue a claim; never offer settled work.
     // A heartbeat landing during that await legitimately replaces the record with an extended lease, so
     // work without a host admission is delivered from the stored record while this token still holds it.
     const stored = state.work.get(claimedItem.id);
@@ -412,11 +422,11 @@ export async function completeDistributedWork(
       note: status === 'completed' ? summarizeValue(recorded.result) || 'no result' : (input.error ?? status),
     },
   ));
-  const bridgePeer = state.peers.get(auth.peer.id) ?? ensurePlaceholderPeer(state, auth.peer.id, current.peerKind);
+  const bridgePeer = state.peers.get(auth.peer.id) ?? bridgePeerFor(auth.peer.id, current.peerKind);
   await pruneAndPersistDistributedRuntime(state);
   await bridgeSettledAndRemember(state, bridgePeer, recorded);
   publishDistributedRuntimeEvent(state, 'remote-work-settled', {
-    peer: sanitizePeer(state.peers.get(auth.peer.id)!),
+    peer: sanitizePeer(state.peers.get(auth.peer.id) ?? bridgePeer),
     work: recorded,
   });
   resolveDistributedRuntimeWaiters(state, updated);
@@ -466,7 +476,7 @@ export async function cancelDistributedWork(
     workId,
     note: updated.error,
   }));
-  const bridgePeer = state.peers.get(updated.peerId) ?? ensurePlaceholderPeer(state, updated.peerId, updated.peerKind);
+  const bridgePeer = state.peers.get(updated.peerId) ?? bridgePeerFor(updated.peerId, updated.peerKind);
   await pruneAndPersistDistributedRuntime(state);
   await bridgeSettledAndRemember(state, bridgePeer, updated);
   publishDistributedRuntimeEvent(state, 'remote-work-cancelled', updated);
@@ -474,14 +484,12 @@ export async function cancelDistributedWork(
   return updated;
 }
 
-function ensurePlaceholderPeer(
-  state: DistributedRuntimeManagerState,
+/** The record the bridges are told about when the work's peer is gone; it is not stored as a peer. */
+function bridgePeerFor(
   peerId: string,
   kind: DistributedPeerRecord['kind'],
 ): StoredPeerRecord {
-  const existing = state.peers.get(peerId);
-  if (existing) return existing;
-  const peer: StoredPeerRecord = {
+  return {
     id: peerId,
     kind,
     label: peerId,
@@ -494,6 +502,4 @@ function ensurePlaceholderPeer(
     tokens: [],
     metadata: {},
   };
-  state.peers.set(peer.id, peer);
-  return peer;
 }

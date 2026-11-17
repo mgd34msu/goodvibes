@@ -12,6 +12,10 @@
  * platform drops `system` messages from the LLM view and does not merge consecutive
  * `user` messages (which would trip a consecutive-user-message API error).
  */
+import { spawn } from 'node:child_process';
+import { constants as osConstants } from 'node:os';
+import type { Readable } from 'node:stream';
+
 export const SHELL_USAGE_HINT =
   '[Shell] Usage: !<command>, runs a shell command; its output is shown and added as context for your next message. Esc stops a command that is still running.';
 
@@ -73,14 +77,20 @@ export class ShellPassthrough {
   async run(command: string, cwd: string, options: ShellRunOptions = {}): Promise<ShellRunResult> {
     const timeoutMs = options.timeoutMs;
     // Its own process group, so stopping it reaches every part of a pipeline or `a; b` list and not only bash.
-    const proc = Bun.spawn(['bash', '-c', command], { cwd, stdout: 'pipe', stderr: 'pipe', detached: process.platform !== 'win32' });
+    const proc = spawn('bash', ['-c', command], { cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    // The shell's exit, not the pipes' close: a background child can hold the pipes open.
+    const exited = new Promise<number>((resolve, reject) => {
+      proc.once('error', reject);
+      proc.once('exit', (code, signal) => resolve(code ?? 128 + (signal ? osConstants.signals[signal] : 0)));
+    });
     const outcome: { stoppedBy: 'timeout' | 'cancelled' | null } = { stoppedBy: null };
     const stop = (reason: 'timeout' | 'cancelled'): void => {
       if (outcome.stoppedBy) return;
       outcome.stoppedBy = reason;
       try {
         if (process.platform === 'win32') proc.kill('SIGKILL');
-        else process.kill(-proc.pid, 'SIGKILL');
+        else if (proc.pid !== undefined) process.kill(-proc.pid, 'SIGKILL');
+        else proc.kill('SIGKILL');
       } catch {
         // The group is already gone; fall back to the shell itself.
         try { proc.kill('SIGKILL'); } catch { /* already exited */ }
@@ -91,28 +101,22 @@ export class ShellPassthrough {
     const timer = timeoutMs === undefined ? undefined : setTimeout(() => stop('timeout'), timeoutMs);
     const out = new CappedText(SHELL_OUTPUT_LIMIT_CHARS);
     const err = new CappedText(SHELL_OUTPUT_LIMIT_CHARS);
-    const readers: Array<ReadableStreamDefaultReader<Uint8Array>> = [];
-    const drain = async (stream: ReadableStream<Uint8Array>, sink: CappedText): Promise<void> => {
-      const reader = stream.getReader();
-      readers.push(reader);
+    const streams: Readable[] = [proc.stdout, proc.stderr];
+    const drain = async (stream: Readable, sink: CappedText): Promise<void> => {
       try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) return;
-          sink.push(value);
-        }
+        for await (const chunk of stream) sink.push(chunk as Buffer);
       } catch {
-        // A cancelled reader ends the drain; what was read so far is kept.
+        // A destroyed stream ends the drain; what was read so far is kept.
       }
     };
     try {
       const drained = Promise.all([drain(proc.stdout, out), drain(proc.stderr, err)]);
-      const exitCode = await proc.exited;
+      const exitCode = await exited;
       // A background child can keep the pipes open after the shell has gone.
       let grace: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([drained, new Promise<void>((resolve) => { grace = setTimeout(resolve, OUTPUT_GRACE_MS); })]);
       clearTimeout(grace);
-      for (const reader of readers) void reader.cancel().catch(() => {});
+      for (const stream of streams) stream.destroy();
       const combined = [out.finish(), err.finish()].filter((s) => s.trim().length > 0).join('\n').trimEnd();
       const dropped = out.dropped + err.dropped;
       const notes: string[] = [];

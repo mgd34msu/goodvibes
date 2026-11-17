@@ -6,9 +6,7 @@
  * outbound sends, sessions, the control plane, or HTTP, those run on every
  * node regardless of who holds the role.
  *
- * `cluster.peers` is an array, so like `conversationGate.gatedSurfaces` it is
- * not a scalar ConfigKey; it is read through `getCategory('cluster')` and
- * carried in DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS so ownership walks see it.
+ * `cluster.peers` is a list setting; its row is in schema-domain-lists.ts.
  */
 import { intRange, port, type ConfigSettingDefinition } from './schema-shared.js';
 

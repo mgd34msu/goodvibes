@@ -8,6 +8,7 @@ export type ListConfigKey =
   | 'cluster.peers'
   | 'conversationGate.gatedSurfaces'
   | 'contract.gates'
+  | 'notifications.webhookUrls'
   | 'sandbox.egressAllowlist'
   | 'sandbox.workspaceWritable'
   | 'worktree.setup.commands'

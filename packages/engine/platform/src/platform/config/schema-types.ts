@@ -213,8 +213,6 @@ export interface GoodVibesConfig {
     globalModel: string;                 // default: ''
     // Per-provider overrides accessed via configManager.getCategory('helper').providers
   };
-  // NOTE: notifications.webhookUrls is an array and does not fit the scalar-value dot-path config API.
-  // Access via configManager.getCategory('notifications') or mergeCategory('notifications', ...).
   notifications: NotificationsConfig;
   runtime: RuntimeConfig;
   telemetry: TelemetryConfig;

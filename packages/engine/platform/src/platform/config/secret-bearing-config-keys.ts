@@ -92,6 +92,8 @@ export const SECRET_BEARING_CONFIG_PATHS: readonly string[] = [
   // carries its own token; its credential reading could not settle, so it is
   // declared (config.credential-key v2, fail-closed credential-scope gate).
   'surfaces.webhook.defaultTarget',
+  // The notification webhooks: a list of the same kind of URL, held whole.
+  'notifications.webhookUrls',
   'surfaces.homeassistant.accessToken',
   'surfaces.homeassistant.webhookSecret',
 

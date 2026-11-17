@@ -27,6 +27,16 @@ export interface ListConfigSetting extends Omit<ConfigSetting, 'key' | 'type'> {
   readonly type: 'object';
 }
 
+/** An http or https URL, the only kind a notification webhook can post to. */
+function webhookUrl(entry: string): boolean {
+  try {
+    const url = new URL(entry);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
@@ -66,6 +76,17 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     description: 'Quality gates a contract runs before it reports work done: each is { name, command, enabled } with optional required and verification. Any gate passes or fails on its command\'s exit code. A list with a gate that cannot run is refused when saved',
     validate: (value) => contractGateListProblems(value).length === 0,
     validationHint: CONTRACT_GATE_LIST_HINT,
+  },
+  {
+    // Declared a credential (secret-bearing-config-keys.ts): an incoming webhook
+    // URL carries its key, so every list, export and event masks it.
+    key: 'notifications.webhookUrls',
+    type: 'object',
+    default: [...coreConfigDefaults.notifications.webhookUrls],
+    description: 'Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so the list is shown masked. Applies at the next start',
+    validate: (value) => stringList(value) && value.every(webhookUrl),
+    closedShape: true,
+    validationHint: 'list of http(s) URLs, for example ["https://hooks.example.com/abc"]',
   },
   {
     key: 'sandbox.egressAllowlist',

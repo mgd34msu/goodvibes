@@ -82,8 +82,6 @@ export interface AdditionalConfigKey {
  * fails to compile here until someone says whether it is a secret.
  */
 const NON_SCHEMA_PATH_SECRET: Readonly<Record<DaemonOwnedNonSchemaConfigPath, boolean>> = {
-  'conversationGate.gatedSurfaces': false,
-  'cluster.peers': false,
   'cluster.groupMaterial': true,
   'google.oauth.refreshToken': true,
   'email.passwordRef': true,

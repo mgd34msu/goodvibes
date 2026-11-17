@@ -183,32 +183,21 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
 ];
 
 /**
- * Daemon-owned config paths that are NOT scalar schema keys.
+ * Daemon-owned config paths that are not rows of the settings table.
  *
- * `listDaemonOwnedConfigKeys()` is derived from CONFIG_SCHEMA, and CONFIG_SCHEMA
- * only describes scalars. An array-valued daemon setting therefore has real
- * ownership (`isDaemonOwnedConfigKey` matches it by prefix, so `set` routes it
- * to the daemon store) but was invisible to everything that WALKS the owned set:
- * the migration never moved it, the daemon-tier overlay never read it back, and
- * a whole-config save never stripped it from the surface file. The result is a
- * value that looks daemon-owned, is written to the daemon store when set through
- * the API, and is silently ignored when it already exists in a client silo.
- *
- * `conversationGate.gatedSurfaces` is the live case: `conversationGate.mode`
- * migrated and this list did not, so a machine could have the gate's mode in the
- * daemon store and its surface list stranded in `~/.goodvibes/tui/settings.json`.
- *
- * Adding a path here grows the covered set, which is what makes the migration
- * re-run on the next start and pick the stranded value up.
+ * `listDaemonOwnedConfigKeys()` is derived from CONFIG_SCHEMA, so a daemon
+ * path with no row there would be invisible to everything that WALKS the owned
+ * set (the migration, the daemon-tier overlay, a whole-config save's strip)
+ * although `isDaemonOwnedConfigKey` routes its writes to the daemon store. The
+ * paths here are those: credential references and key material that are never
+ * shown as settings. Adding a path grows the covered set, which makes the
+ * migration re-run on the next start and pick a stranded value up.
  */
 export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS = [
-  'conversationGate.gatedSurfaces',
-  // Same shape as gatedSurfaces: an array-valued daemon setting that the
-  // prefix match already routes to the daemon store, but that every owned-set
-  // WALK would miss without an entry here, so a static peer list set before
-  // this shipped would strand in a client silo and the daemon would keep
-  // coordinating over multicast alone on a network that drops it.
-  'cluster.peers',
+  // The list settings (`conversationGate.gatedSurfaces`, `cluster.peers`, ...)
+  // are rows of the settings table now (schema-domain-lists.ts) and reach the
+  // owned set through it; only paths that are not settings stay here.
+  //
   // The group's key material. Daemon-owned for the same reason the rest of the
   // cluster's settings are: the daemon is the only thing that reads it, and a
   // client silo can only hold a stale copy of it.

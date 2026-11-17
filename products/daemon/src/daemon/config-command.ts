@@ -105,6 +105,8 @@ export async function renderConfigValue(key: string, value: unknown): Promise<st
       if (value.startsWith('goodvibes://secrets/')) return value;
       return REDACTED_VALUE;
     }
+    // A masked list says how many entries it holds, so an empty one reads as empty.
+    if (Array.isArray(value)) return value.length === 0 ? '[]' : `[${value.length} hidden]`;
     return value === false || value === 0 ? JSON.stringify(value) : REDACTED_VALUE;
   }
   if (value === undefined) return 'unset';

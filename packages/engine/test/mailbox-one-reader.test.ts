@@ -1,13 +1,19 @@
 // Proves: Inbound mail is lost or announced twice across reconnect, restart mid-batch, mailbox reset, a poison message, or two daemons.
 // Red when: The cursor advances before a message is recorded or a restart re-announces one, one unreadable message stops the drain, or both daemons sign in and read.
+// Proves: A mail that arrives while the owner's notice channel is failing is never announced, or is forgotten at a restart.
+// Red when: The delivery-failed outcome is not written to the record, so nothing is owed when the route returns.
+// Proves: A mail whose handling keeps failing holds every later mail behind it, or is dropped with nothing recorded.
+// Red when: The sink never sets a message aside after its attempts, or keeps its claim after a failed attempt.
 /**
  * One mailbox, one reader: inbound notices and the inbox both get every
  * message from the same reader, exactly once, against a scripted IMAP server.
  *
  * The pieces are the real ones: the supervisor and IMAP watcher, the cursor
- * and record stores, the notice intake, the inbox owner and its SQLite mirror.
- * Only the mail server, the clock and the notice route are stand-ins, and
- * screening runs in its local (no decision model) mode so no model is involved.
+ * and record stores, the notice intake (one per daemon, as the daemon builds
+ * it), the inbox owner and its SQLite mirror. Only the mail server, the clock
+ * and the notice route are stand-ins, and screening runs in its local (no
+ * decision model) mode so no model is involved. Where a case needs handling to
+ * fail, the handler the supervisor is given throws for one subject.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -27,6 +33,7 @@ import {
   MailboxReaders,
   PersistedExpectationStore,
   resolveWatcherSettings,
+  type InboundMailboxMessage,
   type InboundMailNote,
   type InboundMailSupervisorDeps,
 } from '../platform/src/platform/email/inbound/index.ts';
@@ -71,22 +78,21 @@ async function machine(server: FakeMailboxOptions = {}) {
   const housekeeper = new InboundMailHousekeeper({ cursors, records, expectations: expectationStore, disclosurePath: join(dir, 'housekeeping.json') });
   const notices: string[] = [];
   let holdNotice: { readonly subject: string; readonly reached: () => void; readonly release: Promise<void> } | null = null;
-  const intake = createInboundMailIntake({
-    expectations: expectations.matcher,
-    records,
-    notices: {
-      resolveBinding: () => ({ kind: 'bound', binding: { surfaceKind: 'telegram' } }),
-      send: async (notice) => {
-        const text = JSON.stringify(notice);
-        const hold = holdNotice;
-        if (hold !== null && text.includes(hold.subject)) { holdNotice = null; hold.reached(); await hold.release; }
-        notices.push(text);
-        return { delivered: true };
-      },
+  /** The owner's notice channel; while `down` it refuses every notice as a transport failure. */
+  const route = { down: false };
+  const noticeRoute: Parameters<typeof createInboundMailIntake>[0]['notices'] = {
+    resolveBinding: () => ({ kind: 'bound', binding: { surfaceKind: 'telegram' } }),
+    send: async (notice) => {
+      if (route.down) return { delivered: false, reason: 'delivery-failed', error: 'the notice channel is down' };
+      const text = JSON.stringify(notice);
+      const hold = holdNotice;
+      if (hold !== null && text.includes(hold.subject)) { holdNotice = null; hold.reached(); await hold.release; }
+      notices.push(text);
+      return { delivered: true };
     },
-    noticeMode: () => 'all',
-    now: () => new Date(),
-  });
+  };
+  /** How many more times handling throws for a subject. */
+  const failHandling = new Map<string, number>();
 
   // The inbox: its owner, its own SQLite mirror, attached to the reader by key.
   const account = { host: 'imap.example.test', port: 993, username: 'watched@example.test', mailbox: MAILBOX, security: 'tls' as const };
@@ -106,9 +112,18 @@ async function machine(server: FakeMailboxOptions = {}) {
   readers.attach(KEY, owner.consumer, { requestHistory: owner.needsHistory() });
 
   const notes: InboundMailNote[] = [];
-  /** One daemon's reader over this machine's stores. */
-  const daemon = (): InboundMailSupervisor => {
-    const supervisor = new InboundMailSupervisor({
+  /** One daemon's reader and notice intake over this machine's stores; a restart starts with nothing in memory. */
+  const daemon = () => {
+    const intake = createInboundMailIntake({ expectations: expectations.matcher, records, notices: noticeRoute, noticeMode: () => 'all', now: () => new Date() });
+    const handle = Object.assign(async (message: InboundMailboxMessage): Promise<void> => {
+      const left = failHandling.get(message.subject) ?? 0;
+      if (left > 0) {
+        failHandling.set(message.subject, left - 1);
+        throw new Error(`handling ${message.subject} failed`);
+      }
+      await intake(message);
+    }, { takeSpentOutcome: (message: InboundMailboxMessage) => intake.takeSpentOutcome(message) });
+    const supervisor: InboundMailSupervisor = new InboundMailSupervisor({
       config: { get: (key: string) => (ON as Record<string, unknown>)[key] } as unknown as InboundMailSupervisorDeps['config'],
       reviveDelayMs: 0,
       leaseRetryMs: 3_600_000,
@@ -123,17 +138,23 @@ async function machine(server: FakeMailboxOptions = {}) {
       }) },
       selectionFacts: async () => ({ googleAdopted: false, mailAccountIsGmail: false }),
       cursors, records, expectations, expectationPolicy: expectationStore, housekeeper,
-      handle: intake,
+      handle,
       observer: { note: (note) => { notes.push(note); } },
       consumers: () => readers.consumers(KEY),
       readerLease: () => holdProcessLock(join(dir, 'reader.lock')),
     });
-    cleanups.push(() => supervisor.stop());
-    return supervisor;
+    const stop = async () => { await supervisor.stop(); intake.stop(); };
+    cleanups.push(stop);
+    return {
+      // As the daemon does once its reader runs: notices held before a restart are still owed.
+      async start() { await supervisor.start(); void intake.sendHeldNotices(); },
+      stop,
+      get status() { return supervisor.status; },
+    };
   };
   const rows = () => inbox.mirror!.listItems({ providers: ['email'], limit: 1_000 });
   return {
-    mailbox, clock, cursors, notices, notes, rows, daemon,
+    mailbox, clock, cursors, records, notices, notes, rows, daemon, route, failHandling,
     /** How many notices named this subject. */
     announced: (subject: string) => notices.filter((text) => text.includes(subject)).length,
     /** How many inbox rows show this subject. */
@@ -264,4 +285,55 @@ test('with two daemons for the same account only one signs in and reads', async 
   expect(m.announced('to one reader')).toBe(1);
   expect(m.announced('after handover')).toBe(1);
   expect(m.rows()).toHaveLength(2);
+});
+
+test('a mail that arrives while the notice channel is down is announced once when it works again, also across a restart', async () => {
+  const m = await machine();
+  const first = m.daemon();
+  await first.start();
+  await pump(m.clock, () => idleCount(m.mailbox) >= 1, 'IDLE');
+
+  // The notice channel is down: the mail is read and recorded, the cursor passes it, nobody is told yet.
+  m.route.down = true;
+  m.mailbox.deliver('during the outage');
+  await pump(m.clock, async () => m.shown('during the outage') === 1 && (await m.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid === 101,
+    'the cursor past the mail whose notice is held');
+  expect(m.announced('during the outage')).toBe(0);
+
+  // The daemon restarts while the channel is still down; nothing of the held notice is in memory any more.
+  await first.stop();
+  const second = m.daemon();
+  await second.start();
+  await pump(m.clock, () => idleCount(m.mailbox) >= 2, 'IDLE after the restart');
+  expect(m.announced('during the outage')).toBe(0);
+
+  // The channel works again and the next mail's notice gets through: the held one follows it.
+  m.route.down = false;
+  m.mailbox.deliver('after the outage');
+  const held = async () => (await m.records.list()).find((record) => record.subject === 'during the outage');
+  await pump(m.clock, async () => m.announced('after the outage') === 1 && m.announced('during the outage') === 1
+    && (await held())?.noticeStatus === 'delivered', 'both notices sent and the held one settled');
+  expect({ held: m.announced('during the outage'), after: m.announced('after the outage') }).toEqual({ held: 1, after: 1 });
+});
+
+test('a mail whose handling keeps failing is set aside and reported once, one that failed once is handled on the next pass, and the mail after them arrives', async () => {
+  const m = await machine();
+  m.failHandling.set('keeps failing', Number.POSITIVE_INFINITY);
+  m.failHandling.set('fails once', 1);
+  const reader = m.daemon();
+  await reader.start();
+  await pump(m.clock, () => idleCount(m.mailbox) >= 1, 'IDLE');
+  m.mailbox.deliverQuietly('keeps failing');
+  m.mailbox.deliverQuietly('fails once');
+  m.mailbox.deliverQuietly('after them');
+  m.mailbox.push('* 3 EXISTS');
+  await pump(m.clock, async () => m.shown('after them') === 1 && (await m.cursors.get(ACCOUNT, MAILBOX))?.lastSeenUid === 103,
+    'the mail after the failing one, and the cursor past all three');
+
+  expect({ failing: m.announced('keeps failing'), once: m.announced('fails once'), after: m.announced('after them') })
+    .toEqual({ failing: 0, once: 1, after: 1 });
+  // Recorded as set aside, and the owner told once.
+  const setAside = (await m.records.list()).filter((record) => record.subject === 'keeps failing');
+  expect(setAside.map((record) => record.noticeFailureReason?.startsWith('Set aside') ?? false)).toEqual([true]);
+  expect(m.notes.filter((note) => note.detail.startsWith('set aside'))).toHaveLength(1);
 });

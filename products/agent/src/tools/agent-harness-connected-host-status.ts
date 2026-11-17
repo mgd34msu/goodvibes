@@ -5,7 +5,7 @@ import { inspectCliExternalRuntime, type CliExternalRuntimeSnapshot } from '../c
 import type { CommandContext } from '../input/command-registry.ts';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
-import { CONNECTED_HOST_LIFECYCLE_STATEMENT } from './agent-harness-connected-host-capabilities.ts';
+import { CONNECTED_HOST_LIFECYCLE_STATEMENT, CONNECTED_HOST_OWNERSHIP, gatedConnectedHostCapabilities } from './agent-harness-connected-host-capabilities.ts';
 import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
 import {
   blockedConnectedHostCapabilities,
@@ -92,7 +92,7 @@ export async function connectedHostStatusSummary(
   const tokenPath = harnessDisplayPath(token.path, homeDirectory);
 
   return {
-    ownership: 'external-connected-host',
+    ownership: CONNECTED_HOST_OWNERSHIP,
     readOnly: true,
     modelRoute: 'host action:"status" or action:"services"',
     compatibilityRoutes: {
@@ -145,6 +145,7 @@ export async function connectedHostStatusSummary(
     capabilitySummary: {
       routeFamilies: connectedHostRouteFamilies().length,
       availableCapabilities: connectedHostCapabilityMap(toolRegistry).filter((capability) => capability.available === true).length,
+      gatedCapabilities: gatedConnectedHostCapabilities().length,
       blockedCapabilities: blockedConnectedHostCapabilities().length,
     },
     ...(options.includeParameters ? { modelAccess: {
@@ -156,6 +157,7 @@ export async function connectedHostStatusSummary(
     },
     routeFamilies: connectedHostRouteFamilies(),
     capabilities: connectedHostCapabilityMap(toolRegistry),
+    gatedCapabilities: gatedConnectedHostCapabilities(new Set(toolRegistry.getToolDefinitions().map((tool) => tool.name))),
     blockedCapabilities: blockedConnectedHostCapabilities() } : {}),
   };
 }

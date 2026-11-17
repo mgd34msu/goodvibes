@@ -1,7 +1,5 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
-import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 /**
  * agent-harness-connected-host-capabilities.ts, the connected-host capability
  * map the harness serves, and the route families behind it.
@@ -27,14 +25,18 @@ import { EFFECT_ADMISSION_SENTENCE } from './agent-harness-effect-admission.ts';
  * The one statement of who manages connected-host lifecycle and listeners,
  * shared by every catalog that describes it so none can contradict another.
  */
+/** Who owns the connected host: the GoodVibes daemon, which this Agent reaches but does not manage. */
+export const CONNECTED_HOST_OWNERSHIP = 'goodvibes-daemon';
+
 export const CONNECTED_HOST_LIFECYCLE_STATEMENT = `Connected-host lifecycle and listener changes (start, stop, restart, install, upgrade, expose or mutate a listener) are daemon operations. The package CLI mirror blocks those tokens; Agent reaches the supported daemon service methods only through agent_operator_method. ${EFFECT_ADMISSION_SENTENCE}`;
 
 export type ConnectedHostCapabilityResolution =
   | { readonly status: 'found'; readonly detail: Record<string, unknown> }
   | { readonly status: 'ambiguous'; readonly input: string; readonly candidates: readonly Record<string, unknown>[] };
 
-function toolIsAvailable(toolRegistry: ToolRegistry, toolName: string): boolean {
-  return toolRegistry.getToolDefinitions().some((tool) => tool.name === toolName);
+/** The registered tool names, read once per call. */
+function registeredToolNames(toolRegistry: ToolRegistry): ReadonlySet<string> {
+  return new Set(toolRegistry.getToolDefinitions().map((tool) => tool.name));
 }
 
 function connectedHostCapabilityModelRoute(capability: Record<string, unknown>): string {
@@ -49,9 +51,10 @@ function blockedConnectedHostModelRoute(): string {
   return hostActions('services', 'status');
 }
 
-export function connectedHostCapabilityMap(toolRegistry: ToolRegistry): readonly Record<string, unknown>[] {
+export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registered: ReadonlySet<string> = registeredToolNames(toolRegistry)): readonly Record<string, unknown>[] {
   const withAvailability = (capability: Record<string, unknown> & { readonly modelTools: readonly string[] }): Record<string, unknown> => ({
     ...capability,
+    access: 'tool',
     modelRoute: connectedHostCapabilityModelRoute(capability),
     harnessRoute: 'agent_harness mode:"connected_host_capability"',
     modelAccess: {
@@ -62,7 +65,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry): readonly
       operate: connectedHostCapabilityModelRoute(capability),
     },
     // modelTools are alternatives (the route text joins them with "or"), so one registered tool makes the capability reachable.
-    available: capability.modelTools.some((toolName) => toolIsAvailable(toolRegistry, toolName)),
+    available: capability.modelTools.some((toolName) => registered.has(toolName)),
   });
   return [
     withAvailability({
@@ -229,81 +232,87 @@ function relatedConnectedHostRouteFamilies(capability: Record<string, unknown>):
   });
 }
 
-function connectedHostCapabilityDetail(entry: { readonly status: 'allowed' | 'blocked'; readonly capability: Record<string, unknown> }): Record<string, unknown> {
-  if (entry.status === 'allowed') {
+type CapabilityAccess = 'tool' | 'gated' | 'blocked';
+type CapabilityEntry = { readonly access: CapabilityAccess; readonly capability: Record<string, unknown> };
+
+const INSPECT_ROUTES = {
+  inspectCapability: 'host action:"capability"',
+  connectedHostInventory: 'host action:"capabilities" includeParameters:true',
+  liveStatus: 'host action:"status"',
+  endpointPosture: 'host action:"services"',
+} as const;
+
+/** The detail of one capability, built from its one `access` field so its routes cannot contradict each other. */
+function connectedHostCapabilityDetail(entry: CapabilityEntry): Record<string, unknown> {
+  const harnessRoute = 'agent_harness mode:"connected_host_capability"';
+  if (entry.access === 'tool') {
     return {
       status: 'allowed',
+      access: 'tool',
       capability: entry.capability,
       modelRoute: connectedHostCapabilityModelRoute(entry.capability),
-      harnessRoute: 'agent_harness mode:"connected_host_capability"',
+      harnessRoute,
       relatedRouteFamilies: relatedConnectedHostRouteFamilies(entry.capability),
-      modelAccess: {
-        inspectCapability: 'host action:"capability"',
-        connectedHostInventory: 'host action:"capabilities" includeParameters:true',
-        liveStatus: 'host action:"status"',
-        endpointPosture: 'host action:"services"',
-        operate: connectedHostCapabilityModelRoute(entry.capability),
-      },
+      modelAccess: { ...INSPECT_ROUTES, operate: connectedHostCapabilityModelRoute(entry.capability) },
       operatorMethodMode: 'Use host action:"methods" for the public operator and Agent Knowledge method catalog. Use action:"method" for one method.',
       servicePostureMode: 'Use host action:"services" for endpoint binding, network-facing posture, issue, and redacted-log diagnostics. Use action:"service" for one endpoint.',
       statusMode: 'Use host action:"status" for live read-only reachability, token posture, and Agent Knowledge route readiness.',
       boundary: 'Use only the listed first-class model tools, slash-command families, and workspace categories. Mutations still require explicit confirmation through those tools or command routes.',
     };
   }
+  if (entry.access === 'gated') {
+    return {
+      status: 'gated',
+      access: 'gated',
+      capability: entry.capability,
+      modelRoute: 'agent_operator_method',
+      harnessRoute,
+      available: entry.capability.available === true,
+      modelAccess: { ...INSPECT_ROUTES, findMethod: 'host action:"methods"', operate: `agent_operator_method methodId:"<method>". ${EFFECT_ADMISSION_SENTENCE}` },
+      boundary: 'Operable only through agent_operator_method on a method the daemon contract publishes, and only under a recorded effect admission for that call.',
+    };
+  }
   return {
     status: 'blocked',
+    access: 'blocked',
     capability: entry.capability,
     modelRoute: blockedConnectedHostModelRoute(),
-    harnessRoute: 'agent_harness mode:"connected_host_capability"',
-    allowed: false,
+    harnessRoute,
     available: false,
-    modelAccess: {
-      inspectCapability: 'host action:"capability"',
-      connectedHostInventory: 'host action:"capabilities" includeParameters:true',
-      liveStatus: 'host action:"status"',
-      endpointPosture: 'host action:"services"',
-      operate: 'not exposed',
-    },
-    boundary: 'This connected-host surface is intentionally not exposed to the model as an Agent operation.',
-    servicePostureMode: 'Use host action:"services" or action:"service" only for read-only endpoint diagnostics.',
-    statusMode: 'Use host action:"status" only for read-only readiness diagnostics.',
+    modelAccess: { ...INSPECT_ROUTES, operate: 'not exposed' },
+    boundary: 'No route reaches this from the model; the capability says what to use instead.',
   };
 }
 
+function capabilityEntries(toolRegistry: ToolRegistry): readonly CapabilityEntry[] {
+  const registered = registeredToolNames(toolRegistry);
+  return [
+    ...connectedHostCapabilityMap(toolRegistry, registered).map(capability => ({ access: 'tool' as const, capability })),
+    ...gatedConnectedHostCapabilities(registered).map(capability => ({ access: 'gated' as const, capability })),
+    ...blockedConnectedHostCapabilities().map(capability => ({ access: 'blocked' as const, capability })),
+  ];
+}
+
+/** The capability ids, constant: an exact id is answered without reading the tool registry first. */
+const CAPABILITY_IDS = ['operator-briefing', 'operator-actions', 'schedule-edit', 'agent-knowledge-read', 'agent-knowledge-ingest', 'channels',
+  'notifications', 'reminders-and-schedules', 'voice-media', 'connected-host-lifecycle', 'arbitrary-connected-host-mutations',
+  'non-agent-knowledge', 'hidden-background-work'] as const;
+
 export async function describeConnectedHostCapability(toolRegistry: ToolRegistry, rawQuery: string,
   options: CatalogRankingOptions = {}): Promise<ConnectedHostCapabilityResolution | null> {
-  const request = captureCatalogReadRequest({ query: rawQuery }, options), query = normalizeCapabilityQuery(request.input.query);
-  if (!query) { request.assertCurrent(); return null; }
-  const assertRegistry = captureCatalogMethods(toolRegistry, ['getToolDefinitions', 'list', 'registrationRevision']);
-  const getDefinitions = toolRegistry.getToolDefinitions, listTools = toolRegistry.list;
-  assertRegistry();
-  const tools = listTools.call(toolRegistry);
-  const toolSlots = tools.map(tool => captureCatalogMethods(tool, ['definition', 'execute']));
-  const originalDefinitions = getDefinitions.call(toolRegistry), definitions = captureCatalogSnapshot(originalDefinitions);
-  const assertSource = () => {
-    assertRegistry();
-    const current = listTools.call(toolRegistry);
-    if (current.length !== tools.length || current.some((tool, index) => tool !== tools[index])) throw new ToolInputProjectionError('held');
-    for (const guard of toolSlots) guard();
-    definitions.assertCurrent(originalDefinitions); definitions.assertCurrent(getDefinitions.call(toolRegistry));
-    for (const guard of toolSlots) guard();
-    assertRegistry();
-  };
-  request.retain(assertSource, 'read-catalog.connected-host.registry');
-  const entries = [
-    ...connectedHostCapabilityMap(toolRegistry).map(capability => ({ status: 'allowed' as const, capability })),
-    ...blockedConnectedHostCapabilities().map(capability => ({ status: 'blocked' as const, capability })),
-  ];
-  request.assertCurrent();
-  return withModelReadingSource({ query: request.input.query, definitions: definitions.captured, entries }, request.options, async (captured, current): Promise<ConnectedHostCapabilityResolution | null> => {
-    const exact = captured.entries.find(entry => entry.capability.id === request.input.query);
-    const insensitive = exact ?? captured.entries.find(entry => typeof entry.capability.id === 'string' && entry.capability.id.toLowerCase() === query);
-    const selected = insensitive ?? await selectHarnessCatalog(captured.entries, request.input.query,
-      entry => { const id = entry.capability.id; if (typeof id !== 'string') throw new ToolInputProjectionError('held');
-        return { id, description: `Connected host capability ${id}`, evidence: entry }; }, current, 'agent.connected-host-capability.select');
-    current.assertCurrent?.();
-    return selected ? { status: 'found', detail: connectedHostCapabilityDetail(selected) } : null;
-  });
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const input = typeof rawQuery === 'string' ? rawQuery.trim() : '';
+  const query = normalizeCapabilityQuery(input);
+  if (!query) return null;
+  const id = CAPABILITY_IDS.find((candidate) => candidate === query);
+  const entries = capabilityEntries(toolRegistry);
+  const exact = id ? entries.find((entry) => entry.capability.id === id) : undefined;
+  if (exact) return { status: 'found', detail: connectedHostCapabilityDetail(exact) };
+  const selected = await selectHarnessCatalog(entries, input,
+    (entry) => ({ id: String(entry.capability.id), description: `${String(entry.capability.purpose ?? entry.capability.reason ?? '')} (${entry.access})` }),
+    options, 'agent.connected-host-capability.select');
+  options.signal?.throwIfAborted();
+  return selected ? { status: 'found', detail: connectedHostCapabilityDetail(selected) } : null;
 }
 
 export function connectedHostSummary(
@@ -315,13 +324,15 @@ export function connectedHostSummary(
   const homeDirectory = shellPaths?.homeDirectory ?? context.platform.configManager.getHomeDirectory() ?? '';
   const connection = resolveAgentConnectedHostConnection(context.platform.configManager, homeDirectory);
   const routeFamilies = connectedHostRouteFamilies();
-  const capabilities = connectedHostCapabilityMap(toolRegistry);
+  const registered = registeredToolNames(toolRegistry);
+  const capabilities = connectedHostCapabilityMap(toolRegistry, registered);
+  const gatedCapabilities = gatedConnectedHostCapabilities(registered);
   const blockedCapabilities = blockedConnectedHostCapabilities();
   return {
     baseUrl: connection.baseUrl,
     operatorToken: connection.token ? 'configured' : 'missing',
     tokenPath: harnessDisplayPath(connection.tokenPath, homeDirectory),
-    ownership: 'goodvibes-daemon',
+    ownership: CONNECTED_HOST_OWNERSHIP,
     lifecycle: CONNECTED_HOST_LIFECYCLE_STATEMENT,
     modes: {
       servicePosture: agentHarnessModes('service_posture', 'service_endpoint'),
@@ -344,69 +355,60 @@ export function connectedHostSummary(
       routeFamilies: routeFamilies.length,
       allowedCapabilities: capabilities.length,
       availableCapabilities: capabilities.filter((capability) => capability.available === true).length,
+      gatedCapabilities: gatedCapabilities.length,
       blockedCapabilities: blockedCapabilities.length,
     },
     ...(options.includeParameters === true ? {
       routeFamilies,
       capabilities,
+      gatedCapabilities,
       blockedCapabilities,
     } : {}),
   };
 }
 
-export function blockedConnectedHostCapabilities(): readonly Record<string, unknown>[] {
+/**
+ * Daemon operations the model can reach only through agent_operator_method,
+ * each call under its own recorded effect admission. Available when that tool
+ * is registered here.
+ */
+export function gatedConnectedHostCapabilities(registered?: ReadonlySet<string>): readonly Record<string, unknown>[] {
+  const available = registered?.has('agent_operator_method') ?? false;
   return [
     {
       id: 'connected-host-lifecycle',
-      confirmationGated: ['start', 'stop', 'restart', 'install', 'upgrade', 'expose-listener', 'mutate-listener'],
-      modelRoute: 'agent_operator_method',
-      harnessRoute: 'agent_harness mode:"connected_host_capability"',
-      modelAccess: {
-        inspectCapability: 'host action:"capability"',
-        liveStatus: 'host action:"status"',
-        endpointPosture: 'host action:"services"',
-        operate: `agent_operator_method when the daemon contract exposes the method. ${EFFECT_ADMISSION_SENTENCE}`,
-      },
-      reason: 'Lifecycle changes are powerful daemon operations. They are available only through explicit setup or confirmed operator methods, never as ambient background side effects.',
-    },
-    {
-      id: 'non-agent-knowledge',
-      blocked: ['default-knowledge', 'non-agent-knowledge-segments', 'fallback-knowledge'],
-      modelRoute: blockedConnectedHostModelRoute(),
-      harnessRoute: 'agent_harness mode:"connected_host_capability"',
-      modelAccess: {
-        inspectCapability: 'host action:"capability"',
-        allowedAgentKnowledge: 'agent_knowledge or agent_knowledge_ingest',
-        liveStatus: 'host action:"status"',
-        operate: 'not exposed',
-      },
-      reason: 'Agent model tools must stay inside the isolated Agent Knowledge route family.',
-    },
-    {
-      id: 'hidden-background-work',
-      blocked: ['hidden-agent-jobs', 'implicit-delegated-review', 'untracked-local-schedulers'],
-      modelRoute: blockedConnectedHostModelRoute(),
-      harnessRoute: 'agent_harness mode:"connected_host_capability"',
-      modelAccess: {
-        inspectCapability: 'host action:"capability"',
-        allowedAutonomy: 'agent tool spawn/batch-spawn, schedules, automation jobs, or confirmed delegation with visible status/cancel routes',
-        liveStatus: 'host action:"status"',
-        operate: 'use a visible autonomy route',
-      },
-      reason: 'Autonomy is allowed when it is visible, statused, and cancellable. Hidden jobs are blocked.',
+      access: 'gated',
+      available,
+      operations: ['start', 'stop', 'restart', 'install', 'upgrade', 'expose-listener', 'mutate-listener'],
+      reason: 'Lifecycle changes are powerful daemon operations: run them through agent_operator_method on the daemon service method, under a recorded admission, never as a background side effect.',
     },
     {
       id: 'arbitrary-connected-host-mutations',
-      confirmationGated: ['route-discovery-mutation', 'account-creation', 'automation-definition-creation'],
-      modelRoute: 'agent_operator_method',
-      harnessRoute: 'agent_harness mode:"connected_host_capability"',
-      modelAccess: {
-        inspectCapability: 'host action:"capability"',
-        allowedActions: 'agent_operator_action for simple allowlisted mutations or agent_operator_method for exact confirmed daemon contract methods',
-        liveStatus: 'host action:"status"',
-        operate: `agent_operator_method. ${EFFECT_ADMISSION_SENTENCE}`,
-      },
-      reason: 'Daemon mutations must resolve to a documented platform operator method and carry explicit user authorization.',
+      access: 'gated',
+      available,
+      operations: ['route-discovery-mutation', 'account-creation', 'automation-definition-creation'],
+      simpleActions: 'agent_operator_action for the allowlisted approval, automation, run and schedule actions',
+      reason: 'Other daemon mutations resolve to one documented operator method and carry the call\'s recorded admission.',
+    },
+  ];
+}
+
+/** Things no route reaches from the model, with what to use instead. */
+export function blockedConnectedHostCapabilities(): readonly Record<string, unknown>[] {
+  return [
+    {
+      id: 'non-agent-knowledge',
+      access: 'blocked',
+      blocked: ['default-knowledge', 'non-agent-knowledge-segments', 'fallback-knowledge'],
+      useInstead: 'agent_knowledge or agent_knowledge_ingest',
+      reason: 'Agent model tools stay inside the isolated Agent Knowledge route family.',
+    },
+    {
+      id: 'hidden-background-work',
+      access: 'blocked',
+      blocked: ['hidden-agent-jobs', 'implicit-delegated-review', 'untracked-local-schedulers'],
+      useInstead: 'agent tool spawn/batch-spawn, schedules, automation jobs, or confirmed delegation with visible status/cancel routes',
+      reason: 'Autonomy is allowed when it is visible, statused, and cancellable. Hidden jobs are blocked.',
     },
   ];
 }

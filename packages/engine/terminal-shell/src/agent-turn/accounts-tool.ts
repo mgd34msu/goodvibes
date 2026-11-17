@@ -58,8 +58,6 @@ function renderAccount(account: AgentAccountRecord): string {
 
 export interface AgentAccountsToolOptions {
   readonly registry: AgentAccountRegistry;
-  /** Accepted from the runtime wiring; the register's path is the registry's own. */
-  readonly shellPaths?: ShellPathService;
   /**
    * The owner's own mailbox, which per-signup aliases are minted from. Read at
    * call time so connecting an account mid-session takes effect.
@@ -292,7 +290,6 @@ export function registerAgentAccountsTool(registry: ToolRegistry, options: Agent
 export function agentAccountsToolOptions(shellPaths: ShellPathService, settings: { get(key: string): unknown },
   expectations?: DaemonExpectationClient): AgentAccountsToolOptions {
   return {
-    shellPaths,
     // The platform registry takes its store path and its "does this look like a
     // credential" rule as inputs rather than deriving either: the path so no
     // product writes into another's storage root, the predicate because the

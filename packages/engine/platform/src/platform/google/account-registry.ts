@@ -23,7 +23,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { withProcessLockSync } from '../utils/process-lock.js';
 import { normalizeDomain, normalizeEmailAddress } from './signup-address.js';
@@ -91,7 +91,6 @@ export interface AccountStoreFile {
 /** Additional owner restriction, never an admission grant. */
 export interface AgentAccountWriteGuard {
   readonly assertCurrent: () => void;
-  readonly didWrite?: (stage: 'lock' | 'unlock' | 'parent' | 'temporary' | 'store', content: string) => void;
 }
 
 export interface ParsedStore {
@@ -422,11 +421,20 @@ export class AgentAccountRegistry {
    * must never be written back, so {@link mutate} refuses.
    */
   private readStore(): ParsedStore {
-    if (!existsSync(this.storePath)) return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0 };
+    // One open, refusing a link in the store's place, and the read goes through that descriptor.
+    let fd: number;
     try {
-      return parseStore(readFileSync(this.storePath, 'utf-8'), this.containsSecretLikeText);
+      fd = openSync(this.storePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0 };
+      return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0, unreadable: 'the file could not be read' };
+    }
+    try {
+      return parseStore(readFileSync(fd, 'utf-8'), this.containsSecretLikeText);
     } catch {
       return { store: { version: STORE_VERSION, accounts: [] }, dropped: 0, unreadable: 'the file could not be read' };
+    } finally {
+      closeSync(fd);
     }
   }
 
@@ -443,20 +451,13 @@ export class AgentAccountRegistry {
   ): T {
     mkdirSync(dirname(this.storePath), { recursive: true });
     return withProcessLockSync(`${this.storePath}.writer.sqlite`, () => {
-      // The lock file and its staging files touch the store's directory; the guard
-      // is told so that its fence follows this owner's own change and nothing else.
-      guard?.didWrite?.('lock', '');
-      try {
-        const parsed = this.readStore();
-        if (parsed.unreadable !== undefined) {
-          throw new Error(`The account registry at ${this.storePath} was not changed because ${parsed.unreadable}. Repair or move the file, then retry.`);
-        }
-        const { value, accounts } = change(parsed);
-        this.writeStore({ ...parsed.store, accounts }, guard, parsed.dropped > 0);
-        return value;
-      } finally {
-        guard?.didWrite?.('unlock', '');
+      const parsed = this.readStore();
+      if (parsed.unreadable !== undefined) {
+        throw new Error(`The account registry at ${this.storePath} was not changed because ${parsed.unreadable}. Repair or move the file, then retry.`);
       }
+      const { value, accounts } = change(parsed);
+      this.writeStore({ ...parsed.store, accounts }, guard, parsed.dropped > 0);
+      return value;
     }, { waitMs: 1_000 });
   }
 
@@ -469,18 +470,15 @@ export class AgentAccountRegistry {
     if (keepPreviousCopy && existsSync(this.storePath)) {
       copyFileSync(this.storePath, `${this.storePath}.dropped-${Date.now()}.bak`);
     }
-    guard?.didWrite?.('parent', content);
     const tmpPath = `${this.storePath}.${randomUUID()}.tmp`;
     let ownsTemporary = false;
     try {
       guard?.assertCurrent();
       writeFileSync(tmpPath, content, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
       ownsTemporary = true;
-      guard?.didWrite?.('temporary', content);
       guard?.assertCurrent();
       renameSync(tmpPath, this.storePath);
       ownsTemporary = false;
-      guard?.didWrite?.('store', content);
     } finally {
       if (ownsTemporary) { try { unlinkSync(tmpPath); } catch { /* Clean up only this operation's private temporary file. */ } }
     }

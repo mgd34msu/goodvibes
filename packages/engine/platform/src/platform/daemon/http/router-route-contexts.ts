@@ -232,6 +232,8 @@ export function buildSystemRouteContext(input: {
       stop: () => input.platformServiceManager.stop(),
       restart: () => input.platformServiceManager.restart(),
       uninstall: () => input.platformServiceManager.uninstall(),
+      statusAsync: async () => toRecord(await input.platformServiceManager.statusAsync()),
+      requestFromDaemon: (action) => input.platformServiceManager.requestFromDaemon(action),
     },
     recordApiResponse: input.recordApiResponse,
     requireAdmin: input.requireAdmin,

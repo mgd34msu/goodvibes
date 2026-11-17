@@ -82,6 +82,8 @@ export interface IntegrationApprovalSnapshotSourceLike {
   getApprovalSnapshot(approvalId?: string): unknown;
 }
 
+export type PlatformServiceAction = 'install' | 'start' | 'stop' | 'restart' | 'uninstall';
+
 export interface PlatformServiceManagerLike {
   status(): Record<string, unknown>;
   install(): unknown;
@@ -89,6 +91,14 @@ export interface PlatformServiceManagerLike {
   stop(): unknown;
   restart(): unknown;
   uninstall(): unknown;
+  /**
+   * The non-blocking forms the daemon uses: no service command blocks the
+   * daemon, and an action that ends this daemon is answered before the stop.
+   * A manager without them (a client acting on its own machine) uses the
+   * synchronous forms.
+   */
+  readonly statusAsync?: (() => Promise<Record<string, unknown>>) | undefined;
+  readonly requestFromDaemon?: ((action: PlatformServiceAction) => Promise<unknown>) | undefined;
 }
 
 export interface RouteBindingRecordInput {

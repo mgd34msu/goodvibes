@@ -14,6 +14,7 @@ import type {
   ApprovalRememberTier,
   AutomationRouteBindingKind,
   DaemonSystemRouteContext,
+  PlatformServiceAction,
   RouteBindingSurfaceKind,
   WatcherKind,
   WatcherSourceKind,
@@ -30,26 +31,10 @@ import {
 import type { WatcherRecord } from './system-route-types.js';
 import { RefusalError } from '@goodvibes-jev/engine/errors';
 
-type ServiceAction = 'install' | 'start' | 'stop' | 'restart' | 'uninstall';
-
-/**
- * The service manager as the daemon may hold it: when it offers the
- * asynchronous forms, the routes use them, so no service command blocks the
- * daemon and an action that ends this daemon is answered before the stop.
- */
-type DaemonServiceManager = DaemonSystemRouteContext['platformServiceManager'] & {
-  readonly statusAsync?: () => Promise<Record<string, unknown>>;
-  readonly requestFromDaemon?: (action: ServiceAction) => Promise<unknown>;
-};
-
-function daemonServiceManager(context: DaemonSystemRouteContext): DaemonServiceManager {
-  return context.platformServiceManager;
-}
-
-async function serviceAction(context: DaemonSystemRouteContext, req: Request, action: ServiceAction): Promise<Response> {
+async function serviceAction(context: DaemonSystemRouteContext, req: Request, action: PlatformServiceAction): Promise<Response> {
   const admin = context.requireAdmin(req);
   if (admin) return admin;
-  const manager = daemonServiceManager(context);
+  const manager = context.platformServiceManager;
   return Response.json(manager.requestFromDaemon ? await manager.requestFromDaemon(action) : manager[action]());
 }
 
@@ -152,7 +137,7 @@ export function createDaemonSystemRouteHandlers(
       // receives the unit file.
       const admin = req ? context.requireAdmin(req) : null;
       if (admin) return admin;
-      const manager = daemonServiceManager(context);
+      const manager = context.platformServiceManager;
       const full = manager.statusAsync ? await manager.statusAsync() : manager.status();
       const { contents: _unitFile, ...withoutUnitFile } = full;
       return Response.json({

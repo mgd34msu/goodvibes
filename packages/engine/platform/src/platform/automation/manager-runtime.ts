@@ -222,7 +222,12 @@ export class AutomationManager {
       syncRunToRuntime: (run: AutomationRun, source: string) => this.syncRunToRuntime(run, source),
       syncJobToRuntime: (job: AutomationJob, source: string) => this.syncJobToRuntime(job, source),
       emitRunStarted: (job: AutomationJob, run: AutomationRun) => this.emitRunStarted(job, run),
-      emitRunCompleted: (job: AutomationJob, run: AutomationRun, outcome: 'success' | 'partial' | 'failed' | 'cancelled') => this.emitRunCompleted(job, run, outcome),
+      emitRunCompleted: (
+        job: AutomationJob,
+        run: AutomationRun,
+        outcome: 'success' | 'partial' | 'failed' | 'cancelled',
+        failure?: { readonly error: string; readonly retryable: boolean },
+      ) => this.emitRunCompleted(job, run, outcome, failure),
       emitRunFailed: (job: AutomationJob, run: AutomationRun, error: string, retryable: boolean) => emitAutomationManagerRunFailed(this.runtimeBus, job, run, error, retryable),
       maybeDeliverRun: (job: AutomationJob, run: AutomationRun) => this.maybeDeliverRun(job, run),
       followUpStartFailure: (job: AutomationJob, run: AutomationRun, retryable: boolean) => scheduleAutomationFailureFollowUp(this.failureFollowUpContext(), job, run, retryable),

@@ -52,7 +52,13 @@ export interface AutomationManagerExecutionContext {
   readonly syncRunToRuntime: (run: AutomationRun, source: string) => void;
   readonly syncJobToRuntime: (job: AutomationJob, source: string) => void;
   readonly emitRunStarted: (job: AutomationJob, run: AutomationRun) => void;
-  readonly emitRunCompleted: (job: AutomationJob, run: AutomationRun, outcome: 'success' | 'partial' | 'failed' | 'cancelled') => void;
+  /** Announces the end of a run: AUTOMATION_RUN_COMPLETED, the one terminal event, for every outcome (a failed start included). */
+  readonly emitRunCompleted: (
+    job: AutomationJob,
+    run: AutomationRun,
+    outcome: 'success' | 'partial' | 'failed' | 'cancelled',
+    failure?: { readonly error: string; readonly retryable: boolean },
+  ) => void;
   readonly emitRunFailed: (job: AutomationJob, run: AutomationRun, error: string, retryable: boolean) => void;
   readonly maybeDeliverRun: (job: AutomationJob, run: AutomationRun) => void;
   /**
@@ -325,6 +331,7 @@ export async function executeAutomationJob(
       catch (persistError) {
         logger.warn('AutomationManager: the run of a removed job could not be saved', { jobId: job.id, runId: run.id, error: summarizeError(persistError) });
       }
+      context.emitRunCompleted(job, cancelledRun, 'cancelled');
       throw error;
     }
     const failedRun: AutomationRun = {
@@ -357,6 +364,8 @@ export async function executeAutomationJob(
     context.syncJobToRuntime(updatedJob, 'automation.execute');
     const transience = await readAutomationRunTransience({ error }, 'automation.run.start', { jobId: updatedJob.id, runId: failedRun.id });
     const retryable = transience?.failureClass === 'retryable';
+    // A run that failed to start has ended: announced once as completed (failed), then the failure detail.
+    context.emitRunCompleted(updatedJob, failedRun, 'failed', { error: message, retryable });
     context.emitRunFailed(updatedJob, failedRun, message, retryable);
     if (!updatedJob.enabled && effectiveJob.enabled) {
       context.emitJobAutoDisabled?.(updatedJob, updatedJob.pausedReason ?? 'failure-threshold-reached');

@@ -76,7 +76,7 @@ export type ResumedSession = SessionResumeOutcome;
  * writes the last-session pointer, reopens the shared session and the daemon
  * spine, fires the `Lifecycle:session:load` hook and announces the resume.
  *
- * The restore itself (transcript, journal replay, model, rewind anchors, agent
+ * The restore itself (transcript, model, rewind anchors, agent
  * records, footer usage) is resumeSessionCore, the routine every terminal app
  * and the headless start-up share. Everything after it is the publication only
  * a running terminal does (hook fire, session-spine mirror, shared-broker
@@ -130,7 +130,7 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         },
         {
           sessionId,
-          // The saved snapshot's size, before any journal replay.
+          // The saved session's message count.
           turnCount: outcome.savedMessageCount,
         },
       );

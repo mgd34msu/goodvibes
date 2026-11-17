@@ -627,7 +627,7 @@
   },
   "./platform/workflow": {
     "gzip_bytes": 231,
-    "rationale": "facade now also carries the per-project work plan store and its retention constants; measured 181 B gzip @ commit f3c14554; headroom max(ceil(181*1.2)=218, 181+50=231) -> 231 (+50 B floor dominates)"
+    "rationale": "workflow facade (automation commands, hook actions, work ledger); measured 181 B gzip @ commit f3c14554; headroom max(ceil(181*1.2)=218, 181+50=231) -> 231 (+50 B floor dominates)"
   },
   "./platform/workspace": {
     "gzip_bytes": 291,

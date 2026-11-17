@@ -11,7 +11,7 @@ export type { LoadedSavedSession } from '@goodvibes-jev/engine/terminal-shell/se
 
 /**
  * The shared resume routine for a context that has no terminal resume handler
- * wired (a test harness): same journal replay, model re-resolution, rewind
+ * wired (a test harness): same transcript restore, model re-resolution, rewind
  * anchors and agent records, without the publication only a running terminal does.
  */
 export function loadSavedSessionIntoLive(

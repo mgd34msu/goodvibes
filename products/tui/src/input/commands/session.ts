@@ -410,7 +410,7 @@ export const sessionCommand: SlashCommand = {
  * subcommand nobody remembers mid-context-switch. `/resume` with no
  * arguments opens a picker over saved sessions (newest first, current
  * session excluded); with an argument it resumes directly via the exact
- * same workflow path (journal replay, model reselection, return-context
+ * same workflow path (transcript restore, model reselection, return-context
  * reveal included).
  */
 export const resumeCommand: SlashCommand = {

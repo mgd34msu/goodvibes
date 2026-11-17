@@ -99,7 +99,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
     async handler(args, ctx) {
       const store = getStore(ctx);
       if (!store) {
-        throw new RefusalError(refusal({ code: 'WORK_PLAN_UNAVAILABLE', state: 'nothing was changed', reason: 'The work plan store is not available in this runtime' }));
+        throw new RefusalError(refusal({ code: 'WORK_PLAN_UNAVAILABLE', state: 'nothing was changed', reason: 'The work plan is not available in this runtime' }));
       }
       const subcommand = (args[0] ?? 'panel').toLowerCase();
       try {

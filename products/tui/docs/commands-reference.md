@@ -96,7 +96,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
 | `/graph` | None | `<workstreamId>` | Show a workstream's task graph: nodes, edges, states, and pool posture |
-| `/triggers` | None | `[status\|migrate [--older-instances-closed]]` | Inspect the selected daemon’s supervised triggers and explicitly migrate older trigger state |
+| `/triggers` | None | `[status]` | Inspect the selected daemon’s supervised triggers |
 
 ## Branches
 

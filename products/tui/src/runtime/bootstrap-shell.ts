@@ -116,7 +116,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     hydrateConversationUsage(conversation, orchestrator);
   };
   // Picker/import/rewind paths also replace history through fromJSON. The
-  // canonical resume callback still runs after any later journal replay.
+  // canonical resume callback still runs after the restore.
   conversation.setUsageHydrator(hydrateSessionUsage);
   // Built before resumeSession below so its providerApi.selectModel is
   // available for the resume handler's model-reselection step (matches

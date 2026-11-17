@@ -27,8 +27,25 @@ function isTargetMissing(error: unknown): boolean {
 const RESPONSE_DEADLINE_MS = 30_000;
 const VERB: Record<SessionAction, string> = { close: 'close', reopen: 'reopen', delete: 'delete' };
 
-/** Session actions already in flight, per account revision and session: reopening the pane does not send a second one. */
-const inFlight = new Set<string>();
+interface Outcome {
+  readonly phase: 'idle' | 'no-answer';
+  readonly notice?: string;
+  /** The session no longer exists: the pane closes. */
+  readonly gone: boolean;
+}
+
+interface Flight {
+  readonly action: SessionAction;
+  readonly outcome: Promise<Outcome>;
+}
+
+/**
+ * Session actions already in flight, per account revision and session, each
+ * with the answer it will settle to: reopening the pane does not send a second
+ * one, and a pane opened while one is in flight shows its answer when it comes
+ * (and closes when it was a delete that went through).
+ */
+const inFlight = new Map<string, Flight>();
 
 /** The list is authoritative only when every record can be identified. A bad
  * response must never become an empty list and falsely prove deletion. */
@@ -61,19 +78,19 @@ export function useSessionLifecycle(id: string, onClose: () => void) {
   // A pane belongs to the account it opened under; WorkView remounts on identity change.
   const [lifetime] = useState(getClientLifetime);
   const flightKey = `${lifetime.revision}:${id}`;
-  const [phase, setPhase] = useState<Phase>(() => inFlight.has(flightKey) ? 'pending' : 'idle');
-  const [action, setAction] = useState<SessionAction | undefined>(undefined);
+  // Read at render, so a flight that settles before the effect below runs is still joined.
+  const flightAtRender = inFlight.get(flightKey);
+  const [phase, setPhase] = useState<Phase>(() => flightAtRender ? 'pending' : 'idle');
+  const [action, setAction] = useState<SessionAction | undefined>(() => flightAtRender?.action);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const mounted = useRef(true);
   const abortRef = useRef<AbortController | undefined>(undefined);
-  const current = () => isClientLifetimeCurrent(lifetime) && hasStoredTokenSync();
-
+  // The latest onClose, synced in its own effect (never during render), for a delete's answer.
+  const onCloseRef = useRef(onClose);
   useEffect(() => {
-    mounted.current = true;
-    // A new account must not adopt this one's answer; leaving the pane lets a sent action finish.
-    const unsubscribe = subscribeClientLifetime(() => abortRef.current?.abort());
-    return () => { mounted.current = false; unsubscribe(); };
-  }, [lifetime, id]);
+    onCloseRef.current = onClose;
+  });
+  const current = () => isClientLifetimeCurrent(lifetime) && hasStoredTokenSync();
 
   const show = (next: Phase, text?: string) => {
     if (!mounted.current || !current()) return;
@@ -82,37 +99,59 @@ export function useSessionLifecycle(id: string, onClose: () => void) {
     if (next === 'idle') setAction(undefined);
   };
 
+  const settle = (outcome: Outcome) => {
+    show(outcome.phase, outcome.notice);
+    if (outcome.gone && mounted.current && current()) onCloseRef.current();
+  };
+
+  useEffect(() => {
+    mounted.current = true;
+    // A new account must not adopt this one's answer; leaving the pane lets a sent action finish.
+    const unsubscribe = subscribeClientLifetime(() => abortRef.current?.abort());
+    // A pane opened while an action on this session is in flight (sent from an
+    // earlier pane) starts as pending and applies that action's answer when it comes.
+    const flight = flightAtRender ?? inFlight.get(flightKey);
+    if (flight) void flight.outcome.then(settle);
+    return () => { mounted.current = false; unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the flight is keyed by lifetime.revision and id
+  }, [lifetime, id]);
+
+  async function request(chosen: SessionAction, abort: AbortController): Promise<Outcome> {
+    const timer = setTimeout(() => abort.abort(), RESPONSE_DEADLINE_MS);
+    try {
+      if (chosen === 'close' || chosen === 'reopen') {
+        await platformClient.operator.sessions[chosen](id, abort.signal);
+        return { phase: 'idle', gone: false };
+      }
+      // An active session is closed first; a session that is already gone counts as deleted.
+      try { await platformClient.operator.sessions.close(id, abort.signal); }
+      catch (error) { if (!isTargetMissing(error)) throw error; }
+      try { await platformClient.operator.sessions.delete(id, abort.signal); }
+      catch (error) { if (!isTargetMissing(error)) throw error; }
+      return { phase: 'idle', gone: true };
+    } catch (error) {
+      if (!abort.signal.aborted && isDefiniteRefusal(error)) {
+        return { phase: 'idle', notice: `The daemon refused to ${VERB[chosen]} this session: ${formatError(error)}`, gone: false };
+      }
+      return { phase: 'no-answer', notice: `No answer from the daemon (${abort.signal.aborted ? `nothing within ${RESPONSE_DEADLINE_MS / 1000}s` : formatError(error)}). Retry sends it again; a repeat is answered with the session's current state.`, gone: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function run(chosen: SessionAction): Promise<void> {
     if (!current() || inFlight.has(flightKey)) return;
-    inFlight.add(flightKey);
     const abort = new AbortController();
     abortRef.current = abort;
     setAction(chosen);
     show('pending');
-    const timer = setTimeout(() => abort.abort(), RESPONSE_DEADLINE_MS);
-    let gone = false;
-    try {
-      if (chosen === 'close' || chosen === 'reopen') {
-        await platformClient.operator.sessions[chosen](id, abort.signal);
-      } else {
-        // An active session is closed first; a session that is already gone counts as deleted.
-        try { await platformClient.operator.sessions.close(id, abort.signal); }
-        catch (error) { if (!isTargetMissing(error)) throw error; }
-        try { await platformClient.operator.sessions.delete(id, abort.signal); }
-        catch (error) { if (!isTargetMissing(error)) throw error; }
-        gone = true;
-      }
-      show('idle');
-    } catch (error) {
-      if (!abort.signal.aborted && isDefiniteRefusal(error)) show('idle', `The daemon refused to ${VERB[chosen]} this session: ${formatError(error)}`);
-      else show('no-answer', `No answer from the daemon (${abort.signal.aborted ? `nothing within ${RESPONSE_DEADLINE_MS / 1000}s` : formatError(error)}). Retry sends it again; a repeat is answered with the session's current state.`);
-    } finally {
-      clearTimeout(timer);
-      inFlight.delete(flightKey);
-      if (abortRef.current === abort) abortRef.current = undefined;
-      if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
-    }
-    if (gone && mounted.current && current()) onClose();
+    const outcome = request(chosen, abort);
+    inFlight.set(flightKey, { action: chosen, outcome });
+    const settled = await outcome;
+    inFlight.delete(flightKey);
+    if (abortRef.current === abort) abortRef.current = undefined;
+    if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
+    settle(settled);
   }
 
   function ask(chosen: SessionAction): void {

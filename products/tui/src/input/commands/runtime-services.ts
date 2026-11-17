@@ -233,6 +233,10 @@ export function requireSandboxSessionRegistry(context: CommandContext) {
   return requireContextValue(context.workspace.sandboxSessionRegistry, 'workspace.sandboxSessionRegistry');
 }
 
+export function requireVoiceSetup(context: CommandContext) {
+  return requireContextValue(context.platform.voiceSetup, 'platform.voiceSetup');
+}
+
 export function requireWorktreeRegistry(context: CommandContext) {
   return requireContextValue(context.workspace.worktreeRegistry, 'workspace.worktreeRegistry');
 }

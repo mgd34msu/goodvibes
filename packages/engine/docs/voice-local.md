@@ -86,6 +86,20 @@ voice engine. This is a real end to end synthesis measurement."). Larger
 models trade latency for accuracy; GPU hosts should prefer faster-whisper for
 STT per the sources above.
 
+## Setup
+
+`voice.setup` is the one operation that sets voice up for a want: `intent`
+`wake` (this surface listens for the wake word, which implies speech-to-text),
+`stt`, `tts` or `voice`, for the `surface` that asked. The plan is decided from
+the host's own facts; steps that need no answer are done at once, and the reply
+lists each step as done, proposed (`acceptProposals: true` does it) or asked
+(`ttsChoice` answers the text-to-speech question). An install the plan needs is
+started, not waited for: `installStarted` names the run, and
+`voice.local.status` serves its progress and receipt. `rendered` is the plan as
+one reply to print as-is. The terminal app and the Agent run the same service
+in-process for `/voice wake setup` and when wake is switched on; the web UI's
+wake switch calls `voice.setup`.
+
 ## Managed install
 
 `voice.local.install` installs text-to-speech (piper and a default voice) and

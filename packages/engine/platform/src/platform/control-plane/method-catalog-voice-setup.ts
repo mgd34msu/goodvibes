@@ -9,6 +9,12 @@
  * read from `voice.local.status` (`lastInstall`). No request is held open for
  * the download, so a long install is never cut off by the server's idle limit.
  *
+ * `voice.setup` is the one operation that sets voice up for a want ("wake",
+ * "stt", "tts", "voice"): it plans from the host's own facts, does the steps
+ * that need no answer, and returns the plan with what is still proposed or
+ * asked. An install it needs is started, not waited for; its progress and
+ * receipt are on `voice.local.status`.
+ *
  * The three `voice.wake.*` verbs are here rather than in their own group because
  * they are the same capability, provisioning a pinned, checksum-verified voice
  * artifact and reporting honestly on it, and they attach through the voice-setup
@@ -116,6 +122,28 @@ const INSTALL_START_SCHEMA = objectSchema({
   startedAt: NUMBER_SCHEMA,
   joined: BOOLEAN_SCHEMA,
 }, ['state', 'startedAt', 'joined']);
+
+const SETUP_STEP_SCHEMA = objectSchema({
+  kind: { type: 'string', enum: ['do', 'propose', 'ask'] },
+  subject: STRING_SCHEMA,
+  message: STRING_SCHEMA,
+  options: {
+    type: 'array',
+    items: objectSchema({ id: STRING_SCHEMA, label: STRING_SCHEMA, trade: STRING_SCHEMA }, ['id', 'label', 'trade']),
+  },
+}, ['kind', 'subject', 'message']);
+
+/** What voice.setup answers: the plan as carried out, and the install it started when it needed one. */
+const SETUP_RESULT_SCHEMA = objectSchema({
+  plan: objectSchema({
+    intent: STRING_SCHEMA,
+    shapes: { type: 'array', items: { type: 'string', enum: ['guided-walkthrough', 'browser-automation', 'official-cli', 'question-driven'] } },
+    steps: { type: 'array', items: SETUP_STEP_SCHEMA },
+  }, ['intent', 'shapes', 'steps']),
+  rendered: STRING_SCHEMA,
+  complete: BOOLEAN_SCHEMA,
+  installStarted: INSTALL_START_SCHEMA,
+}, ['plan', 'rendered', 'complete']);
 
 const RUNTIME_STATUS_SCHEMA = objectSchema({
   platform: NULLABLE_STRING,
@@ -233,6 +261,32 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
     http: { method: 'POST', path: '/api/voice/local/install' },
     inputSchema: objectSchema({}, []),
     outputSchema: INSTALL_START_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'voice.setup',
+    title: 'Set Up Voice',
+    description:
+      'Sets voice up for what was asked: intent wake (this surface listens for the wake word; implies speech-to-text), stt, '
+      + 'tts or voice (all of it), for the surface named (tui, agent, webui, app), which is the one that ends up listening. '
+      + 'The plan is decided from this host\'s own facts (wake rows, wake models on disk, the managed speech runtimes, the input '
+      + 'device); steps that need no answer are done at once (the wake rows are set, missing wake models are fetched), and the '
+      + 'answer lists each step: do (done, or why it could not be), propose (acceptProposals: true does it) and ask (ttsChoice '
+      + 'answers the text-to-speech question: local or a cloud provider this host holds a credential for). An install the plan '
+      + 'needs is started and not waited for: installStarted names the run, and voice.local.status serves its progress and '
+      + 'receipt. rendered is the plan as one reply a surface prints as-is; complete is true when nothing is left to answer '
+      + 'and every step that ran finished.',
+    category: 'health',
+    scopes: ['write:config'],
+    // Writes voice settings and may install executables, like voice.local.install.
+    access: 'admin',
+    http: { method: 'POST', path: '/api/voice/setup' },
+    inputSchema: objectSchema({
+      intent: { type: 'string', enum: ['wake', 'stt', 'tts', 'voice'] },
+      surface: { type: 'string', enum: ['tui', 'agent', 'webui', 'app'] },
+      acceptProposals: BOOLEAN_SCHEMA,
+      ttsChoice: STRING_SCHEMA,
+    }, ['intent', 'surface']),
+    outputSchema: SETUP_RESULT_SCHEMA,
   }),
   methodDescriptor({
     id: 'voice.wake.status',

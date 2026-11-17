@@ -112,6 +112,12 @@ export interface VoiceSetupRequest extends VoiceProofLifetime {
   readonly acceptProposals?: boolean | undefined;
   /** The answer to the text-to-speech question: `local` or one of {@link cloudVoiceProviders}. */
   readonly ttsChoice?: string | undefined;
+  /**
+   * Start an install the plan needs and return without waiting for it (a
+   * daemon verb must not hold its request open for a download). The outcome
+   * then carries `installStarted`, and the receipt is read from status().
+   */
+  readonly installInBackground?: boolean | undefined;
 }
 
 /** What {@link VoiceSetupService.setup} did: the plan as carried out, and the install receipt when one ran. */
@@ -120,9 +126,11 @@ export interface VoiceSetupOutcome {
   readonly plan: VoiceSetupChain;
   /** The plan as one reply a surface prints as-is. */
   readonly rendered: string;
-  /** True when nothing is left to answer and every step that ran succeeded. */
+  /** True when nothing is left to answer and every step that ran succeeded (an install still running is not yet). */
   readonly complete: boolean;
   readonly install?: VoiceInstallReceipt | undefined;
+  /** The install a background setup started or joined; its progress and receipt are on status(). */
+  readonly installStarted?: VoiceInstallStart | undefined;
 }
 
 export interface VoiceSetupServiceDeps {
@@ -383,13 +391,19 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
     });
     let install: VoiceInstallReceipt | undefined;
     let installFailure: string | undefined;
+    let installStarted: VoiceInstallStart | undefined;
     const ensureInstalled = async (): Promise<void> => {
-      if (install || installFailure) return;
+      if (install || installFailure || installStarted) return;
+      if (request.installInBackground) {
+        installStarted = service.startInstall(request);
+        return;
+      }
       try { install = await service.install(request); }
       catch (error) { assertVoiceProofCurrent(request); installFailure = error instanceof Error ? error.message : String(error); }
     };
     const halfFailure = (half: 'stt' | 'tts'): string | undefined => {
       if (installFailure) return installFailure;
+      if (installStarted) return undefined;
       const state = install?.[half];
       return state && state.state !== 'provisioned' ? state.reason ?? state.state : undefined;
     };
@@ -402,6 +416,8 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       if (!answered) { steps.push(step); complete = false; continue; }
       let failure: string | undefined;
       let message = step.message;
+      // Set when this step needs the managed runtime install.
+      let needsInstall = false;
       if (step.subject === 'wake') {
         if (deps.getConfig('voice.wake.enabled') !== 'true') deps.setConfig('voice.wake.enabled', true);
         if (deps.getConfig(surfaceRow) !== 'true') deps.setConfig(surfaceRow, true);
@@ -409,14 +425,17 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
         const outcome = await wake.ensureProvisioned();
         if (!outcome.ready) failure = outcome.message;
       } else if (step.subject === 'stt' && runtime.stt.state !== 'provisioned') {
+        needsInstall = true;
         await ensureInstalled();
         failure = halfFailure('stt');
         if (step.kind === 'propose' && !failure) message = 'The local speech-to-text runtime is installed and pointed at, so what you say after the wake word becomes text.';
       } else if (step.subject === 'tts' && runtime.state !== 'provisioned') {
+        needsInstall = true;
         await ensureInstalled();
         failure = halfFailure('tts');
       } else if (step.subject === 'tts-provider') {
         if (request.ttsChoice === 'local') {
+          needsInstall = true;
           await ensureInstalled();
           failure = halfFailure('tts');
           if (!failure) message = 'The local text-to-speech engine is installed and pointed at.';
@@ -429,11 +448,14 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       if (failure !== undefined) {
         complete = false;
         message = `${step.subject === 'wake-models' ? 'The wake models' : step.subject.startsWith('tts') ? 'Text-to-speech' : 'Speech-to-text'} could not be set up: ${failure}`;
+      } else if (needsInstall && installStarted) {
+        complete = false;
+        message = `${step.subject.startsWith('tts') ? 'Text-to-speech' : 'Speech-to-text'} is being installed${installStarted.joined ? ' (an install was already running)' : ''}; its progress and receipt are on the voice status.`;
       }
       steps.push({ ...step, kind: 'do', message });
     }
     const plan: VoiceSetupChain = { ...chain, steps };
-    return { plan, rendered: renderVoiceSetupChain(plan), complete, ...(install ? { install } : {}) };
+    return { plan, rendered: renderVoiceSetupChain(plan), complete, ...(install ? { install } : {}), ...(installStarted ? { installStarted } : {}) };
   };
 
   const service: VoiceSetupService = {

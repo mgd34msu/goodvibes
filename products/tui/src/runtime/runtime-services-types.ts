@@ -54,6 +54,7 @@ import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/
 import type { DomainDispatch, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { RuntimeEventBus, DistributedRuntimeManager, RemoteRunnerRegistry, RemoteSupervisor, IntegrationHelperService, IdempotencyStore, WorktreeRegistry, SandboxSessionRegistry, ShellPathService, FeatureFlagManager, PolicyRuntimeState, SessionSurface } from '@/runtime/index.ts';
 import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { VoiceSetupService } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
 import type { CacheRegistry, PauseController, MemoryGovernor } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import type { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/platform/platform/web-search';
 import type { ViewPanelAdapter } from '../views/view-panel-adapter.ts';
@@ -225,6 +226,8 @@ export interface RuntimeServices {
   readonly workflow: WorkflowServices;
   readonly voiceProviders: VoiceProviderRegistry;
   readonly voiceService: VoiceService;
+  /** The platform's voice setup: plans from this host's facts and does the steps that need no answer. */
+  readonly voiceSetup: VoiceSetupService;
   readonly webSearchProviders: WebSearchProviderRegistry;
   readonly webSearchService: WebSearchService;
   readonly mediaProviders: MediaProviderRegistry;

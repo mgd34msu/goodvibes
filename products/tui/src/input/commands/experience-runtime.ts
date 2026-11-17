@@ -12,10 +12,12 @@ import {
   VOICE_SETUP_ANNOUNCEMENT,
 } from '../../core/voice-provision-gateway.ts';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
-import { terminalWakeCapabilities } from '../../core/wake-provision-status.ts';
-import { printWakeStatus, runWakeProvision } from '../../core/wake-provision-runner.ts';
-import { planVoiceSetupChain, renderVoiceSetupChain, wakeProvisionStatus } from '@goodvibes-jev/engine/platform/platform/voice';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
+import { terminalWakeCapabilities, WAKE_SETUP_ANNOUNCEMENT } from '../../core/wake-provision-status.ts';
+import { printWakeStatus } from '../../core/wake-provision-runner.ts';
+import { wakeProvisionStatus } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { VoiceSetupOutcome } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
+import { proposesSpeechToText, runWakeSetupPlan } from '../../core/wake-setup-plan.ts';
+import { requireVoiceSetup } from './runtime-services.ts';
 
 export function registerExperienceRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -204,9 +206,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   async wake(args, ctx, shellPaths, _yes) {
     // The wake models are provisioned locally by the platform (checksum-pinned
     // download), not through a daemon verb, so this path needs no gateway.
-    // Installation already provisions them and a daemon retries at boot;
-    // `setup` here is the recovery act, and nothing downloads unless the user
-    // typed it, see wake-provision-runner.ts.
+    // Installation already provisions them and a daemon retries at boot.
     const wakeSub = (args[1] ?? 'status').toLowerCase();
     const managedRoot = shellPaths.resolveUserPath('voice');
     const runner = {
@@ -221,44 +221,31 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       print: (block: string) => ctx.print(block),
     };
     if (wakeSub === 'setup') {
-      // The literal ask: this terminal listens for the wake word. Both rows are
-      // needed (the feature and this surface's row), so both are set.
-      const config = ctx.platform.configManager;
-      const surfaceKey = 'voice.wake.surfaces.tui' as ConfigKey;
-      const wakeWasOn = config.get('voice.wake.enabled') === true;
-      const surfaceWasOn = config.get(surfaceKey) === true;
-      if (!wakeWasOn) config.setDynamic('voice.wake.enabled', true);
-      if (!surfaceWasOn) config.setDynamic(surfaceKey, true);
-      await runWakeProvision(runner);
-      // The goal behind it: what is said after the wake word becomes text. The
-      // daemon's voice status says whether speech-to-text is there; a daemon
-      // that cannot be read counts as not having it.
+      // The platform's one voice setup decides the plan from this host's facts:
+      // this terminal listens (the feature and its row), missing wake models are
+      // fetched, and speech-to-text, what makes a wake word useful, is proposed.
+      if (!wakeProvisionStatus({ managedRoot }).ready) ctx.print(WAKE_SETUP_ANNOUNCEMENT);
+      let outcome: VoiceSetupOutcome;
+      try {
+        outcome = await runWakeSetupPlan(requireVoiceSetup(ctx));
+      } catch (error) {
+        ctx.print(`Wake-Word Setup\n  setup failed: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      const proposesStt = proposesSpeechToText(outcome);
+      // Speech-to-text is installed by the daemon (voice.local.install), the one
+      // installer of the managed voice runtime on this machine.
       const resolution = createVoiceProvisionGateway({
-        configManager: config,
+        configManager: ctx.platform.configManager,
         homeDirectory: () => requireShellPaths(ctx).homeDirectory,
       });
-      let sttReady = false;
-      if (resolution.available) {
-        try { sttReady = (await resolution.gateway.fetchStatus()).stt.state === 'provisioned'; } catch { sttReady = false; }
-      }
-      const chain = planVoiceSetupChain('wake', {
-        surface: 'tui',
-        wakeEnabled: wakeWasOn,
-        surfaceEnabled: surfaceWasOn,
-        // The receipt above already reports the models, fetched or not.
-        wakeProvisioned: true,
-        sttReady,
-        ttsReady: true,
-        inputDevice: String(config.get('voice.wake.inputDevice') ?? ''),
-      });
-      const proposesStt = chain.steps.some((step) => step.kind === 'propose' && step.subject === 'stt');
       if (proposesStt && args[2]?.toLowerCase() === 'yes' && resolution.available) {
-        ctx.print(chain.steps.filter((step) => step.kind === 'do').map((step) => step.message).join('\n'));
+        ctx.print(['Wake-Word Setup', outcome.rendered].join('\n'));
         ctx.print(VOICE_SETUP_ANNOUNCEMENT);
         await runVoiceSetupWithProgress(resolution, { print: (block) => ctx.print(block) });
         return;
       }
-      ctx.print(['Wake-Word Setup', renderVoiceSetupChain(chain), ...(proposesStt
+      ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt
         ? [resolution.available
           ? '(yes: /voice wake setup yes installs it now)'
           : `(speech-to-text is installed through the daemon, which is not reachable here: ${resolution.reason})`]

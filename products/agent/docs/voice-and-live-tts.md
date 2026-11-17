@@ -37,7 +37,10 @@ both have to be on before a microphone is opened. `voice.wake.enabled` turns the
 feature on, and `voice.wake.surfaces.agent` delivers it here, off by default because
 two terminal surfaces both acting on one spoken utterance is a confusing default.
 Nothing about this is implicit. A configuration that is off never opens a device and
-never produces a microphone permission prompt.
+never produces a microphone permission prompt. Switching `voice.wake.enabled` on (in
+settings, with `/config`, or through the model's settings call) runs the same setup as
+`/voice wake setup --yes`: this surface's row is set, missing wake models are fetched,
+and the plan is shown, proposing speech-to-text when it is missing.
 
 Capture uses an external recorder command. `voice.wake.captureCommand` names one,
 or `auto` (the default) probes them in this order and uses the first one installed:

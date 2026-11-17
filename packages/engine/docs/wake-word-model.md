@@ -107,10 +107,13 @@ Four rules hold across all three:
    partial, and a file that exists but does not hash to its pin must never be
    re-used. Each run sweeps first (`recovery.ts`), which is what makes the boot
    retry converge rather than re-inspecting the same torn file forever.
-4. **Turning the feature on still downloads nothing.** `voice.wake.enabled`
-   moving to `true` reads the artifacts and refuses honestly when they are
-   missing, naming the recovery command. Installing and booting are the
-   sanctioned acts, each with a receipt; a switch is not one.
+4. **Turning the feature on runs the voice setup.** `voice.wake.enabled`
+   moving to `true` in the terminal app, the Agent or the web UI runs the same
+   setup as `/voice wake setup` (the daemon's `voice.setup`, or
+   `VoiceSetupService.setup` in-process): this surface's row is set, missing
+   models are fetched and verified (about 6 MB), and the plan is shown,
+   proposing speech-to-text when it is missing. The wake listener itself still
+   only reads the artifacts and refuses honestly when they are missing.
 
 `GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD=1` installs without the model, for an
 air-gapped host, a CI image, or a user who does not want the feature. The curl

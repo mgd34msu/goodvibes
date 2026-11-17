@@ -16,6 +16,7 @@ import {
   wakeStatusLines,
   WAKE_SETUP_ANNOUNCEMENT,
 } from '../../core/wake-provision-status.ts';
+import { proposesSpeechToText, runWakeSetupPlan } from '../../core/wake-setup-plan.ts';
 
 function formatVoiceComponentState(state: string): string {
   return state.replace(/[_-]+/g, ' ');
@@ -118,8 +119,8 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       // the model) gets the outcome; the owner's composer is not held by it.
       ctx.print(WAKE_SETUP_ANNOUNCEMENT);
       try {
-        const outcome = await voiceSetup.setup({ intent: 'wake', surface: 'agent', acceptProposals: args[2]?.toLowerCase() === 'yes' });
-        const proposesStt = outcome.plan.steps.some((step) => step.kind === 'propose' && step.subject === 'stt');
+        const outcome = await runWakeSetupPlan(voiceSetup, args[2]?.toLowerCase() === 'yes');
+        const proposesStt = proposesSpeechToText(outcome);
         ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt ? ['(yes: /voice wake setup --yes yes installs it now)'] : [])].join('\n'));
       } catch (error) {
         ctx.print(`Wake-Word Setup\n  setup failed: ${error instanceof Error ? error.message : String(error)}`);

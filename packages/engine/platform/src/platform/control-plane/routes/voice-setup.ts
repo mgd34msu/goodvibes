@@ -17,6 +17,7 @@ import { readInvocationParams } from './invocation-params.js';
 import type { VoiceKeySupersede } from '../../voice/provisioning/config-preconfigure.js';
 import type { VoiceRoundTripProof } from '../../voice/provisioning/round-trip-proof.js';
 import { attachHandler } from './attach-handler.js';
+import type { VoiceSetupOutcome, VoiceSetupRequest } from '../../runtime/voice-setup.js';
 
 /** One-act install outcome served by voice.local.install. */
 export interface VoiceLocalInstallResult {
@@ -84,6 +85,8 @@ export interface VoiceSetupGatewayService {
   wakeProvision(): Promise<unknown>;
   /** Read one wake artifact in bounded chunks, for a surface that cannot fetch it. */
   wakeModelChunk(request: { component: string; offset?: number | undefined; maxBytes?: number | undefined }): WakeModelChunkPayload;
+  /** Plan voice setup from the host's facts, do what needs no answer, and return the plan. */
+  setup(request: VoiceSetupRequest): Promise<VoiceSetupOutcome>;
 }
 
 export function createVoiceStatusHandler(service: VoiceSetupGatewayService): GatewayMethodHandler {
@@ -150,11 +153,44 @@ export function createWakeModelHandler(service: VoiceSetupGatewayService): Gatew
   };
 }
 
+const SETUP_INTENTS = ['wake', 'stt', 'tts', 'voice'] as const;
+const SETUP_SURFACES = ['tui', 'agent', 'webui', 'app'] as const;
+
+function readChoice<T extends string>(value: unknown, choices: readonly T[], field: string): T {
+  const found = choices.find((choice) => choice === value);
+  if (found === undefined) {
+    throw new GatewayVerbError(`voice.setup: ${field} must be one of ${choices.join(', ')} (got ${JSON.stringify(value)})`, 'INVALID_ARGUMENT', 400, field);
+  }
+  return found;
+}
+
+/**
+ * The one setup operation for every surface. The install the plan needs is
+ * started in the background: a download held open as one request would
+ * outlive the server's idle limit (see createVoiceInstallHandler). Which cloud
+ * voice credentials exist is this host's fact, so it is never read from the
+ * caller.
+ */
+export function createVoiceSetupHandler(service: VoiceSetupGatewayService): GatewayMethodHandler {
+  return (invocation) => {
+    const params = readInvocationParams(invocation);
+    const ttsChoice = typeof params['ttsChoice'] === 'string' && params['ttsChoice'] ? params['ttsChoice'] : undefined;
+    return service.setup({
+      intent: readChoice(params['intent'], SETUP_INTENTS, 'intent'),
+      surface: readChoice(params['surface'], SETUP_SURFACES, 'surface'),
+      acceptProposals: params['acceptProposals'] === true,
+      ...(ttsChoice !== undefined ? { ttsChoice } : {}),
+      installInBackground: true,
+    });
+  };
+}
+
 /** Attach the voice-setup handlers to their registered descriptors (missing = no-op). */
 export function registerVoiceSetupGatewayMethods(catalog: GatewayMethodCatalog, service: VoiceSetupGatewayService): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('voice.local.status', createVoiceStatusHandler(service));
   attach('voice.local.install', createVoiceInstallHandler(service));
+  attach('voice.setup', createVoiceSetupHandler(service));
   attach('voice.wake.status', createWakeStatusHandler(service));
   attach('voice.wake.provision', createWakeProvisionHandler(service));
   attach('voice.wake.model.get', createWakeModelHandler(service));

@@ -60,6 +60,17 @@ export function WakeWordSettings({ open }: WakeWordSettingsProps) {
     },
   });
 
+  // Turning wake on goes through the daemon's one setup operation, so this tab
+  // gets the same plan as the terminal apps: the rows are set, missing models are
+  // fetched, and speech-to-text (what makes a wake word useful) is proposed.
+  const setup = useMutation({
+    mutationFn: (acceptProposals: boolean) => platformClient.operator.voice.setup({ intent: 'wake', surface: 'webui', acceptProposals }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.config });
+    },
+  });
+  const proposesStt = setup.data?.plan.steps.some((step) => step.kind === 'propose' && step.subject === 'stt') === true;
+
   // A daemon build that has never heard of voice.wake.status gets no section at all,
   // rather than a "not available" line about a verb it cannot have, the same honest
   // omission the local-voice card makes.
@@ -162,14 +173,30 @@ export function WakeWordSettings({ open }: WakeWordSettingsProps) {
         <Checkbox
           className="voice-settings-field voice-settings-field--check"
           checked={settings.enabled}
-          disabled={setKey.isPending}
-          onChange={(checked) => setKey.mutate({ key: 'voice.wake.enabled', value: checked })}
+          disabled={setKey.isPending || setup.isPending}
+          onChange={(checked) => {
+            if (checked) setup.mutate(false);
+            else setKey.mutate({ key: 'voice.wake.enabled', value: false });
+          }}
         >
           Enable wake-word detection (all surfaces)
         </Checkbox>
       )}
 
       {setKey.isError && <p className="voice-settings-hint" role="alert">{formatError(setKey.error)}</p>}
+
+      {setup.isPending && <p className="voice-settings-hint">Setting up the wake word…</p>}
+      {setup.isError && <p className="voice-settings-hint" role="alert">{formatError(setup.error)}</p>}
+      {setup.isSuccess && (
+        <div className="voice-settings-local-receipt" role="status" data-testid="wake-setup-plan">
+          {setup.data.rendered.split('\n').map((line, index) => <p key={index}>{line}</p>)}
+          {proposesStt && (
+            <Button className="voice-settings-action" disabled={setup.isPending} onClick={() => setup.mutate(true)}>
+              Install speech-to-text
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* A detector that fires into a daemon with no speech-to-text provider produces
           audio nobody can read. Saying so here beats a wake that chimes and then

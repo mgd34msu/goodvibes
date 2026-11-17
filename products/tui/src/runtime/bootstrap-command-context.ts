@@ -70,6 +70,7 @@ export type CreateBootstrapCommandContextOptions = {
   mcpRegistry: McpRegistry;
   voiceProviderRegistry?: VoiceProviderRegistry;
   voiceService?: VoiceService;
+  voiceSetup?: import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup').VoiceSetupService;
   /** Direct-command consumers (`/search`, `/image`) of already-constructed RuntimeServices. */
   webSearchService?: import('@goodvibes-jev/engine/platform/platform/web-search').WebSearchService;
   mediaProviders?: import('@goodvibes-jev/engine/platform/platform/media').MediaProviderRegistry;

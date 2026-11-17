@@ -274,7 +274,7 @@ async function buildVoiceInteractionWorkflows(
         ? `Tell the user which row refuses to start wake capture: ${wake.blockers[0]?.key ?? 'the blocking row'}. Its written reason is in blockedRowDetails; changing that setting is their decision.`
         : wake.active
           ? 'Wake capture is live; run agent_harness mode:"run_command" command:"/voice wake status" to confirm the pinned models verify on disk, and report its result rather than asking anyone to check.'
-          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the first setupRoutes entry; the surface row moves with it). Turning it on does not fetch models: agent_harness mode:"run_command" command:"/voice wake status" then reports not-provisioned for a missing model and names the command that fetches it.',
+          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the first setupRoutes entry; the surface row moves with it). Turning it on runs the voice setup: missing wake models are fetched and verified, and the setup plan is shown, proposing speech-to-text when it is missing (agent_harness mode:"run_command" command:"/voice wake setup --yes yes" installs it). agent_harness mode:"run_command" command:"/voice wake status" then reports what is on disk.',
       capabilities: ['wake word', 'always listening', 'permission repair'],
       modelRoute: 'agent_harness mode:"media_posture" query:"wake word" includeParameters:true',
       setupRoutes: [

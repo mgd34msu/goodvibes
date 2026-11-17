@@ -116,6 +116,7 @@ import { keepAwakeHolding } from './core/power-status.ts';
 import { createKeepAwakeForwarder, readServedKeepAwakeState, type PowerState } from '@goodvibes-jev/engine/platform/platform/power';
 import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
 import { wireGuidanceNotices } from './input/commands/guidance-runtime.ts';
+import { proposesSpeechToText, runWakeSetupPlan, wakeSetupRunning } from './core/wake-setup-plan.ts';
 import { wrapRequestPermissionWithAlert } from './core/approval-alert.ts';
 import { createTerminalNotifier } from './core/terminal-notifier.ts';
 import { createDeferredRender } from './renderer/deferred-render.ts';
@@ -427,6 +428,22 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (isExternalDaemon()) void keepAwakeForwarder.set(newValue === true);
   });
   unsubs.push(powerChipSource.stop, unsubscribeKeepAwakeForward);
+  // Turning wake detection on from anywhere (settings, /config, a model's settings
+  // call) runs the same voice setup as /voice wake setup and shows its plan.
+  unsubs.push(configManager.subscribe('voice.wake.enabled', (enabled) => {
+    if (enabled !== true || wakeSetupRunning()) return;
+    void runWakeSetupPlan(ctx.services.voiceSetup).then(
+      (outcome) => {
+        systemMessageRouter.high(['Wake-Word Setup', outcome.rendered,
+          ...(proposesSpeechToText(outcome) ? ['(yes: /voice wake setup yes installs it now)'] : [])].join('\n'));
+        render();
+      },
+      (error: unknown) => {
+        systemMessageRouter.high(`Wake-Word Setup: ${error instanceof Error ? error.message : String(error)}`);
+        render();
+      },
+    );
+  }));
   const lifecycle = installProcessLifecycle({
     stdin,
     stdout,

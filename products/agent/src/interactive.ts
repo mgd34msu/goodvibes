@@ -97,6 +97,7 @@ import { createCommandContextUi } from './shell/command-context-ui.ts';
 import { createTerminalPaintWindow } from './shell/terminal-paint-window.ts';
 import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
 import { SessionViews } from './shell/session-views.ts';
+import { proposesSpeechToText, runWakeSetupPlan, wakeSetupRunning } from './core/wake-setup-plan.ts';
 
 // Escape bytes and enter/exit sequencing live in renderer/terminal-escapes.ts (re-exported from @goodvibes-jev/engine/terminal-shell) so this file never holds its own drifting copy.
 
@@ -982,6 +983,22 @@ async function main(prepared: PreparedShellCliRuntime) {
     },
     render: () => render(),
   });
+  // Turning wake detection on from anywhere (settings, /config, a model's settings
+  // call) runs the same voice setup as /voice wake setup and shows its plan.
+  unsubs.push(configManager.subscribe('voice.wake.enabled', (enabled) => {
+    if (enabled !== true || wakeSetupRunning()) return;
+    void runWakeSetupPlan(ctx.services.voiceSetup).then(
+      (outcome) => {
+        systemMessageRouter.high(['Wake-Word Setup', outcome.rendered,
+          ...(proposesSpeechToText(outcome) ? ['(yes: /voice wake setup --yes yes installs it now)'] : [])].join('\n'));
+        render();
+      },
+      (error: unknown) => {
+        systemMessageRouter.high(`Wake-Word Setup: ${error instanceof Error ? error.message : String(error)}`);
+        render();
+      },
+    );
+  }));
 
   const toolCount = toolRegistry.list().length;
   conversation.splashOptions = {

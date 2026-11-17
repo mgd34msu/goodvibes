@@ -7,7 +7,7 @@ import type { ConfigManager } from '../config/manager.js';
 import type { ContentPart, LLMProvider } from '../providers/interface.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { logger } from '../utils/logger.js';
-import { appendVerificationRuntimeMessage } from './verification/archive.js';
+import { attachToolResultImages } from './tool-result-images.js';
 import type { ExecutionPlan, ExecutionPlanManager } from './execution-plan.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitCommunicationConsumed, emitToolReconciled, emitTurnCompleted } from '../runtime/emitters/index.js';
@@ -256,17 +256,7 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
   args.setPendingToolCalls([]);
   if (args.contractSession) reportSessionToolRound(args.contractSession, { toolCalls, results, assistantText: content });
 
-  const allImages = (results as Array<ToolResult & { _images?: Array<{ path: string; base64: string; mediaType: string; description: string }> }>)
-    .filter(r => Array.isArray(r._images) && r._images.length > 0)
-    .flatMap(r => r._images!);
-  if (allImages.length > 0 && args.providerRegistry.getCurrentModel().capabilities.multimodal) {
-    const imageParts: ContentPart[] = [
-      { type: 'text', text: '[Images from read tool results]' },
-      ...allImages.map(img => ({ type: 'image' as const, data: img.base64, mediaType: img.mediaType })),
-    ];
-    // Host-made, not the person's words: marked so retry, undo and the verifier skip it.
-    appendVerificationRuntimeMessage(args.conversation, imageParts);
-  }
+  attachToolResultImages(args.conversation, results, args.providerRegistry.getCurrentModel().capabilities.multimodal);
 
   const spawnedAgents = !isNativeConversationTurn() && toolCalls.some((tc: ToolCall) => {
     const mode = (tc.arguments as Record<string, unknown>).mode;

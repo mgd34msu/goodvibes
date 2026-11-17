@@ -85,6 +85,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import { toolCallActivity } from '@goodvibes-jev/engine/contracts';
 import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
+import { attachToolResultImages } from '../core/tool-result-images.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
@@ -224,6 +225,12 @@ export interface CompanionChatManagerConfig {
   readonly provider: CompanionLLMProvider;
   /** Resolve historical null routes once at admission, never per tool round. */
   readonly resolveDefaultRoute?: (() => QueuedCompanionTurn['route']) | undefined;
+  /**
+   * Whether the model a turn's route names accepts images, so pictures in tool
+   * results (an image file read, a phone capture) reach it. Absent: they are
+   * not attached and the model is told so.
+   */
+  readonly modelReadsImages?: ((route: QueuedCompanionTurn['route']) => boolean) | undefined;
   readonly eventPublisher: CompanionChatEventPublisher;
   /**
    * ToolRegistry to use for executing tool calls emitted by the LLM.
@@ -283,6 +290,7 @@ export class CompanionChatManager {
   private readonly sessions = new Map<string, InternalSession>();
   private readonly provider: CompanionLLMProvider;
   private readonly resolveDefaultRoute: CompanionChatManagerConfig['resolveDefaultRoute'];
+  private readonly modelReadsImages: CompanionChatManagerConfig['modelReadsImages'];
   private readonly nativeDataWriter: NativeDataWriteOwner | undefined;
   private readonly eventPublisher: CompanionChatEventPublisher;
   private readonly toolRegistry: ToolRegistry | null;
@@ -312,6 +320,7 @@ export class CompanionChatManager {
   constructor(config: CompanionChatManagerConfig) {
     this.provider = config.provider;
     this.resolveDefaultRoute = config.resolveDefaultRoute;
+    this.modelReadsImages = config.modelReadsImages;
     this.nativeDataWriter = config.nativeDataWriter;
     this.eventPublisher = config.eventPublisher;
     this.toolRegistry = config.toolRegistry ?? null;
@@ -1231,6 +1240,7 @@ export class CompanionChatManager {
           },
           addToolResults: (results) => {
             history.addToolResults(results);
+            attachToolResultImages(conversation, results, this.modelReadsImages?.(route) ?? false);
             uncommittedContent = '';
           },
         },

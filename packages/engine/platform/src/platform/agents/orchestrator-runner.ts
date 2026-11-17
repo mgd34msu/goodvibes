@@ -12,6 +12,7 @@ import { captureAutonomousSource } from '../permissions/autonomous.js';
 // collaborators (ConversationManager, ToolRegistry, AgentSession, etc.).
 // It does not own any state beyond the duration of a single runAgentLoop() call.
 import { ConversationManager } from '../core/conversation.js';
+import { attachToolResultImages } from '../core/tool-result-images.js';
 import { executeToolCalls as executeAutonomousToolCalls, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
 import { captureToolInputCalls, projectToolInputBatch } from '../core/tool-input-ingress.js';
 import { captureProjectionArgs, describeToolInputProjectionProblem, ToolInputProjectionError } from '../tools/input-projection.js';
@@ -1103,6 +1104,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           throw error;
         }
         activeConversation.addToolResults(results);
+        // Pictures a tool returned (an image file, a phone capture) reach this worker's model too.
+        attachToolResultImages(activeConversation, results, resolveContextWindowModelDefinition(providerRegistry, activeRoute).capabilities.multimodal);
         completionGuard.noteToolResults(results);
         reportContractTurnEnd(context, record, round, { ...raw, toolCalls: calls }, results);
         // Per-model edit-failure + exec-expectation-miss telemetry (measurement only).

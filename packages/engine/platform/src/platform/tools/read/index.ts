@@ -69,7 +69,7 @@ export class ReadTool implements Tool {
     this.codeIntelligence = codeIntelligence;
   }
 
-  async execute(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string; hostEvidence?: ToolHostEvidence; _images?: readonly ReadImage[] }> {
+  async execute(args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<{ success: boolean; output?: string; error?: string; hostEvidence?: ToolHostEvidence; images?: readonly ReadImage[] }> {
     if (!Array.isArray(args.files) || args.files.length === 0) {
       return { success: false, error: 'Missing or empty "files" array' };
     }
@@ -205,7 +205,7 @@ export class ReadTool implements Tool {
         reason: clipped.has(r) ? 'max_tokens' as const : 'max_per_item' as const }];
     });
 
-    // Image bytes travel beside the result text (`_images`), so nothing parses the text to find them.
+    // Image bytes travel beside the result text (`images`), so nothing parses the text to find them.
     const images: ReadImage[] = [];
     const fileResults: FileReadResult[] = results.map((r) => {
       if (r.imageData) {
@@ -275,7 +275,7 @@ export class ReadTool implements Tool {
     const reads = fileResults.flatMap((r, index) => r.readObservation || r.resolvedPath
       ? [{ index, path: r.path, resolvedPath: r.resolvedPath, readObservation: r.readObservation ? { ...r.readObservation } : undefined }]
       : []);
-    const hostEvidence = { ...(reads.length ? { hostEvidence: { reads } } : {}), ...(images.length > 0 ? { _images: images } : {}) };
+    const hostEvidence = { ...(reads.length ? { hostEvidence: { reads } } : {}), ...(images.length > 0 ? { images } : {}) };
 
     if (allFailed) {
       const reasons = [...new Set(fileResults.map((r) => r.error).filter((error): error is string => typeof error === 'string'))];

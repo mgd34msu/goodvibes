@@ -61,6 +61,7 @@ import {
   type DeviceCapabilityId,
 } from '../../devices/index.js';
 import type { Tool } from '../../types/index.js';
+import type { ToolResultImage } from '../../types/tools.js';
 import type { DeviceCapabilityOutcomeWire, DeviceNodeSummary, DevicesClient } from './devices-client.js';
 
 /**
@@ -80,8 +81,8 @@ const MAX_IMAGE_BASE64_CHARS = Math.ceil((5 * 1024 * 1024) / 3) * 4;
 /** Longest-edge pixels a photo is taken at when the call names no width: sharp enough to read, small enough to attach. */
 export const DEFAULT_PHOTO_MAX_WIDTH = 1568;
 
-/** An image the conversation loop attaches to the model's next request, in the shape the `read` tool uses. */
-interface AttachedImage { readonly path: string; readonly base64: string; readonly mediaType: string; readonly description: string }
+/** An image the conversation loop attaches to the model's next request (ToolResult.images). */
+type AttachedImage = ToolResultImage;
 
 export interface ClientPhoneToolOptions {
   /** The conversation the phone tool is serving, so a confirmation prompt and a session-scoped grant bind to it. */
@@ -305,8 +306,8 @@ export function createClientPhoneTool(devices: DevicesClient, toolOptions: Clien
       const images = Array.isArray(attached) ? attached as readonly AttachedImage[] : undefined;
       const output = JSON.stringify(visible, null, 2);
       if (!payload.success) return { success: false, error: String(payload['error'] ?? 'The phone request failed.'), output };
-      // `_images` is the loop's channel for pictures a tool hands the model.
-      return images && images.length > 0 ? { success: true, output, _images: images } as { success: true; output: string } : { success: true, output };
+      // `images` is every loop's channel for pictures a tool hands the model.
+      return images && images.length > 0 ? { success: true, output, images } : { success: true, output };
     },
   };
 }
@@ -432,11 +433,13 @@ async function handleAction(devices: DevicesClient, sessionId: string | undefine
           mediaType,
           description: `Phone capture ${artifactId}`,
         };
+        const daemonPath = typeof read.artifact['daemonPath'] === 'string' ? read.artifact['daemonPath'] : undefined;
         return {
           success: true,
           artifact: read.artifact,
           attached: 'image',
-          note: 'The capture is attached as an image for a model that can see images. It stays on the daemon until its retention window closes.',
+          note: 'The capture is attached as an image when the model reads images; otherwise the next message says it was not shown'
+            + `${daemonPath ? `, and it can be read on the daemon machine at ${daemonPath}` : ''}. It stays on the daemon until its retention window closes.`,
           [IMAGES]: [image],
         };
       }

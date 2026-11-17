@@ -78,6 +78,7 @@ export type {
   ToolExecuteOptions,
   ToolReadModes,
   ToolResult,
+  ToolResultImage,
   ToolSideEffect,
 } from './tools.js';
 export { readModeCategory } from './tools.js';

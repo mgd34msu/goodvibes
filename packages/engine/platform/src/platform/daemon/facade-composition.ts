@@ -393,6 +393,12 @@ export function resolveDaemonFacadeRuntime(
       const model = runtimeServices.providerRegistry.getCurrentModel();
       return { provider: model.provider, model: model.id, systemPrompt: null, reasoningEffort: requestedEffortOverride(runtimeServices.configManager) };
     },
+    modelReadsImages: (route) => {
+      if (route.model === null) return runtimeServices.providerRegistry.getCurrentModel().capabilities.multimodal === true;
+      const named = runtimeServices.providerRegistry.listModels()
+        .find((model) => model.provider === route.provider && (model.id === route.model || model.registryKey === route.model));
+      return named?.capabilities.multimodal === true;
+    },
     // Explicitly opt into disk persistence for the daemon. Default is false
     // for tests and embedded hosts.
     persist: true,

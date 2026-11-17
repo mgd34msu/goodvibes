@@ -257,6 +257,22 @@ export interface ToolResult {
   cancelled?: boolean | undefined;
   /** Host-only facts about this result; never rendered to the model. See {@link ToolHostEvidence}. */
   hostEvidence?: ToolHostEvidence | undefined;
+  /**
+   * Pictures for the model, beside the text (an image file read, a phone
+   * capture). Every conversation loop attaches them to its next request when
+   * its model accepts images, and tells the model they were not shown when it
+   * does not (core/tool-result-images.ts).
+   */
+  images?: readonly ToolResultImage[] | undefined;
+}
+
+/** One picture a tool result hands the model. */
+export interface ToolResultImage {
+  /** Where it came from: a file path, or a source label such as `phone:<artifact id>`. */
+  readonly path: string;
+  readonly base64: string;
+  readonly mediaType: string;
+  readonly description: string;
 }
 
 /**

@@ -34,7 +34,9 @@ test('two independently loaded handles cannot both create an absent conditional 
     f.second.upsertSourceIfCurrent({ ...source, metadata: { owner: 'second' } }, null),
   ]);
   const third = await reopen(f.path);
-  expect({ kinds: results.map(result => result.kind).sort(), owner: third.store.getSource(source.id)?.metadata.owner }).toEqual({ kinds: ['held', 'written'], owner: 'first' });
+  expect(results.map(result => result.kind).sort()).toEqual(['held', 'written']);
+  const winner = results[0]!.kind === 'written' ? 'first' : 'second';
+  expect(third.store.getSource(source.id)?.metadata.owner).toBe(winner);
 });
 
 test('an absent-row condition observes a creation through another initialized real handle', async () => {
@@ -64,7 +66,6 @@ test('separate processes released from one barrier cannot both win an expected-n
     '-e', script, f.path, owner,
   ], { cwd: new URL('..', import.meta.url).pathname, env: { ...process.env }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
   const readers = children.map(child => child.stdout.getReader());
-  const deadline = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill(); }, 12000);
   try {
     await Promise.all(readers.map(async reader => {
       const first = await reader.read();
@@ -81,9 +82,8 @@ test('separate processes released from one barrier cannot both win an expected-n
     expect(results.map(result => result.kind).sort()).toEqual(['held', 'written']);
     expect(third.store.getSource('process-conditional')?.metadata.owner).toBe(results.find(result => result.kind === 'written')!.owner);
   } finally {
-    clearTimeout(deadline);
     for (const child of children) if (child.exitCode === null) child.kill();
     await Promise.allSettled(children.map(child => child.exited));
     for (const reader of readers) reader.releaseLock();
   }
-}, 20000);
+});

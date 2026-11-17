@@ -377,6 +377,7 @@ export type {
   PreparedScopedSecretDeletion,
   PreparedScopedSecretDeletionFacts,
   SecretDeleteOptions,
+  SecretDeletion,
   SecretRecord,
   SecretScope,
   SecretSource,

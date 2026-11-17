@@ -9,9 +9,8 @@ import { captureJudgmentBackendSettings } from '@goodvibes-jev/judgment/decision
  * Config/credential mutation intent invalidates before publication, including
  * ABA and failed/no-op mutation: the two change subscriptions abort the
  * lifetime's signal, and a capture's check reads that signal and nothing else.
- * The settings and credentials are sampled once per capture, which also keeps
- * a source with no observers, and a credential replaced by another process,
- * from outliving a change: the next capture sees it.
+ * A source with no observers is sampled once per capture instead, so a change
+ * is still seen by the next capture.
  */
 export function createJudgmentSourceLifetime(source: Pick<JudgmentSettingsSource, 'config' | 'env'> & {
   readonly secrets: Omit<JudgmentSettingsSource['secrets'], 'get'>;
@@ -63,9 +62,16 @@ export function createJudgmentSourceLifetime(source: Pick<JudgmentSettingsSource
     previous = observation;
   };
 
+  // With both observers every change (another process's settings or credential
+  // write included, through the config file watch and the secret store watch)
+  // aborts the signal, so a capture needs no re-reading; a source without them
+  // is sampled once per capture.
+  const observed = configUnsubscribe !== undefined && secretUnsubscribe !== undefined;
   return {
     capture() {
-      sample();
+      if (disposed) throw new JudgmentAuthorityRetiredError();
+      if (!observed) sample();
+      else if (source.secrets.getCredentialMutationState?.().pending) throw new JudgmentAuthorityRetiredError();
       const captured = identity;
       const signal = controller.signal;
       return Object.freeze({ identity: captured, signal, assertCurrent() {

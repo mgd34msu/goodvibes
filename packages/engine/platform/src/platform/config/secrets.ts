@@ -158,6 +158,13 @@ export interface SecretDeleteOptions {
   readonly medium?: SecretStorageMedium | undefined;
 }
 
+/** One store a deletion removed the key from. */
+export interface SecretDeletion {
+  readonly scope: SecretScope;
+  readonly medium: SecretStorageMedium;
+  readonly source: Exclude<SecretSource, 'env'>;
+}
+
 export interface SecretStorageReview {
   readonly policy: SecretStorageMode;
   readonly secureAvailable: boolean;
@@ -1520,6 +1527,11 @@ export class SecretsManager {
    * in another product cannot be promoted back to the daemon at the next start.
    */
   async delete(key: string, options: SecretDeleteOptions = {}): Promise<void> {
+    await this.deleteWithReceipt(key, options);
+  }
+
+  /** As `delete`, answering which stores held the key; an empty answer means none did and nothing changed. */
+  async deleteWithReceipt(key: string, options: SecretDeleteOptions = {}): Promise<readonly SecretDeletion[]> {
     const daemonNeeded = isDaemonNeededSecretKey(key);
     const scopeFilter = daemonNeeded ? undefined : options.scope;
     const candidates = daemonNeeded ? this.getMigratableStores() : this.getAllCandidateStores();
@@ -1528,7 +1540,8 @@ export class SecretsManager {
       if (options.medium && (options.medium === 'secure') !== store.secure) return false;
       return existsSync(store.path) && this.storeContainsKey(store, key);
     });
-    await this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(store => store.path), () => this.deleteOwned(key, stores)));
+    if (stores.length === 0) return [];
+    return await this.withCredentialMutation(key, () => this.withStoreMutations(stores.map(store => store.path), () => this.deleteOwned(key, stores)));
   }
 
   private storeContainsKey(store: SecretStorePath, key: string): boolean {
@@ -1538,8 +1551,9 @@ export class SecretsManager {
     return values !== null && Object.hasOwn(values, key);
   }
 
-  private deleteOwned(key: string, stores: readonly SecretStorePath[]): void {
+  private deleteOwned(key: string, stores: readonly SecretStorePath[]): readonly SecretDeletion[] {
     let removed = false;
+    const deletions: SecretDeletion[] = [];
     try {
       for (const store of stores) {
         const current = store.secure
@@ -1553,11 +1567,13 @@ export class SecretsManager {
         else this.writePlaintextFile(store.path, values);
         logger.debug('SecretsManager: deleted secret', { key, source: store.source });
         removed = true;
+        deletions.push({ scope: store.scope, medium: store.secure ? 'secure' : 'plaintext', source: store.source });
       }
     } finally {
       // A later store failing must not leave listeners holding a credential an earlier store already lost.
       if (removed) this.notifyChanged(key);
     }
+    return deletions;
   }
 
   /**

@@ -8,6 +8,7 @@ import {
 } from '@goodvibes-jev/engine/platform/platform/config';
 import { formatJsonOrText, yesNo } from './cli-output.js';
 const SECRET_WRITE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--stdin']);
+const SECRET_DELETE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext']);
 
 /** The value without the one trailing newline a piped `echo` adds. */
 async function readProcessStdin(): Promise<string> {
@@ -30,7 +31,7 @@ interface CliSecretRuntime {
   readonly cli: { readonly commandArgs: readonly string[]; readonly flags: { readonly outputFormat?: string | undefined } };
 }
 export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy: {
-  readonly createSecrets: (runtime: Runtime) => Pick<SecretsManager, 'get' | 'set' | 'delete' | 'inspect' | 'listDetailed'>;
+  readonly createSecrets: (runtime: Runtime) => Pick<SecretsManager, 'get' | 'set' | 'deleteWithReceipt' | 'inspect' | 'listDetailed'>;
   readonly binary: (runtime: Runtime) => string;
   readonly inline: boolean;
   readonly writeScope: (key: string, requested: SecretScope) => SecretScope;
@@ -107,14 +108,24 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
           ].join('\n'));
     }
     if (sub === 'delete') {
-      const key = rest.find((arg) => !arg.startsWith('--'));
-      if (!key) return usageError(`Usage: ${policy.binary(runtime)} secrets delete <KEY> [--user|--project] [--secure|--plaintext]`);
+      const deleteUsage = `Usage: ${policy.binary(runtime)} secrets delete <KEY> [--user|--project] [--secure|--plaintext]`;
       const flags = new Set(rest.filter((arg) => arg.startsWith('--')));
-      await secrets.delete(key, {
+      // A mistyped scope flag would otherwise widen the delete to every scope and medium.
+      const unknownFlags = [...flags].filter((flag) => !SECRET_DELETE_FLAGS.has(flag));
+      if (unknownFlags.length > 0) return refused(`Nothing deleted: unknown option ${unknownFlags.join(', ')}. ${deleteUsage}`);
+      const positionals = rest.filter((arg) => !arg.startsWith('--'));
+      const [key] = positionals;
+      if (!key) return usageError(deleteUsage);
+      if (positionals.length > 1) return refused(`Nothing deleted: ${positionals.length} keys were given; delete one key at a time. ${deleteUsage}`);
+      const removed = await secrets.deleteWithReceipt(key, {
         scope: policy.deleteScope(key, flags.has('--user') ? 'user' : flags.has('--project') ? 'project' : undefined),
         medium: flags.has('--secure') ? 'secure' : flags.has('--plaintext') ? 'plaintext' : undefined,
       });
-      return ok(policy.inline ? `[secrets] Deleted: ${key}` : 'Secret deleted\n  key ' + key);
+      if (removed.length === 0) return refused(`No stored secret named ${key}${flags.size > 0 ? ` in the ${[...flags].map((flag) => flag.slice(2)).join(' ')} store` : ''}. Nothing was deleted; \`${policy.binary(runtime)} secrets list\` shows the stored keys.`);
+      const stores = removed.map((entry) => `${entry.scope}/${entry.medium}`);
+      return ok(policy.inline
+        ? `[secrets] Deleted: ${key} (removed from ${stores.join(', ')})`
+        : ['Secret deleted', '  key ' + key, '  removed from ' + stores.join(', ')].join('\n'));
     }
     // Only `list` lists: an unknown verb used to print the listing with exit 0,
     // which told a caller that guessed `get` or `show` it had succeeded.

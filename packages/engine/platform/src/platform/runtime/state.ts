@@ -1,7 +1,6 @@
 export { createRuntimeStore, createDomainDispatch, createInitialRuntimeState } from './store/index.js';
 export type { RuntimeStore, DomainDispatch } from './store/index.js';
 export type { RuntimeState } from './store/state.js';
-export * from './store/selectors/index.js';
 export * from './store/domains/index.js';
 export * from './store/helpers/index.js';
 export * from './feature-flags/index.js';

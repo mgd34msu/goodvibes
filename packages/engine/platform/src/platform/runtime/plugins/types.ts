@@ -1,15 +1,22 @@
 /**
  * Plugin lifecycle system types.
  *
- * Types here extend the store domain types with the capability manifest the
- * plugin manager resolves and the lifecycle state machine's transition result.
+ * The lifecycle states, the capability manifest the plugin manager resolves
+ * and the lifecycle state machine's transition result.
  */
 
-import type { PluginLifecycleState } from '../store/domains/plugins.js';
 import type { PluginManifest } from '../../plugins/loader.js';
 
-// Re-export so consumers only need to import from this module.
-export type { PluginLifecycleState } from '../store/domains/plugins.js';
+/** States for the plugin lifecycle machine. */
+export type PluginLifecycleState =
+  | 'discovered'
+  | 'loading'
+  | 'loaded'
+  | 'active'
+  | 'degraded'
+  | 'error'
+  | 'unloading'
+  | 'disabled';
 
 // ── Capability manifest ───────────────────────────────────────────────────────
 

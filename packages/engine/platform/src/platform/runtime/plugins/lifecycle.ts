@@ -16,8 +16,7 @@
  * transition; only fatal/load failures enter the `error` state.
  */
 
-import type { PluginLifecycleState } from '../store/domains/plugins.js';
-import type { TransitionResult } from './types.js';
+import type { PluginLifecycleState, TransitionResult } from './types.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 
 /** The plugin lifecycle: for each state, the states reachable from it. */

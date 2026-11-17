@@ -44,8 +44,6 @@ export interface PolicyCommandContext {
   print(text: string): void;
   /** Absent in a runtime without policy state; the verbs that need it say so. */
   readonly policyRuntimeState?: PolicyRuntimeState | undefined;
-  /** A registry the product holds itself; otherwise the runtime state's registry. */
-  readonly policyRegistry?: PolicyRegistry | undefined;
   /** The project root the simulation evaluates against (may throw when unavailable). */
   workingDirectory(): string;
   /** The live config: the preflight review reads it, and simulate reads the divergence threshold. */
@@ -63,7 +61,7 @@ function getPolicyState(ctx?: PolicyCommandContext): PolicyRuntimeState {
 }
 
 function getRegistry(ctx?: PolicyCommandContext): PolicyRegistry {
-  return ctx?.policyRegistry ?? getPolicyState(ctx).getRegistry();
+  return getPolicyState(ctx).getRegistry();
 }
 
 async function refreshLintAfterPolicyChange(context: PolicyCommandContext): Promise<void> {

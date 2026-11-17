@@ -23,7 +23,7 @@ import type { ConfigManager } from '../config/manager.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { AgentMessageBus } from '../agents/message-bus.js';
 import { AgentOrchestrator } from '../agents/orchestrator.js';
-import { ArchetypeLoader } from '../agents/archetypes.js';
+import { archetypeLoaderFor, type ArchetypeLoader } from '../agents/archetypes.js';
 import { AgentManager } from '../tools/agent/index.js';
 import type { RuntimeEventBus } from './events/index.js';
 
@@ -49,7 +49,8 @@ export interface AgentGraph {
 
 export function createAgentGraph(options: AgentGraphOptions): AgentGraph {
   const agentMessageBus = new AgentMessageBus(); agentMessageBus.setRuntimeBus(options.runtimeBus);
-  const archetypeLoader = new ArchetypeLoader(join(options.workingDirectory, '.goodvibes', 'agents'));
+  // The process's one loader for this directory, shared with /teamwork: one scan, one freshness rule.
+  const archetypeLoader = archetypeLoaderFor(join(options.workingDirectory, '.goodvibes', 'agents'));
   const agentOrchestrator = new AgentOrchestrator({ messageBus: agentMessageBus,
     capturedBunRuntimeExecutable: options.capturedBunRuntimeExecutable ?? resolveProcessCapturedBunRuntimeExecutable() });
   agentOrchestrator.setRuntimeBus(options.runtimeBus);

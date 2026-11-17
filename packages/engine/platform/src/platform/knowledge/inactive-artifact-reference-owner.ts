@@ -5,8 +5,7 @@
 import { lstatSync, readlinkSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { captureExistingDirectory } from '../utils/atomic-json-store.js';
-import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
-import { inspectNativeArtifactReferenceImage } from '../state/sqlite-store.js';
+import { inspectArtifactReferencesFile } from '../state/sqlite-store.js';
 import { acquireArtifactReferenceLock } from '../state/artifact-reference-lock.js';
 import type { KnowledgeArtifactReferenceOwner } from './artifact-reference-owner.js';
 
@@ -46,14 +45,12 @@ export function createInactiveArtifactReferenceOwner(path: string): KnowledgeArt
     const lock = await acquireArtifactReferenceLock(selected.path, selected.assertCurrent);
     if (!lock) return { kind: 'local-changes' as const };
     try {
-      const assertOwner = lock.assertCurrent;
-      assertOwner(); const exists = lstatSync(selected.path, { throwIfNoEntry: false }) !== undefined;
-      const source = exists ? readFileObservation(selected.path) : undefined;
-      const assertCurrent = () => {
-        assertOwner(); const current = lstatSync(selected.path, { throwIfNoEntry: false });
-        if (source ? !current || fileObservationIdentity(selected.path) !== source.physical : current !== undefined) throw new Error('Knowledge artifact reference source changed.');
-      };
-      assertCurrent(); const referenced = source ? await inspectNativeArtifactReferenceImage(source.bytes, requested, assertCurrent) : Object.freeze([]);
+      // The writer lock keeps every knowledge writer out while it is held, so the
+      // file is read in place (committed WAL content included) and the lock is
+      // the only currency check; no byte copy of the file is made.
+      const assertCurrent = lock.assertCurrent;
+      assertCurrent(); const exists = lstatSync(selected.path, { throwIfNoEntry: false }) !== undefined;
+      const referenced = exists ? inspectArtifactReferencesFile(selected.path, requested) : Object.freeze([]);
       assertCurrent(); const value = await operation(referenced, assertCurrent); assertCurrent();
       return { kind: 'completed' as const, value };
     } finally { lock.release(); }

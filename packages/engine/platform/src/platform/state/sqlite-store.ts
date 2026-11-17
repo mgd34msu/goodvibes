@@ -283,17 +283,6 @@ export function inspectNativePlanningProjectImage(data: Uint8Array, assertCurren
   finally { image.close(); }
 }
 
-/**
- * Artifact references in a byte copy of a knowledge file. A byte copy cannot
- * include commits still in the file's WAL, so it cannot prove an artifact is
- * unreferenced: every requested id is reported referenced, which keeps the
- * artifact. Read through the file (`inspectArtifactReferencesFile`) instead.
- */
-export function inspectNativeArtifactReferenceImage(_data: Uint8Array, ids: readonly string[], assertCurrent: () => void): Promise<readonly string[]> {
-  assertSynchronous(assertCurrent, 'SQLiteStore: the owner check must be synchronous');
-  return Promise.resolve(Object.freeze([...ids]));
-}
-
 /** Open a knowledge file that no store in this process holds, read from it, close it. Never creates the file. */
 function withFileDatabase<T>(path: string, read: (db: SqlDatabase) => T): T {
   const db = new (bunDatabase())(path, { create: false });

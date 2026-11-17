@@ -5,15 +5,19 @@
  * integration unit that joins them (an index naming both). The first agent of the second unit fails
  * with an error a retry cannot clear (the scripted provider refuses it with
  * HTTP 400), so the unit waits on the owner with one question, retry or
- * cancel; the owner answers retry, the daemon is restarted while the contract
- * is in progress, and the contract finishes after the restart with both files.
+ * cancel, which is also an item in the owner inbox; the owner answers retry
+ * there (inbox.answer), a second answer through contracts.reply is refused,
+ * the daemon is restarted while the contract is in progress, and the contract
+ * finishes after the restart with both files. With no decision model the
+ * finished result is put to the owner (accept or cancel), answered in the inbox
+ * too.
  *
  * It runs twice: under Hybrid with the scripted decision model on loopback
  * (fake-decision.ts), and with no decision model at all.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Journey, api, approvePending, operatorToken, short, stage, waitFor, type Stage } from './lib.ts';
+import { Journey, api, approvePending, invoke, operatorToken, short, stage, waitFor, type Daemon, type Stage } from './lib.ts';
 import { textOf, type ChatMessage, type Script } from './fake-model.ts';
 import { answerAsAModelWould, startFakeDecision, type FakeDecision } from './fake-decision.ts';
 
@@ -90,6 +94,14 @@ function script(s: Stage): void {
       finalAnswer: 'contract-a.txt (A) and contract-b.txt (B) are written in the workspace, and contract-index.txt names both.' }));
 }
 
+type InboxItem = { id: string; kind?: string; status: string; key?: string; title?: string; options?: string[]; answeredBy?: unknown };
+
+/** The owner-inbox item a contract question is posted as (key contract-question:<escalationId>). */
+async function inboxItemFor(daemon: Daemon, token: string, escalationId: string, status: 'open' | 'all' = 'open'): Promise<InboxItem | undefined> {
+  const listed = await invoke(daemon, token, 'inbox.list', { status, limit: 200 });
+  return ((listed.body as { items?: InboxItem[] }).items ?? []).find((item) => item.key === `contract-question:${escalationId}`);
+}
+
 type Contract = { id?: string; status?: string; units?: Array<{ id: string; status: string }>; escalations?: Array<{ id: string; question?: string; failurePause?: boolean; resolvedAt?: number | null; answer?: unknown }>; decisions?: Array<{ action: string; reason: string }> };
 
 async function run(label: string, judgment: { endpoint: string; policy: string } | 'off', decision?: FakeDecision): Promise<void> {
@@ -114,21 +126,28 @@ async function run(label: string, judgment: { endpoint: string; policy: string }
       return open ? { contract, open } : (contract.status === 'failed' || contract.status === 'completed' ? { contract, open: undefined } : undefined);
     }, 90_000, 500);
     const unitStates = (paused?.contract.units ?? []).map((unit) => `${unit.id}:${unit.status}`).join(' ');
-    journey.check(`${label}: a failed unit asks the owner to retry or cancel`, 'the second unit\'s agent gets HTTP 400 from the provider; GET /api/contracts/<id>; inbox.list',
-      `contract ${paused?.contract.status}; units ${unitStates}; question ${short(paused?.open?.question ?? 'none', 400)}`,
-      paused?.open !== undefined && /retry/.test(paused.open.question ?? '') && /cancel/.test(paused.open.question ?? '') && existsSync(join(s.home.workspace, 'contract-a.txt')));
-    if (!paused?.open) return;
+    const pausedItem = paused?.open ? await waitFor(() => inboxItemFor(s.daemon, token, paused.open!.id), 10_000) : undefined;
+    journey.check(`${label}: a failed unit asks the owner to retry or cancel, in the owner inbox too`, 'the second unit\'s agent gets HTTP 400 from the provider; GET /api/contracts/<id>; inbox.list',
+      `contract ${paused?.contract.status}; units ${unitStates}; question ${short(paused?.open?.question ?? 'none', 400)}; inbox item ${short(pausedItem ?? 'none', 400)}`,
+      paused?.open !== undefined && /retry/.test(paused.open.question ?? '') && /cancel/.test(paused.open.question ?? '') && existsSync(join(s.home.workspace, 'contract-a.txt'))
+        && pausedItem?.kind === 'question' && JSON.stringify(pausedItem.options) === JSON.stringify(['retry', 'cancel']));
+    if (!paused?.open || !pausedItem) return;
 
-    // The owner answers retry; the daemon restarts while the contract runs.
-    const answered = await api(s.daemon, token, 'POST', `/api/contracts/${encodeURIComponent(contractId)}/reply`, { escalationId: paused.open.id, text: 'retry' });
+    // The owner answers retry in the inbox; a second answer through contracts.reply finds the question answered.
+    const answered = await invoke(s.daemon, token, 'inbox.answer', { itemId: pausedItem.id, option: 'retry' });
+    const taken = await waitFor(async () => {
+      const contract = await read();
+      return (contract.escalations ?? []).find((entry) => entry.id === paused.open!.id && entry.resolvedAt !== undefined && entry.resolvedAt !== null) ? contract : undefined;
+    }, 20_000);
+    const second = await api(s.daemon, token, 'POST', `/api/contracts/${encodeURIComponent(contractId)}/reply`, { escalationId: paused.open.id, text: 'retry' });
     const before = await read();
     await s.restartDaemon();
     token = operatorToken(s.home);
     const after = await read();
-    journey.check(`${label}: the owner answers retry, and the contract's progress survives a daemon restart`,
-      'contracts.reply { escalationId, text: retry }; restart the daemon; GET /api/contracts/<id>',
-      `answer ${answered.status} ${short(answered.text, 200)}; before ${before.status} ${(before.units ?? []).map((unit) => `${unit.id}:${unit.status}`).join(' ')}; after ${after.status} ${(after.units ?? []).map((unit) => `${unit.id}:${unit.status}`).join(' ')}`,
-      answered.status < 300 && after.status !== undefined && after.status !== 'failed' && after.status !== 'cancelled'
+    journey.check(`${label}: the owner answers retry in the inbox, a second answer is refused, and the contract's progress survives a daemon restart`,
+      'inbox.answer { option: retry }; contracts.reply { escalationId, text: retry } again; restart the daemon; GET /api/contracts/<id>',
+      `answer ${answered.status} ${short(answered.text, 200)}; taken ${taken !== undefined}; second reply ${second.status} ${short(second.text, 160)}; before ${before.status} ${(before.units ?? []).map((unit) => `${unit.id}:${unit.status}`).join(' ')}; after ${after.status} ${(after.units ?? []).map((unit) => `${unit.id}:${unit.status}`).join(' ')}`,
+      answered.status < 300 && taken !== undefined && second.status === 409 && after.status !== undefined && after.status !== 'failed' && after.status !== 'cancelled'
         && (after.units ?? []).find((unit) => unit.id === 'u1')?.status === (before.units ?? []).find((unit) => unit.id === 'u1')?.status);
 
     const ended = (contract: Contract): boolean => contract.status === 'passed' || contract.status === 'failed' || contract.status === 'cancelled';
@@ -139,18 +158,20 @@ async function run(label: string, judgment: { endpoint: string; policy: string }
       const contract = await read();
       const open = (contract.escalations ?? []).find((entry) => entry.resolvedAt === undefined || entry.resolvedAt === null);
       if (!ended(contract) && contract.status === 'awaiting-owner' && open && !asked.includes(open.id)) {
+        // The question names its own answer: "accept" to publish an unchecked result, else "approve"; it is answered in the owner inbox.
+        const item = await inboxItemFor(s.daemon, token, open.id);
+        if (!item) return undefined;
         asked.push(open.id);
-        // The question names its own answer: "accept" to publish an unchecked result, else "approve".
-        const word = /Reply "accept"/.test(open.question ?? '') ? 'accept' : 'approve';
-        const approved = await api(s.daemon, token, 'POST', `/api/contracts/${encodeURIComponent(contractId)}/reply`, { escalationId: open.id, text: word });
-        asked.push(`${approved.status} ${short(open.question ?? '', 160)}`);
+        const accept = /Reply "accept"/.test(open.question ?? '');
+        const approved = await invoke(s.daemon, token, 'inbox.answer', { itemId: item.id, ...(accept ? { option: 'accept' } : { text: 'approve' }) });
+        asked.push(`${approved.status} options ${JSON.stringify(item.options)} ${short(open.question ?? '', 160)}`);
       }
       return ended(contract) ? contract : undefined;
     }, 150_000, 500);
     const final = finished ?? await read();
     if (label === 'nomodel') {
-      journey.check(`${label}: with no decision model the owner is asked to accept the finished work`, 'the open question at the end; contracts.reply { text: accept }',
-        short(asked, 400), asked.length === 2 && asked[1]!.startsWith('200'));
+      journey.check(`${label}: with no decision model the owner is asked to accept the finished work, in the owner inbox`, 'the open question at the end; inbox.answer { option: accept }',
+        short(asked, 400), asked.length === 2 && asked[1]!.startsWith('200 options ["accept","cancel"]'));
     } else {
       journey.check(`${label}: with a decision model the finished work is accepted without asking the owner`, 'open questions at the end', short(asked.length ? asked : 'none asked', 300), asked.length === 0);
     }

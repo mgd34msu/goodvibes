@@ -5,6 +5,7 @@ import { createRuntimeBaseServices } from './service-graph.js';
 import { createDaemonHandlerComposition } from './daemon-handler-composition.js';
 import { resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { bridgeHeldForOwnerToInbox, bridgeJevDecisionsToInbox, processHeldForOwner, processJevDecisions } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { bridgeContractQuestionsToInbox, contractQuestionEventsOf } from '@goodvibes-jev/engine/platform/platform/contract';
 import { createDaemonBootController, type DaemonBootController } from './boot-tasks.js';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
@@ -59,6 +60,12 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     // Legacy recovery can await planning or execution. Serve the host while
     // that work runs, and abort/drain it before releasing its dependencies.
     const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
+    // What a contract asks its owner (retry or cancel a failed unit, accept an unchecked result, ...) waits in the
+    // owner inbox beside everything else, and an answer there is the contract's reply; contracts.reply still answers it too.
+    if (services.ownerInbox) {
+      scope.registry.add('contract questions in the owner inbox', bridgeContractQuestionsToInbox(services.contractOperator,
+        contractQuestionEventsOf(services.runtimeBus), services.ownerInbox, { loaded: contractRecovery }));
+    }
     // The work-plan writes recovery queued are flushed by the graph's own contract-runner disposal, which runs after this.
     scope.registry.add('contract recovery', async () => {
       services.contractRunner.dispose();

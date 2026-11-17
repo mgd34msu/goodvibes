@@ -361,6 +361,9 @@ export type {
   ContractExternalWorkStatus,
   ContractWorkFields,
 } from './external.js';
+// A contract's questions to its owner in the owner inbox, answered there as contracts.reply answers them.
+export { CONTRACT_QUESTION_KEY_PREFIX, bridgeContractQuestionsToInbox, contractQuestionEventsOf } from './owner-inbox-bridge.js';
+export type { ContractQuestionEvent, ContractQuestionInbox, ContractQuestionSource } from './owner-inbox-bridge.js';
 // The contracts operator surface (section 10.2): the contracts.* methods, their REST paths and the external adapters act through it.
 export { ContractOperatorError, OPERATOR_SESSION_ID, createContractOperatorService, summarizeContract } from './operator-service.js';
 export type {

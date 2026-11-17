@@ -22,6 +22,7 @@ import {
   type OwnerInboxClient,
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { bridgeContractQuestionsToInbox } from '@goodvibes-jev/engine/platform/platform/contract';
 import { bridgeJevDecisionsToInbox, processJevDecisions } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes-jev/engine/platform/platform/agents';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
@@ -103,7 +104,11 @@ export function wireOwnerQuestionSessions(
   // What Jev decides in this terminal's turns is listed in /decisions here, in the Agent and in the web UI; a choice on it is carried out here.
   const stopDecisions = bridgeJevDecisionsToInbox(processJevDecisions(), homeOwnerInbox(services.shellPaths),
     { surface: 'tui', handle: handleOwnerDecisions, undo: services.fileUndoManager });
+  // What a contract this app runs asks its owner waits in the owner inbox too; an answer there is the contract's reply.
+  const stopContractQuestions = bridgeContractQuestionsToInbox(services.contractRunner,
+    (listener) => services.contractRunner.on(listener), homeOwnerInbox(services.shellPaths));
   return () => {
+    stopContractQuestions();
     stopDecisions();
     stopOpened();
     stopDeleted();

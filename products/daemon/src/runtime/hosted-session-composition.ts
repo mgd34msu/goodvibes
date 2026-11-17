@@ -65,8 +65,9 @@ import type {
 } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
 import {
   containmentFor,
+  hostedAgentAsker,
 } from '@goodvibes-jev/engine/platform/platform/hosted-sessions';
-import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '@goodvibes-jev/engine/platform/platform/agents';
+import { CONVERSATIONAL_DIAGNOSIS_SECTION, askingQuestions } from '@goodvibes-jev/engine/platform/platform/agents';
 import { createSessionSurface, createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, type ApprovalRaise } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { RuntimeServices } from './runtime-services-types.js';
@@ -180,6 +181,9 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         userPermissionRuleStore: services.userPermissionRuleStore,
         // Workers a hosted turn delegates to run under the turn's own posture.
         execContainment: containmentFor(hostedExecPosture()),
+        // Workers a hosted turn starts can leave the owner a question in the one inbox, like every spawned agent;
+        // the agent takes the answer while it runs, otherwise the hosted session that started it does.
+        ...(services.ownerInbox ? { ownerQuestions: askingQuestions(services.ownerInbox, hostedAgentAsker) } : {}),
       });
       try {
         // The floor's own tolerant custom load must settle before cached names

@@ -46,6 +46,7 @@ import {
 } from './question-store.js';
 import type { RevisionSource } from '../utils/revision.js';
 import { logger } from '../utils/logger.js';
+import { askerLivenessPath, isAskerRunning, type OwnerAskerKind } from './owner-asker-liveness.js';
 
 export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA };
 
@@ -135,8 +136,6 @@ export interface OwnerAnswerDelivery {
 export const OWNER_ASKER_HOST_METADATA = 'askerHost';
 /** Metadata key holding the asking terminal session's saved file: present = it can be opened again. */
 export const OWNER_ASKER_SESSION_FILE_METADATA = 'askerSessionFile';
-/** Metadata key holding the asking terminal session's liveness marker: fresh with a live process = open now. */
-export const OWNER_ASKER_LIVENESS_METADATA = 'askerLiveness';
 
 /** Who asked a question and where the facts about it are kept, read from the item. */
 export interface OwnerAsker {
@@ -146,7 +145,6 @@ export interface OwnerAsker {
   readonly agent?: string | undefined;
   readonly host?: 'hosted' | 'daemon' | undefined;
   readonly sessionFile?: string | undefined;
-  readonly livenessFile?: string | undefined;
 }
 
 /**
@@ -159,11 +157,13 @@ export type OwnerAskerPresence =
   | { readonly state: 'gone'; readonly reason: string };
 
 /**
- * Says where an asker is, from facts a process already keeps (the daemon's
- * hosted sessions, agents and session broker; a terminal session's liveness
- * marker and saved file). Undefined: not this probe's kind of asker.
+ * Says where an asker is. `running` is the one liveness fact every kind of
+ * asker shares: some process on this machine holds the asker's lock
+ * (owner-asker-liveness.ts). The probe adds what its owner knows (a terminal
+ * session's saved file, the daemon's hosted sessions, agents and session
+ * broker) to tell closed from gone. Undefined: not this probe's kind of asker.
  */
-export type OwnerAskerPresenceProbe = (asker: OwnerAsker) => OwnerAskerPresence | undefined;
+export type OwnerAskerPresenceProbe = (asker: OwnerAsker, running: boolean) => OwnerAskerPresence | undefined;
 
 /** What the asking side reports about an answer it took (`delivered`) or can never take (`undeliverable`). */
 export interface OwnerAnswerDeliveryReport {
@@ -193,13 +193,11 @@ export function askerOf(item: Pick<OwnerItem, 'metadata'>): OwnerAsker | undefin
   if (session === undefined && agent === undefined) return undefined;
   const host = metadataText(item, OWNER_ASKER_HOST_METADATA);
   const sessionFile = metadataText(item, OWNER_ASKER_SESSION_FILE_METADATA);
-  const livenessFile = metadataText(item, OWNER_ASKER_LIVENESS_METADATA);
   return {
     ...(session !== undefined ? { session } : {}),
     ...(agent !== undefined ? { agent } : {}),
     ...(host === 'hosted' || host === 'daemon' ? { host } : {}),
     ...(sessionFile !== undefined ? { sessionFile } : {}),
-    ...(livenessFile !== undefined ? { livenessFile } : {}),
   };
 }
 
@@ -244,6 +242,8 @@ export interface OwnerAnswerReader {
   pendingFor(scope: QuestionAskerScope): readonly OwnerItem[];
   /** Record that the caller took the answer into its conversation. True only for the first taker. */
   claim(id: string): boolean;
+  /** The lock file a running asker holds while it waits on a question (owner-asker-liveness.ts). */
+  askerLivenessPath(kind: OwnerAskerKind, id: string): string;
 }
 
 export type OwnerAnswerOutcome =
@@ -581,16 +581,23 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   }
 
   #presenceOf = (asker: OwnerAsker): OwnerAskerPresence => {
+    const running = (asker.agent !== undefined && isAskerRunning(this.askerLivenessPath('agent', asker.agent)))
+      || (asker.session !== undefined && isAskerRunning(this.askerLivenessPath('session', asker.session)));
     for (const probe of this.#probes) {
       try {
-        const found = probe(asker);
+        const found = probe(asker, running);
         if (found) return found;
       } catch (error) {
         logger.debug('[owner-inbox] a presence probe failed; trying the next', { error: error instanceof Error ? error.message : String(error) });
       }
     }
-    return { state: 'closed' };
+    return { state: running ? 'attached' : 'closed' };
   };
+
+  /** {@link OwnerAnswerReader}: beside this inbox's store, so every process on the store reads the same lock. */
+  askerLivenessPath(kind: OwnerAskerKind, id: string): string {
+    return askerLivenessPath(this.#questions.path, kind, id);
+  }
 
   #project(entry: StoredOwnerEntry, now: number): OwnerItem {
     return projectStored(entry, now, this.#presenceOf);

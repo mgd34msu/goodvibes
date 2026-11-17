@@ -107,7 +107,6 @@ export {
   OWNER_ANSWER_AGENT_METADATA,
   OWNER_ANSWER_SESSION_METADATA,
   OWNER_ASKER_HOST_METADATA,
-  OWNER_ASKER_LIVENESS_METADATA,
   OWNER_ASKER_SESSION_FILE_METADATA,
   OWNER_ITEM_KINDS,
   OWNER_ITEM_LIMITS,
@@ -146,6 +145,8 @@ export type {
 } from './owner-inbox.js';
 export { QuestionStore, ownerInboxStorePath, sharedQuestionStore } from './question-store.js';
 export { terminalSessionPresence } from './owner-session-presence.js';
+export { askerLivenessPath, holdAskerRunning, isAskerRunning } from './owner-asker-liveness.js';
+export type { OwnerAskerKind } from './owner-asker-liveness.js';
 export type { QuestionAskerScope, StoredAnswerDelivery, StoredOwnerEntry, StoredOwnerItem, StoredOwnerItemKind } from './question-store.js';
 export { registerOwnerInboxGatewayMethods } from './routes/owner-inbox.js';
 export { registerNotificationDeadLetterGatewayMethods, listNotificationDeadLetters, replayNotificationDeadLetters } from './routes/notification-dead-letters.js';

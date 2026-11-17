@@ -33,8 +33,8 @@ export type {
   HostedSessionSettings,
 } from './manager.js';
 
-export { createHostedSessionRuntime, newHostedSessionId } from './session-runtime.js';
-export type { HostedSessionContractSink, HostedSessionRuntime, HostedSessionRuntimeOptions } from './session-runtime.js';
+export { createHostedSessionRuntime, hostedAgentAsker, newHostedSessionId } from './session-runtime.js';
+export type { HostedOwnerQuestions, HostedSessionContractSink, HostedSessionRuntime, HostedSessionRuntimeOptions } from './session-runtime.js';
 
 // A hosted session as the host of the contracts it starts, and the external
 // work adapter that dispatches contract work into hosted sessions.

@@ -1,5 +1,5 @@
 import { effectivePermissionMode, isSettableGatePresetName, type GatePresetName } from '../gate/presets.js';
-import { withExecutionModeOwner, type ExecutionModeOwner } from '../gate/execution-context.js';
+import { currentExecutionModeOwner, withExecutionModeOwner, type ExecutionModeOwner } from '../gate/execution-context.js';
 import { emitPresetChanged } from '../runtime/emitters/gate.js';
 import { readNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import { readNativeConversationTurnStatus } from '../core/native-turn-admission.js';
@@ -30,8 +30,9 @@ import { HostedSessionUnavailableError } from './errors.js';
 import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
-import { askingQuestions } from '../agents/agent-owner-questions.js';
-import { watchSessionAnswers } from '../agents/agent-inlets.js';
+import { askingQuestions, type QuestionAsker } from '../agents/agent-owner-questions.js';
+import { watchSessionAnswers, type SessionAnswerWatch } from '../agents/agent-inlets.js';
+import { callingAgentId } from '../agents/calling-agent.js';
 import type { OwnerInbox } from '../control-plane/owner-inbox.js';
 import type { QuestionInbox } from '../tools/query/index.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
@@ -224,6 +225,9 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   // session was closed waited in the store and is read once here, as the session is opened again.
   const answers = inbox ? watchSessionAnswers(conversation, () => sessionId) : null;
   answers?.open(sessionId);
+  // An agent one of this session's turns starts runs under this session's mode owner; its questions come back here once it stops.
+  hostedTurnSessions.set(modeOwner, sessionId);
+  if (answers) hostedSessionWatches.set(sessionId, answers);
   const ownerQuestions = inbox && answers
     ? askingQuestions(inbox, () => ({ session: sessionId, host: 'hosted', sessionWatch: answers }))
     : undefined;
@@ -451,6 +455,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       modeRevision++;
       // An answer that arrives from here on waits in the store for the next time the session is opened.
       answers?.dispose();
+      if (answers && hostedSessionWatches.get(sessionId) === answers) hostedSessionWatches.delete(sessionId);
       promptLifetime.abort();
       stopContracts();
       unbindContextAccounting();
@@ -473,6 +478,28 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
 
 /** The owner inbox as a hosted session uses it: asks and reads there, and settles a session that ended. */
 export type HostedOwnerQuestions = QuestionInbox & Pick<OwnerInbox, 'claim' | 'settleSession'>;
+
+/** The hosted session whose turn runs under each mode owner (an agent a turn started inherits it). */
+const hostedTurnSessions = new WeakMap<ExecutionModeOwner, string>();
+/** The answer watch of each hosted session whose loop is composed in this process. */
+const hostedSessionWatches = new Map<string, SessionAnswerWatch>();
+
+/**
+ * The asker of a question an agent on a hosted workspace floor posts: that
+ * agent, which takes the answer on its next model request while it runs, and
+ * the hosted session whose turn started it, whose conversation takes the answer
+ * once the agent stops (now when the session is open, otherwise when it is next
+ * opened). Undefined outside an agent's tool call.
+ */
+export function hostedAgentAsker(): QuestionAsker | undefined {
+  const agent = callingAgentId();
+  if (agent === undefined) return undefined;
+  const owner = currentExecutionModeOwner();
+  const session = owner ? hostedTurnSessions.get(owner) : undefined;
+  if (session === undefined) return { agent, host: 'hosted' };
+  const sessionWatch = hostedSessionWatches.get(session);
+  return { agent, session, host: 'hosted', ...(sessionWatch ? { sessionWatch } : {}) };
+}
 
 /** The untrusted-content scope a hosted session's turns run in. */
 export function hostedSessionContentScope(sessionId: string): string {

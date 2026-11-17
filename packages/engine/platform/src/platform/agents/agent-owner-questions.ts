@@ -132,8 +132,9 @@ export function daemonAgentPresence(
   agents: { getStatus(id: string): AgentRecord | null },
   sharedSessions?: { getSession(id: string): SharedSessionRecord | null },
 ): OwnerAskerPresenceProbe {
-  return (asker): OwnerAskerPresence | undefined => {
+  return (asker, running): OwnerAskerPresence | undefined => {
     if (asker.host !== 'daemon' || asker.agent === undefined) return undefined;
+    if (running) return { state: 'attached' };
     const record = agents.getStatus(asker.agent);
     if (record && (record.status === 'running' || record.status === 'pending')) return { state: 'attached' };
     if (asker.session !== undefined) {
@@ -155,16 +156,19 @@ export function daemonAgentPresence(
 }
 
 /**
- * Where a hosted session that asked is: its loop is composed (`attached`); it
- * is kept but idle, parked or restored after a restart (`closed`: the answer is
- * taken when it is next opened); ended or retired (`gone`).
+ * Where a hosted session (or an agent one of its turns started) that asked is:
+ * running (`attached`); kept but idle, parked or restored after a restart
+ * (`closed`: the session's conversation takes the answer when it is next
+ * opened); ended or retired (`gone`).
  */
 export function hostedSessionPresence(sessions: {
   get(id: string): { readonly status: string; readonly title?: string | undefined; readonly terminatedReason?: string | undefined } | null;
   liveTurnControls(id: string): unknown;
 }): OwnerAskerPresenceProbe {
-  return (asker): OwnerAskerPresence | undefined => {
-    if (asker.host !== 'hosted' || asker.session === undefined) return undefined;
+  return (asker, running): OwnerAskerPresence | undefined => {
+    if (asker.host !== 'hosted') return undefined;
+    if (running) return { state: 'attached' };
+    if (asker.session === undefined) return { state: 'closed', reopens: `agent ${asker.agent ?? 'unknown'} runs again` };
     const record = sessions.get(asker.session);
     if (!record) return { state: 'gone', reason: `Hosted session ${asker.session} no longer exists.` };
     if (record.status === 'terminated') {

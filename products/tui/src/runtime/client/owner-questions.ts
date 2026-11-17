@@ -21,13 +21,12 @@ import {
   type AnswerDeliveringInbox,
   type OwnerInboxClient,
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { OWNER_ASKER_LIVENESS_METADATA, OWNER_ASKER_SESSION_FILE_METADATA } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { OWNER_ASKER_SESSION_FILE_METADATA } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes-jev/engine/platform/platform/agents';
-import { livenessMarkerPathFor } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { whenSessionOpens } from '@goodvibes-jev/engine/terminal-shell/session-resume';
 import type { RuntimeServices } from '../services.ts';
-import { findSessionConversation } from '../conversation-rewind-port.ts';
+import { findSessionConversation, onSessionConversationChange } from '../conversation-rewind-port.ts';
 import { createDaemonVerbCaller, resolveDaemonEndpoint } from './operator-endpoint.ts';
 
 /** The inbox `/questions` reads and answers: the daemon's when reachable, the home store directly otherwise. */
@@ -61,11 +60,8 @@ export function terminalOwnerQuestions(services: RuntimeServices, sessionId: () 
     {
       home,
       sessionWatch: () => sessionWatches.get(services),
-      // What any process reads to tell whether the asking session is open, closed or deleted.
-      askerFacts: (id) => ({
-        [OWNER_ASKER_SESSION_FILE_METADATA]: services.sessionManager.filePathFor(id),
-        [OWNER_ASKER_LIVENESS_METADATA]: livenessMarkerPathFor(services.surface, id),
-      }),
+      // What any process reads to tell a closed session (its saved file is there) from a deleted one.
+      askerFacts: (id) => ({ [OWNER_ASKER_SESSION_FILE_METADATA]: services.sessionManager.filePathFor(id) }),
       daemonReachable,
       daemon,
       // Only for a question a daemon on another machine holds: its update stream while one is open.
@@ -97,12 +93,15 @@ export function wireOwnerQuestionSessions(
   homeOwnerInbox(services.shellPaths);
   const watch = watchSessionAnswers(conversation, sessionId);
   sessionWatches.set(services, watch);
+  // A new or forked session takes the conversation's place: the mark that the old one is running goes at once.
+  const stopFollowing = onSessionConversationChange(() => watch.refresh());
   const inbox = (): AnswerDeliveringInbox => terminalOwnerQuestions(services, sessionId);
   const stopOpened = whenSessionOpens(conversation, (id) => inbox().openSession(id));
   const stopDeleted = services.sessionManager.onDeleted((id) => { void inbox().deleteSession(id); });
   return () => {
     stopOpened();
     stopDeleted();
+    stopFollowing();
     watch.dispose();
     if (sessionWatches.get(services) === watch) sessionWatches.delete(services);
   };

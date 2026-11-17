@@ -27,6 +27,7 @@ import {
   type OwnerItem,
 } from '../control-plane/owner-inbox.js';
 import { logger } from '../utils/logger.js';
+import { holdAskerRunning, type OwnerAskerKind } from '../control-plane/owner-asker-liveness.js';
 
 let reader: OwnerAnswerReader | null = null;
 
@@ -54,18 +55,59 @@ const watches = new Set<AnswerWatch>();
  */
 type AnswerRoute = 'take' | 'leave' | 'drop';
 
-/** Questions one asker waits on, and the store revision it last looked at. */
+/** An asker a watch speaks for, named as its liveness lock is. */
+interface AskerKey {
+  readonly kind: OwnerAskerKind;
+  readonly id: string;
+}
+
+/**
+ * Questions one asker waits on, and the store revision it last looked at.
+ * While it waits on any, this process holds the asker's lock, the fact every
+ * other process reads to tell the owner the asker is running
+ * (control-plane/owner-asker-liveness.ts); it gives the lock up when it waits
+ * on nothing, when the asker stops, and the kernel does if the process dies.
+ */
 class AnswerWatch {
   readonly #pending = new Set<string>();
   /** The conversation's host channel while the asker is open here; undefined: keep waiting. */
   readonly #host: () => Pick<HostInstructions, 'set'> | undefined;
   readonly #route: (item: OwnerItem) => AnswerRoute;
+  /** The askers this watch speaks for right now. */
+  readonly #askers: () => readonly AskerKey[];
+  /** Lock path to its release, for each asker whose lock this watch holds. */
+  readonly #held = new Map<string, () => void>();
   #seen = -1;
 
-  constructor(host: () => Pick<HostInstructions, 'set'> | undefined, route: (item: OwnerItem) => AnswerRoute = () => 'take') {
+  constructor(
+    host: () => Pick<HostInstructions, 'set'> | undefined,
+    askers: () => readonly AskerKey[],
+    route: (item: OwnerItem) => AnswerRoute = () => 'take',
+  ) {
     this.#host = host;
+    this.#askers = askers;
     this.#route = route;
     watches.add(this);
+  }
+
+  /** Hold exactly the locks of the askers this watch speaks for while it waits on something; none otherwise. */
+  sync(): void {
+    const source = reader;
+    const wanted = new Set<string>();
+    if (source && this.#pending.size > 0) {
+      for (const asker of this.#askers()) wanted.add(source.askerLivenessPath(asker.kind, asker.id));
+    }
+    for (const [path, release] of this.#held) {
+      if (!wanted.has(path)) { release(); this.#held.delete(path); }
+    }
+    for (const path of wanted) {
+      if (this.#held.has(path)) continue;
+      try {
+        this.#held.set(path, holdAskerRunning(path));
+      } catch (error) {
+        logger.debug('[owner-inbox] could not mark an asker running', { path, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
   }
 
   get size(): number {
@@ -75,15 +117,17 @@ class AnswerWatch {
   add(id: string): void {
     this.#pending.add(id);
     this.#seen = -1;
+    this.sync();
   }
 
   forget(id: string): void {
-    this.#pending.delete(id);
+    if (this.#pending.delete(id)) this.sync();
   }
 
   clear(): void {
     this.#pending.clear();
     this.#seen = -1;
+    this.sync();
   }
 
   dispose(): void {
@@ -122,6 +166,7 @@ class AnswerWatch {
     }
     // An item left to a running agent is looked at again on the next request, in case the agent stopped.
     this.#seen = left ? -1 : revision;
+    this.sync();
     return handed;
   }
 }
@@ -176,8 +221,12 @@ function agentRoute(self: string): (item: OwnerItem) => AnswerRoute {
 
 /** Opens the run's inlet. `running` says whether the run still reads requests (its record reads running). */
 export function openAgentInlet(agentId: string, host: HostInstructions, running: () => boolean, options: AgentInletOptions = {}): AgentInlet {
+  const askers: readonly AskerKey[] = [
+    { kind: 'agent', id: agentId },
+    ...(options.session !== undefined ? [{ kind: 'session' as const, id: options.session }] : []),
+  ];
   const inlet: OpenInlet = {
-    watch: new AnswerWatch(() => (running() ? host : undefined), agentRoute(agentId)),
+    watch: new AnswerWatch(() => (running() ? host : undefined), () => askers, agentRoute(agentId)),
     host, running, handed: 0, read: 0,
   };
   inlets.set(agentId, inlet);
@@ -249,6 +298,12 @@ export interface SessionAnswerWatch {
   open(sessionId: string): number;
   /** A question the open session (or one of its agents) just asked. */
   add(questionId: string): void;
+  /**
+   * The session open in the conversation may have changed (a new or forked
+   * session): the running lock follows it, so a session that left reads as
+   * closed at once.
+   */
+  refresh(): void;
   /** The session left the conversation; its answers wait for the next open. */
   close(): void;
   dispose(): void;
@@ -260,20 +315,27 @@ export interface SessionAnswerWatch {
  * hook per conversation; it costs nothing while the session waits on nothing.
  */
 export function watchSessionAnswers(conversation: RequestingConversation, currentSession: () => string | undefined): SessionAnswerWatch {
-  let opened: string | undefined;
+  // The session the watched questions belong to; when another takes its place they wait in the store for its next open.
+  let tracked: string | undefined;
   let closed = false;
   const current = (): string | undefined => (closed ? undefined : currentSession());
   const watch = new AnswerWatch(
     () => (current() !== undefined ? conversation.hostInstructions : undefined),
+    () => (tracked !== undefined ? [{ kind: 'session', id: tracked }] : []),
     (item) => (answerSessionOf(item) !== current() ? 'drop' : leftToRunningAgent(item) ? 'leave' : 'take'),
   );
-  const stop = conversation.onRequest(() => { watch.pull(); });
+  const follow = (): void => {
+    const session = current();
+    if (session === tracked) return;
+    tracked = session;
+    watch.clear();
+  };
+  const stop = conversation.onRequest(() => { follow(); watch.pull(); });
   return {
     get sessionId() { return current(); },
     open(sessionId) {
-      if (opened !== sessionId) watch.clear();
-      opened = sessionId;
       closed = false;
+      if (tracked !== sessionId) { tracked = sessionId; watch.clear(); }
       const source = reader;
       if (!source) return 0;
       try {
@@ -285,8 +347,12 @@ export function watchSessionAnswers(conversation: RequestingConversation, curren
         return 0;
       }
     },
-    add(questionId) { watch.add(questionId); },
-    close() { closed = true; watch.clear(); },
-    dispose() { stop(); watch.dispose(); closed = true; },
+    add(questionId) {
+      follow();
+      if (tracked !== undefined) watch.add(questionId);
+    },
+    refresh() { follow(); },
+    close() { closed = true; follow(); },
+    dispose() { stop(); closed = true; tracked = undefined; watch.dispose(); },
   };
 }

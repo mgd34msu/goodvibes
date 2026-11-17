@@ -420,6 +420,11 @@ export interface ClientRuntimeServicesOptions {
    * not. Default: not stated, the terminal behaviour.
    */
   readonly execContainment?: import('../tools/exec/containment.js').ExecContainmentRequirement | undefined;
+  /**
+   * The owner inbox the `query` tool of every agent this composition runs asks
+   * in, as spawned agents elsewhere do. Absent: its agents have no `query`.
+   */
+  readonly ownerQuestions?: import('../tools/query/index.js').QuestionInbox | (() => import('../tools/query/index.js').QuestionInbox) | undefined;
 }
 
 /**
@@ -659,6 +664,7 @@ function composeClientRuntimeServices(
     overflowHandler,
     sandboxSessionRegistry,
     workflowServices: workflow,
+    ...(options.ownerQuestions !== undefined ? { ownerQuestions: options.ownerQuestions } : {}),
   });
 
   // Poll-free runtime event for permission-mode changes so surfaces can render a live mode pill.

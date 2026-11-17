@@ -243,15 +243,35 @@ export function createConversationRewindPort(
 
 export function createConversationRewindScope<Conversation extends RewindConversation = RewindConversation>() {
 const liveConversations = new Map<string, Conversation>();
+const changeListeners = new Set<() => void>();
+
+function changed(): void {
+  for (const listener of [...changeListeners]) {
+    try { listener(); } catch { /* a listener's failure never blocks a registration */ }
+  }
+}
 
 /** Register a session's live conversation so the daemon rewind verbs can serve it. */
 function registerSessionConversation(sessionId: string, conversation: Conversation): void {
-  if (sessionId) liveConversations.set(sessionId, conversation);
+  if (!sessionId) return;
+  liveConversations.set(sessionId, conversation);
+  changed();
 }
 
 /** Drop a session's conversation registration. */
 function unregisterSessionConversation(sessionId: string): void {
-  liveConversations.delete(sessionId);
+  if (liveConversations.delete(sessionId)) changed();
+}
+
+/**
+ * Run `listener` after each change of which session a conversation of this
+ * process runs (a resume, a new or forked session, a session closed), so what
+ * follows the open session (the owner inbox's mark that it is running) moves
+ * with it at once. Returns the function that removes it.
+ */
+function onSessionConversationChange(listener: () => void): () => void {
+  changeListeners.add(listener);
+  return () => { changeListeners.delete(listener); };
 }
 
 /**
@@ -281,5 +301,5 @@ function createSessionConversationRewindPort(options: ConversationRewindPortOpti
 function findSessionConversation(sessionId: string): Conversation | null {
   return sessionId ? liveConversations.get(sessionId) ?? null : null;
 }
-return Object.freeze({ registerSessionConversation, unregisterSessionConversation, hasSessionConversation, findSessionConversation, createSessionConversationRewindPort });
+return Object.freeze({ registerSessionConversation, unregisterSessionConversation, hasSessionConversation, findSessionConversation, createSessionConversationRewindPort, onSessionConversationChange });
 }

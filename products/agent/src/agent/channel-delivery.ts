@@ -88,16 +88,25 @@ function parseLinkTarget(raw: string): AgentChannelDeliveryTarget {
   return { kind: 'link', address: normalized };
 }
 
-function selectedTargetInputs(input: AgentChannelDeliveryInput): readonly string[] {
+function selectedTargetInputs(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): readonly string[] {
   return [input.channel, input.route, input.webhook, input.link].map(readText).filter((value): value is string => Boolean(value));
+}
+
+/**
+ * The one rule for a delivery target: exactly one of channel, route, webhook
+ * or link. With none or several, which recipient was meant is unknown, so
+ * nothing is sent.
+ */
+export function requireOneDeliveryTarget(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): void {
+  const count = selectedTargetInputs(input).length;
+  if (count === 0) throw new Error('No delivery target was given, so nothing was sent. Give exactly one of channel, route, webhook or link.');
+  if (count > 1) throw new Error(`${count} delivery targets were given, so the recipient is unclear and nothing was sent. Give exactly one of channel, route, webhook or link.`);
 }
 
 export function buildAgentChannelDeliveryPreview(input: AgentChannelDeliveryInput): AgentChannelDeliveryPreview {
   const message = readText(input.message);
   if (!message) throw new Error('Channel delivery message is required.');
-  const targets = selectedTargetInputs(input);
-  if (targets.length === 0) throw new Error('Choose one delivery target: channel, route, webhook, or link.');
-  if (targets.length > 1) throw new Error('Choose exactly one delivery target.');
+  requireOneDeliveryTarget(input);
 
   const channel = readText(input.channel);
   const route = readText(input.route);

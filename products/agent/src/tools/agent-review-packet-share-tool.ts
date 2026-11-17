@@ -8,6 +8,7 @@ import {
   buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,
   formatAgentChannelDeliveryResult,
+  requireOneDeliveryTarget,
   type AgentChannelDeliveryInput,
 } from '../agent/channel-delivery.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
@@ -175,10 +176,12 @@ function formatShareResult(input: {
 }
 
 /** Whether the strategy that takes this request carries files: a fact the strategy declares. */
-function surfaceCarriesFiles(router: AgentReviewPacketShareChannelRouter, input: AgentChannelDeliveryInput): boolean {
+/** Which surface takes the target: none (nothing can send it), one that carries files, or one that does not. */
+function targetSurface(router: AgentReviewPacketShareChannelRouter, input: AgentChannelDeliveryInput): 'none' | 'files' | 'text' {
   const request = buildAgentChannelDeliveryPreview(input).request as unknown as ChannelDeliveryRequest;
-  return router.listStrategies().some(strategy => strategy.canHandle(request)
-    && (strategy as { readonly supportsAttachments?: boolean }).supportsAttachments === true);
+  const handlers = router.listStrategies().filter(strategy => strategy.canHandle(request));
+  if (handlers.length === 0) return 'none';
+  return handlers.some(strategy => (strategy as { readonly supportsAttachments?: boolean }).supportsAttachments === true) ? 'files' : 'text';
 }
 
 export function createAgentReviewPacketShareTool(
@@ -219,7 +222,7 @@ export function createAgentReviewPacketShareTool(
           },
           link: {
             type: 'string',
-            description: 'Delivery target: link. Exactly one of channel, route, webhook or link is required.',
+            description: 'Delivery target: link, taken only where a delivery surface handles links; otherwise the share is refused before anything is sent. Exactly one of channel, route, webhook or link is required.',
           },
           confirm: confirmParameter(),
           explicitUserRequest: requestParameter(),
@@ -236,9 +239,9 @@ export function createAgentReviewPacketShareTool(
       const artifactId = readString(args.archiveArtifactId);
       if (!artifactId) return failure('archiveArtifactId is required.');
       // Checked before the outward-effect decision, which would otherwise rule on an empty target and mask this cause.
-      const targetCount = ['channel', 'route', 'webhook', 'link'].filter(name => readString(args[name])).length;
-      if (targetCount === 0) return failure('Choose one delivery target: exactly one of channel, route, webhook or link is required. Nothing was sent.');
-      if (targetCount > 1) return failure('Choose exactly one delivery target: channel, route, webhook and link are mutually exclusive. Nothing was sent.');
+      try {
+        requireOneDeliveryTarget({ channel: readString(args.channel), route: readString(args.route), webhook: readString(args.webhook), link: readString(args.link) });
+      } catch (error) { return failure(error instanceof Error ? error.message : String(error)); }
       let summary: ReviewPacketArchiveSummary;
       let assertSource: () => void;
       try {
@@ -259,9 +262,12 @@ export function createAgentReviewPacketShareTool(
         ...(readString(args.webhook) ? { webhook: readString(args.webhook) } : {}),
         ...(readString(args.link) ? { link: readString(args.link) } : {}),
       };
-      let attached: boolean;
-      try { attached = surfaceCarriesFiles(channelDeliveryRouter, target); }
+      let surface: 'none' | 'files' | 'text';
+      try { surface = targetSurface(channelDeliveryRouter, target); }
       catch (error) { return failure(`${error instanceof Error ? error.message : String(error)} Nothing was sent.`); }
+      // Found here, before the outward-effect decision, rather than as a delivery error after it.
+      if (surface === 'none') return failure('No delivery surface in this Agent takes that target, so nothing was sent. Use a configured channel, a route id or an http(s) webhook URL.');
+      const attached = surface === 'files';
       const message = buildShareMessage(summary, readString(args.message), attached);
       // Set just before the delivery call: a throw after that point cannot say the message was not sent.
       let deliveryStarted = false;

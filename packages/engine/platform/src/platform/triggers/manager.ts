@@ -325,6 +325,8 @@ export class TriggerManager {
     if (!this.config.enabled) return;
     try {
       if (!this.loaded) {
+        // An observer only probes the lock (re-entrant once taken); the store is read when the owner has gone, not every tick.
+        if (this.observing === 'other-process' && !this.store.claim()) return;
         this.load(true);
         if (!this.loaded) return;
         this.startSweep();

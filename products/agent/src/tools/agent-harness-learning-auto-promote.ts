@@ -1,4 +1,5 @@
 import { learningPromotionReference, MIN_PROMPT_MEMORY_CONFIDENCE } from './agent-harness-learning-curator-common.ts';
+import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -138,7 +139,7 @@ function writeLocalRecord(
 async function promoteMemory(
   api: MemoryApi, candidate: LearningCandidate, collection: LearningCandidateCollection,
   options: CatalogRankingOptions, context: LearningCuratorNativeContext, assertOwnership: () => void,
-  onDurable?: () => void, paths?: ShellPathService,
+  onDurable?: () => void, paths?: ShellPathService, spine?: MemoryAccess,
 ): Promise<string> {
   const fields = candidate.proposalFields ?? {};
   const summary = (fields.summary ?? fields.detail ?? candidate.label).trim();
@@ -157,6 +158,15 @@ async function promoteMemory(
     detail, tags: splitList(fields.tags), review: { confidence: storedConfidence },
     provenance: [{ kind: 'event', ref: learningPromotionReference(candidate.id) }],
   } satisfies Parameters<MemoryApi['add']>[0];
+  const reviewRoute = (id: string) => `memory:${id}  ${summary.slice(0, 60)} (not recalled until reviewed: agent_local_registry domain:"memory" action:"review" id:"${id}" confidence:${Math.max(confidence, MIN_PROMPT_MEMORY_CONFIDENCE)})`;
+  if (spine) {
+    // An adopted daemon is the single writer of the shared memory store: the memory is created there.
+    assertOwnership(); assertLearningCandidateCollection(collection, context, options);
+    const record = await spine.add(input, { signal: options.signal, assertCurrent: () => { options.assertCurrent?.(); assertOwnership(); } });
+    onDurable?.();
+    markNotePromotion(paths, candidate, 'memory', record.id);
+    return reviewRoute(record.id);
+  }
   let transition: ReturnType<LearningCandidateCollection['prepareTransition']> | undefined;
   try {
     assertOwnership(); assertLearningCandidateCollection(collection, context, options);
@@ -182,7 +192,7 @@ async function promoteMemory(
         owned.commit(inserted);
       },
     });
-    return `memory:${record.id}  ${summary.slice(0, 60)} (not recalled until reviewed: agent_local_registry domain:"memory" action:"review" id:"${record.id}" confidence:${Math.max(confidence, MIN_PROMPT_MEMORY_CONFIDENCE)})`;
+    return reviewRoute(record.id);
   } catch (error) {
     try { transition?.abort(); } catch (failure) { throw new PromotionRestrictionFailure(failure); }
     throw new PromotionRestrictionFailure(error);
@@ -282,7 +292,7 @@ function consolidate(
 /** Use the caller's recorded admission for all planned local promotions. */
 async function runAutoPromoterOnce(
   context: LearningCuratorNativeContext, skillRegistry: AgentSkillRegistry, memoryApi: MemoryApi,
-  options: CatalogRankingOptions, memoryServedByDaemon: boolean,
+  options: CatalogRankingOptions, memorySpine: MemoryAccess | undefined,
 ): Promise<AutoPromoteResult> {
   const signal = options.signal, caller = options.assertCurrent;
   if (typeof caller !== 'function') throw new ToolInputProjectionError('unavailable');
@@ -339,20 +349,13 @@ async function runAutoPromoterOnce(
     assertCurrent();
     collection.assertCandidateCurrent(candidate);
     assertCurrent();
-    // An adopted daemon is the single writer of the shared memory store; this pass only
-    // holds the boot-time local copy, so writing there would fork the two.
-    if (candidate.proposalTarget === 'memory' && memoryServedByDaemon) {
-      skipped++;
-      log.push(`Skipped ${candidate.id}: memory is served by the connected daemon, which this pass cannot write to. Create it with agent_local_registry domain:"memory" action:"create".`);
-      continue;
-    }
     // Set once the record is durable and cleared when it is logged, so a stop in between still reports it.
     let durable = false;
     const onDurable = () => { durable = true; };
     const ledger = () => durable ? [...log, `wrote ${candidate.proposalTarget} for ${candidate.id}; the checks after the write stopped the pass`] : log;
     try {
       let line: string;
-      if (candidate.proposalTarget === 'memory') line = await promoteMemory(memoryApi, candidate, collection, options, context, assertOwnership, onDurable, paths);
+      if (candidate.proposalTarget === 'memory') line = await promoteMemory(memoryApi, candidate, collection, options, context, assertOwnership, onDurable, paths, memorySpine);
       else if (candidate.proposalTarget === 'persona') line = promotePersona(paths, candidate, collection, context, options, assertOwnership, onDurable);
       else if (candidate.proposalTarget === 'routine') line = promoteRoutine(paths, candidate, collection, context, options, assertOwnership, onDurable);
       else { skipped++; log.push(`Skipped ${candidate.id}: the ${candidate.proposalTarget ?? 'unknown'} proposal target is not written by this pass.`); continue; }
@@ -389,11 +392,11 @@ async function runAutoPromoterOnce(
 const activePromotions = new Map<string, Promise<AutoPromoteResult>>();
 /** Serialize native writes; each caller keeps its own source/permission lifetime. */
 export async function runAutoPromoter(context: LearningCuratorNativeContext, skills: AgentSkillRegistry,
-  memory: MemoryApi, options: CatalogRankingOptions, memoryServedByDaemon = false): Promise<AutoPromoteResult> {
+  memory: MemoryApi, options: CatalogRankingOptions, memorySpine?: MemoryAccess): Promise<AutoPromoteResult> {
   const workspace = modelReadingServicePath(context, ['workspace']);
   const paths = modelReadingServicePath(context, ['workspace', 'shellPaths']);
   const root = modelReadingServicePath(context, ['workspace', 'shellPaths', 'userGoodVibesRoot']);
-  if (typeof root !== 'string' || !root) return runAutoPromoterOnce(context, skills, memory, options, memoryServedByDaemon);
+  if (typeof root !== 'string' || !root) return runAutoPromoterOnce(context, skills, memory, options, memorySpine);
   const signal = options.signal;
   const current = () => {
     signal?.throwIfAborted();
@@ -405,7 +408,7 @@ export async function runAutoPromoter(context: LearningCuratorNativeContext, ski
   const previous = activePromotions.get(root);
   const pass = (async () => {
     if (previous) await previous.catch(() => {});
-    current(); return runAutoPromoterOnce(context, skills, memory, options, memoryServedByDaemon);
+    current(); return runAutoPromoterOnce(context, skills, memory, options, memorySpine);
   })();
   activePromotions.set(root, pass);
   const cleanup = () => { if (activePromotions.get(root) === pass) activePromotions.delete(root); };

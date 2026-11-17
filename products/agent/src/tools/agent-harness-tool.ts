@@ -631,7 +631,8 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const skillRegistry = AgentSkillRegistry.fromShellPaths(shellPaths);
           let result: Awaited<ReturnType<typeof runAutoPromoter>>;
           try {
-            result = await runAutoPromoter(deps.commandContext, skillRegistry, memoryApi, learningEffectOptions, deps.commandContext.clients?.memorySpine?.active === true);
+            const spine = deps.commandContext.clients?.memorySpine;
+            result = await runAutoPromoter(deps.commandContext, skillRegistry, memoryApi, learningEffectOptions, spine?.active === true ? spine : undefined);
           } catch (stopped) {
             // A cancelled call stays a throw; a pass cut short by anything else reports what it already wrote.
             const written = completedPromotionWrites(stopped);

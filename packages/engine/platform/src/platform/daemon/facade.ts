@@ -86,6 +86,7 @@ import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
 import { configureVoiceRequestLifetime } from './http/voice-request-lifetime.js';
+import { configureVoiceRequestLifetime } from './http/voice-request-lifetime.js';
 import { bindClientAddress, bindLocalOrigin, isDirectLoopbackRequest, resolveClientAddress } from './client-address.js';
 import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './http/listener-admission.js';
 import type { ServiceCommandRunner } from './service-handover.js';
@@ -884,6 +885,7 @@ export class DaemonServer {
         ...(tlsState.tls ? { tls: tlsState.tls } : {}),
         async fetch(req: Request, server: UpgradeCapableServer): Promise<Response | undefined> {
           configureJudgmentRequestLifetime(req, server);
+          configureVoiceRequestLifetime(req, server);
           configureVoiceRequestLifetime(req, server);
           // Resolved once here; every security event, the sign-in limiter and the audit read this one value.
           const peerAddress = server.requestIP?.(req)?.address;

@@ -6,26 +6,16 @@
  * `voice.local.status` reports the RESTING state of the managed runtime on disk
  * (piper TTS always; whisper.cpp STT only where goodvibes has a pinned, checksummed
  * build, today that is linux-x64 only, everywhere else STT reports honestly
- * unsupported with a reason). `voice.local.install` is the one-act setup; its result
+ * unsupported with a reason). `voice.local.install` starts the one-act setup and answers at
+ * once; the run's receipt is read from voice.local.status as `lastInstall`. The receipt
  * carries a FINER per-engine terminal state than status's resting enum (e.g.
  * checksum-mismatch, bundle-unavailable, sideload-mismatch) because it describes what
  * THIS attempt did, not just where things stand.
  *
- * platform ADOPTION NOTE (round: webui memory+voice compose, platform commit efc1b380): the
- * calling brief's own context described voice.local.install as returning/streaming
- * "structured progress" and voice.local.status as reporting a `not-yet-published`
- * engine state. Neither exists on the wire at this commit, verified against
- * packages/engine/platform/src/platform/control-plane/routes/voice-setup.ts (install is a plain
- * POST returning ONE final JSON result; the provisioner's internal onProgress callback
- * is never wired to any runtime event, SSE frame, or chunked response) and against
- * method-catalog-voice-setup.ts's actual output enums (no `not-yet-published` value
- * anywhere, the closest analogues are `bundle-unavailable`, a hosted-but-not-yet-
- * uploaded engine bundle, currently unreachable in practice since every platform in
- * the manifest that has an entry at all already has a real URL; and
- * `unsupported-platform` with an honest `reason` string for platforms with no pinned
- * build at all). This module and its UI render the REAL enums verbatim rather than
- * inventing the promised-but-absent ones, reported back per this round's brief,
- * not patched around.
+ * Progress is read, not streamed: while a run is active voice.local.status carries
+ * `installInProgress`, and the surface polls it. The engine states rendered are the
+ * wire's own enums (`bundle-unavailable` for a pinned bundle not yet hosted,
+ * `unsupported-platform` with a reason where no pinned build exists).
  */
 
 export type VoiceLocalRuntimeState = 'not-provisioned' | 'partial' | 'provisioned' | 'unsupported-platform';
@@ -85,6 +75,25 @@ export interface VoiceLocalStatusSnapshot {
   readonly offerBytes: number | null;
   /** Live progress of the ACTIVE install run, see VoiceLocalInstallProgress. */
   readonly installInProgress?: VoiceLocalInstallProgress;
+  /** The last install run that ended: its receipt, or why it stopped without one. */
+  readonly lastInstall?: VoiceLocalInstallOutcome;
+}
+
+/**
+ * voice.local.install answers at once with the run it started (or joined); the
+ * run goes on in the daemon and its outcome is read from voice.local.status.
+ */
+export interface VoiceLocalInstallStart {
+  readonly startedAt: number;
+  readonly joined: boolean;
+}
+
+/** voice.local.status's `lastInstall`: the run's times and its receipt or error. */
+export interface VoiceLocalInstallOutcome {
+  readonly startedAt: number;
+  readonly finishedAt: number;
+  readonly receipt?: VoiceLocalInstallResult;
+  readonly error?: string;
 }
 
 /** The real wire enum for an install attempt's per-engine terminal state, richer than
@@ -179,8 +188,10 @@ export function readVoiceLocalStatus(value: unknown): VoiceLocalStatusSnapshot |
   const tts = isRecord(value.tts) ? value.tts : {};
   const stt = isRecord(value.stt) ? value.stt : {};
   const installInProgress = readInstallProgress(value.installInProgress);
+  const lastInstall = readInstallOutcome(value.lastInstall);
   return {
     ...(installInProgress !== undefined ? { installInProgress } : {}),
+    ...(lastInstall !== undefined ? { lastInstall } : {}),
     platform: typeof value.platform === 'string' ? value.platform : null,
     state,
     tts: {
@@ -202,6 +213,29 @@ export function readVoiceLocalStatus(value: unknown): VoiceLocalStatusSnapshot |
     },
     offerBytes: typeof value.offerBytes === 'number' && Number.isFinite(value.offerBytes) ? value.offerBytes : null,
   };
+}
+
+/** Parse `lastInstall`; undefined when absent or without its run times. A receipt
+ * that does not parse is dropped and reported as a run without one. */
+function readInstallOutcome(value: unknown): VoiceLocalInstallOutcome | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.startedAt !== 'number' || !Number.isFinite(value.startedAt)) return undefined;
+  if (typeof value.finishedAt !== 'number' || !Number.isFinite(value.finishedAt)) return undefined;
+  const receipt = readVoiceLocalInstallResult(value.receipt);
+  const error = readOptionalString(value.error);
+  return {
+    startedAt: value.startedAt,
+    finishedAt: value.finishedAt,
+    ...(receipt ? { receipt } : {}),
+    ...(error !== undefined ? { error } : {}),
+  };
+}
+
+/** Parse voice.local.install's start answer ({ state: 'running', startedAt, joined }), or null. */
+export function readVoiceLocalInstallStart(value: unknown): VoiceLocalInstallStart | null {
+  if (!isRecord(value) || value.state !== 'running') return null;
+  if (typeof value.startedAt !== 'number' || !Number.isFinite(value.startedAt)) return null;
+  return { startedAt: value.startedAt, joined: value.joined === true };
 }
 
 function readInstallEngineOutcome(value: unknown, fallbackEngine: string): VoiceLocalInstallEngineOutcome | null {

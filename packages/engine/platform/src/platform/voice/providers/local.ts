@@ -161,7 +161,9 @@ function readEngine(
   return merged.engine && merged.binary && merged.modelPath ? merged : null;
 }
 
-const RUN_TIMEOUT_MS = 120_000;
+/** The longest one local engine run (synthesis or transcription) may take before it is stopped. */
+export const LOCAL_VOICE_RUN_TIMEOUT_MS = 120_000;
+const RUN_TIMEOUT_MS = LOCAL_VOICE_RUN_TIMEOUT_MS;
 
 /** Failed runs in a row, whatever the wording, after which an engine is not spawned again. */
 const CONSECUTIVE_FAILURE_LIMIT = 3;

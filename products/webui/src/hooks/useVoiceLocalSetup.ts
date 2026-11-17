@@ -7,12 +7,14 @@
  * CHANGED), VoiceSettings refetches manually / on install-mutation success, the same
  * standing gap fleet.*, checkpoints.*, and memory.* document in queries.ts.
  *
- * Live install progress (platform 5357f09e): while the install mutation is in flight, the
- * status query polls on a short refetchInterval, the same react-query polling idiom
- * FleetView's snapshot uses, because voice.local.status carries an OPTIONAL
- * `installInProgress` section during an active install (the install verb itself stays
- * plain request/response; there is no stream). On an older daemon the section is
- * simply absent and the surface keeps its plain busy state.
+ * voice.local.install starts the run and answers at once ({ state: 'running',
+ * startedAt, joined }); the run goes on in the daemon. The install mutation then polls
+ * voice.local.status, writing each read into the status query so the card shows the
+ * live `installInProgress` section, until the run has ended and its outcome is on the
+ * read as `lastInstall`; it resolves with that receipt or fails with the recorded
+ * reason. No request is held open for the download, so a long install is never
+ * reported failed because the connection idled out. One poller: the status query
+ * itself does not poll.
  *
  * A successful install also invalidates useVoice.ts's ['voice','status'] and the one
  * shared config entry (queryKeys.config), since the install call may newly configure
@@ -22,9 +24,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../lib/goodvibes';
 import { queryKeys } from '../lib/queries';
-import { readVoiceLocalInstallResult, readVoiceLocalStatus } from '../lib/voice/voice-local-setup';
+import { formatError } from '../lib/errors';
+import {
+  readVoiceLocalInstallResult,
+  readVoiceLocalInstallStart,
+  readVoiceLocalStatus,
+  type VoiceLocalInstallResult,
+  type VoiceLocalStatusSnapshot,
+} from '../lib/voice/voice-local-setup';
 
-export function useVoiceLocalStatus(enabled: boolean, pollForInstallProgress = false) {
+/** How often a running install's status is read. */
+const INSTALL_POLL_MS = 750;
+/** Reads in a row that fail, or that show the run neither running nor finished, before the surface says so. */
+const INSTALL_POLL_PATIENCE = 5;
+
+const pause = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
+
+export function useVoiceLocalStatus(enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.voiceLocalStatus,
     queryFn: async () => {
@@ -40,22 +56,51 @@ export function useVoiceLocalStatus(enabled: boolean, pollForInstallProgress = f
     enabled,
     staleTime: 30_000,
     retry: false,
-    // Poll only while the caller's install is in flight, the window in which the
-    // daemon serves installInProgress (see the header comment).
-    refetchInterval: pollForInstallProgress ? 750 : false,
   });
 }
 
 export function useVoiceLocalInstall() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<VoiceLocalInstallResult> => {
       const raw = await platformClient.operator.voice.local.install();
-      const result = readVoiceLocalInstallResult(raw);
-      if (!result) {
-        throw new Error('The daemon answered, but its response did not carry an install receipt.');
+      // A daemon that still runs the install inside the request answers with the receipt.
+      const receipt = readVoiceLocalInstallResult(raw);
+      if (receipt) return receipt;
+      const start = readVoiceLocalInstallStart(raw);
+      if (!start) throw new Error('The daemon answered, but its response named no install run.');
+      let failures = 0;
+      let unreported = 0;
+      for (;;) {
+        await pause(INSTALL_POLL_MS);
+        let status: VoiceLocalStatusSnapshot | null = null;
+        let readError: unknown = null;
+        try {
+          status = readVoiceLocalStatus(await platformClient.operator.voice.local.status());
+        } catch (error) {
+          readError = error;
+        }
+        if (!status) {
+          if (++failures < INSTALL_POLL_PATIENCE) continue;
+          throw new Error(
+            `Could not read the install's progress (${readError ? formatError(readError) : 'the status answer carried no runtime state'}). `
+            + 'It may still be running in the daemon; reopen voice settings to see what is installed.',
+          );
+        }
+        failures = 0;
+        queryClient.setQueryData(queryKeys.voiceLocalStatus, status);
+        if (status.installInProgress) { unreported = 0; continue; }
+        const outcome = status.lastInstall;
+        if (!outcome || outcome.startedAt < start.startedAt) {
+          if (++unreported < INSTALL_POLL_PATIENCE) continue;
+          throw new Error(
+            'The daemon no longer reports this install as running or finished (it may have restarted while installing). '
+            + 'The card shows what is installed; install again to finish any missing part.',
+          );
+        }
+        if (outcome.receipt) return outcome.receipt;
+        throw new Error(`The install failed: ${outcome.error ?? 'the daemon recorded no reason'}. Install again to retry any failed part.`);
       }
-      return result;
     },
     onSettled: async () => {
       await Promise.all([

@@ -105,11 +105,10 @@ export function VoiceSettings() {
   });
 
   const localInstall = useVoiceLocalInstall();
-  // While the install mutation is in flight the status query polls: the daemon serves
-  // an OPTIONAL installInProgress section during an active install (platform 5357f09e) and
-  // this is the window it exists in. Absent (an older daemon, or the first poll not
-  // landed yet) the card keeps its plain busy state.
-  const localStatus = useVoiceLocalStatus(open, localInstall.isPending);
+  // While the install runs, its mutation reads voice.local.status and writes each read
+  // here, so the card shows the live installInProgress section; before the first read
+  // lands the card keeps its plain busy state.
+  const localStatus = useVoiceLocalStatus(open);
   const localUnavailable = localStatus.isError
     && (isMethodUnavailableError(localStatus.error) || isMethodNotInvokableError(localStatus.error));
 

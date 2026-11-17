@@ -22,7 +22,7 @@ import {
   type SignatureValidationResult,
 } from '../runtime/plugins/trust.js';
 import { PluginQuarantineEngine, type QuarantineRecord } from '../runtime/plugins/quarantine.js';
-import { isHighRiskCapability, resolveCapabilityManifest } from '../runtime/plugins/manifest.js';
+import { declaredPluginCapabilities, isHighRiskCapability, resolveCapabilityManifest, resolvePluginGrant } from '../runtime/plugins/manifest.js';
 import type { PluginCapability, PluginManifestV2 } from '../runtime/plugins/types.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS, PluginClosedError, PluginInFlightTracker } from './in-flight.js';
@@ -134,6 +134,13 @@ export interface PluginQuarantineResult {
   unloading?: Promise<void> | undefined;
 }
 
+/** Result of a trust change; `restarting` settles once a running plugin has started again at its new tier. */
+export interface PluginTrustChangeResult {
+  ok: boolean;
+  error?: string;
+  restarting?: Promise<{ ok: boolean; error?: string }> | undefined;
+}
+
 /** Mechanical progress evidence for a caller awaiting plugin shutdown. */
 export interface PluginShutdownStatus {
   readonly state: 'open' | 'closing' | 'closed' | 'failed';
@@ -207,7 +214,8 @@ export class PluginManager {
   init(deps: PluginLoaderDeps): Promise<void> {
     return this.ownOperation(async () => {
       if (deps.inFlight) this.inFlight = deps.inFlight;
-      this.deps = { ...deps, inFlight: this.inFlight };
+      // Each start reads the plugin's tier from this manager's trust store.
+      this.deps = { ...deps, inFlight: this.inFlight, trustTier: (pluginName) => this.trustStore.getTier(pluginName) };
       this.loadState();
       await this.loadEnabledPlugins();
     });
@@ -255,7 +263,7 @@ export class PluginManager {
     name: string,
     tier: PluginTrustTier,
     note?: string | undefined,
-  ): { ok: boolean; error?: string } {
+  ): PluginTrustChangeResult {
     if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
     const discovered = this.findDiscoveredPlugin(name);
     if (!discovered) {
@@ -281,7 +289,8 @@ export class PluginManager {
     this.trustStore.importRecords({ [name]: record });
     logger.info(`[plugins] ${name}: trust tier set to '${tier}'`);
     this.notifySubscribers();
-    return { ok: true };
+    const restarting = this.restartAfterTrustChange(name);
+    return { ok: true, ...(restarting ? { restarting } : {}) };
   }
 
   /**
@@ -290,7 +299,7 @@ export class PluginManager {
   trustSigned(
     name: string,
     publicKey?: string,
-  ): { ok: boolean; fingerprint?: string | undefined; error?: string } {
+  ): PluginTrustChangeResult & { fingerprint?: string | undefined } {
     if (this.closed) return { ok: false, error: 'Plugin manager is closed' };
     const discovered = this.findDiscoveredPlugin(name);
     if (!discovered) {
@@ -313,7 +322,8 @@ export class PluginManager {
     if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
     this.trustStore.importRecords({ [name]: result.record });
     this.notifySubscribers();
-    return { ok: true, fingerprint: result.record.signatureFingerprint };
+    const restarting = this.restartAfterTrustChange(name);
+    return { ok: true, fingerprint: result.record.signatureFingerprint, ...(restarting ? { restarting } : {}) };
   }
 
   /**
@@ -339,10 +349,10 @@ export class PluginManager {
   /**
    * capabilities, Return the capability information for a plugin.
    *
-   * Returns the full set: requested, granted (based on current trust tier),
-   * denied, and which capabilities are high-risk. `blocked` reports what the
-   * trust tier withholds; plugins run in this process, so only quarantine
-   * (which stops the plugin loading) is enforced, not per-capability blocks.
+   * Returns what the manifest declares, which of it is high-risk, the trust
+   * tier, and `blocked`: what the tier withholds. The loader enforces the same
+   * reading at every start: a withheld tool, provider or hook registration is
+   * refused, and a withheld high-risk capability keeps the plugin from starting.
    */
   capabilities(name: string): {
     ok: boolean;
@@ -358,13 +368,12 @@ export class PluginManager {
       return null;
     }
 
-    const manifest = discovered.manifest as { capabilities?: string[] };
-    const requested = (manifest.capabilities ?? []) as PluginCapability[];
+    const requested = declaredPluginCapabilities(discovered.manifest) as PluginCapability[];
     const tier = this.trustStore.getTier(name);
     const highRisk = requested.filter((c) => isHighRiskCapability(c));
     const safe = requested.filter((c) => !isHighRiskCapability(c));
-    // Capabilities blocked by current trust tier
-    const blocked = tier !== 'trusted' ? highRisk : [];
+    const grant = resolvePluginGrant(name, discovered.manifest, tier);
+    const blocked = [...grant.declared].filter((capability) => !grant.granted.has(capability));
 
     return { ok: true, requested, highRisk, safe, tier, blocked };
   }
@@ -772,6 +781,38 @@ export class PluginManager {
     });
     this.unloading.set(loaded, pending);
     return pending;
+  }
+
+  /**
+   * Start a running plugin again so a trust change applies now: its tier is
+   * read when it starts. Calls into it drain first, as for a reload; one still
+   * busy at the timeout keeps its current instance until the next reload.
+   */
+  private restartAfterTrustChange(name: string): Promise<{ ok: boolean; error?: string }> | undefined {
+    if (!this.plugins.has(name)) return undefined;
+    return this.ownOperation(async () => {
+      const loaded = this.plugins.get(name);
+      const deps = this.deps;
+      if (!loaded || !deps) return { ok: true };
+      const drain = await this.inFlight.quiesce(name, DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS);
+      if (!drain.drained) {
+        this.inFlight.resume(name);
+        return { ok: false, error: `'${name}' still had ${drain.inFlight} call(s) running, so it keeps its current registrations until /plugin reload` };
+      }
+      try {
+        try { await this.unload(loaded, 'trust changed'); }
+        catch (error) { if (!(error instanceof PluginCleanupError)) throw error; this.cleanupErrors.add(error); }
+        finally { this.plugins.delete(name); }
+        const discovered = this.findDiscoveredPlugin(name);
+        if (!discovered || !this.isEnabled(name) || this.quarantineEngine.isQuarantined(name)) return { ok: true };
+        const { loaded: next, failure } = await this.acquireOrFail(discovered, deps);
+        if (next) { this.plugins.set(name, next); return { ok: true }; }
+        return { ok: false, error: `'${name}' did not start again at its new trust tier: ${failure ?? 'see the log for the reason'}` };
+      } finally {
+        this.inFlight.resume(name);
+        this.notifySubscribers();
+      }
+    });
   }
 
   // ─── Private helpers ────────────────────────────────────────────────────────

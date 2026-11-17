@@ -49,7 +49,9 @@ export function readInstalledBundleGuard(pluginDir: string): InstalledBundleGuar
   const grant = receipt.bundle;
   if (!grant) return { kind: 'not-a-bundle' };
   if (typeof grant !== 'object') return { kind: 'unreadable', reason: `its install receipt ${path} holds a bundle grant that is not an object` };
-  const runtime = stringList(grant.granted)
+  // The guard holds what the bundle declared (granted and withheld at install);
+  // the plugin's live trust tier is checked at each start by the loader's grant.
+  const runtime = [...new Set([...stringList(grant.granted), ...stringList(grant.withheld)])]
     .filter((cap): cap is PluginCapability => (ALL_CAPABILITIES as readonly string[]).includes(cap));
   const entry = receipt.entry;
   const guard = createBundleCapabilityGuard({

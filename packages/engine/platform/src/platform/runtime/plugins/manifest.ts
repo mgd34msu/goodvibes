@@ -112,6 +112,51 @@ export function resolveCapabilityManifest(
   };
 }
 
+/** What one plugin may register at its current trust tier, and what its tier withholds. */
+export interface PluginGrant {
+  readonly tier: PluginTrustTier;
+  /** Known capabilities the manifest declares. */
+  readonly declared: ReadonlySet<PluginCapability>;
+  /** The declared capabilities the tier grants. */
+  readonly granted: ReadonlySet<PluginCapability>;
+  /** Declared high-risk capabilities the tier withholds: such a plugin is not started. */
+  readonly withheldHighRisk: readonly PluginCapability[];
+}
+
+/**
+ * The declared capability list of a plugin manifest: the plain list of a
+ * plugin's manifest.json, or the `runtime` list of a capability bundle's.
+ */
+export function declaredPluginCapabilities(manifest: { readonly capabilities?: unknown }): string[] {
+  const declared = manifest.capabilities;
+  if (Array.isArray(declared)) return declared.filter((entry): entry is string => typeof entry === 'string');
+  if (declared && typeof declared === 'object' && Array.isArray((declared as { runtime?: unknown }).runtime)) {
+    return ((declared as { runtime: unknown[] }).runtime).filter((entry): entry is string => typeof entry === 'string');
+  }
+  return [];
+}
+
+/** The grant a plugin starts with: its manifest's declarations resolved against its trust tier. */
+export function resolvePluginGrant(
+  name: string,
+  manifest: { readonly version?: string; readonly description?: string; readonly capabilities?: unknown },
+  tier: PluginTrustTier,
+): PluginGrant {
+  const resolved = resolveCapabilityManifest(name, {
+    name,
+    version: manifest.version ?? '',
+    description: manifest.description ?? '',
+    // The resolver drops (and logs) any string that is not a known capability.
+    capabilities: declaredPluginCapabilities(manifest) as PluginCapability[],
+  }, undefined, tier);
+  return Object.freeze({
+    tier,
+    declared: new Set(resolved.requested),
+    granted: new Set(resolved.granted),
+    withheldHighRisk: Object.freeze(resolved.denied.filter((cap) => isHighRiskCapability(cap))),
+  });
+}
+
 /**
  * isHighRiskCapability, Returns whether a capability is classified as high-risk.
  * High-risk capabilities require the `trusted` tier to be granted.

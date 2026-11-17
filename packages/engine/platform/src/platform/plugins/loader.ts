@@ -14,7 +14,9 @@ import type { MediaProviderRegistry } from '../media/index.js';
 import type { WebSearchProviderRegistry } from '../web-search/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { PluginInFlightTracker } from './in-flight.js';
-import { PLUGIN_NAME_PATTERN } from '../runtime/plugins/manifest.js';
+import { PLUGIN_NAME_PATTERN, resolvePluginGrant } from '../runtime/plugins/manifest.js';
+import type { PluginTrustTier } from '../runtime/plugins/trust.js';
+import { readInstalledBundleGuard } from '../runtime/ecosystem/installed-bundle-guard.js';
 
 export interface PluginPathOptions {
   readonly cwd: string;
@@ -57,6 +59,13 @@ export interface PluginManifest {
   main?: string | undefined;
   /** Optional list of runtime event names the plugin subscribes to. */
   hooks?: string[] | undefined;
+  /**
+   * Capabilities the plugin needs (`register.tool`, `register.provider`,
+   * `register.hook`, `register.panel`, `filesystem.read`, and the high-risk
+   * `filesystem.write`, `network.outbound`, `shell.exec`). Its trust tier
+   * decides which are granted; a registration it does not declare is refused.
+   */
+  capabilities?: string[] | undefined;
 }
 
 /**
@@ -198,6 +207,11 @@ export interface PluginLoaderDeps {
    * plugin whose calls are not counted). PluginManager.init supplies one.
    */
   inFlight?: PluginInFlightTracker | undefined;
+  /**
+   * The plugin's current trust tier, read at each start. PluginManager.init
+   * supplies its trust store; without one every plugin starts `untrusted`.
+   */
+  trustTier?: ((pluginName: string) => PluginTrustTier) | undefined;
 }
 
 /** Cleanup failures remain observable to an awaited lifetime owner. */
@@ -253,8 +267,25 @@ export async function loadPlugin(
     return fail(`entry file not found: ${entryPath}`);
   }
 
-  // Trust notice, plugins run as trusted code (like VS Code extensions)
-  logger.warn(`[plugins] Loading '${manifest.name}', plugins are trusted code and run with full application access`);
+  // A plugin installed from a pinned bundle registers only what its receipt grants.
+  const bundle = readInstalledBundleGuard(pluginDir);
+  if (bundle.kind === 'unreadable') {
+    return fail(`not loaded: ${bundle.reason}, so what it is allowed to register is unknown; reinstall it to write the receipt again`, 'error');
+  }
+
+  // The tier is read at every start, so a change of trust applies at the next one.
+  const tier = deps.trustTier?.(manifest.name) ?? 'untrusted';
+  const grant = resolvePluginGrant(manifest.name, manifest, tier);
+  if (grant.withheldHighRisk.length > 0) {
+    // Code in this process cannot be held to a capability it was refused, so a
+    // withheld high-risk capability is enforced by not running the plugin.
+    const named = grant.withheldHighRisk.join(', ');
+    return fail(`not started: it declares ${named}, which only a trusted plugin may use, and its trust tier is '${tier}'. `
+      + `Run /plugin trust ${manifest.name} trusted to allow it, or remove ${named} from its manifest`);
+  }
+
+  // The tier limits what the host hands the plugin; its own code still runs with this process's access.
+  logger.warn(`[plugins] Loading '${manifest.name}' at trust tier '${tier}' (granted: ${[...grant.granted].join(', ') || 'none'}); it runs inside this process`);
 
   const loaded: LoadedPlugin = {
     manifest,
@@ -306,6 +337,8 @@ export async function loadPlugin(
       cleanup: loaded.cleanup,
       inFlight: deps.inFlight,
       registrations,
+      ...(bundle.kind === 'bundle' ? { bundleGuard: bundle.guard } : {}),
+      grant,
     };
 
     const api = createPluginAPI(ctx);

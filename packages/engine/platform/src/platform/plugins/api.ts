@@ -22,6 +22,7 @@ import { EngineErrorCodes, formatRefusal, refusal, type Refusal } from '@goodvib
 import { createOwnedPluginCapabilities } from './owned-capabilities.js';
 import { PluginClosedError, PluginQuiescingError, type PluginInFlightTracker } from './in-flight.js';
 import { enforceBundleCapability, type BundleCapabilityGuard } from '../runtime/ecosystem/bundle-manifest.js';
+import type { PluginGrant } from '../runtime/plugins/manifest.js';
 
 /**
  * PluginProviderConfig, minimal config for registering a custom LLM provider
@@ -201,6 +202,29 @@ export interface PluginAPIContext {
    * the bundle did not declare (or its trust tier withheld) fails the start.
    */
   bundleGuard?: BundleCapabilityGuard | undefined;
+  /**
+   * What this plugin's trust tier grants of what its manifest declares. A tool,
+   * provider or event-hook registration needs its capability in `granted`; one
+   * outside it fails the start with the reason and the command that changes it.
+   * Absent only for an embedding that loads a plugin without a trust owner.
+   */
+  grant?: PluginGrant | undefined;
+}
+
+const REGISTRATION_NOUN: Readonly<Record<'register.tool' | 'register.provider' | 'register.hook', string>> = {
+  'register.tool': 'a tool',
+  'register.provider': 'a provider',
+  'register.hook': 'an event hook',
+};
+
+/** Why a registration outside the plugin's grant is refused, and what changes it. */
+function grantRefusal(pluginName: string, grant: PluginGrant, capability: 'register.tool' | 'register.provider' | 'register.hook'): Error {
+  const what = REGISTRATION_NOUN[capability];
+  return new Error(grant.declared.has(capability)
+    ? `plugin '${pluginName}' may not register ${what}: its trust tier is '${grant.tier}', and '${capability}' needs 'limited'. `
+      + `Run /plugin trust ${pluginName} limited, then enable or reload it`
+    : `plugin '${pluginName}' registered ${what} without declaring '${capability}' in its manifest; `
+      + `add "${capability}" to "capabilities" in its manifest.json`);
 }
 
 /** The refusal shown when a plugin command was refused or threw. */
@@ -255,13 +279,16 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
   };
   const owned = createOwnedPluginCapabilities(track);
   const guard = ctx.bundleGuard;
+  const grant = ctx.grant;
   /**
-   * Refuse a registration the bundle's grant does not cover (throws
-   * BundleCapabilityViolation, which fails the plugin's start with its reason).
-   * A plugin not installed from a bundle has no guard. `names` lists every
-   * spelling the declaration may use, the first being the one reported.
+   * Refuse a registration the plugin's trust tier does not grant, then one the
+   * bundle's grant does not cover (BundleCapabilityViolation); either throw
+   * fails the plugin's start with its reason. A plugin not installed from a
+   * bundle has no guard. `names` lists every spelling the declaration may use,
+   * the first being the one reported.
    */
   const permit = (runtime: 'register.tool' | 'register.provider' | 'register.hook', surface?: { kind: 'tool' | 'hook'; names: readonly [string, ...string[]] }): void => {
+    if (grant && !grant.granted.has(runtime)) throw grantRefusal(ctx.pluginName, grant, runtime);
     if (!guard) return;
     enforceBundleCapability(guard, 'runtime', runtime);
     if (!surface) return;

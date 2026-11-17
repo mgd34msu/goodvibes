@@ -73,9 +73,15 @@ subscription needs `register.hook` and the event name in `hooks`; a provider of
 any kind needs `register.provider`; a channel plugin or delivery strategy needs
 its id in `channels`. A registration outside the grant stops the plugin's start
 and names what was not declared. A plugin whose install receipt exists but
-cannot be read is not loaded; reinstalling it writes the receipt again. Plugins
-copied into `.goodvibes/plugins` by hand, or installed from the catalog without a
-bundle, have no grant to check.
+cannot be read is not loaded; reinstalling it writes the receipt again.
+
+Every plugin, bundle or not, is also held to its trust tier at each start: the
+capabilities its `manifest.json` declares (a plain list, or a bundle manifest's
+`capabilities.runtime`) are resolved against the plugin's current tier, a tool,
+provider or hook registration outside that grant fails the start, and a
+declared high-risk capability the tier withholds keeps the plugin from starting.
+An untrusted plugin gets `register.panel` and `filesystem.read`; `limited` adds
+the tools, providers and hooks it declares; `trusted` adds the high-risk ones.
 
 ```ts
 const guard = createBundleCapabilityGuard(manifest);
@@ -88,10 +94,12 @@ enforceBundleCapability(guard, 'channel', 'slack');  // throws, not declared
 `planBundleActivation(manifest, { trustTier })` resolves the bundle's declared
 security capabilities against the trust tier using the existing plugin
 capability model. If the bundle declared high-risk capabilities the tier does
-not grant, it activates **quarantined**. Those capabilities are withheld and
+not grant, it installs **quarantined**: those capabilities are withheld and
 recorded (`plan.quarantine`), and the returned guard cannot exercise them even
-though they were declared. Safe capabilities still work; over-reach is withheld,
-not silently granted.
+though they were declared. Because a plugin runs inside the process, the loader
+does not start a plugin while a high-risk capability it declares is withheld;
+`/plugin trust <id> trusted` (or removing the capability) lets it start.
+Over-reach is withheld, never silently granted.
 
 ## SHA-256 pinned distribution
 

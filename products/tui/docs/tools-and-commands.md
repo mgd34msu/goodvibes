@@ -670,9 +670,22 @@ Place plugin folders in `~/.goodvibes/plugins/` (global) or `.goodvibes/plugins/
 {
   "name": "my-plugin",
   "version": "1.0.0",
-  "description": "My custom plugin"
+  "description": "My custom plugin",
+  "capabilities": ["register.tool", "register.hook"]
 }
 ```
+
+`capabilities` declares what the plugin needs: `register.tool`, `register.provider`, `register.hook`, `register.panel`, `filesystem.read`, and the high-risk `filesystem.write`, `network.outbound`, `shell.exec`. A tool, provider or event-hook registration the manifest does not declare is refused and the plugin does not start, with the reason. Commands, gateway methods and channels need no declaration.
+
+The plugin's trust tier decides what of its declaration it gets, checked at every start:
+
+| Tier | Gets |
+| --- | --- |
+| `untrusted` (default) | panels and reading files; its tool, provider and hook registrations are refused |
+| `limited` | also the tools, providers and hooks it declares |
+| `trusted` | also the high-risk capabilities it declares |
+
+A plugin that declares a high-risk capability does not start below `trusted`: it runs inside this process, so a capability it was refused can only be withheld by not running it. `/plugin trust <name> <tier>` sets the tier and starts a running plugin again at once; `trusted` is set by a verified signature, or by your confirmation when the signature does not verify.
 
 ### Plugin API
 
@@ -694,7 +707,7 @@ Manage installed plugins via `/plugin enable|disable|reload|list`. `/plugin relo
 ### Trust, quarantine, and discovery
 
 - local plugin discovery across configured search directories
-- plugin inspect/review output with trust tier, quarantine posture, capability counts, and signature fingerprint visibility
+- plugin inspect/review output with trust tier, quarantine posture, declared and withheld capabilities, and signature fingerprint visibility
 - `/plugin list|inspect|review|browse|catalog-review|publish-local|install|update|uninstall`
 
 ### Curated ecosystem catalogs

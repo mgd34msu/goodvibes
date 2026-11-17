@@ -121,6 +121,8 @@ function renderPlan(plan: BundleActivationPlan, committed: boolean): string {
       `  QUARANTINED: yes; ${plan.quarantine.reason ?? 'over-reached its trust tier'}`,
       `  withheld capabilities: ${plan.quarantine.revokedCapabilities.join(', ')}`,
     );
+  } else if (plan.capabilityManifest.denied.length > 0) {
+    lines.push(`  quarantined: no; withheld until its trust tier is limited: ${plan.capabilityManifest.denied.join(', ')} (/plugin trust ${plan.manifest.id} limited)`);
   } else {
     lines.push('  quarantined: no; every declared capability fit the trust tier');
   }
@@ -181,7 +183,7 @@ async function handleInstall(runtime: CliCommandRuntime, ref: string | undefined
       source,
       trustTier: plan.trustTier,
       granted: [...plan.capabilityManifest.granted],
-      withheld: [...plan.quarantine.revokedCapabilities],
+      withheld: [...plan.capabilityManifest.denied],
       quarantined: plan.quarantine.required,
       tools: [...manifest.capabilities.tools],
       hooks: [...manifest.capabilities.hooks],

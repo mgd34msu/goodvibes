@@ -112,7 +112,7 @@ class PluginsModalSurface implements ConfigModalSurface {
       const verify = recorded && recorded.stamp === verifyStamp(plugin) ? recorded : undefined;
       const suffix = [
         trustRecord?.signatureFingerprint ? `sig ${trustRecord.signatureFingerprint}` : 'unsigned',
-        caps ? `caps ${caps.requested.length}/${caps.highRisk.length}hr/${caps.blocked.length}untrusted` : null,
+        caps ? `caps ${caps.requested.length}/${caps.highRisk.length}hr${caps.blocked.length > 0 ? `, withheld ${caps.blocked.join(',')}` : ''}` : null,
         quarantineRecord ? `quarantine: ${quarantineRecord.reason}` : null,
         verify ? `verify ${verify.valid ? 'VALID' : 'INVALID'}${verify.fingerprint ? ` fp=${verify.fingerprint}` : (!verify.valid && verify.reason ? `: ${verify.reason}` : '')}` : null,
       ].filter((s): s is string => s !== null).join(' · ');

@@ -16,6 +16,13 @@ import {
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
 
+/** What each trust tier lets a plugin do; the loader enforces it at every start. */
+const TIER_EFFECT: Readonly<Record<'untrusted' | 'limited' | 'trusted', string>> = {
+  untrusted: 'panels and reading files only; its tool, provider and event-hook registrations are refused',
+  limited: 'the tools, providers and event hooks its manifest declares; high-risk capabilities stay withheld',
+  trusted: 'everything its manifest declares, including shell, file-write and network capabilities',
+};
+
 export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'plugin',
@@ -116,7 +123,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           `  quarantined: ${status.quarantined ? 'yes' : 'no'}`,
           `  requestedCapabilities: ${capabilities?.requested.length ?? 0}`,
           `  highRiskCapabilities: ${capabilities?.highRisk.length ?? 0}`,
-          `  highRiskAboveTier: ${capabilities?.blocked.length ?? 0}`,
+          `  withheldByTier: ${capabilities?.blocked.join(', ') || 'none'}`,
           `  signedFingerprint: ${trust?.signatureFingerprint ?? 'n/a'}`,
           `  quarantineReason: ${quarantine?.reason ?? 'n/a'}`,
         ].join('\n'));
@@ -128,8 +135,11 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           'Plugin Security Review',
           `  total: ${plugins.length}`,
           `  active: ${plugins.filter((plugin) => plugin.active).length}`,
-          // Only quarantine refuses anything (a quarantined plugin does not load); trust tiers are notes, shown by /plugin inspect.
           `  quarantined (will not load): ${plugins.filter((plugin) => plugin.quarantined).length}`,
+          // Each tier is enforced at start: untrusted may not register tools, providers or hooks; only trusted may declare high-risk capabilities.
+          `  untrusted (panels and reads only): ${plugins.filter((plugin) => plugin.trustTier === 'untrusted').length}`,
+          `  limited (declared tools, providers, hooks): ${plugins.filter((plugin) => plugin.trustTier === 'limited').length}`,
+          `  trusted (also high-risk): ${plugins.filter((plugin) => plugin.trustTier === 'trusted').length}`,
         ].join('\n'));
         return;
       }
@@ -337,17 +347,23 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         // `--override` was the old retyped answer; the registry now asks once when the signature fails.
         const userNote = args.slice(3).filter((word) => word !== '--override').join(' ');
         let note = userNote || undefined;
+        const effect = TIER_EFFECT[tier];
+        const restartLine = async (restarting: Promise<{ ok: boolean; error?: string }> | undefined): Promise<string> => {
+          if (!restarting) return 'It applies when the plugin next starts.';
+          const restarted = await restarting;
+          return restarted.ok ? 'The running plugin was started again at the new tier.' : `The running plugin was not restarted: ${restarted.error}`;
+        };
         if (tier === 'trusted') {
           const sigResult = pluginManager.trustSigned(name);
           if (sigResult.ok) {
-            ctx.print(`Plugin '${name}' elevated to 'trusted' via signed manifest${sigResult.fingerprint ? ` (fingerprint: ${sigResult.fingerprint})` : ''}.\nThe tier is a record of your trust; only quarantine stops a plugin from loading.`);
+            ctx.print(`Plugin '${name}' elevated to 'trusted' via signed manifest${sigResult.fingerprint ? ` (fingerprint: ${sigResult.fingerprint})` : ''}: ${effect}\n${await restartLine(sigResult.restarting)}`);
             return;
           }
           note = `owner override after failed signature check (${sigResult.error})${userNote ? `; ${userNote}` : ''}`;
         }
         const result = pluginManager.trust(name, tier, note);
         ctx.print(result.ok
-          ? `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}.\nThe tier is a record of your trust; only quarantine stops a plugin from loading.`
+          ? `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(result.restarting)}`
           : `Error: ${result.error}`);
         return;
       }
@@ -372,21 +388,24 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           ctx.print(`Error: Plugin '${name}' not found.`);
           return;
         }
-        const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier}`, '', `Requested capabilities (${info.requested.length}):`];
-        if (info.requested.length === 0) lines.push('  (none)');
+        const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${TIER_EFFECT[info.tier]})`, '', `Declared capabilities (${info.requested.length}):`];
+        if (info.requested.length === 0) lines.push('  (none: it may register commands and gateway methods only)');
         else {
           for (const cap of info.requested) {
             const tag = info.blocked.includes(cap)
-              ? '[high-risk, above trust tier]'
-              : info.highRisk.includes(cap) ? '[high-risk]' : '[safe]';
+              ? (info.highRisk.includes(cap) ? '[withheld: needs trusted]' : '[withheld: needs limited]')
+              : info.highRisk.includes(cap) ? '[granted, high-risk]' : '[granted]';
             lines.push(`  ${cap.padEnd(32)} ${tag}`);
           }
         }
-        if (info.blocked.length > 0) {
+        const withheldHighRisk = info.blocked.filter((cap) => info.highRisk.includes(cap));
+        if (withheldHighRisk.length > 0) {
           lines.push('');
-          lines.push(`${info.blocked.length} high-risk capability/capabilities requested by a plugin below the trusted tier '${info.tier}'.`);
-          lines.push('Plugins run inside this process, so the tier is a record of your trust and is not enforced per capability; only quarantine stops a plugin from loading.');
-          lines.push(`Use /plugin trust ${name} trusted to record trust, or /plugin quarantine ${name} to stop it loading.`);
+          lines.push(`It declares ${withheldHighRisk.join(', ')}, which needs the trusted tier, so it does not start.`);
+          lines.push(`Use /plugin trust ${name} trusted to allow it, or remove the capability from its manifest.`);
+        } else if (info.blocked.length > 0) {
+          lines.push('');
+          lines.push(`Its registrations of ${info.blocked.join(', ')} are refused at this tier; /plugin trust ${name} limited allows them.`);
         }
         ctx.print(lines.join('\n'));
         return;

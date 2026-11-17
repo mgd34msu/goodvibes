@@ -539,17 +539,12 @@ export class ResponseCompletionGuard {
   private classicPublication(input: ResponseCompletionInput, options: JudgmentReadingOptions): () => void {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const conversation = input.conversation, response = input.response;
-    const messages = conversation.getMessageSnapshot();
-    const prefix = JSON.stringify(messages);
+    // The history's own revision says whether it moved; notices may arrive meanwhile, and besides them only this exact answer may follow.
+    const messages = captureConversationEvidence(conversation);
     const current = () => {
       options.signal?.throwIfAborted(); options.assertCurrent?.();
-      const now = conversation.getMessageSnapshot();
-      // Notices may arrive meanwhile; besides them, only this exact answer may follow.
-      const after = now.slice(messages.length).filter(message => message.role !== 'system');
-      if (input.conversation !== conversation || input.response !== response
-        || JSON.stringify(now.slice(0, messages.length)) !== prefix || after.length > 1) throw new ResponseCompletionError('stale-evidence');
-      const added = after[0];
-      if (added && (added.role !== 'assistant' || added.content !== response || added.toolCalls?.length)) throw new ResponseCompletionError('stale-evidence');
+      if (input.conversation !== conversation || input.response !== response) throw new ResponseCompletionError('stale-evidence');
+      try { messages.assertFinalized(response); } catch (cause) { throw new ResponseCompletionError('stale-evidence', { cause }); }
     };
     current(); return current;
   }
@@ -602,14 +597,15 @@ export class ResponseCompletionGuard {
     this.assertEvidenceCurrent = undefined;
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     const conversation = input.conversation, snapshot = conversation.getMessageSnapshot;
+    // The history's revision is the one currentness owner for the transcript (no re-projection per check).
     const messages = captureConversationEvidence(conversation);
-    const projectTranscript = () => completionTranscript(verificationMessages(conversation, snapshot.call(conversation)) as ConversationMessageSnapshot[]);
     const transcript = completionTranscript(verificationMessages(conversation, messages.snapshot) as ConversationMessageSnapshot[]);
     // Validate all retained text before touching the port. Never trim away an earlier request or late secret.
-    const source = retainStrictJudgmentJson({ request: input.request, response: input.response, transcript,
+    // A detached copy: what was read cannot change under the check, and the inputs are compared by identity.
+    const source = { snapshot: captureStrictJudgmentJson({ request: input.request, response: input.response, transcript,
       archive: verificationHistory(conversation).map(history => ({ messages: completionTranscript(history.messages as ConversationMessageSnapshot[]) })), tools: input.tools, delegated: (input.delegated ?? []).map(agent => ({ id: agent.id, task: agent.task, status: agent.status,
         output: agent.output, ...(agent.error ? { error: agent.error } : {}), evidence: completionTranscript(agent.evidence ?? []) })),
-      completedWork: input.completedWork ?? [], requirements: input.requirements ?? null, initial: this.initial, previousReview: this.previousReview });
+      completedWork: input.completedWork ?? [], requirements: input.requirements ?? null, initial: this.initial, previousReview: this.previousReview }) };
     const preparedState = this.evidenceProjection.prepareFull(source.snapshot);
     const retainedWorkers = this.reviewStore ? retainedDelegationSources(preparedState, this.reviewStore.sources, this.ownSource) : [];
     const fullState = retainedWorkers.length
@@ -617,13 +613,12 @@ export class ResponseCompletionGuard {
     const hasDelegatedEvidence = preparedState.delegated.length > 0 || retainedWorkers.length > 0;
     this.sourceAdmitted = true;
     this.admittedDraft = preparedState.response;
-    const conversationSource = messages.native ? null : JSON.stringify(transcript);
     const archiveIdentity = verificationHistory(conversation), archiveSource = retainStrictJudgmentJson(archiveIdentity);
     const current = () => {
-      source.assertCurrent(); messages.assertCurrent(); archiveSource.assertCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.();
+      messages.assertCurrent(); archiveSource.assertCurrent(); options.signal?.throwIfAborted(); options.assertCurrent?.();
       if (input.conversation !== conversation || conversation.getMessageSnapshot !== snapshot
         || input.request !== source.snapshot.request || input.response !== source.snapshot.response
-        || verificationHistory(conversation) !== archiveIdentity || conversationSource !== null && JSON.stringify(projectTranscript()) !== conversationSource) throw new ResponseCompletionError('stale-evidence');
+        || verificationHistory(conversation) !== archiveIdentity) throw new ResponseCompletionError('stale-evidence');
     };
     this.assertEvidenceCurrent = current;
     current();
@@ -673,9 +668,8 @@ export class ResponseCompletionGuard {
         const assertCurrent = () => {
           options.signal?.throwIfAborted(); options.assertCurrent?.();
           try {
-            source.assertCurrent(); restriction.assertCurrent(); archiveSource.assertCurrent(); messages.assertFinalized(source.snapshot.response);
+            restriction.assertCurrent(); archiveSource.assertCurrent(); messages.assertFinalized(source.snapshot.response);
             if (verificationHistory(conversation) !== archiveIdentity) throw new ResponseCompletionError('unavailable');
-            if (conversationSource !== null && JSON.stringify(projectTranscript().slice(0, transcript.length)) !== conversationSource) throw new ResponseCompletionError('unavailable');
             if (response.content !== source.snapshot.response) throw new ResponseCompletionError('unavailable');
           } catch (error) { throw new ResponseCompletionError('unavailable', { cause: error }); }
         };
@@ -700,15 +694,17 @@ export class ResponseCompletionGuard {
     }
     this.onCompletionRequired?.();
     routing.recordAction('The request requires task fulfillment, or applicability is unsettled. Retain the original completion checks.');
+    // The evidence does not change between passes: its size is measured once.
+    const largeEvidence = JSON.stringify(fullState).length > 100_000;
     for (;;) {
     let state: unknown = fullState;
-    let checkpoint = !withoutCheckpoint && JSON.stringify(fullState).length > 100_000
+    let checkpoint = !withoutCheckpoint && largeEvidence
       ? nativeWorkCheckpoint(input.completedWork ?? [], source.snapshot.completedWork, fullState, this.ownSource) : undefined;
     if (checkpoint && !await this.checkCheckpointHistory(fullState, checkpoint, { ...readingOptions, port,
       identity: this.cacheIdentity(port), assertCurrent: owner.assertCurrent })) checkpoint = undefined;
     let verificationFindings: readonly import('./response-completion-findings.js').CompletionFinding[] = [];
     if (checkpoint) state = checkpoint;
-    else if (requireVerification || JSON.stringify(fullState).length > 100_000) {
+    else if (requireVerification || largeEvidence) {
       if (!this.verification) throw new VerificationHeldError('missing private verification provider');
       let checked;
       try { checked = await this.verification.prepare(fullState, { ...readingOptions, port, identity: this.cacheIdentity(port), assertCurrent: owner.assertCurrent }); }

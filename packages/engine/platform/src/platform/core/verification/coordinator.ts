@@ -15,6 +15,13 @@ import { PageAuditRound, type PageAuditMember } from './page-audits.js';
 
 const clean = (readings: Readonly<Record<string, { verdict: string; outcome: string }>>) => Object.values(readings).every(reading => reading.verdict === 'no' && reading.outcome === 'act');
 const bounded = (value: unknown, limit: number) => JSON.stringify(value).length <= limit;
+/** A source's size on the wire, measured once per source object: frames are cut from the same sources many times per check. */
+const wireSizes = new WeakMap<VerificationSource, number>();
+const wireSize = (source: VerificationSource): number => {
+  let size = wireSizes.get(source);
+  if (size === undefined) { size = JSON.stringify(verificationWireSource(source)).length; wireSizes.set(source, size); }
+  return size;
+};
 const MAX_EXACT_CASE_CHARACTERS = 192_000;
 const readingEvidence = (readings: Readonly<Record<string, { verdict: string; outcome: string }>>) =>
   Object.fromEntries(Object.entries(readings).map(([aspect, reading]) => [aspect, { verdict: reading.verdict, outcome: reading.outcome }]));
@@ -268,7 +275,7 @@ export class CompletionVerification {
     const exactScopeFits = bounded(originals, VERIFICATION_FRAME_CHARACTERS);
     // Large instruction histories are reduced with the same source qualification
     // as observations, then the ledger is audited against EVERY original page.
-    const pages = verificationFrames(instructions, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length);
+    const pages = verificationFrames(instructions, VERIFICATION_FRAME_CHARACTERS, wireSize);
     const source = pages.length <= 1 ? instructions.map(verificationWireSource) : (await this.evidenceTree(instructions, access)).map(node => this.compactNode(node));
     const context = { sources: source, currentRequest: instructions.filter(isCurrentRequest),
       granularity: 'Use independently checkable obligations: performed work and delivery of its artifact are separate requirements. Preserve explicit scope and constraints; do not turn a full-codebase request into only representative subsystem sampling or add exhaustive runtime testing unless requested.' };
@@ -422,7 +429,7 @@ export class CompletionVerification {
     }
   }
   private async evidenceTree(sources: readonly VerificationSource[], access: VerificationAccess): Promise<VerificationReceipt[]> {
-    const pages = verificationFrames(sources, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length);
+    const pages = verificationFrames(sources, VERIFICATION_FRAME_CHARACTERS, wireSize);
     let nodes = (await ownedMapLimit(access, pages, 3, (page, access) => this.page(page, access))).flat();
     while (!bounded(nodes.map(node => this.compactNode(node)), VERIFICATION_OVERVIEW_CHARACTERS)) {
       // Only bounded summaries go over the wire. Full child/source ID sets stay
@@ -446,7 +453,7 @@ export class CompletionVerification {
     const describe = (source: VerificationSource) => ({ referencePreviewOnly: source.reference.slice(0, 240),
       executionPreviewOnly: source.execution ? JSON.stringify(source.execution).slice(0, 320) : null,
       previewOnly: { beginning: source.text.slice(0, 100), end: source.text.length > 100 ? source.text.slice(-100) : '' } });
-    let nodes = verificationFrames(sources, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length).map(page => {
+    let nodes = verificationFrames(sources, VERIFICATION_FRAME_CHARACTERS, wireSize).map(page => {
       const receipt = this.store.retainIndex({ representation: 'source-index', children: [], sourceIds: page.map(source => source.id),
         summary: { facts: [{ text: JSON.stringify({ meaning: 'RETRIEVAL INDEX ONLY. Previews cannot prove completion or source contents. Open exact originals before judging.',
           locationPreviewsOnly: [...new Set(page.flatMap(source => source.text.match(/[\w./-]+/g) ?? []).filter(path => /\.(?:md|zip|tsx?|jsonl?)$/.test(path)))].slice(0, 8).map(path => path.slice(0, 96)),
@@ -519,7 +526,7 @@ export class CompletionVerification {
     // Owner instructions establish obligations. They must still be checked,
     // but a request is not an execution observation that the work failed.
     const pages = [observations.observations.filter(source => source.kind === 'instruction'), observations.observations.filter(source => source.kind !== 'instruction')]
-      .flatMap(group => verificationFrames(group, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length));
+      .flatMap(group => verificationFrames(group, VERIFICATION_FRAME_CHARACTERS, wireSize));
     const { sources: _sources, earlier: _earlier, ...details } = evidence;
     const auditScope = this.auditScope(requirement.id, { turnContext, requirement, response, details, nativeQualification,
       sourceIds: evidence.sources?.map(source => source.id) ?? null, earlierIds: evidence.earlier?.map(node => node.id) ?? null }, access);
@@ -1041,11 +1048,11 @@ export class CompletionVerification {
     // only the tail of the current receipt in the last frame.
     const preferred = [...acceptance.values()].at(-1);
     const hostPrimary = preferred
-      ? verificationFrames(preferred, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length)[0] ?? []
+      ? verificationFrames(preferred, VERIFICATION_FRAME_CHARACTERS, wireSize)[0] ?? []
       : [];
     const hostContract = hostPrimary[0];
     const savedAnswer = hostContract ? observations.filter(source => source.lane === 'contract-answer' && source.contractId === hostContract.contractId) : [];
-    const answerFrames = verificationFrames(savedAnswer, VERIFICATION_FRAME_CHARACTERS, source => JSON.stringify(verificationWireSource(source)).length);
+    const answerFrames = verificationFrames(savedAnswer, VERIFICATION_FRAME_CHARACTERS, wireSize);
     // The approval digest alone does not tell a reader WHICH result was
     // approved. Keep a bounded saved answer intact beside its exact receipt;
     // otherwise older partial work displaces the accepted result itself.
@@ -1057,7 +1064,7 @@ export class CompletionVerification {
     }
     const latestExecution = [...executions.values()].at(-1);
     const resultFrames = verificationFrames(latestExecution ?? added, VERIFICATION_FRAME_CHARACTERS,
-      source => JSON.stringify(verificationWireSource(source)).length);
+      wireSize);
     // Keep a bounded latest execution intact, including its result header and
     // trailer. Taking only its last frame can hide counts/status at the start
     // and make the verifier request the exact same successful inspection again.

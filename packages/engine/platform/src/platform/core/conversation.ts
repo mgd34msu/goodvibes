@@ -25,7 +25,6 @@ import { logger } from '../utils/logger.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { archiveVerificationCompaction, detachVerificationMessages, forkVerificationArchive, isVerificationRuntimeMessage, mergeVerificationArchive, resetVerificationArchives,
   restoreVerificationBranch, restoreVerificationMessages, retainVerificationMessagePositions, switchVerificationArchive, updateVerificationMessage } from './verification/archive.js';
-import { retainStrictJudgmentJson } from '../gate/judgment-result.js';
 
 export type TranscriptEventIndex = Awaited<ReturnType<typeof buildTranscriptEventIndex>>;
 
@@ -293,7 +292,8 @@ export class ConversationManager {
     const candidate: AssistantMessage = {
       role: 'assistant',
       content,
-      toolCalls: opts?.toolCalls,
+      // The history keeps its own copy, so the caller's array cannot change it without moving the revision.
+      toolCalls: opts?.toolCalls ? structuredClone(opts.toolCalls) : undefined,
       reasoningContent: opts?.reasoningContent,
       reasoningSummary: opts?.reasoningSummary,
       usage: opts?.usage,
@@ -509,33 +509,21 @@ export class ConversationManager {
     return this.messages.some((message) => message.role === 'system' && test(message));
   }
 
-  /** Retain the actual message fields used by completion, including externally
-   * shared nested arguments. Compare identities/slots, never reserialize large
-   * source strings on every verifier question. Presentation can update freely. */
+  /**
+   * The history completion evidence is read from, and the revision it stands
+   * at. Every change to the history (append, stream update, undo, branch,
+   * compaction, load) moves the revision, and the message objects are this
+   * manager's own (handed out only as copies), so "still the same history" is
+   * an identity and an integer compare: no per-message walk, no copy and no
+   * serialisation per check, whatever the transcript's length.
+   */
   public captureMessageEvidence(): { snapshot: ConversationMessageSnapshot[]; native: boolean; assertCurrent: () => void; assertFinalized: (response: string) => void } {
-    const messages = this.messages, revision = this.workRevision, snapshot = this.getMessageSnapshot;
-    const fields = ['role', 'content', 'toolCalls', 'callId', 'outcome', 'hostEvidence'] as const;
-    const captured = messages.map(message => ({ message, slots: fields.map(key => ({ key, descriptor: Object.getOwnPropertyDescriptor(message, key) })) }));
-    const nested = captured.flatMap(entry => entry.slots.flatMap(slot => {
-      if (slot.descriptor && !('value' in slot.descriptor)) throw new Error('Conversation evidence contains an accessor');
-      const value: unknown = slot.descriptor?.value;
-      return value && typeof value === 'object' ? [retainStrictJudgmentJson(value)] : [];
-    }));
+    const messages = this.messages, revision = this.workRevision, snapshot = this.getMessageSnapshot, length = messages.length;
     const assertPrefix = () => {
-      if (this.messages !== messages || this.getMessageSnapshot !== snapshot || messages.length < captured.length) throw new TranscriptSourceChangedError();
-      for (let index = 0; index < captured.length; index++) {
-        const entry = captured[index]!;
-        if (messages[index] !== entry.message) throw new TranscriptSourceChangedError();
-        for (const slot of entry.slots) {
-          const current = Object.getOwnPropertyDescriptor(entry.message, slot.key), before = slot.descriptor;
-          if (!!current !== !!before || current && (!('value' in current) || !Object.is(current.value, before?.value)
-            || current.enumerable !== before?.enumerable || current.configurable !== before?.configurable || current.writable !== before?.writable)) throw new TranscriptSourceChangedError();
-        }
-      }
-      for (const source of nested) source.assertCurrent();
+      if (this.messages !== messages || this.getMessageSnapshot !== snapshot || messages.length < length) throw new TranscriptSourceChangedError();
     };
     // A notice for the person is not evidence: one appended after the capture changes nothing checked.
-    const addedWork = () => messages.slice(captured.length).filter(message => message.role !== 'system');
+    const addedWork = () => messages.slice(length).filter(message => message.role !== 'system');
     const assertCurrent = () => {
       assertPrefix();
       if (this.workRevision !== revision || addedWork().length !== 0) throw new TranscriptSourceChangedError();

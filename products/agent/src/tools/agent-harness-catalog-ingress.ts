@@ -21,8 +21,27 @@ const CATALOG_MODES = new Set(['modes', 'mode', 'commands', 'command', 'run_comm
 const PERSONAL_OPS_MODES = new Set(['personal_ops_briefing', 'personal_ops', 'personal_ops_queue', 'personal_ops_intake', 'personal_ops_lane', 'run_personal_ops_read']);
 const PROTECTED_COMMS_EFFECT_MODES = new Set(['channel_draft_save', 'channel_draft_send', 'channel_routing_assign', 'channel_routing_remove']);
 const projectionGuards = new WeakMap<object, () => void>();
-const forwardedGuards = new WeakMap<object, { readonly options: ToolExecuteOptions | undefined; readonly assertCurrent: () => void; readonly assertInvocation: () => boolean; readonly assertEffect: (effect: ToolExecutionEffect) => boolean }>();
 const publicationGuards = new WeakMap<object, RetainedGuards>();
+
+/**
+ * A translated call's authority: the original, already admitted call's checks.
+ * It belongs to the call, not to an argument object: it is found through the
+ * call's options (the engine's execution capability, the same object every
+ * forwarded step is given), so a structural copy of the arguments keeps it and
+ * nothing the model writes can mint it. Forwards nest and may overlap within
+ * one call; the innermost one still running applies.
+ */
+interface CallAdmission {
+  readonly assertCurrent: () => void;
+  readonly assertInvocation: () => boolean;
+  readonly assertEffect: (effect: ToolExecutionEffect) => boolean;
+}
+const callAdmissions = new WeakMap<ToolExecuteOptions, CallAdmission[]>();
+
+function admissionOf(options: ToolExecuteOptions | undefined): CallAdmission | undefined {
+  const active = options === undefined ? undefined : callAdmissions.get(options);
+  return active?.[active.length - 1];
+}
 interface SettingsPreviewBinding {
   readonly context: CommandContext;
   readonly registry: ToolRegistry;
@@ -204,11 +223,8 @@ export function createHarnessCatalogInputProjector(registry: ToolRegistry, fallb
 
 /** Verify the original invocation, including admission, after every catalog await. */
 export function harnessCatalogExecutionGuard(args: Record<string, unknown>, options?: ToolExecuteOptions): () => void {
-  const inherited = forwardedGuards.get(args);
-  if (inherited) {
-    if (inherited.options !== options) throw new ToolInputProjectionError('stale');
-    return inherited.assertCurrent;
-  }
+  const inherited = admissionOf(options);
+  if (inherited) return inherited.assertCurrent;
   const projected = projectionGuards.get(args);
   const retained = retainedGuards(args);
   const signal = modelReadingServicePath(options, ['signal']) as AbortSignal | undefined;
@@ -225,9 +241,8 @@ export function harnessCatalogExecutionGuard(args: Record<string, unknown>, opti
 
 /** Trusted translations retain the original engine proof; arguments never mint it. */
 export function harnessCatalogInvocationAuthority(args: Record<string, unknown>, options?: ToolExecuteOptions, effect?: ToolExecutionEffect): boolean {
-  const inherited = forwardedGuards.get(args);
+  const inherited = admissionOf(options);
   if (inherited) {
-    if (inherited.options !== options) throw new ToolInputProjectionError('stale');
     inherited.assertCurrent();
     return effect ? inherited.assertEffect(effect) : inherited.assertInvocation();
   }
@@ -235,21 +250,35 @@ export function harnessCatalogInvocationAuthority(args: Record<string, unknown>,
   return effect ? assertCurrentToolEffect(args, options, effect) : assertCurrentToolInvocation(args, options);
 }
 
-/** Argument translation retains the exact options capability and original guard. */
+/**
+ * Runs a translated call under the original call's admission, found through
+ * the call's options, never re-proven per argument object.
+ */
 export async function forwardHarnessCatalogCall(tool: Tool, original: Record<string, unknown>, forwarded: Record<string, unknown>, options?: ToolExecuteOptions,
   additionalGuard?: () => void) {
   const originalGuard = harnessCatalogExecutionGuard(original, options);
-  const inherited = forwardedGuards.get(original);
-  const previousForwarded = forwardedGuards.get(forwarded);
+  const inherited = admissionOf(options);
   const originalInvocation = inherited ? inherited.assertInvocation : () => assertCurrentToolInvocation(original, options);
   const originalEffect = inherited ? inherited.assertEffect : (effect: ToolExecutionEffect) => assertCurrentToolEffect(original, options, effect);
   const assertCurrent = () => { originalGuard(); additionalGuard?.(); };
   assertCurrent(); publicationGuards.set(forwarded, retainedGuards(original));
-  forwardedGuards.set(forwarded, { options, assertCurrent, assertInvocation: () => { assertCurrent(); return originalInvocation(); }, assertEffect: effect => { assertCurrent(); return originalEffect(effect); } });
+  const admission: CallAdmission = {
+    assertCurrent,
+    assertInvocation: () => { assertCurrent(); return originalInvocation(); },
+    assertEffect: (effect) => { assertCurrent(); return originalEffect(effect); },
+  };
+  // Without options there is no engine admission to carry: the forwarded body's
+  // own checks find none, as the original call's would.
+  let active: CallAdmission[] | undefined;
+  if (options !== undefined) {
+    active = callAdmissions.get(options);
+    if (!active) { active = []; callAdmissions.set(options, active); }
+    active.push(admission);
+  }
   try { const result = await tool.execute(forwarded, options); assertCurrent(); return result; }
   finally {
-    if (previousForwarded) forwardedGuards.set(forwarded, previousForwarded);
-    else forwardedGuards.delete(forwarded);
+    const index = active?.lastIndexOf(admission) ?? -1;
+    if (active && index >= 0) active.splice(index, 1);
   }
 }
 
@@ -261,7 +290,7 @@ export function protectHarnessCatalogTool(tool: Tool, registry: ToolRegistry, se
     const routing = catalogRoutingInput(input);
     const previewInspection = routing.mode === 'run_workspace_action' && isAgentWorkspaceSettingsImportPreview(input);
     const assertOptions = previewInspection && options ? captureCatalogMethods(options, ['signal', 'assertCurrent', 'inputProjectionContext']) : () => {};
-    if (!forwardedGuards.has(input) && !projectionGuards.has(input)) { publicationGuards.set(input, new RetainedGuards()); }
+    if (!admissionOf(options) && !projectionGuards.has(input)) { publicationGuards.set(input, new RetainedGuards()); }
     const guard = harnessCatalogExecutionGuard(input, options);
     const registration = registeredTool(registry, tool.definition.name);
     const assertContext = catalogContextGuard(registry, context, tool.definition.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting'

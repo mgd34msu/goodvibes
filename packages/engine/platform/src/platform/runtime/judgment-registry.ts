@@ -41,10 +41,6 @@ registry.register(pendingApproval);
 import { codeSearchRerank } from '../state/batteries/code-search-rerank.js';
 registry.register(codeSearchRerank);
 
-// State: VIBE.md import.
-import { vibePersonaLine } from '../state/batteries/vibe-persona-line.js';
-registry.register(vibePersonaLine);
-
 // Runtime: ecosystem catalog search and review.
 import { catalogSearch } from './ecosystem/batteries/catalog-search.js';
 import { trustNoteCaution } from './ecosystem/batteries/trust-note-caution.js';

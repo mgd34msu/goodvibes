@@ -62,15 +62,6 @@ export type {
   HonestMemorySearchResult,
 } from './memory-recall-contract.js';
 export {
-  VIBE_PERSONA_TAG,
-  VIBE_PROJECTION_HEADING,
-  VIBE_PROJECTION_CAVEAT,
-  selectVibeRecords,
-  renderVibeProjection,
-  vibeBodyToConstraintOptions,
-} from './vibe-projection.js';
-export type { VibeProjectionOptions, VibeImportOptions } from './vibe-projection.js';
-export {
   projectMemoryRecordToMarkdown,
   projectMemoryToFiles,
   parseProjectedMemoryFile,

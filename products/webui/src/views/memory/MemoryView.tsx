@@ -1,8 +1,9 @@
 /**
  * The Memory tab of the Library, the web UI's consumer of the canonical, cross-surface
  * memory store (memory.records.* platform 1.1.0): search and browse, record detail with its
- * review form and confirmed delete, and a read-only personas group (VIBE.md constraint
- * records). Adding a record is the page's primary action (AddMemoryDialog, in LibraryView).
+ * review form and confirmed delete. The Agent's persona is its VIBE.md file, not memory
+ * records; records an earlier import left tagged `vibe` are listed as ordinary memory,
+ * to keep, edit or delete like any other. Adding a record is the page's primary action (AddMemoryDialog, in LibraryView).
  *
  * HONESTY. The recall-honesty contract (memory-recall-contract.ts) is applied
  * server-side and surfaced here verbatim via MemorySearchHonestyNote: which search
@@ -17,7 +18,6 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { Database, Plus } from 'lucide-react';
 import {
   client as platformClient,
-  VIBE_PERSONA_TAG,
   type MemoryClass,
   type MemoryRecord,
   type MemoryScope,
@@ -37,12 +37,11 @@ import { sentence, useDebouncedValue, useMemoryRecordMutations } from '../librar
 import { MemoryRecordRow } from './MemoryRecordRow';
 import { MemoryRecordPane } from './MemoryRecordPane';
 import { MemorySearchHonestyNote } from './MemorySearchHonestyNote';
-import { MEMORY_CLASSES, MEMORY_SCOPES, isPersonaRecord, splitTags } from './memory-helpers';
+import { MEMORY_CLASSES, MEMORY_SCOPES, splitTags } from './memory-helpers';
 import '../../styles/components/memory.css';
 
 /** One page of records; "Show more" asks for the next page on top. */
 const LIMIT = 100;
-const PERSONA_FILTER: MemorySearchInput = { cls: 'constraint', tags: [VIBE_PERSONA_TAG], limit: LIMIT };
 
 export interface MemoryViewProps {
   /** The Library's shared search text (already settled). */
@@ -93,29 +92,11 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
     queryFn: () => platformClient.operator.memory.search(appliedFilters),
     placeholderData: keepPreviousData,
   });
-  const personas = useQuery({
-    queryKey: queryKeys.memoryPersonas,
-    queryFn: () => platformClient.operator.memory.search(PERSONA_FILTER),
-  });
-
-  const personaRecords = useMemo(
-    () => (personas.data?.records ?? []).filter(isPersonaRecord),
-    [personas.data],
-  );
-  // Browsing shows personas in their own group (and not twice); with any search or
-  // filter the main list already carries the matching persona records.
-  const showPersonaGroup = browsing && personaRecords.length > 0;
-  const personaIds = useMemo(() => new Set(personaRecords.map((r) => r.id)), [personaRecords]);
-  const records = useMemo(() => {
-    const all = list.data?.records ?? [];
-    return showPersonaGroup ? all.filter((r) => !personaIds.has(r.id)) : all;
-  }, [list.data, showPersonaGroup, personaIds]);
+  const records = useMemo(() => list.data?.records ?? [], [list.data]);
 
   const selected: MemoryRecord | undefined = useMemo(
-    () => (selectedId === null
-      ? undefined
-      : [...(list.data?.records ?? []), ...personaRecords].find((r) => r.id === selectedId)),
-    [selectedId, list.data, personaRecords],
+    () => (selectedId === null ? undefined : records.find((r) => r.id === selectedId)),
+    [selectedId, records],
   );
 
   const filtersActive = semantic || recall || scopeFilter !== '' || clsFilter !== '' || tagsInput.trim() !== '';
@@ -157,7 +138,7 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
         {list.data && <MemorySearchHonestyNote result={list.data} limit={limit} />}
       </div>
       {list.isPending && <SkeletonRows count={6} label="Loading memory" />}
-      {list.data?.records.length === 0 && !showPersonaGroup && (
+      {list.data?.records.length === 0 && (
         <EmptyState
           icon={<Database />}
           title="No memory recorded yet"
@@ -191,19 +172,6 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
             {list.isFetching ? 'Loading…' : 'Show more'}
           </Button>
         </div>
-      )}
-      {showPersonaGroup && personas.data && (
-        <RowGroup label="Personas" count={personaRecords.length}>
-          {personaRecords.map((record) => (
-            <MemoryRecordRow
-              key={record.id}
-              record={record}
-              recallFloor={personas.data.recallFloor}
-              selected={record.id === selected?.id}
-              onOpen={(r) => setSelectedId(r.id)}
-            />
-          ))}
-        </RowGroup>
       )}
     </>
   );

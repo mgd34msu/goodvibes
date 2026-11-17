@@ -927,11 +927,6 @@ export const DEFAULT_SSE_RECONNECT = {
 
 // ─── Memory (memory.records.*, memory.review-queue, memory.consolidation.receipts) ──
 
-/** VIBE.md persona/preference lines are constraint records tagged with this (the platform's
- * vibe-projection.ts VIBE_PERSONA_TAG); memory-helpers.ts's isPersonaRecord applies the same
- * cls+tag test, since no projection verb is on the wire. */
-export const VIBE_PERSONA_TAG = 'vibe';
-
 export type MemoryRecordEntityResult = OperatorMethodOutput<'memory.records.get'>;
 export type MemoryRecord = MemoryRecordEntityResult['record'];
 export type MemoryScope = MemoryRecord['scope'];

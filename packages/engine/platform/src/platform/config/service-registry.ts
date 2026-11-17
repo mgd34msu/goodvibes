@@ -43,7 +43,7 @@ import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 export interface ServiceConfig {
   /** Human-readable / lookup name. */
   name: string;
-  /** Base URL for the service (informational). */
+  /** Base URL for the service: the origin its credential may be sent to by name, and where a connection test goes. */
   baseUrl?: string | undefined;
   /** Auth type used by this service. */
   authType: 'bearer' | 'basic' | 'api-key' | 'oauth';
@@ -158,6 +158,17 @@ function projectEntryRefusal(entry: unknown): string | null {
     if (typeof value !== 'string' || isSecretRefInput(value) || looksLikeSecretRef(value)) return `${field} is not a plain key name in your secret store`;
   }
   return null;
+}
+
+/** The origin (scheme, host, port) of a URL, or null when it is not one. */
+function originOf(url: string | undefined): string | null {
+  if (!url?.trim()) return null;
+  try {
+    const parsed = new URL(url.trim());
+    return parsed.origin === 'null' ? null : parsed.origin;
+  } catch {
+    return null;
+  }
 }
 
 /** Parsed services files, valid while the file keeps the identity it was read with. */
@@ -339,6 +350,27 @@ export class ServiceRegistry {
     assertCurrent();
     const value = keyOrRef ? await read.call(secrets, keyOrRef) : null;
     assertCurrent(); return value;
+  }
+
+  /**
+   * The headers for a request to `url` with a named service's credential, given
+   * only when `url` is on the service's own origin (its `baseUrl`). A service
+   * with no `baseUrl` has no origin to send to, so it is refused by name; the
+   * refusal names the service and both origins. `headers` is null when the
+   * service is unknown or has no credential.
+   */
+  async resolveAuthFor(serviceName: string, url: string): Promise<{ readonly headers: Record<string, string> | null } | { readonly refused: string }> {
+    const config = this.get(serviceName);
+    if (!config) return { headers: await this.resolveAuth(serviceName) };
+    const serviceOrigin = originOf(config.baseUrl);
+    const requested = originOf(url);
+    if (!serviceOrigin) {
+      return { refused: `service "${serviceName}" has no baseUrl, so its credential is not sent to ${requested ?? url}. Set "baseUrl" for ${serviceName} in your services file, or pass the credential with auth.` };
+    }
+    if (requested !== serviceOrigin) {
+      return { refused: `service "${serviceName}" belongs to ${serviceOrigin}; its credential is not sent to ${requested ?? url}. Nothing was sent for this entry; request a URL on ${serviceOrigin}, or drop service for this URL.` };
+    }
+    return { headers: await this.resolveAuth(serviceName) };
   }
 
   /**

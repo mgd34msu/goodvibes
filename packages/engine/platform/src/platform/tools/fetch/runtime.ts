@@ -28,7 +28,7 @@ import { toRecord } from '../../utils/record-coerce.js';
 import { mapWithConcurrency, sleep } from '../../utils/concurrency.js';
 
 export interface FetchRuntimeDeps {
-  readonly serviceRegistry?: Pick<ServiceRegistry, 'resolveAuth'> | null | undefined;
+  readonly serviceRegistry?: Pick<ServiceRegistry, 'resolveAuthFor'> | null | undefined;
   readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
   /**
    * Default sanitize mode applied when a fetch call omits sanitize_mode.
@@ -505,7 +505,10 @@ async function prepareFetchRequest(
       throw new CredentialMissingError(`auth type "${urlInput.auth.type}" has no ${missingAuthField(urlInput.auth)}, so no credential would be sent. Nothing was sent for this entry.`);
     }
   } else if (urlInput.service) {
-    const resolved = await deps.serviceRegistry?.resolveAuth(urlInput.service);
+    // A named service's credential goes only to that service's own origin.
+    const answer = await deps.serviceRegistry?.resolveAuthFor(urlInput.service, urlInput.url);
+    if (answer && 'refused' in answer) throw new CredentialMissingError(answer.refused);
+    const resolved = answer?.headers;
     if (!resolved || Object.keys(resolved).length === 0) {
       throw new CredentialMissingError(`service "${urlInput.service}" has no credential (unknown service, no stored secret, or no service registry). Nothing was sent for this entry; register the service or store its secret.`);
     }
@@ -686,7 +689,8 @@ async function fetchOne(
     let response = fetched.response;
     const retryOnAuth = urlInput.retry_on_auth ?? (urlInput.service !== undefined);
     if (response.status === 401 && retryOnAuth && urlInput.service && !(requestBody instanceof FormData)) {
-      const refreshedHeaders = await deps.serviceRegistry?.resolveAuth(urlInput.service);
+      const refreshed = await deps.serviceRegistry?.resolveAuthFor(urlInput.service, urlInput.url);
+      const refreshedHeaders = refreshed && 'headers' in refreshed ? refreshed.headers : null;
       if (refreshedHeaders) {
         // The refused response is superseded; release its body before retrying.
         await response.body?.cancel().catch(() => undefined);

@@ -340,7 +340,7 @@ export function registerAllTools(
     providerRegistry?: ProviderRegistry | undefined;
     toolLLM?: ToolLLM | undefined;
     featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
-    serviceRegistry?: Pick<ServiceRegistry, 'resolveAuth' | 'getAll' | 'inspect'> | null | undefined;
+    serviceRegistry?: Pick<ServiceRegistry, 'resolveAuth' | 'resolveAuthFor' | 'getAll' | 'inspect'> | null | undefined;
     secretsManager?: Pick<SecretsManager, 'get' | 'set' | 'getGlobalHome'> | null | undefined;
     overflowHandler?: OverflowHandler | undefined;
     changeTracker?: SessionChangeTracker | undefined;

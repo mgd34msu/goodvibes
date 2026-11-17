@@ -93,7 +93,7 @@ export const FETCH_TOOL_SCHEMA = {
           },
           service: {
             type: 'string',
-            description: 'Named service for automatic credential lookup from the service registry. Services are configured in the host services.json file. Use the registry tool or inspect that registry to discover available service names.',
+            description: 'Named service for automatic credential lookup from the service registry. The credential is sent only to the service\'s own origin (its baseUrl); a URL on another origin is refused with nothing sent. Services are configured in the host services.json file. Use the registry tool or inspect that registry to discover available service names.',
           },
           auth: {
             type: 'object',

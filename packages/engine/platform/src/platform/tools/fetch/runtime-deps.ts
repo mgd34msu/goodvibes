@@ -19,7 +19,7 @@ function splitHostConfig(value: unknown): string[] | undefined {
 }
 
 export interface ConfiguredFetchDepsOptions {
-  readonly serviceRegistry: Pick<ServiceRegistry, 'resolveAuth'> | null | undefined;
+  readonly serviceRegistry: Pick<ServiceRegistry, 'resolveAuthFor'> | null | undefined;
   readonly featureFlags: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
   readonly configManager: Pick<ConfigManager, 'get'>;
   /** The loopback-fetch admission, when the composition already has it. */

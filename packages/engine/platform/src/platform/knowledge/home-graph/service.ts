@@ -1,7 +1,8 @@
 import { notifyKnowledgeCommitted } from '../commit-notification.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { createHomeGraphSourceIdentityPlanner, type HomeGraphSourceIdentity } from './source-identity-plan.js';
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { withOrWithoutDecisionModel } from '../decision-policy.js';
 import { snapshotNodeInput } from '../activation/projection.js';
 import { KnowledgeScopeSelectionHeldError } from '../scope-selection.js';
 import { createKnowledgeExtractionOwner } from '../extraction-ownership.js';
@@ -37,7 +38,7 @@ import {
   readHomeGraphState,
   safeHomeGraphFilename,
 } from './state.js';
-import { answerHomeGraphQuery } from './ask.js';
+import { answerHomeGraphQuery, answerHomeGraphQueryByKeywords } from './ask.js';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import {
   autoLinkHomeGraphSource,
@@ -338,7 +339,6 @@ export class HomeGraphService {
 
   async ask(input: HomeGraphAskInput): Promise<HomeGraphAskResult> {
     return this.ownForegroundOperation(async (writes) => {
-      requireDecisionFeature('verified Home Graph answers; use browse or local knowledge search without a decision model');
       this.requireAdmission('home-graph ask');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
@@ -347,23 +347,30 @@ export class HomeGraphService {
       // repair a stale extraction first, so a reset waits for it, and
       // background work does not start while it runs.
       if (!input.readOnly) writes.begin(spaceId);
-      const initialState = readHomeGraphSearchState(this.store, spaceId);
-      const repairedExtractions = input.readOnly ? 0 : await this.repairStaleExtractionsForAsk(spaceId, installationId, input.query, initialState);
-      this.autoLinkController.signal.throwIfAborted();
-      const state = repairedExtractions > 0 ? readHomeGraphSearchState(this.store, spaceId) : initialState;
-      const selection = await readHomeGraphSearchSelection({ store: this.store, spaceId, query: input, state, signal: this.autoLinkController.signal });
-      const answer = await answerHomeGraphQuery({ store: this.store, semanticService: this.options.semanticService,
-        spaceId, query: input, state, results: selection.results, selection, signal: this.autoLinkController.signal });
-      // The answer returns now; device pages and enrichment run in the background queue.
-      const queued = input.readOnly ? 0 : this.queueAskPageRefresh(spaceId, installationId, answer);
-      if (!input.readOnly) this.queueAnswerEnrichment(spaceId, answer);
-      return withHomeGraphAskPageRefresh(answer, { requested: queued > 0, queued });
+      // Without a decision model the answer is the home's keyword matches, read from what is stored.
+      return withOrWithoutDecisionModel(() => this.askWithDecisionModel(input, spaceId, installationId),
+        () => withHomeGraphAskPageRefresh(answerHomeGraphQueryByKeywords({ store: this.store, spaceId, query: input,
+          state: readHomeGraphSearchState(this.store, spaceId) }), { requested: false, queued: 0 }),
+        this.autoLinkController.signal);
     });
+  }
+
+  private async askWithDecisionModel(input: HomeGraphAskInput, spaceId: string, installationId: string): Promise<HomeGraphAskResult> {
+    const initialState = readHomeGraphSearchState(this.store, spaceId);
+    const repairedExtractions = input.readOnly ? 0 : await this.repairStaleExtractionsForAsk(spaceId, installationId, input.query, initialState);
+    this.autoLinkController.signal.throwIfAborted();
+    const state = repairedExtractions > 0 ? readHomeGraphSearchState(this.store, spaceId) : initialState;
+    const selection = await readHomeGraphSearchSelection({ store: this.store, spaceId, query: input, state, signal: this.autoLinkController.signal });
+    const answer = await answerHomeGraphQuery({ store: this.store, semanticService: this.options.semanticService,
+      spaceId, query: input, state, results: selection.results, selection, signal: this.autoLinkController.signal });
+    // The answer returns now; device pages and enrichment run in the background queue.
+    const queued = input.readOnly ? 0 : this.queueAskPageRefresh(spaceId, installationId, answer);
+    if (!input.readOnly) this.queueAnswerEnrichment(spaceId, answer);
+    return withHomeGraphAskPageRefresh(answer, { requested: queued > 0, queued });
   }
 
   async reindex(input: HomeGraphReindexInput = {}): Promise<HomeGraphReindexResult> {
     return this.ownForegroundOperation(async (writes) => {
-      requireDecisionFeature('semantic Home Graph reindexing');
       this.requireAdmission('home-graph reindex');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
@@ -378,7 +385,8 @@ export class HomeGraphService {
         await active.run.then(() => undefined, () => undefined);
         this.autoLinkController.signal.throwIfAborted();
       }
-      const run = this.runForegroundOperation(spaceId, () => runHomeGraphReindex({
+      // One decision-model operation: once the set model fails under Hybrid, the later stages run without it.
+      const run = this.runForegroundOperation(spaceId, () => withConfiguredDecisionModelPolicy(() => runHomeGraphReindex({
         store: this.store,
         artifactStore: this.artifactStore,
         semanticService: this.options.semanticService,
@@ -386,7 +394,7 @@ export class HomeGraphService {
         extract: (source, artifact, spaceId, installationId) => this.extractArtifact(source, artifact, spaceId, installationId),
         autoLinkExistingSources: (spaceId, installationId, sourceIds) => this.autoLinkExistingSources(spaceId, installationId, sourceIds),
         refreshQualityIssues: (spaceId, installationId) => this.refreshQualityIssues(spaceId, installationId),
-      }, { ...input, knowledgeSpaceId: spaceId }));
+      }, { ...input, knowledgeSpaceId: spaceId })));
       this.activeReindex.set(spaceId, { key, run });
       try {
         return await run;
@@ -447,7 +455,6 @@ export class HomeGraphService {
 
   async refreshDevicePassport(input: HomeGraphProjectionInput): Promise<HomeGraphDevicePassportResult> {
     return this.ownForegroundOperation(async (writes) => {
-      requireDecisionFeature('verified Home Graph device passports');
       this.requireAdmission('home-graph device passport');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
@@ -456,7 +463,8 @@ export class HomeGraphService {
       return this.runForegroundOperation(spaceId, async () => {
         // Only this passport's own linked sources that were never enriched, within a bound;
         // the rest of the home is enriched by the ingest tail, the sync pump and reindex.
-        if (this.options.semanticService && input.deviceId) {
+        // Enrichment reads by decision model; without one the passport is built from what is stored.
+        if (this.options.semanticService && input.deviceId && !isClassicOperation()) {
           await enrichUnenrichedHomeGraphSources(this.requireSelfImprovementRuntime(), spaceId,
             devicePassportSourceIds(this.store, spaceId, input.deviceId), Date.now() + PASSPORT_ENRICHMENT_BUDGET_MS, this.autoLinkController.signal);
         }
@@ -475,7 +483,6 @@ export class HomeGraphService {
 
   async generateRoomPage(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
     return this.ownForegroundOperation(async (writes) => {
-      requireDecisionFeature('verified Home Graph room pages');
       this.requireAdmission('home-graph room page');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
@@ -496,7 +503,6 @@ export class HomeGraphService {
 
   async generatePacket(input: HomeGraphProjectionInput): Promise<HomeGraphProjectionResult> {
     return this.ownForegroundOperation(async (writes) => {
-      requireDecisionFeature('verified Home Graph sharing packets');
       this.requireAdmission('home-graph sharing packet');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
@@ -596,15 +602,14 @@ export class HomeGraphService {
     readonly skipGapRefinement?: boolean | undefined;
   } = {}) {
     return this.ownForegroundOperation(async (writes) => {
-      requireDecisionFeature('automatic Home Graph refinement and triage');
       this.requireAdmission('home-graph refinement');
       await this.store.init();
       this.autoLinkController.signal.throwIfAborted();
       // Refinement and triage write issues, tasks and pages: claim the space so a reset waits for the run.
       const { spaceId } = resolveReadableHomeGraphSpace(this.store, input);
       writes.begin(spaceId);
-      return this.runForegroundOperation(spaceId, () => runHomeGraphRefinement({ ...input, knowledgeSpaceId: spaceId, store: this.store,
-        semanticService: this.options.semanticService, signal: this.autoLinkController.signal }));
+      return this.runForegroundOperation(spaceId, () => withConfiguredDecisionModelPolicy(() => runHomeGraphRefinement({ ...input,
+        knowledgeSpaceId: spaceId, store: this.store, semanticService: this.options.semanticService, signal: this.autoLinkController.signal })));
     });
   }
 

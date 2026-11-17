@@ -1,7 +1,7 @@
 import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { activateClassicFallback, decisionOrClassic, isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { activateClassicFallback, decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { freezeSupport } from '../semantic/verification/projection.js';
 import { nodeServingWithoutReview } from './battery.js';
 import { KnowledgeNodeActivationHeldError as Held, NODE_ACTIVATION_LIMITS as LIMITS,
@@ -25,7 +25,11 @@ function checkedPort(port: JudgmentPort, current: () => void): JudgmentPort {
       || !isClassicOperation() && judgmentPort(nodeServingWithoutReview.name) !== port) throw new Held('stale');
   };
   return { ...port, model, async ask(request) {
-    check(); requireDecisionFeature('automatic knowledge serving without owner review');
+    check();
+    // A sibling reading's model failure switched this operation to running without
+    // a model (Hybrid): no request is sent, and decisionOrClassic below answers
+    // with the pending-review reading, so the knowledge waits for the owner's review.
+    if (isClassicOperation()) throw new DecisionModelsDisabledError('automatic knowledge serving without owner review');
     const result = await port.ask(request);
     check();
     const answer = result?.answers?.serve;

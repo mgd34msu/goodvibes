@@ -32,7 +32,12 @@ import {
   selfImprovementRunKey,
 } from './background-scheduler.js';
 import { isGeneratedKnowledgeSource } from '../generated-projections.js';
-import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
+import { KNOWLEDGE_WITHOUT_DECISION_MODEL, knowledgeKeywordExcerpt, withOrWithoutDecisionModel } from '../decision-policy.js';
+import { readPublicKnowledgeSelection } from '../public-retrieval.js';
+import { knowledgeTerms } from '../passages.js';
+import { isBroadKnowledgeSpaceAlias } from './answer-common.js';
+import { sourceSemanticText } from './utils.js';
 
 export interface KnowledgeSemanticServiceOptions {
   readonly llm?: KnowledgeSemanticLlm | null | undefined;
@@ -114,22 +119,22 @@ export class KnowledgeSemanticService {
     };
   }
 
+  /** Without a decision model the source is left as stored (searchable by its extracted text) and the result says so. */
   async enrichSource(
     sourceId: string,
     input: EnrichKnowledgeSourceOptions = {},
   ): Promise<KnowledgeSemanticEnrichmentResult | null> {
-    requireDecisionFeature('semantic knowledge enrichment');
     await this.store.init();
     const source = this.store.getSource(sourceId);
     if (!source) return null;
-    return enrichKnowledgeSource({ store: this.store, llm: this.options.llm }, source, input);
+    return withOrWithoutDecisionModel(() => enrichKnowledgeSource({ store: this.store, llm: this.options.llm }, source, input),
+      () => notEnrichedWithoutDecisionModel(source), input.signal);
   }
 
   async enrichSources(
     sources: readonly KnowledgeSourceRecord[],
     input: EnrichKnowledgeSourceOptions & { readonly limit?: number } = {},
   ): Promise<readonly KnowledgeSemanticEnrichmentResult[]> {
-    requireDecisionFeature('semantic knowledge enrichment');
     const results: KnowledgeSemanticEnrichmentResult[] = [];
     const selected = sources.slice(0, Math.max(1, input.limit ?? sources.length));
     for (const [index, source] of selected.entries()) {
@@ -157,8 +162,9 @@ export class KnowledgeSemanticService {
     readonly failed: number;
     readonly errors: readonly { readonly sourceId: string; readonly error: string }[];
     readonly selfImprovement: KnowledgeSemanticSelfImproveResult;
+    /** Why sources were left as stored: no decision model is in use. */
+    readonly reason?: string | undefined;
   }> {
-    requireDecisionFeature('semantic knowledge reindexing');
     const signal = input.signal;
     signal?.throwIfAborted();
     // Critical-tier admission: reindex is one of the expensive verbs the
@@ -183,9 +189,17 @@ export class KnowledgeSemanticService {
     let failed = 0;
     let processed = 0;
     const errors: { sourceId: string; error: string }[] = [];
+    let leftWithoutModel = 0;
     for (const [index, source] of sources.entries()) {
       await yieldEvery(index);
       signal?.throwIfAborted();
+      // From the start, or since the set model failed in this run under Hybrid:
+      // the remaining sources stay as stored and the result says why.
+      if (isClassicOperation()) {
+        leftWithoutModel = sources.length - processed;
+        skipped += leftWithoutModel;
+        break;
+      }
       if (Date.now() - startedAt >= maxRunMs) {
         skipped += sources.length - processed;
         break;
@@ -209,6 +223,10 @@ export class KnowledgeSemanticService {
       signal?.throwIfAborted();
     }
     signal?.throwIfAborted();
+    if (leftWithoutModel > 0 || isClassicOperation()) {
+      return { scanned: sources.length, enriched, skipped, failed, errors, reason: notEnrichedReason(leftWithoutModel),
+        selfImprovement: { ...emptySelfImproveResult(), reason: SELF_IMPROVE_WITHOUT_DECISION_MODEL } };
+    }
     const selfImprovement = await this.selfImprove({
       knowledgeSpaceId: input.knowledgeSpaceId,
       sourceIds: input.sourceIds,
@@ -246,8 +264,11 @@ export class KnowledgeSemanticService {
    * continues in the background.
    */
   async answer(input: KnowledgeSemanticAnswerInput): Promise<KnowledgeSemanticAnswerResult> {
-    requireDecisionFeature('verified semantic knowledge answers; use local knowledge search without a decision model');
     await this.store.init();
+    return withOrWithoutDecisionModel(() => this.answerWithDecisionModel(input), () => this.answerByKeywords(input), input.signal);
+  }
+
+  private async answerWithDecisionModel(input: KnowledgeSemanticAnswerInput): Promise<KnowledgeSemanticAnswerResult> {
     const answerOnce = (current: KnowledgeSemanticAnswerInput) => answerKnowledgeQuery({
       store: this.store,
       llm: this.options.llm,
@@ -322,8 +343,8 @@ export class KnowledgeSemanticService {
     readonly maxRunMs?: number | undefined;
     readonly limit?: number | undefined;
   }): Promise<KnowledgeSemanticSelfImproveResult> {
-    requireDecisionFeature('automatic semantic answer-gap repair');
     assertAnswerVerificationActive(input.signal);
+    if (isClassicOperation()) return { ...emptySelfImproveResult(), reason: SELF_IMPROVE_WITHOUT_DECISION_MODEL };
     const gaps = input.answer.answer.gaps.filter((gap) => readString(readRecord(gap.metadata).gapKind) === 'answer');
     if (!this.options.gapRepairer || gaps.length === 0) return emptySelfImproveResult();
     return this.selfImprove({
@@ -381,7 +402,9 @@ export class KnowledgeSemanticService {
     input: KnowledgeSemanticSelfImproveInput = {},
     runOptions: { readonly stopWhenPaused?: boolean } = {},
   ): Promise<KnowledgeSemanticSelfImproveResult> {
-    requireDecisionFeature('automatic semantic knowledge improvement');
+    // Gap repair searches, reads and accepts sources by decision-model readings;
+    // without one the gaps stay open as they are and the result says why.
+    if (isClassicOperation()) return { ...emptySelfImproveResult(), reason: SELF_IMPROVE_WITHOUT_DECISION_MODEL };
     const signal = input.signal;
     await this.store.init();
     const ownedInput = { ...input, signal };
@@ -496,6 +519,54 @@ export class KnowledgeSemanticService {
       },
       shouldStop: () => this.backgroundStopRequested(runOptions),
     }, input);
+  }
+
+  /**
+   * The answer without a decision model: the records that share the most words
+   * with the question (local search), each with the passages of its stored text
+   * that mention them. Nothing is read by a model and nothing is written; the
+   * text says the matches were not checked.
+   */
+  private async answerByKeywords(input: KnowledgeSemanticAnswerInput): Promise<KnowledgeSemanticAnswerResult> {
+    const spaceId = normalizeKnowledgeSpaceId(input.knowledgeSpaceId);
+    const selection = await readPublicKnowledgeSelection(this.store, {
+      query: input.query, mode: 'search', ...(input.signal ? { signal: input.signal } : {}),
+      scope: isBroadKnowledgeSpaceAlias(spaceId) ? { includeAllSpaces: true } : { knowledgeSpaceId: spaceId },
+    });
+    selection.assertCurrent();
+    const sourceIds = input.candidateSourceIds ? new Set(input.candidateSourceIds) : undefined;
+    const nodeIds = input.candidateNodeIds ? new Set(input.candidateNodeIds) : undefined;
+    const strict = input.strictCandidates === true && (sourceIds !== undefined || nodeIds !== undefined);
+    const rows = selection.accepted
+      .filter((row) => !strict || (row.kind === 'source' ? sourceIds?.has(row.id) : nodeIds?.has(row.id)) === true)
+      .slice(0, Math.max(1, input.limit ?? 8));
+    const terms = knowledgeTerms([input.query]);
+    const lines = rows.map((row) => {
+      const title = row.source ? row.source.title ?? row.source.canonicalUri ?? row.source.sourceUri ?? row.id : row.node!.title;
+      const detail = row.source
+        ? knowledgeKeywordExcerpt(sourceSemanticText(row.source, this.store.getExtractionBySourceId(row.id)), terms) || row.source.summary
+        : row.node!.summary;
+      return detail ? `- ${title}: ${detail}` : `- ${title}`;
+    });
+    const mode = input.mode ?? 'standard';
+    const text = rows.length === 0
+      ? `${input.noMatchMessage ?? `No knowledge matched "${input.query}".`} (Keyword search; ${KNOWLEDGE_WITHOUT_DECISION_MODEL}.)`
+      : [`Keyword matches for "${input.query}" (${KNOWLEDGE_WITHOUT_DECISION_MODEL}):`, ...(mode === 'concise' ? lines.slice(0, 1) : lines)].join('\n');
+    const sources = rows.flatMap((row) => row.source ? [row.source] : []);
+    return {
+      ok: true, spaceId, query: input.query,
+      answer: {
+        text, mode, confidence: 0,
+        sources: input.includeSources === false ? [] : sources,
+        linkedObjects: input.includeLinkedObjects === false ? [] : input.linkedObjects ?? [],
+        facts: rows.flatMap((row) => row.node && (row.node.kind === 'fact' || row.node.metadata.semanticKind === 'fact') ? [row.node] : []),
+        gaps: [],
+        synthesized: false,
+      },
+      results: rows.map((row) => ({ kind: row.kind, id: row.id, score: row.localScore ?? 0,
+        reason: 'Literal token overlap; semantic relevance was not assessed', provenance: 'classic' as const, scoreSource: 'literal-overlap' as const,
+        ...(row.source ? { source: row.source } : {}), ...(row.node ? { node: row.node } : {}) })),
+    };
   }
 
   /**
@@ -620,6 +691,17 @@ function listSemanticSources(
       .filter((source) => isSemanticSourceCandidate(source) && isHomeAssistantKnowledgeSpace(normalizeKnowledgeSpaceId(getKnowledgeSpaceId(source))));
   }
   return store.listSourcesInSpace(normalized).filter(isSemanticSourceCandidate);
+}
+
+/** Why a self-improvement run repaired nothing: no decision model is in use. */
+const SELF_IMPROVE_WITHOUT_DECISION_MODEL = `Not run: ${KNOWLEDGE_WITHOUT_DECISION_MODEL}. Open knowledge gaps stay listed as they are; they are searched for and repaired when a decision model is in use.`;
+
+function notEnrichedReason(count: number): string {
+  return `${count} source(s) not enriched: ${KNOWLEDGE_WITHOUT_DECISION_MODEL}. They stay searchable by their extracted text; facts are extracted when a decision model is in use.`;
+}
+
+function notEnrichedWithoutDecisionModel(source: KnowledgeSourceRecord): KnowledgeSemanticEnrichmentResult {
+  return { source, skipped: true, reason: notEnrichedReason(1), facts: [], entities: [], gaps: [] };
 }
 
 function isSemanticSourceCandidate(source: KnowledgeSourceRecord): boolean {

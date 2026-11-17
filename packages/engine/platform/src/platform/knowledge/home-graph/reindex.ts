@@ -1,4 +1,3 @@
-import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
 import { REPAIRS_GAP_RELATION } from './types.js';
 import type { ArtifactDescriptor } from '../../artifacts/types.js';
@@ -52,7 +51,8 @@ export async function runHomeGraphReindex(
   context: HomeGraphReindexContext,
   input: HomeGraphReindexInput = {},
 ): Promise<HomeGraphReindexResult> {
-  requireDecisionFeature('semantic Home Graph reindexing');
+  // Without a decision model every stage still runs in code: re-extraction, linking,
+  // declared quality issues and pages built from what is stored; enrichment says why it left sources as they are.
   context.signal?.throwIfAborted();
   await context.store.init();
   context.signal?.throwIfAborted();
@@ -101,6 +101,9 @@ export async function runHomeGraphReindex(
     force: input.force === true,
     signal: context.signal,
   }));
+  // Enrichment that left the sources as stored (no decision model in use) is a skipped stage with its reason.
+  const semanticOutcome: HomeGraphStageOutcome = semanticStage.value?.reason !== undefined
+    ? { status: 'skipped', reason: semanticStage.value.reason } : semanticStage.outcome;
   await yieldToEventLoop();
   context.signal?.throwIfAborted();
   const quality = await runStage(context.signal, remaining, true, () => context.refreshQualityIssues(spaceId, installationId));
@@ -119,7 +122,7 @@ export async function runHomeGraphReindex(
     ? { status: 'deferred' as const, reason: `${generated.deferredDevicePassports} device page(s) did not fit in the run budget` }
     : pages.outcome;
   const refreshedGeneratedPageCount = generated.devicePassports + generated.roomPages;
-  const budgetExhausted = reindex.budgetExhausted === true || [link, semanticStage, quality, pages].some((stage) => stage.outcome.status === 'deferred')
+  const budgetExhausted = reindex.budgetExhausted === true || [link.outcome, semanticOutcome, quality.outcome, pages.outcome].some((outcome) => outcome.status === 'deferred')
     || pagesOutcome.status === 'deferred';
   return {
     ...reindex,
@@ -134,7 +137,7 @@ export async function runHomeGraphReindex(
     ...(semanticStage.value ? { semantic: semanticStage.value } : {}),
     ...(quality.value ? { qualityIssues: quality.value } : {}),
     generated,
-    stages: { link: link.outcome, semantic: semanticStage.outcome, quality: quality.outcome, pages: pagesOutcome },
+    stages: { link: link.outcome, semantic: semanticOutcome, quality: quality.outcome, pages: pagesOutcome },
   };
 }
 

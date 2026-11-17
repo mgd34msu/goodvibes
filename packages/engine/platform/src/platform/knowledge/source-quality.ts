@@ -14,7 +14,7 @@ import { KnowledgeNodeMutationHeldError } from './store-node-authority.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 import { KnowledgeGeneratedFactSupportHeldError } from './semantic/verification/types.js';
 import { judgmentPort, JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { mapLimit, JudgmentError } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, JudgmentInputError } from '../gate/judgment-input.js';
 import { sourceRankingContent } from './semantic/answer-source-ranking.js';
@@ -35,6 +35,8 @@ export interface KnowledgePageSourceReading {
   readonly probability?: number | undefined;
   readonly authority: KnowledgeSourceAuthority;
   readonly decisionId?: string | undefined;
+  /** False when no decision model is in use: the source is kept as stored, unranked, with authority `unverified`. */
+  readonly assessed?: false | undefined;
 }
 export class KnowledgeSourceQualityHeldError extends Error {
   override readonly name = 'KnowledgeSourceQualityHeldError';
@@ -59,7 +61,8 @@ export function createKnowledgePageSourceReader(policy: KnowledgePageSourceQuali
   const sourceVersions = new Map<string, string>();
   let binding: { port: ReturnType<typeof judgmentPort>; model: string } | undefined;
   const assertPortCurrent = () => {
-    if (binding && (judgmentPort('engine.knowledge.page-source-quality') !== binding.port || binding.port.model !== binding.model)) throw new KnowledgeSourceQualityHeldError('stale');
+    // Since a Hybrid fallback in this operation no reading uses the port it started with.
+    if (binding && !isClassicOperation() && (judgmentPort('engine.knowledge.page-source-quality') !== binding.port || binding.port.model !== binding.model)) throw new KnowledgeSourceQualityHeldError('stale');
   };
   const throwIfAborted = () => { if (policy.signal?.aborted) throw new KnowledgeSourceQualityHeldError('aborted'); };
   const purpose = policy.purpose ?? 'A grounded factual reference page about the subject described by the source';
@@ -72,7 +75,9 @@ export function createKnowledgePageSourceReader(policy: KnowledgePageSourceQuali
   async function read(source: KnowledgeSourceRecord, existing?: KnowledgeSourceRecord, status = source.status): Promise<KnowledgePageSourceReading> {
     throwIfAborted();
     if (excluded(source, status, existing)) return { source, useful: false, authority: 'unverified' };
-    requireDecisionFeature('semantic knowledge source quality and authority; use native source inspection or local search without a decision model');
+    // Usefulness and authority are a quality grade: without a decision model the
+    // source is kept as stored and labelled unassessed, never graded or ranked.
+    if (isClassicOperation()) return { source, useful: true, authority: 'unverified', assessed: false };
     const version = JSON.stringify(source);
     const earlier = sourceVersions.get(source.id);
     if (earlier !== undefined && earlier !== version) throw new KnowledgeSourceQualityHeldError('stale');
@@ -131,6 +136,8 @@ export function createKnowledgePageSourceReader(policy: KnowledgePageSourceQuali
     const eligible = unique.filter((source) => !excluded(source, source.status));
     // Refuse the entire selected batch before any concurrent request starts.
     const readings = await readCandidates(eligible.map((source) => ({ source })));
+    // Unassessed readings keep their stored order; graded ones go best first.
+    if (readings.some((item) => item.assessed === false)) return readings.filter((item) => item.useful);
     return readings.filter((item) => item.useful).sort((a, b) => b.probability! - a.probability! || a.source.id.localeCompare(b.source.id));
   }
   function assertCurrent(current: (id: string) => KnowledgeSourceRecord | null | undefined): void {
@@ -152,12 +159,13 @@ export async function rankKnowledgePageSources(sources: readonly KnowledgeSource
 /** Prefer the batch rank helper when sorting a collection. */
 export async function compareKnowledgePageSources(left: KnowledgeSourceRecord, right: KnowledgeSourceRecord, policy: KnowledgePageSourceQualityPolicy = {}): Promise<number> {
   const readings = await createKnowledgePageSourceReader(policy).rank([left, right]);
-  const probabilities = new Map(readings.map((item) => [item.source.id, item.probability!]));
+  const probabilities = new Map(readings.map((item) => [item.source.id, item.probability ?? 0]));
   return (probabilities.get(right.id) ?? 0) - (probabilities.get(left.id) ?? 0) || left.id.localeCompare(right.id);
 }
 export async function knowledgePageSourceWeight(source: KnowledgeSourceRecord, policy: KnowledgePageSourceQualityPolicy = {}): Promise<number> {
   const reading = await createKnowledgePageSourceReader(policy).read(source);
-  return reading.useful ? reading.probability! : 0;
+  // An unassessed source (no decision model in use) has no grade to weigh.
+  return reading.useful ? reading.probability ?? 0 : 0;
 }
 export async function readKnowledgeSourceAuthority(source: KnowledgeSourceRecord, policy: KnowledgePageSourceQualityPolicy = {}): Promise<KnowledgeSourceAuthority> {
   return (await createKnowledgePageSourceReader(policy).read(source)).authority;

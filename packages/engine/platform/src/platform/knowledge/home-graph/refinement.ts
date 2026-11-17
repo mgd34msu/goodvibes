@@ -1,5 +1,4 @@
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
-import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { KnowledgeSemanticService } from '../semantic/index.js';
 import type { KnowledgeStore } from '../store.js';
 import { knowledgeRefinementTaskLifecycle, type KnowledgeRefinementTaskRecord } from '../types.js';
@@ -79,7 +78,8 @@ export async function runHomeGraphRefinement(input: HomeGraphSpaceInput & {
     }), { category: 'bad_request', source: 'runtime' });
   }
   signal?.throwIfAborted();
-  requireDecisionFeature('automatic Home Graph refinement and triage');
+  // Without a decision model triage lists the open issues for review and gap
+  // refinement reports that it did not run; neither changes anything.
   await input.store.init();
   signal?.throwIfAborted();
   const { spaceId } = resolveReadableHomeGraphSpace(input.store, input);

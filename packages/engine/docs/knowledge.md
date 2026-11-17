@@ -490,6 +490,37 @@ scheduled refinement use, since Ask's foreground pass runs through the same
 gap-repair budget), yield between gap attempts, and mark interrupted active
 tasks as blocked-and-retriable on the next run for that space.
 
+## Without a decision model
+
+Every knowledge and Home Graph verb works when no decision model is in use
+(none is set, `judgment.policy` is No Decision Model, or under Hybrid the set
+model failed during the operation). Each result says that nothing in it was read
+or checked by a decision model. Under Decision Model Only a failing model's
+error stands.
+
+- Ask (knowledge and Home Graph): the records that share the most words with
+  the question, each with the passages of its stored text that mention them,
+  labelled as keyword matches; confidence `0`, nothing written, no gap repair.
+- Enrichment, semantic reindex and self-improvement: sources stay as stored
+  (searchable by their extracted text) and open gaps stay open; the result's
+  `reason` says why. Home Graph reindex still re-extracts, links, refreshes
+  declared quality issues and rebuilds pages; its `semantic` stage is `skipped`
+  with that reason.
+- Device passports and room pages: built from the Home Assistant profile, the
+  linked sources in stored order and the stored facts, under a note that says
+  sources were not ranked and facts were not checked; the page source carries
+  `semanticAssessment: not-evaluated`. Sharing packets never used a model.
+- Quality issues: declared device fields settle issues in code; a device whose
+  questions need a reading keeps its existing issues.
+- Issue triage: no issue is closed; the open issues are listed for review with
+  `reason: triage-not-assessed-no-decision-model`.
+- Source usefulness and authority: sources are kept in stored order with
+  authority `unverified` and `assessed: false`.
+- Maintenance jobs all run; a schedule does not start the two semantic jobs
+  until a decision model is in use, and keeps its cadence.
+- A synthesized node waits for owner review instead of being served
+  automatically.
+
 ## Review pathways
 
 The knowledge/wiki feature is designed for frequent LLM and user review. There

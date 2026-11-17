@@ -146,6 +146,18 @@ export function sourceLinkedObjectIds(source: KnowledgeSourceRecord): string[] {
   ];
 }
 
+/**
+ * The passport fields the device's own declared profile leaves open, decided in
+ * code: no manufacturer, no model, battery-powered without a battery type, no
+ * linked source. Used as is when no question needs a reading.
+ */
+export function declaredMissingDevicePassportFields(device: KnowledgeNodeRecord, sources: readonly KnowledgeSourceRecord[]): string[] {
+  const batteryType = typeof device.metadata.batteryType === 'string' && device.metadata.batteryType.trim().length > 0;
+  const battery = batteryType ? false : readHomeGraphDeclaredBoolean(device.metadata.batteryPowered);
+  return [typeof device.metadata.manufacturer === 'string' ? '' : 'manufacturer', typeof device.metadata.model === 'string' ? '' : 'model',
+    battery ? 'battery type' : '', sources.length ? '' : 'manual/source'].filter(Boolean);
+}
+
 /** An uncertain completeness reading holds the caller before any generated-page write. */
 export async function missingDevicePassportFields(
   device: KnowledgeNodeRecord,
@@ -163,7 +175,7 @@ export async function missingDevicePassportFields(
   if (battery === undefined) questions.push('batteryApplicable');
   if (battery !== false && facts.length) questions.push('batteryTypePresent');
   if (options.signal?.aborted) throw new HomeGraphQualityHeldError('aborted');
-  if (!questions.length) return [manufacturer ? '' : 'manufacturer', model ? '' : 'model', battery ? 'battery type' : '', sources.length ? '' : 'manual/source'].filter(Boolean);
+  if (!questions.length) return declaredMissingDevicePassportFields(device, sources);
   const input = projectHomeGraphQualityInput('device-1', device, options.entities ?? [], facts, questions);
   const readingOptions = { signal: options.signal, timeoutMs: options.timeoutMs, assertCurrent: options.assertCurrent };
   const [reading] = options.answers ? await options.answers.read([input], readingOptions) : await readHomeGraphQuality([input], readingOptions);

@@ -1,4 +1,5 @@
 import { captureJudgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
 import type { KnowledgeStore } from '../store.js';
 import { KnowledgeRepairFactUsefulnessHeldError as Held } from '../semantic/repair-usefulness/types.js';
 
@@ -9,6 +10,8 @@ export function withDevicePageRefresh<T>(store: KnowledgeStore, key: string, sig
   requestState: () => string, operation: (assertCurrent: () => void) => Promise<T>): Promise<T> {
   const state = requestState();
   const installation = () => {
+    // An operation without a decision model uses no installation, so none can retire it.
+    if (isClassicOperation()) return undefined;
     try { return captureJudgmentPort('engine.knowledge.page-fact-quality'); }
     catch (error) { if (error instanceof JudgmentPortMissingError) return undefined; throw error; }
   };
@@ -16,6 +19,8 @@ export function withDevicePageRefresh<T>(store: KnowledgeStore, key: string, sig
   const assertRequest = () => {
     if (signal?.aborted) throw new Held('aborted');
     try { owner?.assertCurrent(); } catch { throw new Held('stale'); }
+    // Since a Hybrid fallback in this operation the page no longer uses the installation it started with.
+    if (owner !== undefined && isClassicOperation()) { if (requestState() !== state) throw new Held('stale'); return; }
     const current = installation();
     if (requestState() !== state || owner?.signal.aborted || current?.identity !== owner?.identity || current?.port.model !== model) throw new Held('stale');
   };

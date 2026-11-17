@@ -2,7 +2,6 @@ import { SQLiteObservationRetiredError } from '../../state/sqlite-store.js';
 import { SemanticIdentityHeldError } from '../store-semantic-fact-selector.js';
 import { KnowledgeRecordAdmissionHeldError } from '../store-record-snapshot.js';
 import { createHomeGraphQualityIssueIdentities } from './quality/issue-identities.js';
-import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import type { KnowledgeIssueRecord, KnowledgeIssueUpsertInput, KnowledgeNodeRecord } from '../types.js';
 import type { KnowledgeStore } from '../store.js';
 import { isLegacyHomeGraphQualityIssue, KnowledgeIssueReplacementHeldError } from '../store-issue-replacement.js';
@@ -35,7 +34,8 @@ export async function refreshHomeGraphQualityReport(
   installationId: string,
   options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly answers?: HomeGraphQualityAnswerMemo | undefined } = {},
 ): Promise<{ readonly issues: readonly KnowledgeIssueRecord[]; readonly retainedLegacyIssues: number; readonly unansweredDeviceIds: readonly string[] }> {
-  requireDecisionFeature('semantic Home Graph quality assessment');
+  // Without a decision model the declared fields still settle issues in code; a
+  // device whose questions need a reading keeps its issues and is reported unanswered.
   await store.init();
   const state = readHomeGraphState(store, spaceId);
   const originals = new Map(state.nodes.map(node => [node.id,node]));

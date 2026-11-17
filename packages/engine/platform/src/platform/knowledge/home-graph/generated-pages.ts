@@ -2,7 +2,8 @@ import { assertKnowledgeRestriction } from '../extraction-ownership.js';
 import { createHomeGraphSourceIdentityPlanner } from './source-identity-plan.js';
 import { createHomeGraphNodeIdentityPlanner, prepareHomeGraphNodeIdentity } from './node-identity-plan.js';
 import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
-import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { withOrWithoutDecisionModel } from '../decision-policy.js';
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
 import { createSemanticFactIdentityPlanner } from '../semantic/identity-plan.js';
 import { readHomeGraphPagePriorities } from './page-priority.js';
@@ -39,6 +40,7 @@ import {
   uniqueStrings,
 } from './helpers.js';
 import {
+  declaredMissingDevicePassportFields,
   findHomeAssistantNode,
   missingDevicePassportFields,
   readHomeGraphServingState,
@@ -49,6 +51,8 @@ import {
   renderDevicePassportPage,
   renderPacketPage,
   renderRoomPage,
+  renderUncheckedDevicePassportPage,
+  renderUncheckedRoomPage,
 } from './rendering.js';
 import { retainHomeGraphPageInputs } from './page-read-set.js';
 import { createSemanticWriteGuard } from '../semantic/primary-source-plan.js';
@@ -127,6 +131,9 @@ async function generateHomeGraphPagesWithinBudget(
   const effectiveOptions = options ?? {};
   const summary = createGeneratedPagesSummary();
   if (effectiveOptions.enabled === false) return summary;
+  // An automatic run does not go on rebuilding pages without a model: when the
+  // set model fails mid-run under Hybrid the remaining pages wait for the next run.
+  let withoutModel = false;
   const deadlineAt = typeof effectiveOptions.maxRunMs === 'number' && Number.isFinite(effectiveOptions.maxRunMs) && effectiveOptions.maxRunMs > 0
     ? Date.now() + Math.trunc(effectiveOptions.maxRunMs)
     : undefined;
@@ -154,7 +161,8 @@ async function generateHomeGraphPagesWithinBudget(
     // run; each passport reads only its own device's rows from them.
     const sourceLookup = buildDevicePassportSourceLookup(state.sources, state.nodes, state.edges);
     for (const [index, device] of devices.entries()) {
-      if (context.signal?.aborted || deadlineReached(deadlineAt)) {
+      withoutModel ||= isClassicOperation();
+      if (context.signal?.aborted || deadlineReached(deadlineAt) || withoutModel) {
         summary.deferredDevicePassports += devices.length - index;
         break;
       }
@@ -193,7 +201,8 @@ async function generateHomeGraphPagesWithinBudget(
     const rooms = limitRecords(allRooms, effectiveOptions.maxRoomPages);
     summary.deferredRoomPages += Math.max(0, allRooms.length - rooms.length);
     for (const [index, room] of rooms.entries()) {
-      if (context.signal?.aborted || deadlineReached(deadlineAt)) {
+      withoutModel ||= isClassicOperation();
+      if (context.signal?.aborted || deadlineReached(deadlineAt) || withoutModel) {
         summary.deferredRoomPages += rooms.length - index;
         break;
       }
@@ -225,7 +234,7 @@ async function generateHomeGraphPagesWithinBudget(
   }
 
   summary.truncated = summary.deferredDevicePassports > 0 || summary.deferredRoomPages > 0;
-  return summary;
+  return withoutModel ? { ...summary, provenance: 'classic', reason: 'decision-model-disabled' } : summary;
 }
 
 function deadlineReached(deadlineAt: number | undefined): boolean {
@@ -241,7 +250,6 @@ export async function refreshHomeGraphDevicePassport(
     readonly signal?: AbortSignal | undefined;
   },
 ): Promise<HomeGraphDevicePassportResult & { readonly artifactCreated: boolean }> {
-  requireDecisionFeature('verified Home Graph device passports');
   throwIfAborted(context.signal);
   const store = context.store, artifactStore = context.artifactStore, signal = context.signal, requestInput = context.input, requestData = context.state, requestAuthority = context.assertCurrent;
   const requestState = () => JSON.stringify({ input: context.input, spaceId: context.spaceId, installationId: context.installationId,
@@ -249,8 +257,118 @@ export async function refreshHomeGraphDevicePassport(
   // device.id, objectId and deviceId all name one passport; queue on the node id so spellings cannot overlap.
   const queued = context.input.deviceId
     ? findHomeAssistantNode(store.listNodesInSpace(context.spaceId), 'ha_device', context.input.deviceId) : undefined;
-  return withDevicePageRefresh(store, JSON.stringify([context.spaceId, queued?.id ?? context.input.deviceId]), signal, requestState,
-    (assertQueueCurrent) => refreshHomeGraphDevicePassportNow({ ...context, assertCurrent: () => { assertQueueCurrent(); assertKnowledgeRestriction(requestAuthority); } }));
+  // One operation owns the queue and the page, so a Hybrid fallback inside it reaches the page's no-model path.
+  return withConfiguredDecisionModelPolicy(() => withDevicePageRefresh(store, JSON.stringify([context.spaceId, queued?.id ?? context.input.deviceId]), signal, requestState,
+    (assertQueueCurrent) => {
+      const owned = { ...context, assertCurrent: () => { assertQueueCurrent(); assertKnowledgeRestriction(requestAuthority); } };
+      return withOrWithoutDecisionModel(() => refreshHomeGraphDevicePassportNow(owned), () => refreshUncheckedDevicePassport(owned), signal);
+    }));
+}
+
+/**
+ * The device passport without a decision model: the Home Assistant profile,
+ * entities, linked sources as stored (not ranked), the facts already stored
+ * for the device shown as not checked, its open issues, and the fields its
+ * declared profile leaves open. No profile fact is derived and nothing is read
+ * by a model; the page and its metadata say so.
+ */
+async function refreshUncheckedDevicePassport(
+  context: HomeGraphPageContext & {
+    readonly input: HomeGraphProjectionInput;
+    readonly state?: HomeGraphStateSnapshot | undefined;
+    readonly sourceLookup?: DevicePassportSourceLookup | undefined;
+    readonly signal?: AbortSignal | undefined;
+  },
+): Promise<HomeGraphDevicePassportResult & { readonly artifactCreated: boolean }> {
+  const { store, artifactStore, spaceId, installationId, input } = context;
+  const assertCallerCurrent = context.assertCurrent;
+  assertKnowledgeRestriction(assertCallerCurrent);
+  throwIfAborted(context.signal);
+  if (!input.deviceId) {
+    throw new GoodVibesError('refreshDevicePassport requires deviceId.', {
+      category: 'bad_request', source: 'runtime', operation: 'homegraph.refreshDevicePassport',
+    });
+  }
+  const state = context.state ?? readHomeGraphServingState(store, spaceId);
+  const device = findHomeAssistantNode(state.nodes, 'ha_device', input.deviceId);
+  if (!device) {
+    throw new GoodVibesError(`Unknown Home Assistant device: ${input.deviceId}`, {
+      category: 'not_found', source: 'runtime', operation: 'homegraph.refreshDevicePassport',
+    });
+  }
+  const deviceObjectId = readHomeAssistantMetadataString(device, 'objectId', 'deviceId') ?? device.id;
+  const passportIdentity = prepareHomeGraphNodeIdentity(createHomeGraphNodeIdentityPlanner(store), store, {
+    spaceId, kind: 'ha_device_passport', objectId: deviceObjectId, aliases: [...new Set([input.deviceId, device.id])],
+  });
+  const entities = state.nodes.filter((node) => node.kind === 'ha_entity' && state.edges.some((edge) => edgeIsActive(edge)
+    && edge.fromKind === 'node' && edge.fromId === node.id && edge.toKind === 'node' && edge.toId === device.id && edge.relation === 'belongs_to_device'));
+  const sourceLookup = context.sourceLookup ?? buildDevicePassportSourceLookup(state.sources, state.nodes, state.edges);
+  const sources = [...(sourceLookup.sourceIdsByNodeId.get(device.id) ?? [])]
+    .map((id) => sourceLookup.sourcesById.get(id)).filter((source): source is KnowledgeSourceRecord => Boolean(source));
+  const facts = semanticFactsForNode(device.id, sources, state.nodes, state.edges);
+  const observedIds = new Set([device.id, ...entities.map((node) => node.id)]);
+  const structuralEdges = state.edges.filter((edge) => edge.relation !== 'supports_fact' && edge.relation !== 'describes'
+    && ((edge.fromKind === 'node' && observedIds.has(edge.fromId)) || (edge.toKind === 'node' && observedIds.has(edge.toId))));
+  const assertPageInputsCurrent = retainHomeGraphPageInputs(store, { sources, nodes: [device, ...entities, ...facts], edges: structuralEdges });
+  const issues = filterDevicePassportIssues(issuesForScope(state.issues, state.edges, observedIds, sources), sources);
+  const missingFields = declaredMissingDevicePassportFields(device, sources);
+  const markdown = renderUncheckedDevicePassportPage({ spaceId, device, entities, sources, issues, missingFields, facts });
+  const passportId = passportIdentity.id;
+  const assertPublicationCurrent = () => {
+    store.assertRecordSnapshotFrame(() => {
+      passportIdentity.assertCurrent();
+      assertKnowledgeRestriction(assertCallerCurrent);
+      assertPageInputsCurrent();
+      throwIfAborted(context.signal);
+    });
+  };
+  assertPublicationCurrent();
+  // The passport node is an observed projection of the device, not a synthesized claim: it needs no serving reading.
+  const passportInput = prepareObservedKnowledgeNodeInput(store, {
+    id: passportId,
+    kind: 'ha_device_passport',
+    slug: passportIdentity.slug,
+    title: `${device.title} passport`,
+    summary: `Living device profile for ${device.title}.`,
+    aliases: [`${device.title} passport`],
+    status: 'active',
+    confidence: 80,
+    metadata: buildHomeGraphMetadata(spaceId, installationId, {
+      homeGraphIdentityVersion: 1, homeGraphIdentitySpace: homeGraphIdentitySpace(spaceId),
+      homeAssistant: { installationId, objectKind: 'device_passport', objectId: passportIdentity.objectId },
+      deviceId: deviceObjectId,
+      missingFields,
+      provenance: 'classic',
+      semanticAssessment: 'not-evaluated',
+      pageContentHash: null,
+      refreshedAt: knowledgeClockIso(Date.now()),
+    }),
+  }, 'generated-page-index', device, () => store.getNode(device.id));
+  const generated = await materializeGeneratedMarkdown({
+    store, artifactStore, spaceId, installationId,
+    filename: `${safeHomeGraphFilename(device.title)}-passport.md`,
+    markdown,
+    projectionKind: 'device-passport',
+    assertCurrent: assertPublicationCurrent,
+    identityKeys: [...new Set([deviceObjectId, input.deviceId, device.id, passportIdentity.objectId])],
+    title: `${device.title} passport`,
+    summary: `Living device profile for ${device.title}, built without a decision model.`,
+    tags: ['homeassistant', 'home-graph', 'generated-page', 'device-passport'],
+    targetNodeId: passportId,
+    signal: context.signal,
+    metadata: { ...(input.metadata ?? {}), deviceId: deviceObjectId, provenance: 'classic', semanticAssessment: 'not-evaluated' },
+  }, {
+    nodes: [createSemanticNodeSlugPlanner(store)(passportInput)], issues: [], assertCurrent: assertPublicationCurrent,
+    edges: [{ fromKind: 'node', fromId: passportId, toKind: 'node', toId: device.id, relation: 'source_for', metadata: buildHomeGraphMetadata(spaceId, installationId) }],
+  });
+  const passport = generated.nodes?.find((node) => node.id === passportId);
+  if (!passport) throw new Error('Atomic device passport publication omitted its passport node.');
+  return {
+    ok: true, spaceId, title: `${device.title} passport`, markdown,
+    artifact: generated.artifact, source: generated.source,
+    ...(generated.linked ? { linked: generated.linked } : {}),
+    device, passport, missingFields, artifactCreated: generated.artifactCreated,
+  };
 }
 
 async function refreshHomeGraphDevicePassportNow(
@@ -508,7 +626,45 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 export async function generateHomeGraphRoomPage(
   context: HomeGraphPageContext & { readonly input: HomeGraphProjectionInput; readonly signal?: AbortSignal | undefined },
 ): Promise<HomeGraphProjectionResult & { readonly artifactCreated: boolean }> {
-  requireDecisionFeature('verified Home Graph room pages');
+  return withOrWithoutDecisionModel(() => generateCheckedRoomPage(context), () => generateUncheckedRoomPage(context), context.signal);
+}
+
+/** The room page without a decision model: sources as stored and stored facts shown as not checked; the page and its metadata say so. */
+async function generateUncheckedRoomPage(
+  context: HomeGraphPageContext & { readonly input: HomeGraphProjectionInput; readonly signal?: AbortSignal | undefined },
+): Promise<HomeGraphProjectionResult & { readonly artifactCreated: boolean }> {
+  const { store, artifactStore, spaceId, installationId, input } = context;
+  const state = readHomeGraphServingState(store, spaceId);
+  const areaId = input.areaId ?? input.roomId;
+  const title = input.title ?? resolveRoomTitle(state.nodes, areaId) ?? 'Home Graph Room';
+  const page = renderUncheckedRoomPage({ ...state, title }, areaId);
+  const assertPageInputsCurrent = retainHomeGraphPageInputs(store, { sources: page.sources, nodes: [...page.subjects, ...page.facts], edges: [] });
+  const assertRoomCurrent = () => { assertKnowledgeRestriction(() => context.assertCurrent?.()); assertPageInputsCurrent(); };
+  assertRoomCurrent();
+  const targetNode = areaId
+    ? findHomeAssistantNode(state.nodes, 'ha_area', areaId) ?? findHomeAssistantNode(state.nodes, 'ha_room', areaId)
+    : undefined;
+  const generated = await materializeGeneratedMarkdown({
+    store, artifactStore, spaceId, installationId,
+    filename: `${safeHomeGraphFilename(title)}.md`,
+    markdown: page.markdown,
+    projectionKind: 'room-page',
+    assertCurrent: assertRoomCurrent,
+    signal: context.signal,
+    identityKeys: areaId ? [...new Set([areaId, ...(targetNode ? [targetNode.id, readHomeAssistantMetadataString(targetNode, 'objectId', 'areaId') ?? targetNode.id] : [])])] : [''],
+    title,
+    summary: `Living Home Graph room page for ${title}, built without a decision model.`,
+    tags: ['homeassistant', 'home-graph', 'generated-page', 'room-page'],
+    ...(targetNode ? { targetNodeId: targetNode.id } : {}),
+    metadata: { ...(input.metadata ?? {}), ...(areaId ? { areaId } : {}), provenance: 'classic', semanticAssessment: 'not-evaluated' },
+  });
+  return { ok: true, spaceId, title, markdown: page.markdown, artifact: generated.artifact, source: generated.source,
+    ...(generated.linked ? { linked: generated.linked } : {}), artifactCreated: generated.artifactCreated };
+}
+
+async function generateCheckedRoomPage(
+  context: HomeGraphPageContext & { readonly input: HomeGraphProjectionInput; readonly signal?: AbortSignal | undefined },
+): Promise<HomeGraphProjectionResult & { readonly artifactCreated: boolean }> {
   const { store, artifactStore, spaceId, installationId, input } = context;
   const state = readHomeGraphServingState(store, spaceId);
   const writeGuard = createSemanticWriteGuard(store, context.signal);
@@ -583,7 +739,7 @@ export async function generateHomeGraphRoomPage(
 export async function generateHomeGraphPacket(
   context: HomeGraphPageContext & { readonly input: HomeGraphProjectionInput },
 ): Promise<HomeGraphProjectionResult & { readonly artifactCreated: boolean }> {
-  requireDecisionFeature('verified Home Graph sharing packets');
+  // Rendered in code from the stored records; no decision-model reading is involved.
   const { store, artifactStore, spaceId, installationId, input } = context;
   const title = input.title ?? `${input.packetKind ?? 'home'} packet`;
   const sharingProfile = sharingProfileForPacket(input.packetKind, input.sharingProfile);

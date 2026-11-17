@@ -234,4 +234,6 @@ export interface KnowledgeSemanticSelfImproveResult {
   readonly promotedFactCount?: number | undefined;
   readonly nextRepairAttemptAt?: number | undefined;
   readonly errors: readonly { readonly gapId: string; readonly error: string }[];
+  /** Why the run repaired nothing, when it did not run: no decision model is in use. */
+  readonly reason?: string | undefined;
 }

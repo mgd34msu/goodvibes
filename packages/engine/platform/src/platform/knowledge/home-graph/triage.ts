@@ -1,4 +1,5 @@
-import { requireDecisionFeature } from '../../runtime/decision-policy.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
+import { KNOWLEDGE_WITHOUT_DECISION_MODEL } from '../decision-policy.js';
 import { matchesJudgmentModel } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { JudgmentInputError } from '../../gate/judgment-input.js';
@@ -84,6 +85,18 @@ export interface HomeGraphTriageResult {
   readonly reason?: string | undefined;
 }
 
+/** The triage result without a decision model: the open issues it would read, each left open for review and none applied. */
+function untriagedWithoutDecisionModel(spaceId: string, open: readonly KnowledgeIssueRecord[], options: HomeGraphTriageOptions,
+  minConfidence: number): HomeGraphTriageResult {
+  const skipIds = new Set(options.skipIssueIds ?? []);
+  const listed = open.filter((issue) => !skipIds.has(issue.id)).slice(0, Math.max(1, options.limit ?? HOME_GRAPH_TRIAGE_DEFAULT_LIMIT));
+  const reason = `not assessed: ${KNOWLEDGE_WITHOUT_DECISION_MODEL}; the issue stays open for your review`;
+  const decisions: HomeGraphTriageDecision[] = listed.map((issue) => ({ issueId: issue.id, code: issue.code, action: 'review',
+    confidence: 0, reason, applied: false, source: 'homegraph-triage' }));
+  return { ok: true, spaceId, configured: false, processed: 0, skipped: 0, applied: 0, reviewed: decisions.length, decisions,
+    remaining: open.length, minConfidence, reason: 'triage-not-assessed-no-decision-model' };
+}
+
 /** Read applicability and exact proposed facts before ordinary automatic writes. */
 export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
   readonly store: KnowledgeStore;
@@ -92,7 +105,6 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
   readonly options?: HomeGraphTriageOptions | undefined;
   readonly signal?: AbortSignal | undefined;
 }): Promise<HomeGraphTriageResult> {
-  requireDecisionFeature('automatic Home Graph issue triage');
   await input.store.init();
   const { spaceId } = resolveReadableHomeGraphSpace(input.store, input);
   const options = input.options ?? {};
@@ -117,6 +129,9 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
   // never acquires a provider. Preserve cancellation before provider capture
   // can normalize that same signal as a retired reading authority.
   if (input.signal?.aborted) return empty(true, 'triage-held-aborted');
+  // Whether an issue applies is a reading; without a decision model no issue is
+  // closed and each one stays open for the owner, listed here as not assessed.
+  if (isClassicOperation()) return untriagedWithoutDecisionModel(spaceId, open, options, minConfidence);
   let owner: JudgmentPortCapture;
   try { owner = captureJudgmentPort('engine.knowledge.homegraph-triage', { signal: input.signal }); }
   catch (error) {
@@ -171,6 +186,8 @@ export async function runHomeGraphIssueTriage(input: HomeGraphSpaceInput & {
       reviewed: decisions.length - applied, decisions,
       remaining: readHomeGraphState(input.store, spaceId).issues.filter(triageable).length, minConfidence };
   } catch (error) {
+    // The set model failed during this run under Hybrid: nothing was applied, so the issues are listed for review.
+    if (!input.signal?.aborted && isClassicOperation()) return untriagedWithoutDecisionModel(spaceId, open, options, minConfidence);
     if (error instanceof JudgmentInputError) return empty(true, 'triage-held-protected-input', skipped);
     if (error instanceof Held) return empty(error.reason !== 'unconfigured', `triage-held-${error.reason}`, skipped);
     throw error;

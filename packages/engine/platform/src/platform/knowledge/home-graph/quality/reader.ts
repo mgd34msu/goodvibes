@@ -1,4 +1,4 @@
-import { activateClassicFallback, requireDecisionFeature } from '../../../runtime/decision-policy.js';
+import { activateClassicFallback, isClassicOperation } from '../../../runtime/decision-policy.js';
 import { prepareJudgmentResult } from '../../../gate/judgment-result.js';
 import { captureJudgmentPort, JudgmentAuthorityRetiredError, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { fanOut, toJson, type JudgmentPort, type JsonValue, type YesNoReading } from '@goodvibes-jev/judgment';
@@ -76,9 +76,16 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
   /** Leave a device whose readings do not settle `unanswered` instead of holding the whole pass. Only callers that can keep that device's existing state may set it. */
   readonly leaveUnsettledUnanswered?: boolean | undefined;
 } = {}): Promise<readonly HomeGraphQualityReading[]> {
-  requireDecisionFeature('semantic Home Graph quality assessment');
   if (options.signal?.aborted) throw new Held('aborted');
   const snapshots = checkedInputs(inputs);
+  // Without a decision model each device's questions stay unanswered: the caller
+  // keeps what its declared fields settle and the issues the device already has.
+  if (isClassicOperation()) {
+    options.assertCurrent?.();
+    return freezeSupport(snapshots.map(({ input, omitted }): HomeGraphQualityReading => ({ assertCurrent: () => { options.assertCurrent?.(); },
+      reference: input.reference, answers: {}, provenance: {}, decisionIds: [], batteries: [],
+      ...(input.questions.length ? { unanswered: 'not-assessed' as const } : {}), ...(omitted ? { omitted } : {}) })));
+  }
   const callerSignal = options.signal, callerCurrent = options.assertCurrent;
   let owner: JudgmentPortCapture | undefined;
   if (!snapshots.length) return [];

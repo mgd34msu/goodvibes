@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { getNextAutomationOccurrence, ensureAutomationCronPhase, normalizeCronSchedule, normalizeEverySchedule, validateSchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeStore } from './store.js';
@@ -52,12 +52,14 @@ function readRunOwner(run: KnowledgeJobRunRecord): KnowledgeJobRunOwner | null {
   return typeof instanceId === 'string' && typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0 ? { instanceId, pid } : null;
 }
 
-/** Local health checks and rendering do not infer new semantic facts. */
-function classicJob(kind: KnowledgeJobRecord['kind']): boolean {
-  return kind === 'lint' || kind === 'reindex' || kind === 'refresh-stale' || kind === 'refresh-bookmarks' || kind === 'rebuild-projections';
-}
-function assertJobPolicy(job: KnowledgeJobRecord): void {
-  if (!classicJob(job.kind)) requireDecisionFeature(`knowledge job: ${job.title}`);
+/**
+ * Every job runs without a decision model: health checks, refreshes, ingest,
+ * projections and consolidation take their no-model paths, and the two semantic
+ * jobs return a result that says they left the store as it is. Only those two
+ * have nothing to do then, so a schedule does not start them until a model is in use.
+ */
+function jobDoesWorkWithoutDecisionModel(kind: KnowledgeJobRecord['kind']): boolean {
+  return kind !== 'semantic-enrichment' && kind !== 'semantic-self-improvement';
 }
 
 export interface KnowledgeSchedulingContext {
@@ -158,7 +160,6 @@ export class KnowledgeScheduleService {
     await this.readyForMutation();
     const job = this.getJob(input.jobId);
     if (!job) throw unknownKnowledgeJob(input.jobId);
-    if (input.enabled ?? true) assertJobPolicy(job);
     const previous = input.id ? this.context.store.getSchedule(input.id) : null;
     const schedule = ensureAutomationCronPhase(input.schedule, previous?.schedule);
     // Checked whether or not it is enabled now: a disabled schedule is stored to be enabled later.
@@ -226,8 +227,6 @@ export class KnowledgeScheduleService {
     await this.readyForMutation();
     const schedule = this.getSchedule(id);
     if (!schedule) return null;
-    const job = this.getJob(schedule.jobId);
-    if (enabled && job) assertJobPolicy(job);
     const nextRunAt = enabled ? getNextAutomationOccurrence(schedule.schedule, Date.now()) : undefined;
     const updated = await this.context.store.upsertSchedule({
       id: schedule.id,
@@ -288,7 +287,6 @@ export class KnowledgeScheduleService {
     if (this.disposed) throw new Error('Knowledge scheduler is closed');
     const job = this.getJob(id);
     if (!job) throw unknownKnowledgeJob(id);
-    assertJobPolicy(job);
     const mode = input.mode ?? job.defaultMode;
     const flightKey = JSON.stringify([job.id, [...(input.sourceIds ?? [])].sort(), input.limit ?? null]);
     const active = this.activeRuns.get(flightKey);
@@ -649,11 +647,11 @@ export class KnowledgeScheduleService {
     try {
       await this.settleInterruptedRuns(now);
       const job = this.getJob(schedule.jobId);
-      // Preserve the saved cadence while semantic jobs are paused by Classic.
+      // Preserve the saved cadence of a semantic job while no decision model is in use.
       // No run receipt or queued work claims that an omitted job executed.
       // A run of this job still going (queued background runs return at once)
       // is not repeated, and the schedule is not marked as having run.
-      const dispatched = !this.hasActiveRun(schedule.jobId) && (!isClassicOperation() || Boolean(job && classicJob(job.kind)));
+      const dispatched = !this.hasActiveRun(schedule.jobId) && (!isClassicOperation() || Boolean(job && jobDoesWorkWithoutDecisionModel(job.kind)));
       let completed = false;
       if (dispatched) {
         const run = await this.runJob(schedule.jobId, { mode: 'background' });
@@ -742,7 +740,6 @@ export class KnowledgeScheduleService {
       mode: run.mode,
     }));
     try {
-      assertJobPolicy(job);
       const result = await untilAborted(this.context.runJobByKind(job.kind, input, signal), signal);
       const completedAt = Date.now();
       const current = this.context.store.getJobRun(run.id);

@@ -20,8 +20,8 @@ export interface HomeGraphQualityReading {
   readonly batteries: readonly { readonly name: string; readonly version: number }[];
   readonly model?: string | undefined;
   readonly requestedModel?: string | undefined;
-  /** The device's readings did not settle; it has no answers and keeps its existing issues. */
-  readonly unanswered?: 'unsettled' | undefined;
+  /** The device's readings did not settle, or no decision model is in use to read them; it has no answers and keeps its existing issues. */
+  readonly unanswered?: 'unsettled' | 'not-assessed' | undefined;
   /** Entities and facts of the device that were over the limits and not sent with its reading. */
   readonly omitted?: { readonly entities: number; readonly facts: number } | undefined;
 }

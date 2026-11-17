@@ -24,7 +24,11 @@ export interface HomeGraphRenderState {
   readonly issues: readonly KnowledgeIssueRecord[];
 }
 
-export async function renderRoomPage(state: HomeGraphRenderState, areaId?: string, sourceReader = createHomeGraphPageSourceReader(), createFactReader?: (subjects: readonly KnowledgeNodeRecord[], sources: readonly KnowledgeSourceRecord[]) => HomeGraphPageFactReader): Promise<string> {
+/** The line every Home Graph page built without a decision model opens with. */
+const UNCHECKED_PAGE_NOTE = '> Built without a decision model: linked sources are listed as stored (not ranked or checked for usefulness), and facts are shown as stored, not checked against their sources.';
+
+/** What a room page covers: the area, its devices, entities, automations, scenes and scripts, and the sources linked to them. */
+function roomPageScope(state: HomeGraphRenderState, areaId: string | undefined) {
   const area = areaId
     ? findNodeByHaId(state.nodes, 'ha_area', areaId) ?? findNodeByHaId(state.nodes, 'ha_room', areaId)
     : undefined;
@@ -52,21 +56,19 @@ export async function renderRoomPage(state: HomeGraphRenderState, areaId?: strin
     ...scenes.map((node) => node.id),
     ...scripts.map((node) => node.id),
   ]);
-  if (!createFactReader) throw new GoodVibesError('Home Graph room rendering requires a fact quality reader.', {
-    category: 'bad_request', source: 'runtime', operation: 'homegraph.generateRoomPage',
-  });
   const sourceIds = relatedNodeIds.size > 0 ? sourceIdsLinkedToNodes(state.edges, state.nodes, relatedNodeIds) : null;
   const sourceCandidates = state.sources.filter(source => !isGeneratedPageSource(source) && (!sourceIds || sourceIds.has(source.id)));
-  const factReader = createFactReader(state.nodes.filter((node) => relatedNodeIds.has(node.id)), sourceCandidates);
-  const sources = (await sourceReader.rank(sourceCandidates)).map(item => item.source);
-  const factPlan = await factReader.prepare(semanticFactsLinkedToSources(sources, state.nodes, state.edges, relatedNodeIds));
-  assertHomeGraphPageFactPlan(factPlan);
-  const semanticFacts = factPlan.facts.filter((fact) => factPlan.accepts(fact));
-  factPlan.assertCurrent();
+  return { title, devices, entities, automations, scenes, scripts, relatedNodeIds, sourceCandidates };
+}
+
+function renderRoomBody(state: HomeGraphRenderState, scope: ReturnType<typeof roomPageScope>, sources: readonly KnowledgeSourceRecord[],
+  facts: { readonly title: string; readonly nodes: readonly KnowledgeNodeRecord[] }, note?: string): string {
+  const { title, devices, entities, automations, scenes, scripts, relatedNodeIds } = scope;
   const issues = issuesForScope(state.issues, state.edges, relatedNodeIds, sources);
   return [
     `# ${title}`,
     '',
+    ...(note ? [note, ''] : []),
     `Knowledge space: \`${state.spaceId}\``,
     '',
     renderRoomOverview(title, devices, entities, automations, scenes, scripts),
@@ -75,10 +77,38 @@ export async function renderRoomPage(state: HomeGraphRenderState, areaId?: strin
     renderNodeList('Automations', automations),
     renderNodeList('Scenes', scenes),
     renderNodeList('Scripts', scripts),
-    renderSemanticFacts('Extracted Facts', semanticFacts),
+    renderSemanticFacts(facts.title, facts.nodes),
     renderSourceList('Linked Sources', sources),
     renderIssueList('Open Issues', issues),
   ].filter(Boolean).join('\n');
+}
+
+export async function renderRoomPage(state: HomeGraphRenderState, areaId?: string, sourceReader = createHomeGraphPageSourceReader(), createFactReader?: (subjects: readonly KnowledgeNodeRecord[], sources: readonly KnowledgeSourceRecord[]) => HomeGraphPageFactReader): Promise<string> {
+  const scope = roomPageScope(state, areaId);
+  if (!createFactReader) throw new GoodVibesError('Home Graph room rendering requires a fact quality reader.', {
+    category: 'bad_request', source: 'runtime', operation: 'homegraph.generateRoomPage',
+  });
+  const factReader = createFactReader(state.nodes.filter((node) => scope.relatedNodeIds.has(node.id)), scope.sourceCandidates);
+  const sources = (await sourceReader.rank(scope.sourceCandidates)).map(item => item.source);
+  const factPlan = await factReader.prepare(semanticFactsLinkedToSources(sources, state.nodes, state.edges, scope.relatedNodeIds));
+  assertHomeGraphPageFactPlan(factPlan);
+  const semanticFacts = factPlan.facts.filter((fact) => factPlan.accepts(fact));
+  factPlan.assertCurrent();
+  return renderRoomBody(state, scope, sources, { title: 'Extracted Facts', nodes: semanticFacts });
+}
+
+/**
+ * A room page without a decision model: the same structure, its linked sources
+ * in stored order and the stored facts about it shown as not checked. Returns
+ * the records the page shows, so publication can hold them current.
+ */
+export function renderUncheckedRoomPage(state: HomeGraphRenderState, areaId?: string): {
+  readonly markdown: string; readonly subjects: readonly KnowledgeNodeRecord[]; readonly sources: readonly KnowledgeSourceRecord[]; readonly facts: readonly KnowledgeNodeRecord[];
+} {
+  const scope = roomPageScope(state, areaId);
+  const facts = semanticFactsLinkedToSources(scope.sourceCandidates, state.nodes, state.edges, scope.relatedNodeIds);
+  const markdown = renderRoomBody(state, scope, scope.sourceCandidates, { title: 'Stored Facts (not checked)', nodes: facts }, UNCHECKED_PAGE_NOTE);
+  return { markdown, subjects: state.nodes.filter((node) => scope.relatedNodeIds.has(node.id)), sources: scope.sourceCandidates, facts };
 }
 
 export function renderDevicePassportPage(input: {
@@ -115,6 +145,44 @@ export function renderDevicePassportPage(input: {
     renderIssueList('Open Issues', input.issues.filter((issue) => issue.status === 'open')),
     input.missingFields.length > 0
       ? ['## Open Questions', '', ...input.missingFields.map((field) => `- ${field}`), ''].join('\n')
+      : '',
+  ].filter(Boolean).join('\n');
+}
+
+/** A device passport without a decision model: the profile, entities, sources as stored and the stored facts shown as not checked. */
+export function renderUncheckedDevicePassportPage(input: {
+  readonly spaceId: string;
+  readonly device: KnowledgeNodeRecord;
+  readonly entities: readonly KnowledgeNodeRecord[];
+  readonly sources: readonly KnowledgeSourceRecord[];
+  readonly issues: readonly KnowledgeIssueRecord[];
+  readonly missingFields: readonly string[];
+  readonly facts: readonly KnowledgeNodeRecord[];
+}): string {
+  return [
+    `# ${input.device.title}`,
+    '',
+    UNCHECKED_PAGE_NOTE,
+    '',
+    `Knowledge space: \`${input.spaceId}\``,
+    '',
+    '## Overview',
+    '',
+    renderDeviceOverview(input.device, input.entities, input.sources),
+    '',
+    '## Home Assistant Profile',
+    '',
+    renderMetadataField('Manufacturer', input.device.metadata.manufacturer),
+    renderMetadataField('Model', input.device.metadata.model),
+    renderMetadataField('Area', readHa(input.device, 'areaId')),
+    renderMetadataField('Device id', readHa(input.device, 'deviceId')),
+    '',
+    renderNodeList('Entities Exposed To Home Assistant', input.entities),
+    renderSemanticFacts('Stored Device Facts (not checked)', input.facts),
+    renderSourceList('Sources', input.sources),
+    renderIssueList('Open Issues', input.issues.filter((issue) => issue.status === 'open')),
+    input.missingFields.length > 0
+      ? ['## Open Questions', '', 'Read from the Home Assistant profile and linked sources only.', '', ...input.missingFields.map((field) => `- ${field}`), ''].join('\n')
       : '',
   ].filter(Boolean).join('\n');
 }

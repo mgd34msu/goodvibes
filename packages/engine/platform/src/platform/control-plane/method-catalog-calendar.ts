@@ -43,7 +43,7 @@ const CALENDAR_EVENT_DETAIL_SCHEMA = objectSchema({
  * over a `CalendarGatewayService`, the daemon composition supplies the
  * configured backend (a CalDAV server, or a connected Google account;
  * control-plane/routes/calendar-composition.ts), and
- * `GATEWAY_REST_ROUTES` maps each advertised http path to the same handler, so
+ * the gateway REST arm serves each advertised http path with the same handler, so
  * the REST path and the methodId-invoke endpoint resolve identically.
  *
  * They did not used to be. For a long time none of these five http paths was

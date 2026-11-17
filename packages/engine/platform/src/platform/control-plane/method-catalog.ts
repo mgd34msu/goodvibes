@@ -499,17 +499,24 @@ export class GatewayMethodCatalog {
     return typeof this.methods.get(id)?.handler === 'function';
   }
 
-  /** The method bound to this route; with `unique`, null when more than one method binds it. */
+  /**
+   * The method bound to this route: the most specific binding (fewest `{param}`
+   * segments) when several match. With `unique`, null when more than one does.
+   */
   findByHttpBinding(method: string, pathname: string, options?: { readonly unique?: boolean }): GatewayMethodDescriptor | null {
     const pathParts = pathSegments(pathname);
     const bucket = this.bindingIndex().get(`${method.toUpperCase()} ${pathParts.length}`);
     if (!bucket) return null;
     let found: GatewayMethodDescriptor | null = null;
+    let foundParams = Number.POSITIVE_INFINITY;
     for (const entry of bucket) {
       if (!segmentsMatchTemplate(entry.parts, pathParts)) continue;
-      if (!options?.unique) return entry.descriptor;
-      if (found) return null;
-      found = entry.descriptor;
+      if (options?.unique && found) return null;
+      const params = entry.parts.reduce((count, segment) => count + (segment.startsWith('{') && segment.endsWith('}') ? 1 : 0), 0);
+      if (params < foundParams) {
+        found = entry.descriptor;
+        foundParams = params;
+      }
     }
     return found;
   }

@@ -30,7 +30,6 @@ import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { clientAddressOf, resolveClientAddress } from './client-address.js';
 import { resolveGatewayPathTemplate } from './helpers.js';
 import { refuseGatewayAccess } from './http/gateway-binding-gate.js';
-import { SYNTHESIZED_DISPATCH_HEADER, guardSelfDispatch, guardSynthesizedDepth } from './gateway-self-dispatch.js';
 import { createAuthFailureAudit, type AuthFailureAudit } from './auth-failure-audit.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -232,8 +231,6 @@ interface GatewayMethodCallInput {
      */
     readonly explicitUserRequest?: boolean | undefined;
   };
-  /** Synthesized dispatches behind this call. 0 = a real client. */
-  readonly synthesizedDepth?: number | undefined;
   /**
    * The principal the caller already verified for this credential on this
    * call (a socket compares its authentication revision first). Absent: the
@@ -1076,8 +1073,6 @@ export class DaemonControlPlaneHelper {
       readonly admin?: boolean | undefined;
       readonly scopes?: readonly string[] | undefined;
     };
-    /** Synthesized dispatches behind this call. 0 = a real client. */
-    readonly synthesizedDepth?: number | undefined;
     /** Whose in-flight budget the call uses (see {@link callerKey}); a caller that names none shares one budget. */
     readonly caller?: string | undefined;
   }): Promise<{ status: number; ok: boolean; body: unknown }> {
@@ -1087,9 +1082,6 @@ export class DaemonControlPlaneHelper {
       return { status: 400, ok: false, body: refusalBody('The path contains a "." or ".." segment; send the final path.', 'INVALID_ARGUMENT', 400) };
     }
     const url = new URL(`http://${this.context.host}:${this.context.port}${input.path.startsWith('/') ? input.path : `/${input.path}`}`);
-    const loop = guardSynthesizedDepth(input.synthesizedDepth,
-      this.context.gatewayMethods.findByHttpBinding(input.method, url.pathname)?.id, url.pathname);
-    if (loop) return loop;
     const matchedDescriptor = this.context.gatewayMethods.findByHttpBinding(input.method, url.pathname);
     if (matchedDescriptor) {
       const denied = this.validateGatewayInvocation(matchedDescriptor, input.context);
@@ -1122,8 +1114,6 @@ export class DaemonControlPlaneHelper {
         method: input.method,
         headers: {
           Authorization: `Bearer ${input.authToken}`,
-          // Depth travels WITH the request: concurrency is not a cycle.
-          [SYNTHESIZED_DISPATCH_HEADER]: String((input.synthesizedDepth ?? 0) + 1),
           ...(input.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         },
         ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
@@ -1365,12 +1355,11 @@ export class DaemonControlPlaneHelper {
         body: refusalBody(`Gateway method is not invokable: ${input.methodId}`, EngineErrorCodes.NOT_INVOKABLE, 501),
       };
     }
+    // No handler here: the advertised path is served by its route module, if
+    // any. The gateway REST arm serves only verbs with a handler, so this
+    // request cannot come back to this method; a path nothing serves answers
+    // the fixed 501 NOT_INVOKABLE.
     const resolvedPath = resolveGatewayPathTemplate(descriptor.http.path, input.query, input.body);
-    // A path routing back to this same methodId would re-enter rather than
-    // reach an implementation; no handler means terminal. See the sibling.
-    const unwired = resolvedPath.path
-      && guardSelfDispatch(input.methodId, descriptor.http.method, resolvedPath.path);
-    if (unwired) return unwired;
     if (!resolvedPath.path) {
       return {
         status: 400,
@@ -1387,7 +1376,6 @@ export class DaemonControlPlaneHelper {
       method: descriptor.http.method,
       path: resolvedPath.path,
       query: input.query,
-      synthesizedDepth: input.synthesizedDepth,
       caller,
       body: descriptor.http.method === 'GET' || descriptor.http.method === 'DELETE' ? undefined : input.body,
       context: {

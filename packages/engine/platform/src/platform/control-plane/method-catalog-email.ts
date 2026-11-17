@@ -66,7 +66,7 @@ const EMAIL_DRAFT_SUMMARY_SCHEMA = objectSchema({
  * (control-plane/routes/email.ts) attaches an in-process handler to each id
  * over an `EmailGatewayService`, the daemon composition supplies the
  * IMAP/SMTP-backed implementation from `platform/email`, and
- * `GATEWAY_REST_ROUTES` maps each advertised http path to the same handler, so
+ * the gateway REST arm serves each advertised http path with the same handler, so
  * the REST path and the methodId-invoke endpoint resolve identically.
  *
  * They did not used to be, and the consequence was not a 404 on an obscure

@@ -58,6 +58,8 @@ const controlHandlers = createDaemonControlRouteHandlers({
     list: () => [],
     listEvents: () => [],
     get: () => null,
+    findByHttpBinding: () => null,
+    hasHandler: () => false,
   },
   getOperatorContract,
   invokeGatewayMethodCall: async () => ({

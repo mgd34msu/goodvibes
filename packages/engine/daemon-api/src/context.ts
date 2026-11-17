@@ -87,7 +87,9 @@ export interface DaemonControlRouteHandlers {
   getGatewayMethod(methodId: string): MaybeResponse;
   invokeGatewayMethod(methodId: string, req: Request): MaybeResponse;
   createControlPlaneEventStream(req: Request): MaybeResponse;
+  resolveGatewayRestVerb(method: string, pathname: string): GatewayRestVerbMatch | null;
   invokeGatewayRestVerb(invocation: GatewayRestVerbInvocation): MaybeResponse;
+  refuseUnservedGatewayRestVerb(method: string, pathname: string): Response | null;
 }
 
 /** Route handlers for telemetry endpoints: snapshots, events, errors, traces, metrics, and OTLP ingest. */
@@ -438,15 +440,27 @@ export interface GatewayRestVerbInvocation {
   readonly params: Readonly<Record<string, string>>;
 }
 
+/** The handler-backed gateway verb an advertised method and path name. */
+export interface GatewayRestVerbMatch {
+  readonly methodId: string;
+  /** The descriptor's binding template, e.g. `/api/skills/{name}`. */
+  readonly path: string;
+}
+
 /**
- * The single handler the gateway REST route table dispatches through. The
- * daemon implements it by delegating to `invokeGatewayMethodCall(methodId, …)`
- * after resolving the authenticated principal and folding `params` into the
- * invocation query, REST parity with the methodId-invoke endpoint, no verb
- * logic duplicated.
+ * The gateway REST arm (gateway-rest-routes.ts). The method catalog is the one
+ * statement of which verb a path serves: `resolveGatewayRestVerb` answers only
+ * for a verb with a registered handler, and `invokeGatewayRestVerb` runs it
+ * through `invokeGatewayMethodCall(methodId, …)` after resolving the principal
+ * and folding `params` into the invocation, the same handler and access gate
+ * as the methodId-invoke endpoint. `refuseUnservedGatewayRestVerb` is asked
+ * after every route declined: a path a verb advertises that nothing on this
+ * daemon serves gets the fixed 501 NOT_INVOKABLE answer instead of a 404.
  */
 export interface DaemonGatewayRestRouteHandlers {
+  resolveGatewayRestVerb(method: string, pathname: string): GatewayRestVerbMatch | null;
   invokeGatewayRestVerb(invocation: GatewayRestVerbInvocation): MaybeResponse;
+  refuseUnservedGatewayRestVerb(method: string, pathname: string): Response | null;
 }
 
 export interface DaemonApiRouteHandlers

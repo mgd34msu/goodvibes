@@ -4,384 +4,97 @@ import { InvalidPathEncodingError, invalidPathEncodingResponse, safeDecodeURICom
 /**
  * gateway-rest-routes.ts
  *
- * Explicit REST route table for the handler-backed gateway verb families that
- * ALSO advertise an `http` binding in the operator method catalog (skills.*,
- * principals.*, profile.*, occasions.*, checkin.*, ci.*, channels.profiles.*, the session-scoped
- * sessions.permissionMode.get/set + sessions.contextUsage.get, stepup.* (the
- * relay step-up ceremony), runtime.metrics.get, and contracts.*). Those verbs are
- * served in-process through `invokeGatewayMethodCall`'s registered-handler
- * branch, reachable over the wire via the generic
- * `POST /api/control-plane/methods/{methodId}/invoke` endpoint
- * (`GATEWAY_METHOD_INVOKE_PATH` in operator.ts). But each one
- * also promises a plain-REST path (`GET /api/skills`, …) in its descriptor's
- * http binding, and no route ever served those paths, a caller trusting the
- * advertisement and hitting `GET /api/skills` got a bare 404. That is the exact
- * advertise-without-route defect the capability-route reconcile
- * (method-catalog-route-reconcile.ts) exists to catch.
+ * The REST arm of the gateway verbs. A handler-backed verb (one whose handler
+ * the method catalog holds) is reached at the path its descriptor advertises
+ * in its `http` binding: `handlers.resolveGatewayRestVerb` asks the catalog
+ * which verb binds this method and path and answers only for one with a
+ * handler, and `handlers.invokeGatewayRestVerb` runs it through the same
+ * `invokeGatewayMethodCall` the methodId-invoke endpoint
+ * (`POST /api/control-plane/methods/{methodId}/invoke`) uses: one handler,
+ * one access gate. Path parameters ({name}, {sessionId}, ...) are folded into
+ * the invocation so the handler's `readInvocationParams` view sees them.
  *
- * This module closes that gap with genuine route parity rather than by muting
- * the gate: it maps each advertised REST path to its gateway methodId and
- * dispatches through `handlers.invokeGatewayRestVerb`, which the daemon wires
- * back to the SAME `invokeGatewayMethodCall` the methodId-invoke endpoint uses.
- * No verb logic is duplicated, the REST path and the methodId-invoke endpoint
- * now resolve to the identical in-process handler, with the identical
- * access/scope gate. Path parameters ({name}, {sessionId}, …) are folded into
- * the invocation query so the handler's `readInvocationParams` view sees them.
- *
- * Drift guard: the reconcile gate reddens whenever a handler-backed family
- * gains an http binding without a matching entry here (its advertised path
- * would resolve to no route), so a new family's REST paths must be added to
- * GATEWAY_REST_ROUTES in the same change.
+ * The descriptor is the one statement of where a verb is served; nothing here
+ * repeats it. A verb without a handler is not answered here, so its path falls
+ * through to the route modules, and a synthesized request for it can never
+ * come back to this arm.
  */
 
-interface GatewayRestRoute {
+interface GatewayRestPathAlias {
   readonly method: string;
-  readonly regex: RegExp;
-  readonly paramNames: readonly string[];
+  readonly segments: readonly string[];
   readonly methodId: string;
 }
 
-/** Build a route entry from an `/api/{param}/...`-style template. */
-function route(method: string, template: string, methodId: string): GatewayRestRoute {
-  const paramNames: string[] = [];
-  const pattern = template.replace(/\{([^/}]+)\}/g, (_match, name: string) => {
-    paramNames.push(name);
-    return '([^/]+)';
-  });
-  return { method, regex: new RegExp(`^${pattern}$`), paramNames, methodId };
-}
-
 /**
- * The explicit REST route table. Every entry is a path a gateway verb
- * descriptor advertises in its http binding; keep this in lockstep with those
- * bindings (the reconcile gate enforces it).
+ * Paths kept for clients written against the retired pause/resume job verbs:
+ * the same state change as disable/enable, through the same handler.
  */
-export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
-  route('POST', '/api/automation/jobs', 'automation.jobs.create'),
-  route('PATCH', '/api/automation/jobs/{jobId}', 'automation.jobs.update'),
-  route('DELETE', '/api/automation/jobs/{jobId}', 'automation.jobs.delete'),
-  route('POST', '/api/automation/jobs/{jobId}/enable', 'automation.jobs.enable'),
-  route('POST', '/api/automation/jobs/{jobId}/disable', 'automation.jobs.disable'),
-  // pause and resume are the same state change as disable and enable, through the same native handler.
-  route('POST', '/api/automation/jobs/{jobId}/pause', 'automation.jobs.disable'),
-  route('POST', '/api/automation/jobs/{jobId}/resume', 'automation.jobs.enable'),
-  route('POST', '/api/automation/schedules', 'automation.schedules.create'),
-  route('DELETE', '/api/automation/schedules/{scheduleId}', 'automation.schedules.delete'),
-  route('POST', '/api/automation/schedules/{scheduleId}/enable', 'automation.schedules.enable'),
-  route('POST', '/api/automation/schedules/{scheduleId}/disable', 'automation.schedules.disable'),
-  route('POST', '/api/inbound/telegram/configure', 'inbound.telegram.configure'),
-  route('POST', '/api/inbound/telegram/decide', 'inbound.telegram.decide'),
-  route('POST', '/api/inbound/telegram/list', 'inbound.telegram.list'),
-  route('POST', '/api/inbound/telegram/status', 'inbound.telegram.status'),
-  route('POST', '/api/inbound/telegram/read', 'inbound.telegram.read'),
-  route('POST', '/api/inbound/telegram/cancel', 'inbound.telegram.cancel'),
-  route('POST', '/api/inbound/telegram/revoke', 'inbound.telegram.revoke'),
-  route('POST', '/api/inbound/telegram/release', 'inbound.telegram.release'),
-  route('GET', '/api/work-ledger/project', 'workLedger.project'),
-  route('POST', '/api/work-ledger/submissions', 'workLedger.submit'),
-  route('POST', '/api/work-ledger/submissions/get', 'workLedger.submission.get'),
-  route('POST', '/api/work-ledger/intake/capture', 'workLedger.intake.capture'),
-  route('POST', '/api/work-ledger/intake/get', 'workLedger.intake.get'),
-  route('POST', '/api/work-ledger/intake/admit', 'workLedger.intake.admit'),
-  route('POST', '/api/work-ledger/intake/resume', 'workLedger.intake.resume'),
-  route('POST', '/api/work-ledger/intake/cancel', 'workLedger.intake.cancel'),
-  route('POST', '/api/work-ledger/turn/session', 'workLedger.turn.session'),
-  route('POST', '/api/work-ledger/turn/start', 'workLedger.turn.start'),
-  route('POST', '/api/work-ledger/turn/startAgent', 'workLedger.turn.startAgent'),
-  route('POST', '/api/work-ledger/turn/status', 'workLedger.turn.status'),
-  route('POST', '/api/work-ledger/turn/cancel', 'workLedger.turn.cancel'),
-  route('POST', '/api/work-ledger/execution/start', 'workLedger.execution.start'),
-  route('POST', '/api/work-ledger/execution/status', 'workLedger.execution.status'),
-  route('POST', '/api/work-ledger/execution/cancel', 'workLedger.execution.cancel'),
-  route('POST', '/api/work-ledger/execution/resume', 'workLedger.execution.resume'),
-  route('POST', '/api/work-ledger/legacy-import/prepare', 'workLedger.prepareLegacyImport'),
-  route('POST', '/api/work-ledger/legacy-import', 'workLedger.importLegacy'),
-  route('GET', '/api/work-ledger/snapshot', 'workLedger.snapshot'),
-  route('GET', '/api/work-ledger/history', 'workLedger.history'),
-  // skills.*
-  route('GET', '/api/skills', 'skills.list'),
-  route('POST', '/api/skills', 'skills.create'),
-  route('GET', '/api/skills/{name}', 'skills.get'),
-  route('DELETE', '/api/skills/{name}', 'skills.delete'),
-  route('POST', '/api/skills/{name}/update', 'skills.update'),
-  // principals.*
-  route('GET', '/api/principals', 'principals.list'),
-  route('POST', '/api/principals', 'principals.create'),
-  route('POST', '/api/principals/resolve', 'principals.resolve'),
-  route('GET', '/api/principals/{principalId}', 'principals.get'),
-  route('DELETE', '/api/principals/{principalId}', 'principals.delete'),
-  route('POST', '/api/principals/{principalId}/update', 'principals.update'),
-  // profile.*, the owner profile (docs/owner-profile.md §11.1). `person` is a
-  // POST with the name in the body rather than a GET with it in the path: a
-  // path segment lands in every access log and proxy trace it passes through,
-  // and the whole point of the People section's containment is that a person's
-  // name is not something to scatter around because a URL shape was convenient.
-  route('GET', '/api/profile', 'profile.read'),
-  route('GET', '/api/profile/status', 'profile.status'),
-  route('POST', '/api/profile/person', 'profile.person'),
-  route('GET', '/api/profile/fields/{fieldId}', 'profile.get'),
-  route('GET', '/api/profile/fields/{fieldId}/provenance', 'profile.provenance'),
-  route('POST', '/api/profile/set', 'profile.set'),
-  route('POST', '/api/profile/append', 'profile.append'),
-  route('POST', '/api/profile/forget', 'profile.forget'),
-  route('POST', '/api/profile/undo', 'profile.undo'),
-
-  // occasions.*, the owner's important dates and plans, and the loop that
-  // raises them (docs/occasions.md §7). The two verbs that read a whole
-  // collection are GET; everything that names one thing, answers a question or
-  // writes a line takes a body and is POST.
-  route('GET', '/api/occasions', 'occasions.list'),
-  route('GET', '/api/occasions/pending', 'occasions.pending'),
-  route('GET', '/api/occasions/state', 'occasions.state'),
-  route('GET', '/api/occasions/plans', 'occasions.plans.list'),
-  route('POST', '/api/occasions/propose', 'occasions.propose'),
-  route('POST', '/api/occasions/confirm', 'occasions.confirm'),
-  route('POST', '/api/occasions/remove', 'occasions.remove'),
-  route('POST', '/api/occasions/update', 'occasions.update'),
-  route('POST', '/api/occasions/answer', 'occasions.answer'),
-  route('POST', '/api/occasions/acknowledge', 'occasions.acknowledge'),
-  route('POST', '/api/occasions/interview', 'occasions.interview.get'),
-  route('POST', '/api/occasions/interview/answer', 'occasions.interview.answer'),
-  route('POST', '/api/occasions/interview/record', 'occasions.interview.record'),
-  route('POST', '/api/occasions/gifts', 'occasions.gifts'),
-  route('POST', '/api/occasions/sweep', 'occasions.sweep'),
-  route('POST', '/api/occasions/conflict/resolve', 'occasions.conflict.resolve'),
-  route('POST', '/api/occasions/plans/propose', 'occasions.plans.propose'),
-  route('POST', '/api/occasions/plans/confirm', 'occasions.plans.confirm'),
-  route('POST', '/api/occasions/plans/update', 'occasions.plans.update'),
-  route('POST', '/api/occasions/plans/remove', 'occasions.plans.remove'),
-  // checkin.*
-  route('GET', '/api/checkin/config', 'checkin.config.get'),
-  route('POST', '/api/checkin/config', 'checkin.config.set'),
-  route('GET', '/api/checkin/receipts', 'checkin.receipts.list'),
-  route('POST', '/api/checkin/run', 'checkin.run'),
-  // ci.*
-  route('POST', '/api/ci/status', 'ci.status'),
-  route('GET', '/api/ci/watches', 'ci.watches.list'),
-  route('POST', '/api/ci/watches', 'ci.watches.create'),
-  route('DELETE', '/api/ci/watches/{watchId}', 'ci.watches.delete'),
-  route('POST', '/api/ci/watches/{watchId}/run', 'ci.watches.run'),
-  // channels.profiles.*
-  // channels.routing.* / channels.drafts.*, the routing table and draft store
-  // the daemon host serves (platform channels/host-routing and
-  // channels/host-drafts). Both families advertised these paths long before
-  // anything served them; the host's handlers exist now, so the paths resolve here.
-  // channels.inbox.list, the merged inbound feed, served by the host that
-  // holds the provider credentials from its synced mirror. Same treatment as
-  // its two siblings below: the advertised path dispatches to the same
-  // methodId, so the REST call and the methodId invoke are one handler. A build
-  // with no inbox composition attaches no handler and answers 501 NOT_INVOKABLE
-  // here rather than a bare 404, which names the missing step.
-  route('GET', '/api/channels/inbox', 'channels.inbox.list'),
-  route('GET', '/api/channels/routing', 'channels.routing.list'),
-  route('POST', '/api/channels/routing', 'channels.routing.assign'),
-  route('DELETE', '/api/channels/routing/{assignmentId}', 'channels.routing.delete'),
-  route('GET', '/api/channels/drafts', 'channels.drafts.list'),
-  route('POST', '/api/channels/drafts', 'channels.drafts.save'),
-  route('GET', '/api/channels/drafts/{draftId}', 'channels.drafts.get'),
-  route('DELETE', '/api/channels/drafts/{draftId}', 'channels.drafts.delete'),
-  route('GET', '/api/channels/profiles', 'channels.profiles.list'),
-  route('POST', '/api/channels/profiles', 'channels.profiles.set'),
-  route('GET', '/api/channels/profiles/{surfaceKind}', 'channels.profiles.get'),
-  route('DELETE', '/api/channels/profiles/{surfaceKind}', 'channels.profiles.delete'),
-  // workspaces.* (registered-workspace registry)
-  route('GET', '/api/workspaces/registrations', 'workspaces.registrations.list'),
-  route('POST', '/api/workspaces/registrations', 'workspaces.registrations.add'),
-  route('DELETE', '/api/workspaces/registrations', 'workspaces.registrations.remove'),
-  route('POST', '/api/workspaces/resolve', 'workspaces.resolve'),
-  // sessions.permissionMode.* + sessions.contextUsage.get
-  route('GET', '/api/sessions/{sessionId}/permission-mode', 'sessions.permissionMode.get'),
-  route('POST', '/api/sessions/{sessionId}/permission-mode', 'sessions.permissionMode.set'),
-  route('GET', '/api/sessions/{sessionId}/context-usage', 'sessions.contextUsage.get'),
-  // Live-turn verbs: per-call cancel + queued mid-turn message management.
-  route('POST', '/api/sessions/{sessionId}/turns/cancel', 'sessions.turns.cancel'),
-  route('POST', '/api/sessions/{sessionId}/tool-calls/{callId}/cancel', 'sessions.toolCalls.cancel'),
-  route('GET', '/api/sessions/{sessionId}/queued-messages', 'sessions.queuedMessages.list'),
-  route('POST', '/api/sessions/{sessionId}/queued-messages/{messageId}', 'sessions.queuedMessages.edit'),
-  route('DELETE', '/api/sessions/{sessionId}/queued-messages/{messageId}', 'sessions.queuedMessages.delete'),
-  // stepup.*, relay WebAuthn step-up ceremony (register a credential, mint a
-  // challenge). Both handler-backed gateway verbs with an advertised REST path.
-  route('POST', '/api/stepup/credentials', 'stepup.credentials.register'),
-  route('GET', '/api/stepup/credentials', 'stepup.credentials.list'),
-  route('DELETE', '/api/stepup/credentials/{credentialId}', 'stepup.credentials.remove'),
-  route('POST', '/api/stepup/challenge', 'stepup.challenge.mint'),
-  // memory.projections.*, the live read-only projection of standing memory
-  // records (project/team scope) to their markdown form. Handler-backed gateway
-  // verbs with an advertised REST path, so they need parity entries here (the
-  // Pattern-B memory.records.* verbs are served by operator.ts's own table
-  // instead and are intentionally NOT listed here).
-  route('GET', '/api/memory/projections', 'memory.projections.list'),
-  route('GET', '/api/memory/projections/{id}', 'memory.projections.get'),
-  // runtime.metrics.get, the process-wide RuntimeMeter snapshot. This is the
-  // sole route for GET /api/runtime/metrics: the daemon-api raw handler that
-  // once served it was removed in favor of this gateway-verb parity entry, so
-  // the URL now resolves to the same in-process handler (and the same
-  // read:telemetry scope gate) as the methodId-invoke endpoint. Because
-  // dispatchDaemonApiRoutes tries the gateway-REST table BEFORE the operator
-  // dispatcher, this entry is what answers the URL.
-  route('GET', '/api/runtime/metrics', 'runtime.metrics.get'),
-  // fleet.graph.get, the workstream task-graph view.
-  route('GET', '/api/fleet/workstreams/{workstreamId}/graph', 'fleet.graph.get'),
-  // contracts.*, the contract runner's operator surface: list and read the
-  // contracts this daemon holds, start one, cancel one, and answer an open
-  // escalation (docs/design/contract-runner.md 10.2).
-  route('GET', '/api/contracts', 'contracts.list'),
-  route('POST', '/api/contracts', 'contracts.start'),
-  route('GET', '/api/contracts/{contractId}', 'contracts.get'),
-  route('POST', '/api/contracts/{contractId}/cancel', 'contracts.cancel'),
-  route('POST', '/api/contracts/{contractId}/reply', 'contracts.reply'),
-  // power.*, sleep ownership: the chip state + the owner keep-awake toggle.
-  route('GET', '/api/power/status', 'power.status.get'),
-  route('POST', '/api/power/keep-awake', 'power.keepAwake.set'),
-  // devices.*, paired-phone capability nodes, the durable "always allow"
-  // grants surface, and the housekeeping sweep with its disclosure.
-  route('GET', '/api/devices/nodes', 'devices.nodes.list'),
-  // Asking one of those nodes for a capability, and reading back a capture a
-  // caller that is not on this host's disk cannot open for itself.
-  route('POST', '/api/devices/capability/request', 'devices.capability.request'),
-  route('GET', '/api/devices/artifacts', 'devices.artifacts.list'),
-  route('GET', '/api/devices/artifacts/{artifactId}', 'devices.artifacts.read'),
-  route('DELETE', '/api/devices/artifacts/{artifactId}', 'devices.artifacts.delete'),
-  route('GET', '/api/devices/grants', 'devices.grants.list'),
-  route('POST', '/api/devices/grants/revoke', 'devices.grants.revoke'),
-  route('POST', '/api/devices/housekeeping', 'devices.housekeeping.run'),
-  // ops.memory.get, the MemoryGovernor snapshot (tier, budget, RSS/heap,
-  // per-cache footprints, paused jobs, tripwire state).
-  route('GET', '/api/ops/memory', 'ops.memory.get'),
-  // voice.local.*, managed local-voice runtime status + one-act install.
-  route('GET', '/api/voice/local/status', 'voice.local.status'),
-  route('POST', '/api/voice/local/install', 'voice.local.install'),
-  // voice.wake.*, the pinned wake-word artifacts: content-verified state, the
-  // explicit ~3.7MB provision, and a bounded chunked read of one artifact's
-  // bytes. The last exists because a browser tab cannot fetch the pinned asset
-  // itself (the release asset answers with no CORS header), so the tab reads it
-  // from here, same-origin, and verifies what it reassembled against the
-  // pinned checksum each chunk restates.
-  route('GET', '/api/voice/wake/status', 'voice.wake.status'),
-  route('POST', '/api/voice/wake/provision', 'voice.wake.provision'),
-  route('GET', '/api/voice/wake/model', 'voice.wake.model.get'),
-  // calendar.*, event read/write and iCalendar import/export over the
-  // platform Google connector. These paths were advertised for a long time
-  // with nothing behind them, because the connector lived inside one product
-  // and the daemon had no implementation to call; the descriptors carried
-  // `invokable: false` to say so honestly. The connector is platform
-  // capability now (platform/google), so the paths are real.
-  route('GET', '/api/calendar/events', 'calendar.events.list'),
-  route('GET', '/api/calendar/events/{eventId}', 'calendar.events.get'),
-  route('POST', '/api/calendar/events', 'calendar.events.create'),
-  route('PATCH', '/api/calendar/events/{eventId}', 'calendar.events.update'),
-  route('DELETE', '/api/calendar/events/{eventId}', 'calendar.events.delete'),
-  route('GET', '/api/calendar/calendars', 'calendar.calendars.list'),
-  route('GET', '/api/calendar/ics/export', 'calendar.ics.export'),
-  route('POST', '/api/calendar/ics/import', 'calendar.ics.import'),
-  // email.*, inbox read and outbound send over the platform IMAP/SMTP
-  // service. Same story as calendar above, with a sharper consequence: while
-  // there was no daemon-reachable implementation, nothing the daemon did on
-  // its own, a schedule, a trigger, a channel reply, could send mail.
-  route('GET', '/api/email/inbox', 'email.inbox.list'),
-  route('GET', '/api/email/inbox/{uid}', 'email.inbox.read'),
-  route('POST', '/api/email/drafts', 'email.draft.create'),
-  route('POST', '/api/email/send', 'email.send'),
-
-  // payments.*, the daemon holds the card and charges it, so every surface
-  // reads and writes this over the wire. Card material goes IN through
-  // cards.create and has no read route by design; see routes/payments.ts.
-  route('GET', '/api/payments/budget', 'payments.budget.status'),
-  route('GET', '/api/payments/cards', 'payments.cards.list'),
-  route('POST', '/api/payments/cards', 'payments.cards.create'),
-  route('DELETE', '/api/payments/cards/{id}', 'payments.cards.delete'),
-  // The daemon types the stored card into an open checkout page. Takes a card
-  // id and field targets, answers with field names and a boolean, no request
-  // or response on this route carries card material in either direction.
-  route('POST', '/api/payments/checkout/begin', 'payments.checkout.begin'),
-  route('GET', '/api/payments/purchases', 'payments.purchases.list'),
-  route('GET', '/api/payments/purchase/status', 'payments.purchase.status'),
-  route('POST', '/api/payments/purchase/approve', 'payments.purchase.approve'),
-  route('POST', '/api/payments/purchase/deny', 'payments.purchase.deny'),
-  route('POST', '/api/payments/purchase/cancel', 'payments.purchase.cancel'),
-  route('POST', '/api/payments/purchase/reconcile', 'payments.purchase.reconcile'),
-  // browser.*, real browser control over the platform engine. The engine was
-  // hoisted into the platform and the daemon could link it, but no verb and no path
-  // existed, so a daemon-only caller had nothing to invoke: with no surface
-  // process attached, a schedule, a trigger or a channel reply could not open
-  // a page at all. The whole surface is routed rather than a convenient
-  // subset, because a daemon that can navigate but cannot select an option is
-  // still a daemon an operator has to open a surface for.
-  route('GET', '/api/browser/status', 'browser.status'),
-  route('POST', '/api/browser/provision', 'browser.provision'),
-  route('GET', '/api/browser/sessions', 'browser.sessions.list'),
-  route('POST', '/api/browser/sessions/launch', 'browser.sessions.launch'),
-  route('POST', '/api/browser/sessions/attach', 'browser.sessions.attach'),
-  route('POST', '/api/browser/sessions/release', 'browser.sessions.release'),
-  route('POST', '/api/browser/sessions/close', 'browser.sessions.close'),
-  route('POST', '/api/browser/navigate', 'browser.navigate'),
-  route('POST', '/api/browser/snapshot', 'browser.snapshot'),
-  route('POST', '/api/browser/click', 'browser.click'),
-  route('POST', '/api/browser/type', 'browser.type'),
-  route('POST', '/api/browser/select', 'browser.select'),
-  route('POST', '/api/browser/press', 'browser.press'),
-  route('POST', '/api/browser/scroll', 'browser.scroll'),
-  route('POST', '/api/browser/wait-for', 'browser.waitFor'),
-  route('POST', '/api/browser/read-text', 'browser.readText'),
-  route('POST', '/api/browser/extract', 'browser.extract'),
-  route('POST', '/api/browser/screenshot', 'browser.screenshot'),
-  route('GET', '/api/browser/tabs', 'browser.tabs.list'),
-  route('POST', '/api/browser/tabs', 'browser.tabs.create'),
-  route('POST', '/api/browser/tabs/switch', 'browser.tabs.switch'),
-  route('POST', '/api/browser/tabs/close', 'browser.tabs.close'),
-  route('POST', '/api/browser/history/back', 'browser.history.back'),
-  route('POST', '/api/browser/history/forward', 'browser.history.forward'),
+const GATEWAY_REST_PATH_ALIASES: readonly GatewayRestPathAlias[] = [
+  { method: 'POST', segments: pathSegments('/api/automation/jobs/{jobId}/pause'), methodId: 'automation.jobs.disable' },
+  { method: 'POST', segments: pathSegments('/api/automation/jobs/{jobId}/resume'), methodId: 'automation.jobs.enable' },
 ];
 
-/**
- * Dispatch a request against the gateway REST route table.
- *
- * Returns the handler's `Response` when a path+method entry matches, or `null`
- * when nothing matches (so the caller falls through to the rest of the route
- * chain / a 404). When the daemon has not wired `invokeGatewayRestVerb` (e.g. a
- * minimal embed), a matching path returns `null` rather than throwing, it
- * degrades to the same 404 the caller saw before these routes existed.
- */
-/**
- * Header carrying how many synthesized dispatches a request is already deep.
- *
- * Lives here rather than beside the guard that reads it because this module
- * owns the table that made a cycle possible: these rows map an advertised path
- * back to its own methodId, so a verb reaching the synthesizing arm of
- * `invokeGatewayMethodCall` lands right back here. Absent on a request from a
- * real client; `1` on the first synthesis.
- */
-export const SYNTHESIZED_DISPATCH_HEADER = 'x-goodvibes-synthesized-dispatch';
-
-/** Read the synthesized-dispatch depth off a request. 0 when unmarked. */
-export function readSynthesizedDispatchDepth(req: Request): number {
-  const raw = req.headers.get(SYNTHESIZED_DISPATCH_HEADER);
-  if (raw === null) return 0;
-  const depth = Number.parseInt(raw, 10);
-  return Number.isFinite(depth) && depth > 0 ? depth : 0;
+/** Split as the method catalog splits a binding (a trailing slash is ignored), so both read a path the same way. */
+function pathSegments(path: string): string[] {
+  return (path.replace(/\/+$/, '') || '/').split('/');
 }
 
+function isParamSegment(segment: string): boolean {
+  return segment.startsWith('{') && segment.endsWith('}');
+}
+
+/** The raw (still encoded) values of `template`'s `{param}` segments in `pathname`, or null when it does not match. */
+function matchTemplate(template: readonly string[], pathname: readonly string[]): Record<string, string> | null {
+  if (template.length !== pathname.length) return null;
+  const params: Record<string, string> = {};
+  for (let index = 0; index < template.length; index += 1) {
+    const want = template[index]!;
+    const have = pathname[index]!;
+    if (isParamSegment(want)) {
+      if (have.length === 0) return null;
+      params[want.slice(1, -1)] = have;
+    } else if (want !== have) return null;
+  }
+  return params;
+}
+
+/**
+ * Dispatch a request to the handler-backed gateway verb its method and path
+ * name. Returns the verb's `Response`, or `null` when no handler-backed verb
+ * binds the path (the caller falls through to the rest of the route chain).
+ * A daemon that has not wired the gateway REST handlers (a minimal embed)
+ * answers nothing here.
+ */
 export async function dispatchGatewayRestRoutes(
   req: Request,
   handlers: Partial<DaemonGatewayRestRouteHandlers>,
 ): Promise<Response | null> {
+  if (typeof handlers.invokeGatewayRestVerb !== 'function') return null;
   const { pathname } = new URL(req.url);
   const method = req.method;
-  for (const entry of GATEWAY_REST_ROUTES) {
-    if (entry.method !== method) continue;
-    const match = entry.regex.exec(pathname);
-    if (!match) continue;
-    if (typeof handlers.invokeGatewayRestVerb !== 'function') return null;
-    const params: Record<string, string> = {};
-    try {
-      entry.paramNames.forEach((name, index) => {
-        params[name] = safeDecodeURIComponent(match[index + 1]!);
-      });
-    } catch (error) {
-      if (error instanceof InvalidPathEncodingError) return invalidPathEncodingResponse();
-      throw error;
-    }
-    return handlers.invokeGatewayRestVerb({ methodId: entry.methodId, req, params });
+  const segments = pathSegments(pathname);
+  let methodId: string | undefined;
+  let raw: Record<string, string> | null = null;
+  for (const alias of GATEWAY_REST_PATH_ALIASES) {
+    if (alias.method !== method) continue;
+    raw = matchTemplate(alias.segments, segments);
+    if (raw) { methodId = alias.methodId; break; }
   }
-  return null;
+  if (!raw) {
+    const verb = handlers.resolveGatewayRestVerb?.(method, pathname);
+    if (!verb) return null;
+    raw = matchTemplate(pathSegments(verb.path), segments);
+    if (!raw) return null;
+    methodId = verb.methodId;
+  }
+  if (methodId === undefined) return null;
+  const params: Record<string, string> = {};
+  try {
+    for (const [name, value] of Object.entries(raw)) params[name] = safeDecodeURIComponent(value);
+  } catch (error) {
+    if (error instanceof InvalidPathEncodingError) return invalidPathEncodingResponse();
+    throw error;
+  }
+  return handlers.invokeGatewayRestVerb({ methodId, req, params });
 }

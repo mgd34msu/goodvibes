@@ -2,7 +2,6 @@ import type { DaemonControlRouteHandlers, GatewayRestVerbInvocation } from './co
 import { isRuntimeEventDomain, type RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import { authenticationRequiredResponse, jsonErrorResponse } from './error-response.js';
-import { readSynthesizedDispatchDepth } from './gateway-rest-routes.js';
 import { GATEWAY_METHOD_INVOKE_PATH } from './operator.js';
 import type { AuthenticatedPrincipal, CredentialKind } from './http-policy.js';
 import {
@@ -13,13 +12,18 @@ import {
 } from './route-helpers.js';
 
 interface GatewayMethodDescriptorLike {
+  readonly id: string;
   readonly access?: 'public' | 'authenticated' | 'admin' | 'remote-peer' | undefined;
+  readonly http?: { readonly method: string; readonly path: string } | undefined;
 }
 
 interface GatewayMethodCatalogLike {
   list(options?: Record<string, unknown>): unknown;
   listEvents(options?: Record<string, unknown>): unknown;
   get(methodId: string): GatewayMethodDescriptorLike | null | undefined;
+  /** The method whose `http` binding serves this method and path, the most specific one when several do. */
+  findByHttpBinding(method: string, pathname: string): GatewayMethodDescriptorLike | null | undefined;
+  hasHandler(methodId: string): boolean;
 }
 
 interface ControlPlaneGatewayLike {
@@ -81,12 +85,6 @@ export interface ControlRouteContext {
      * token again and handlers read who called from it.
      */
     readonly principal?: (AuthenticatedPrincipal & { readonly credentialKind?: CredentialKind | null | undefined }) | undefined;
-    /**
-     * How many synthesized dispatches already produced this call. Passed on so
-     * a request that re-enters the dispatcher is refused as a loop instead of
-     * consuming the concurrent-call budget one nesting level at a time.
-     */
-    readonly synthesizedDepth?: number | undefined;
   }) => Promise<{ status: number; ok: boolean; body: unknown }>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
   readonly requireAdmin: (req: Request) => Response | null;
@@ -381,6 +379,22 @@ export function createDaemonControlRouteHandlers(
       });
       return gatewayCallResponse(methodId, response);
     },
+    resolveGatewayRestVerb: (method, pathname) => {
+      // Only a verb with a handler is served here; any other falls through to the route modules.
+      const descriptor = context.gatewayMethods.findByHttpBinding(method, pathname);
+      if (!descriptor?.http || !context.gatewayMethods.hasHandler(descriptor.id)) return null;
+      return { methodId: descriptor.id, path: descriptor.http.path };
+    },
+    refuseUnservedGatewayRestVerb: (method, pathname) => {
+      const descriptor = context.gatewayMethods.findByHttpBinding(method, pathname);
+      if (!descriptor) return null;
+      return jsonErrorResponse({
+        error: `Gateway method is not invokable: ${descriptor.id}. Its path is advertised, but this daemon has no handler or route for it, so the capability is not set up in this composition.`,
+        code: EngineErrorCodes.NOT_INVOKABLE,
+        state: 'nothing was run',
+        next: ['This is a fixed answer for this daemon; retrying will not change it. Read the method catalog for what this daemon serves.'],
+      }, { status: 501 });
+    },
     invokeGatewayRestVerb: async (invocation: GatewayRestVerbInvocation) => {
       // REST parity for a handler-backed gateway verb reached by its advertised
       // path (gateway-rest-routes.ts). Not a second implementation: resolve the
@@ -427,9 +441,6 @@ export function createDaemonControlRouteHandlers(
         methodId,
         query,
         body: restBody,
-        // Carry the depth forward. This route IS the far side of a synthesized
-        // dispatch, so a marked request arriving here is the loop itself.
-        synthesizedDepth: readSynthesizedDispatchDepth(req),
         ...(principal ? { principal } : {}),
         context: {
           principalId: principal?.principalId,

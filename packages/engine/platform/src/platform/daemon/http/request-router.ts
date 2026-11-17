@@ -62,14 +62,20 @@ export class DaemonRequestRouter {
     return table;
   }
 
-  /** The route that serves this request, without the credential check. Null: no route matched. */
+  /**
+   * The route that serves this request, without the credential check. A path
+   * a gateway verb advertises that no handler or route serves answers its
+   * fixed 501. Null: no route matched.
+   */
   async dispatch(req: Request): Promise<Response | null> {
     const table = this.routeTable();
     for (const dispatcher of table.before ?? []) {
       const early = await dispatcher(req);
       if (early) return early;
     }
-    return dispatchDaemonApiRoutes(req, table.handlers, table.extensions);
+    const served = await dispatchDaemonApiRoutes(req, table.handlers, table.extensions);
+    if (served) return served;
+    return table.handlers.refuseUnservedGatewayRestVerb?.(req.method, new URL(req.url).pathname) ?? null;
   }
 
   /** One request, start to answer. */

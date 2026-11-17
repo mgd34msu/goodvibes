@@ -44,11 +44,10 @@ export async function dispatchDaemonApiRoutes(
 ): Promise<Response | null> {
   const judgment = await dispatchBrowserJudgmentRoutes(req, handlers);
   if (judgment !== null) return judgment;
-  // Gateway-hoisted verb families (skills.*, principals.*, checkin.*, ci.*,
-  // channels.profiles.*, sessions.permissionMode/contextUsage) that advertise a
-  // REST http binding are served here, ahead of the built-ins. Every one of
-  // their paths is otherwise unrouted, so trying this first shadows no existing
-  // route; unmatched paths return null and fall through unchanged.
+  // A gateway verb with a handler is served at the path its descriptor
+  // advertises, ahead of the built-ins, so the verb's handler is the one
+  // implementation of that path (the automation job writes rely on this).
+  // A verb without a handler returns null here and falls through unchanged.
   let result = await dispatchGatewayRestRoutes(req, handlers);
   if (result !== null) return result;
   result = await dispatchRemoteRoutes(req, handlers);

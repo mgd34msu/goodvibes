@@ -618,8 +618,8 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
    * not from a fresh remote fetch per call, so freshness is a fact a caller has
    * to be told rather than assume. `providers` carries it, one entry per
    * provider the host knows about, every call, whether or not it contributed an
-   * item. A host that attaches no handler answers 501 NOT_INVOKABLE naming the
-   * missing composition step (daemon/gateway-self-dispatch.ts), which is an
+   * item. A host that attaches no handler answers 501 NOT_INVOKABLE (the
+   * advertised path has no handler or route on that daemon), which is an
    * honest answer for a build that does not hold provider credentials.
    */
   methodDescriptor({

@@ -1,6 +1,5 @@
 import { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/daemon-api';
-import { GATEWAY_REST_ROUTES } from '@goodvibes-jev/engine/daemon-api';
-import type { DaemonApiRouteHandlers } from '@goodvibes-jev/engine/daemon-api';
+import type { DaemonApiRouteHandlers, GatewayRestVerbMatch } from '@goodvibes-jev/engine/daemon-api';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import type { GatewayMethodCatalog } from './method-catalog.js';
 import { MODEL_ROUTES } from '../daemon/http/model-routes.js';
@@ -92,42 +91,24 @@ function declaredPathMatches(declared: string, path: string): boolean {
 }
 
 /**
- * The method ids whose advertised path is served by the gateway REST table.
- *
- * These are the ones that dispatch into `catalog.invoke(methodId)`, so these
- * are the ones for which a registered handler is a REQUIREMENT rather than an
- * implementation detail. Every other served method reaches its own route
- * module's handler function and legitimately has none in the catalog.
+ * The ids a composed catalog advertises as callable and cannot answer: no
+ * handler is attached, and the descriptor has no http binding (WebSocket and
+ * method dispatch reach only `catalog.invoke`) or no route module serves its
+ * binding (`routes`, a probe of the route modules alone, the default), so
+ * every call to it gets a 501. A method declared `invokable: false` is not
+ * counted. Each handler-less bound descriptor costs one probe.
  */
-let gatewayRestMethodIdCache: ReadonlySet<string> | null = null;
-
-function gatewayRestMethodIds(): ReadonlySet<string> {
-  gatewayRestMethodIdCache ??= new Set(GATEWAY_REST_ROUTES.map((route) => route.methodId));
-  return gatewayRestMethodIdCache;
-}
-
-/**
- * Whether a descriptor can only be answered by a catalog handler: it has no
- * HTTP binding (WebSocket and method dispatch reach `catalog.invoke`), or its
- * path is in the gateway REST table, which also dispatches into
- * `catalog.invoke`. A method served by its own route module, or one declared
- * `invokable: false`, needs none.
- */
-function needsCatalogHandler(descriptor: GatewayMethodDescriptor): boolean {
-  if (descriptor.invokable === false) return false;
-  return !descriptor.http || gatewayRestMethodIds().has(descriptor.id);
-}
-
-/**
- * The ids a composed catalog advertises as callable and cannot answer: each
- * needs a catalog handler and has none, so every call to it gets a 501. One
- * pass over the descriptors with a map lookup each.
- */
-export function findUnservedGatewayMethods(catalog: Pick<GatewayMethodCatalog, 'list' | 'hasHandler'>): string[] {
-  return catalog.list()
-    .filter((descriptor) => needsCatalogHandler(descriptor) && !catalog.hasHandler(descriptor.id))
-    .map((descriptor) => descriptor.id)
-    .sort();
+export async function findUnservedGatewayMethods(
+  catalog: Pick<GatewayMethodCatalog, 'list' | 'hasHandler'>,
+  routes: RouteProbe = createDaemonApiRouteProbe(),
+): Promise<string[]> {
+  const unserved: string[] = [];
+  for (const descriptor of catalog.list()) {
+    if (descriptor.invokable === false || catalog.hasHandler(descriptor.id)) continue;
+    if (descriptor.http && await routes(descriptor.http.method, resolveTemplatePath(descriptor.http.path))) continue;
+    unserved.push(descriptor.id);
+  }
+  return unserved.sort();
 }
 
 /** Metadata key a start-up mark sets, so a client reads why the method is not callable. */
@@ -143,15 +124,15 @@ export const UNSERVED_METHOD_REASON_KEY = 'unservedReason';
  * later is a policy change. A handler registered afterwards replaces the
  * marked descriptor as usual.
  */
-export function markUnservedGatewayMethods(catalog: GatewayMethodCatalog): readonly string[] {
-  const unserved = findUnservedGatewayMethods(catalog);
+export async function markUnservedGatewayMethods(catalog: GatewayMethodCatalog, routes?: RouteProbe): Promise<readonly string[]> {
+  const unserved = await findUnservedGatewayMethods(catalog, routes);
   for (const id of unserved) {
     const descriptor = catalog.get(id);
     if (!descriptor) continue;
     catalog.register({
       ...descriptor,
       invokable: false,
-      metadata: { ...descriptor.metadata, [UNSERVED_METHOD_REASON_KEY]: 'This daemon has no handler for this method in its current configuration.' },
+      metadata: { ...descriptor.metadata, [UNSERVED_METHOD_REASON_KEY]: 'This daemon has no handler or route for this method in its current configuration.' },
     }, undefined, { replace: true });
   }
   return unserved;
@@ -176,12 +157,21 @@ function resolveTemplatePath(template: string): string {
  * single marker function for any property access, so it never needs
  * updating when DaemonApiRouteHandlers gains a field (the exact kind of
  * drift this reconcile exists to avoid reintroducing elsewhere).
+ *
+ * The gateway REST arm serves a path only for a verb whose handler the catalog
+ * holds. With `catalog`, the probe answers it the way the daemon does (so a
+ * handler-backed verb's binding is live); without one, it counts the route
+ * modules alone.
  */
-export function createDaemonApiRouteProbe(): RouteProbe {
+export function createDaemonApiRouteProbe(catalog?: Pick<GatewayMethodCatalog, 'findByHttpBinding' | 'hasHandler'>): RouteProbe {
   const marker = () => Response.json(RECONCILE_PROBE_MARKER);
+  const resolveGatewayRestVerb = (method: string, pathname: string): GatewayRestVerbMatch | null => {
+    const descriptor = catalog?.findByHttpBinding(method, pathname);
+    return descriptor?.http && catalog?.hasHandler(descriptor.id) ? { methodId: descriptor.id, path: descriptor.http.path } : null;
+  };
   const inertHandlers = new Proxy(
     {},
-    { get: () => marker },
+    { get: (_target, property) => (property === 'resolveGatewayRestVerb' ? resolveGatewayRestVerb : marker) },
   ) as unknown as DaemonApiRouteHandlers;
 
   return async (method, path) => {

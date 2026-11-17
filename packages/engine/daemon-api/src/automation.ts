@@ -3,7 +3,7 @@ import { InvalidPathEncodingError, invalidPathEncodingResponse, safeDecodeURICom
 
 /**
  * Job and schedule create/update/delete/enable/disable, and job pause/resume,
- * are served only by the gateway REST table (`gateway-rest-routes.ts`), which
+ * are served only by the gateway REST arm (`gateway-rest-routes.ts`), which
  * carries the verb gating and the native handlers' revision check; they are
  * deliberately absent here. This table keeps the reads, run actions and the
  * run-now paths.

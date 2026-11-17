@@ -19,7 +19,7 @@ import {
  * (control-plane/routes/browser.ts) attaches an in-process handler to each id
  * over a `BrowserGatewayService`, the daemon composition supplies the
  * implementation backed by the platform engine (platform/browser), and
- * `GATEWAY_REST_ROUTES` maps each advertised http path to the same handler, so
+ * the gateway REST arm serves each advertised http path with the same handler, so
  * the REST path and the methodId-invoke endpoint resolve identically.
  *
  * They did not used to exist at all. The engine was hoisted into the platform and

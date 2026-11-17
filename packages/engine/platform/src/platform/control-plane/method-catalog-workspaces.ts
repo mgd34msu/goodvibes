@@ -13,7 +13,7 @@
  * Descriptors live here (static) so `buildOperatorContract` / api.md / the
  * generated artifacts see them whether or not a handler is attached yet;
  * routes/workspaces.ts attaches the handlers at gateway composition time. All
- * four carry an `http` binding backed by GATEWAY_REST_ROUTES (REST parity).
+ * four carry an `http` binding, served by their handlers (the gateway REST arm).
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { methodDescriptor } from './method-catalog-shared.js';

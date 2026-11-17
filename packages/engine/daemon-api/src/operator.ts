@@ -384,8 +384,8 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/api/local-auth/bootstrap-file' && method === 'DELETE') return handlers.deleteBootstrapFile(req);
 
   if (pathname === '/api/runtime/scheduler' && method === 'GET') return handlers.getSchedulerCapacity(req);
-  // GET /api/runtime/metrics is served by the gateway-REST parity table
-  // (gateway-rest-routes.ts → runtime.metrics.get), which dispatchDaemonApiRoutes
+  // GET /api/runtime/metrics is served by the gateway REST arm
+  // (gateway-rest-routes.ts → runtime.metrics.get's handler), which dispatchDaemonApiRoutes
   // tries ahead of this dispatcher. The raw handler that once lived here was
   // removed to consolidate on the single gateway-verb mechanism.
 

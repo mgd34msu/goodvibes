@@ -20,6 +20,7 @@ export type {
   DaemonRuntimeRouteHandlers,
   DaemonGatewayRestRouteHandlers,
   GatewayRestVerbInvocation,
+  GatewayRestVerbMatch,
 } from './context.js';
 export { dispatchAutomationRoutes } from './automation.js';
 export { dispatchSessionRoutes } from './sessions.js';
@@ -28,12 +29,7 @@ export { dispatchOperatorRoutes } from './operator.js';
 export { dispatchRemoteRoutes } from './remote.js';
 export { dispatchDaemonApiRoutes } from './api-router.js';
 export type { DaemonApiRouteExtension } from './api-router.js';
-export {
-  dispatchGatewayRestRoutes,
-  GATEWAY_REST_ROUTES,
-  SYNTHESIZED_DISPATCH_HEADER,
-  readSynthesizedDispatchDepth,
-} from './gateway-rest-routes.js';
+export { dispatchGatewayRestRoutes } from './gateway-rest-routes.js';
 export {
   buildMissingScopeBody,
   principalHasScope,

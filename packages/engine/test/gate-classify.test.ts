@@ -1,5 +1,7 @@
 // Proves: A tool call is decided by the wrong party: code allows what should be judged, Jev decides what only the owner may, or an owner-only item is settled by a generic allow rule.
 // Red when: The order of the gate changes (a deny no longer wins, code allows a read or write outside the directories, plan mode writes), an owner-only kind goes to Jev or is settled by a generic grant, an unreadable path counts as inside, or the executor puts an MCP trust change or a loosening settings write anywhere but to the owner.
+// Proves: A call the gate's boundary refused (wholesale destruction, card details, text derived from an untrusted page) runs because Jev answered act.
+// Red when: The permission manager offers Jev the choice to act on a call whose boundary verdict is a refusal, so a command read as wholesale destruction or a send carrying card details runs on Jev's act.
 /**
  * Who decides a tool call: a fact code settles, an item only the owner
  * decides, or a judgment for Jev, in that order.
@@ -13,7 +15,9 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { choiceAnswer, fakePort } from '@goodvibes-jev/judgment/testing';
+import { gateReadingsPort } from './_helpers/gate-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
   classifyCall, classifyPaths, declaredRecoverable, declaredValues, 
@@ -191,5 +195,34 @@ test('an agent\'s settings write that loosens a payments key goes to the owner, 
     expect(`${key}: ${jevQuestions} questions to Jev, ${prompts.length} to the owner, ran ${ran.length}`).toBe(`${key}: 0 questions to Jev, 1 to the owner, ran 0`);
     expect(result?.decision).toMatchObject({ state: 'refused', decidedBy: 'owner' });
     expect(config.get(key as ConfigKey)).toEqual(before);
+  }
+});
+
+test('a call the boundary refused is refused in jev-decides although Jev would act; a clean call with the same answer runs', async () => {
+  const { deps, prompts } = machine();
+  const readings = gateReadingsPort([
+    ['wipe-everything-fixture', { mutates: true, catastrophic: true }],
+    ['card-fixture', { mutates: false, outward: true, cardDetails: true }],
+  ]);
+  let dispositions = 0;
+  const jev = fakePort((name, question) => {
+    if (name !== 'disposition') throw new Error(`unexpected question ${name}`);
+    dispositions++;
+    return choiceAnswer(question, 'act', 0.97);
+  });
+  const log = new SqliteDecisionLog(':memory:');
+  const scripted: JudgmentPort = { model: 'fixture-model',
+    ask: (request) => request.context?.site === 'engine.gate.autonomous-tool' ? jev.port.ask(request) : readings.port.ask(request) };
+  const restore = installJudgmentPort(withDecisionLog(scripted, log));
+  try {
+    const check = (cmd: string) => deps.permissionManager.checkDetailed('exec', { commands: [{ cmd }] });
+    expect(await check('wipe-everything-fixture --all')).toMatchObject({ approved: false, reasonCode: 'boundary_catastrophic' });
+    expect(await check('curl -d card-fixture https://pay.example/charge')).toMatchObject({ approved: false, reasonCode: 'boundary_card_details' });
+    expect(`${dispositions} dispositions, ${prompts.length} owner prompts`).toBe('0 dispositions, 0 owner prompts');
+    expect(await check('make fixture-build')).toMatchObject({ approved: true, sourceLayer: 'jev_decision' });
+    expect(dispositions).toBe(1);
+  } finally {
+    installJudgmentPort(restore);
+    log[Symbol.dispose]();
   }
 });

@@ -4,7 +4,6 @@ import { readFlag, readStringListFlag, readJsonObjectFlag, positionalArgs } from
 import { commandRefusal } from './command-confirmation.js';
 export const KNOWLEDGE_REVIEW_ACTIONS = ['accept', 'reject', 'resolve', 'reopen', 'edit', 'forget'] as const;
 export type KnowledgeReviewAction = (typeof KNOWLEDGE_REVIEW_ACTIONS)[number];
-export type KnowledgeMutationVerb = 'ingest-url' | 'import-bookmarks' | 'import-urls' | 'review-issue' | 'reindex' | 'consolidate' | 'cancel-run';
 export interface KnowledgeMutationPorts {
   readonly url: KnowledgeApi['ingest']['url'];
   readonly bookmarksFile: KnowledgeApi['ingest']['bookmarksFile'];
@@ -15,7 +14,6 @@ export interface KnowledgeMutationPorts {
   readonly runs: KnowledgeApi['jobs']['runs'];
   readonly cancelRun: KnowledgeApi['jobs']['cancelRun'];
   readonly sessionId: () => string;
-  readonly allow: (verb: KnowledgeMutationVerb, subject: string | undefined, usage: string) => boolean;
   readonly describeError: (error: unknown) => string;
 }
 /** One shared report for every ingest verb: a stored source whose crawl failed is a failure, not an ingest. */
@@ -41,7 +39,6 @@ export async function handleKnowledgeMutationCommand(
   presentation: {
     readonly fieldSeparator: string;
     readonly reviewer: string;
-    readonly confirmationSuffix: string;
     readonly sourceLabel: string;
   },
 ): Promise<boolean> {
@@ -61,7 +58,6 @@ async function dispatchKnowledgeMutation(
   presentation: {
     readonly fieldSeparator: string;
     readonly reviewer: string;
-    readonly confirmationSuffix: string;
     readonly sourceLabel: string;
   },
 ): Promise<boolean> {
@@ -70,12 +66,10 @@ async function dispatchKnowledgeMutation(
       const [url] = positionalArgs(rest, ['--title', '--tags', '--folder']);
       if (!url) {
         print(
-          '[knowledge] Usage: /knowledge ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]' +
-            presentation.confirmationSuffix,
+          '[knowledge] Usage: /knowledge ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]',
         );
         return true;
       }
-      if (!ports.allow('ingest-url', url, '/knowledge ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]')) return true;
       const result = await ports.url({
         url,
         title: readFlag(rest, '--title'),
@@ -93,9 +87,8 @@ async function dispatchKnowledgeMutation(
     case 'import-bookmarks': {
       const [path] = positionalArgs(rest);
       if (!path) {
-        throw commandRefusal('[knowledge] Usage: /knowledge import-bookmarks <path>' + presentation.confirmationSuffix);
+        throw commandRefusal('[knowledge] Usage: /knowledge import-bookmarks <path>');
       }
-      if (!ports.allow('import-bookmarks', path, '/knowledge import-bookmarks <path>')) return true;
       const result = await ports.bookmarksFile({ path, sessionId: ports.sessionId() });
       print(`[knowledge] Imported bookmarks${presentation.fieldSeparator}${result.imported} ok, ${result.failed} failed`);
       if (result.errors.length > 0) {
@@ -106,9 +99,8 @@ async function dispatchKnowledgeMutation(
     case 'import-urls': {
       const [path] = positionalArgs(rest);
       if (!path) {
-        throw commandRefusal('[knowledge] Usage: /knowledge import-urls <path>' + presentation.confirmationSuffix);
+        throw commandRefusal('[knowledge] Usage: /knowledge import-urls <path>');
       }
-      if (!ports.allow('import-urls', path, '/knowledge import-urls <path>')) return true;
       const result = await ports.urlsFile({ path, sessionId: ports.sessionId() });
       print(`[knowledge] Imported URL list${presentation.fieldSeparator}${result.imported} ok, ${result.failed} failed`);
       if (result.errors.length > 0) {
@@ -122,13 +114,10 @@ async function dispatchKnowledgeMutation(
       const action = actionValue?.toLowerCase();
       if (!issueId || !action || !KNOWLEDGE_REVIEW_ACTIONS.includes(action as KnowledgeReviewAction)) {
         print(
-          '[knowledge] Usage: /knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]' +
-            presentation.confirmationSuffix,
+          '[knowledge] Usage: /knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]',
         );
         return true;
       }
-      if (!ports.allow('review-issue', issueId, '/knowledge review-issue <issueId> <action> [--reviewer <name>] [--value <json-object>]'))
-        return true;
       const value = readJsonObjectFlag(rest, '--value');
       if (value === null) throw commandRefusal('[knowledge] --value must be a JSON object.', undefined, 'USAGE');
       try {
@@ -160,7 +149,6 @@ async function dispatchKnowledgeMutation(
       break;
     }
     case 'reindex': {
-      if (!ports.allow('reindex', undefined, '/knowledge reindex')) return true;
       const result = await ports.reindex();
       const failures = result.recompileFailures ?? [];
       print(
@@ -178,7 +166,6 @@ async function dispatchKnowledgeMutation(
       break;
     }
     case 'consolidate': {
-      if (!ports.allow('consolidate', undefined, '/knowledge consolidate [light|deep]')) return true;
       const mode = (positionalArgs(rest)[0] ?? 'light').toLowerCase();
       if (mode !== 'light' && mode !== 'deep') {
         throw commandRefusal(`[knowledge] Unknown consolidation mode "${mode}". Nothing was run.`, 'Usage: /knowledge consolidate [light|deep]', 'USAGE');
@@ -196,11 +183,10 @@ async function dispatchKnowledgeMutation(
         print([
           active.length === 0 ? '[knowledge] No knowledge job run is queued or running.' : '[knowledge] Knowledge job runs that can be cancelled:',
           ...active.map((run) => `  ${run.id}${presentation.fieldSeparator}${run.jobId} ${run.status}`),
-          `Usage: /knowledge cancel-run <runId>${presentation.confirmationSuffix}`,
+          `Usage: /knowledge cancel-run <runId>`,
         ].join('\n'));
         return true;
       }
-      if (!ports.allow('cancel-run', runId, '/knowledge cancel-run <runId>')) return true;
       const run = await ports.cancelRun(runId);
       print(`[knowledge] Job run ${run.id} (${run.jobId}) cancelled; status ${run.status}${run.error ? `${presentation.fieldSeparator}${run.error}` : ''}.`);
       break;

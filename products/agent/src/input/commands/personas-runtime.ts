@@ -89,7 +89,7 @@ function renderDiscoveredPersonas(personas: readonly DiscoveredPersonaRecord[]):
     `Discovered Agent persona files (${personas.length})`,
     ...personas.map(summarizeDiscoveredPersona),
     '',
-    'Import one with: /personas import-discovered <name> --yes',
+    'Import one with: /personas import-discovered <name>',
   ].join('\n');
 }
 
@@ -115,23 +115,11 @@ async function importDiscoveredPersona(args: readonly string[], ctx: CommandCont
   const parsed = parsePersonaArgs(args);
   const name = parsed.rest.join(' ').trim();
   if (!name) {
-    throw commandRefusal('Usage: /personas import-discovered <name> [--use] --yes');
+    throw commandRefusal('Usage: /personas import-discovered <name> [--use]');
   }
   const discovered = findDiscoveredPersona(await discoverPersonas(requireShellPaths(ctx)), name);
   if (!discovered) {
     throw commandRefusal(`Unknown discovered Agent persona ${name}\nRun /personas discover to inspect available persona files.`);
-  }
-  if (!parsed.yes) {
-    ctx.print([
-      'Agent persona import preview',
-      `  name ${discovered.name}`,
-      `  origin ${discovered.origin}`,
-      `  path ${discovered.path}`,
-      `  description ${discovered.description || '(none)'}`,
-      `  body characters ${discovered.body.length}`,
-      '  next rerun with --yes to import into the Agent-local persona registry',
-    ].join('\n'));
-    return;
   }
   const persona = personaRegistry.create({
     name: discovered.name,
@@ -172,7 +160,7 @@ export function registerPersonasRuntimeCommands(registry: CommandRegistry): void
     aliases: ['persona'],
     description: 'Manage Agent-local personas',
     hidden: true,
-    usage: '[list|discover|import-discovered <name> --yes|search <query>|show <id>|create --name <name> --description <summary> --body <instructions>|update <id> [--name ...] [--description ...] [--body ...]|use <id>|active|clear|review <id>|stale <id> <reason...>|delete <id>]',
+    usage: '[list|discover|import-discovered <name>|search <query>|show <id>|create --name <name> --description <summary> --body <instructions>|update <id> [--name ...] [--description ...] [--body ...]|use <id>|active|clear|review <id>|stale <id> <reason...>|delete <id>]',
     async handler(args, ctx) {
       const sub = (args[0] ?? 'list').toLowerCase();
       const registryStore = registryFromContext(ctx);

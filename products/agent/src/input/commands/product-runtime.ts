@@ -1,9 +1,9 @@
-import { createTrustReviewTools, createTrustCommandFlow } from '@goodvibes-jev/engine/terminal-shell/trust-review';
+import { createTrustReviewTools, createTrustCommandFlow, trustBundleExportConfirmation } from '@goodvibes-jev/engine/terminal-shell/trust-review';
 import 'node:fs';
 import 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireReadModels, requireSecretsManager, requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, stripYesFlag } from './confirmation.ts';
 
 const { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle } = createTrustReviewTools<CommandContext>({
   listSecrets: (ctx) => requireSecretsManager(ctx).list(),
@@ -25,7 +25,8 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
     effect: 'mixed',
     description: 'Review trust posture and export portable trust bundles',
     hidden: true,
-    usage: '[review|bundle export <path> --yes|bundle inspect <path>]',
+    usage: '[review|bundle export <path>|bundle inspect <path>]',
+    confirm: (args, ctx) => trustBundleExportConfirmation(args, (path) => requireShellPaths(ctx).resolveWorkspacePath(path)),
     async handler(args, ctx) {
       const parsed = stripYesFlag(args);
       const commandArgs = [...parsed.rest];
@@ -33,17 +34,11 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
       if (
         await runTrustCommand(ctx, commandArgs, {
           resolvePath: (path) => shellPaths.resolveWorkspacePath(path),
-          missingPathSuffix: (mode) => (mode === 'export' ? ' --yes' : ''),
-          allowExport(path) {
-            if (parsed.yes) return true;
-            requireYesFlag(ctx, `export trust bundle to ${path}`, '/trust bundle export <path> --yes');
-            return false;
-          },
           inspectError: (error) => ctx.print(`Could not read that bundle file: ${error instanceof Error ? error.message : String(error)}`),
         })
       )
         return;
-      throw commandRefusal('Usage: /trust [review|bundle export <path> --yes|bundle inspect <path>]');
+      throw commandRefusal('Usage: /trust [review|bundle export <path>|bundle inspect <path>]');
     },
   });
 }

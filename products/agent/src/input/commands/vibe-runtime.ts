@@ -1,10 +1,6 @@
 import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/persona-registry';
 import { discoverVibeFiles, formatVibeStatus, initVibeFile, loadVibeImportSource, resolveVibePathReference } from '@goodvibes-jev/engine/terminal-shell/agent-turn/vibe-file';
-import {
-  formatVibeConfirmationRouteLines,
-  vibeImportPersonaConfirmationRoutes,
-  vibeInitConfirmationRoutes,
-} from '../../agent/vibe-confirmation-routes.ts';
+import { existsSync } from 'node:fs';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs } from './agent-local-library-args.ts';
 import { requireShellPaths } from './runtime-services.ts';
@@ -23,9 +19,9 @@ function usage(): string {
   return [
     'Usage: /vibe [status|init|show|import-persona]',
     '  /vibe',
-    '  /vibe init [--global] [--force] --yes',
+    '  /vibe init [--global] [--force]',
     '  /vibe show [project|global|path]',
-    '  /vibe import-persona [project|global|path] [--name <name>] [--description <summary>] [--review] [--use] --yes',
+    '  /vibe import-persona [project|global|path] [--name <name>] [--description <summary>] [--review] [--use]',
   ].join('\n');
 }
 
@@ -34,6 +30,15 @@ export function registerVibeRuntimeCommands(registry: CommandRegistry): void {
     name: 'vibe',
     effect: 'local-state',
     aliases: ['vibes'],
+    // Creating VIBE.md or importing it as a persona runs at once (a persona is
+    // removed with /personas delete). Replacing an existing VIBE.md with the
+    // template (--force) loses what the owner wrote, so the registry asks once.
+    confirm(args, ctx) {
+      if ((args[0] ?? '').toLowerCase() !== 'init' || !args.includes('--force')) return undefined;
+      const path = resolveVibePathReference(requireShellPaths(ctx), args.includes('--global') ? 'global' : 'project');
+      if (!existsSync(path)) return undefined;
+      return { title: `Replace ${path}?`, detail: `${path} is replaced with the starter VIBE.md; what it says now cannot be recovered from here.`, confirmLabel: 'Replace' };
+    },
     description: 'Inspect, create, and import VIBE.md personality files',
     hidden: true,
     usage: '[status|init|show|import-persona]',
@@ -49,22 +54,10 @@ export function registerVibeRuntimeCommands(registry: CommandRegistry): void {
         if (sub === 'init') {
           const parsed = parseAgentLocalLibraryArgs(args.slice(1), { valueFlags: VIBE_VALUE_FLAGS });
           const scope = parsed.flags.has('global') ? 'global' : 'project';
-          const previewPath = scope === 'global'
-            ? resolveVibePathReference(shellPaths, 'global')
-            : resolveVibePathReference(shellPaths, 'project');
-          if (!parsed.yes) {
-            ctx.print([
-              'VIBE.md init preview',
-              `  scope ${scope}`,
-              `  path ${previewPath}`,
-              ...formatVibeConfirmationRouteLines(vibeInitConfirmationRoutes(scope, parsed.flags.has('force'))),
-            ].join('\n'));
-            return;
-          }
           const result = initVibeFile(shellPaths, { scope, force: parsed.flags.has('force') });
           ctx.print(result.created
             ? `Created ${scope} VIBE.md\n  path ${result.path}`
-            : `VIBE.md already exists\n  path ${result.path}\n  next rerun with --force --yes to replace it`);
+            : `VIBE.md already exists, so nothing was written\n  path ${result.path}\n  next /vibe init${scope === 'global' ? ' --global' : ''} --force replaces it with the starter`);
           return;
         }
 
@@ -88,24 +81,6 @@ export function registerVibeRuntimeCommands(registry: CommandRegistry): void {
           const source = loadVibeImportSource(shellPaths, reference);
           const name = parsed.flags.get('name')?.trim() || source.name;
           const description = parsed.flags.get('description')?.trim() || source.description;
-          if (!parsed.yes) {
-            ctx.print([
-              'VIBE.md persona import preview',
-              `  source ${source.scope}`,
-              `  path ${source.path}`,
-              `  name ${name}`,
-              `  description ${description}`,
-              `  body characters ${source.body.length}`,
-              ...formatVibeConfirmationRouteLines(vibeImportPersonaConfirmationRoutes({
-                reference,
-                name,
-                description,
-                review: parsed.flags.has('review'),
-                use: parsed.flags.has('use'),
-              })),
-            ].join('\n'));
-            return;
-          }
           if (ctx.invokedByModel === true && parsed.flags.has('review')) {
             throw commandRefusal('Refused: marking a persona reviewed is the owner\'s decision that its text may reach the prompt, so it only counts when you type it yourself. This came from the model running a command, which is the route content that was just read would use. Nothing was imported; rerun without --review, then review it yourself with /personas review <id>.');
           }

@@ -78,16 +78,16 @@ The main assistant conversation can use the read-only `agent_knowledge` tool for
 
 ## Ingest
 
-Use Agent Workspace -> Knowledge for URL, URL-list, file, artifact-id, bookmark, browser-history, connector ingest, issue review, consolidation, and reindex forms. The main assistant conversation can also call the confirmed `agent_knowledge_ingest` tool for URL, file, artifact-id, URL-list, bookmark, browser-history, and connector source families. `/knowledge ingest-url <url> --yes` and `goodvibes-agent knowledge ingest-url <url> --yes` ingest URL sources into Agent Knowledge only.
+Use Agent Workspace -> Knowledge for URL, URL-list, file, artifact-id, bookmark, browser-history, connector ingest, issue review, consolidation, and reindex forms. The main assistant conversation can also call the confirmed `agent_knowledge_ingest` tool for URL, file, artifact-id, URL-list, bookmark, browser-history, and connector source families. `/knowledge ingest-url <url>` and `goodvibes-agent knowledge ingest-url <url> --yes` ingest URL sources into Agent Knowledge only.
 
 The TUI workspace exposes the common confirmed ingest, issue-review, consolidation, and reindex flows. The CLI also exposes Agent-specific batch routes for scripts:
 
 - `goodvibes-agent knowledge import-urls <path> --yes`
 - `goodvibes-agent knowledge import-bookmarks <path> --yes`
 - `goodvibes-agent knowledge import-browser-history --yes`
-- `/knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> --yes`
-- `/knowledge consolidate [light|deep] --yes`
-- `/knowledge cancel-run [runId] --yes` (without an id it lists the queued and running job runs)
+- `/knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget>`
+- `/knowledge consolidate [light|deep]`
+- `/knowledge cancel-run [runId]` (without an id it lists the queued and running job runs)
 - `goodvibes-agent knowledge reindex --yes`
 
 Connected-host ingest and read CLI routes target `/api/goodvibes-agent/knowledge/*`. Workspace and slash-command issue review, packet/explain, consolidation, and reindex flows stay inside the isolated Agent Knowledge service. None of them call default knowledge.

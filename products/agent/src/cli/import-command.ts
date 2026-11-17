@@ -215,7 +215,7 @@ function applyPermissions(runtime: CliCommandRuntime, plan: OpenClawImportPlan):
   return [
     `  permission grants applied ${granted.length}${plan.permissions.sourcePath ? ` (from ${plan.permissions.sourcePath})` : ''}`,
     ...lines,
-    ...(granted.length > 0 ? ['  undo (inside the Agent):', ...granted.map((category) => `    /settings reset permissions.tools.${category} --yes`)] : []),
+    ...(granted.length > 0 ? ['  undo (inside the Agent):', ...granted.map((category) => `    /settings reset permissions.tools.${category}`)] : []),
   ];
 }
 

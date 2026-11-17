@@ -136,7 +136,7 @@ function renderDiscoveredRoutines(routines: readonly DiscoveredRoutineRecord[]):
     `Discovered Agent routine files (${routines.length})`,
     ...routines.map(summarizeDiscoveredRoutine),
     '',
-    'Import one with: /routines import-discovered <name> --yes',
+    'Import one with: /routines import-discovered <name>',
   ].join('\n');
 }
 
@@ -176,23 +176,11 @@ async function importDiscoveredRoutine(args: readonly string[], ctx: CommandCont
   const parsed = parseRoutineArgs(args);
   const name = parsed.rest.join(' ').trim();
   if (!name) {
-    throw commandRefusal('Usage: /routines import-discovered <name> [--enabled] --yes');
+    throw commandRefusal('Usage: /routines import-discovered <name> [--enabled]');
   }
   const discovered = findDiscoveredRoutine(await discoverRoutines(requireShellPaths(ctx)), name);
   if (!discovered) {
     throw commandRefusal(`Unknown discovered Agent routine ${name}\nRun /routines discover to inspect available routine files.`);
-  }
-  if (!parsed.yes) {
-    ctx.print([
-      'Agent routine import preview',
-      `  name ${discovered.name}`,
-      `  origin ${discovered.origin}`,
-      `  path ${discovered.path}`,
-      `  description ${discovered.description || '(none)'}`,
-      `  steps characters ${discovered.steps.length}`,
-      '  next rerun with --yes to import into the Agent-local routine registry',
-    ].join('\n'));
-    return;
   }
   if (parsed.flags.get('enabled') === 'true') assertActorMayEnable(actorOf(ctx), 'routine', discovered.name, 'fresh');
   const routine = routineRegistry.create({
@@ -514,7 +502,7 @@ export function registerRoutinesRuntimeCommands(registry: CommandRegistry): void
     aliases: ['routine'],
     description: 'Manage Agent-local routines',
     hidden: true,
-    usage: '[list|enabled|attention|discover|import-discovered <name> --yes|search <query>|show <id>|receipts|reconcile|receipt <id>|create --name <name> --description <summary> --steps <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--steps ...]|enable <id>|disable <id>|start <id>|review <id>|stale <id> <reason...>|promote <id> --cron <expr> [--delivery-channel slack] --yes|delete <id>]',
+    usage: '[list|enabled|attention|discover|import-discovered <name>|search <query>|show <id>|receipts|reconcile|receipt <id>|create --name <name> --description <summary> --steps <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--steps ...]|enable <id>|disable <id>|start <id>|review <id>|stale <id> <reason...>|promote <id> --cron <expr> [--delivery-channel slack] --yes|delete <id>]',
     handler: runRoutinesRuntimeCommand,
   });
 }

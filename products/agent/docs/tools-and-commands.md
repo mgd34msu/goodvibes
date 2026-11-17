@@ -360,10 +360,10 @@ goodvibes-agent knowledge import-bookmarks <path> --yes
 goodvibes-agent knowledge import-browser-history --yes
 goodvibes-agent knowledge reindex --yes
 /knowledge queue
-/knowledge review-issue <issue-id> resolve --yes
+/knowledge review-issue <issue-id> resolve
 /knowledge packet <task>
 /knowledge explain <task>
-/knowledge consolidate light --yes
+/knowledge consolidate light
 ```
 
 Agent rejects route-selection flags that would target another knowledge space, including `--space`, `--knowledge-space`, `--knowledge-space-id`, and `--include-all-spaces`. Parseable public Agent-route scope aliases are normalized; contaminated connected-host responses return `scope_contamination`.

@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { AgentCalendarRegistry, localIsoDate, UNTITLED_EVENT_TITLE } from '../../agent/calendar-registry.ts';
-import { parseIcs } from '@goodvibes-jev/engine/platform/platform/calendar';
 import { formatJsonStoreWriteReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath } from './agent-local-library-args.ts';
@@ -47,7 +46,7 @@ const CALENDAR_USAGE_MESSAGE = [
   '  Viewing         list | upcoming [--days N]',
   '  Connecting      connect <google|outlook> [--device | --code <address>] | disconnect <google|outlook> | accounts',
   '  Subscriptions   subscribe <ics-url> [--name N] [--every MIN] [--yes] | unsubscribe <name> --yes | subscriptions | refresh [name]',
-  '  Local events    add --title <title> --start <ISO> --yes | delete <id> --yes | import <path> [--yes] | export [--dest <path>] [--yes]',
+  '  Local events    add --title <title> --start <ISO> | delete <id> --yes | import <path> | export [--dest <path>]',
 ].join('\n');
 
 const CALENDAR_VALUE_FLAGS = ['title', 'start', 'end', 'location', 'notes', 'dest', 'path', 'days'] as const;
@@ -77,7 +76,7 @@ function renderEventList(events: readonly Parameters<typeof formatEventLine>[0][
     return [
       'Local calendar events',
       `  store ${path}`,
-      '  No events yet. Add one with /calendar add --title <title> --start <ISO> --yes',
+      '  No events yet. Add one with /calendar add --title <title> --start <ISO>',
     ].join('\n');
   }
   return [
@@ -154,12 +153,12 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
       return;
     }
 
-    // import <path> [--yes]
+    // import <path>: adds the file's events (an event already imported is skipped); /calendar delete removes one.
     if (sub === 'import') {
       const parsed = parseCalendarArgs(args.slice(1));
       const filePath = parsed.rest[0] ?? parsed.flags.get('path');
       if (!filePath) {
-        throw commandRefusal('Usage: /calendar import <path-to-ics> [--yes]');
+        throw commandRefusal('Usage: /calendar import <path-to-ics>');
       }
       const sourcePath = resolveCommandFilePath(ctx, filePath, 'read');
       if (sourcePath === null) return;
@@ -167,24 +166,6 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
         throw commandRefusal(`File not found: ${sourcePath}`);
       }
       const content = readFileSync(sourcePath, 'utf-8');
-      if (!parsed.yes) {
-        // The same reader the import uses, so the preview and the receipt agree on what an event is.
-        const preview = parseIcs(content);
-        const untitled = preview.events.filter((e) => e.summary === '(no title)' || !e.summary.trim()).length;
-        const unexpanded = preview.events.filter((e) => e.recurrence?.expansion === 'unsupported');
-        ctx.print([
-          'Calendar import preview',
-          `  file ${sourcePath}`,
-          `  events found ${preview.events.length}`,
-          ...preview.events.slice(0, 5).map((e) => `  - ${e.summary} (${e.start.value})${e.recurrence ? ' repeats' : ''}`),
-          preview.events.length > 5 ? `  ... and ${preview.events.length - 5} more` : '',
-          untitled > 0 ? `  ${untitled} event${untitled === 1 ? ' has' : 's have'} no title and will be imported as "${UNTITLED_EVENT_TITLE}"` : '',
-          preview.skipped.length > 0 ? `  ${preview.skipped.length} entr${preview.skipped.length === 1 ? 'y' : 'ies'} cannot be read and will not be imported: ${preview.skipped[0]?.message ?? ''}` : '',
-          unexpanded.length > 0 ? `  ${unexpanded.length} repeating event${unexpanded.length === 1 ? '' : 's'} use a rule this version does not expand and will show on the first date only: ${unexpanded.slice(0, 3).map((e) => e.summary).join(', ')}${unexpanded.length > 3 ? ', ...' : ''}` : '',
-          '  rerun with --yes to import',
-        ].filter(Boolean).join('\n'));
-        return;
-      }
       const result = registry.importIcs(content);
       const { imported } = result;
       ctx.print([
@@ -203,20 +184,10 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
       return;
     }
 
-    // export [--dest <path>] [--yes]
+    // export [--dest <path>]: to stdout, or a new file (an existing file is never replaced).
     if (sub === 'export') {
       const parsed = parseCalendarArgs(args.slice(1));
       const dest = parsed.flags.get('dest') ?? parsed.rest[0];
-      if (!parsed.yes) {
-        const events = registry.list();
-        ctx.print([
-          'Calendar export preview',
-          `  events ${events.length}`,
-          dest ? `  dest ${dest}` : '  output to stdout (no --dest given)',
-          '  rerun with --yes to export',
-        ].join('\n'));
-        return;
-      }
       const destPath = dest ? resolveCommandFilePath(ctx, dest, 'write') : undefined;
       if (destPath === null) return;
       const ics = registry.exportIcs(undefined, destPath);
@@ -228,25 +199,13 @@ export async function runCalendarRuntimeCommand(args: readonly string[], ctx: Co
       return;
     }
 
-    // add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes
+    // add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>]
     if (sub === 'add' || sub === 'create') {
       const parsed = parseCalendarArgs(args.slice(1));
       const title = parsed.flags.get('title')?.trim() ?? parsed.rest.join(' ').trim();
       const start = parsed.flags.get('start')?.trim();
       if (!title || !start) {
-        throw commandRefusal('Usage: /calendar add --title <title> --start <ISO-date-or-datetime> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes');
-      }
-      if (!parsed.yes) {
-        ctx.print([
-          'Calendar event preview',
-          `  title ${title}`,
-          `  start ${start}`,
-          parsed.flags.get('end') ? `  end   ${parsed.flags.get('end')}` : '',
-          parsed.flags.get('location') ? `  location ${parsed.flags.get('location')}` : '',
-          parsed.flags.get('notes') ? `  notes ${parsed.flags.get('notes')}` : '',
-          '  rerun with --yes to save',
-        ].filter(Boolean).join('\n'));
-        return;
+        throw commandRefusal('Usage: /calendar add --title <title> --start <ISO-date-or-datetime> [--end <ISO>] [--location <loc>] [--notes <notes>]');
       }
       const event = registry.create({
         title,
@@ -336,7 +295,7 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     effect: 'mixed',
     aliases: ['cal'],
     description: 'Manage local calendar events, external calendar subscriptions, and connected calendar accounts',
-    usage: '[list|upcoming [--days N]|connect <google|outlook> [--device | --code <address>]|disconnect <google|outlook>|accounts|import <path> [--yes]|export [--dest <path>] [--yes]|add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes|delete <id> --yes|subscribe <ics-url> [--name N] [--every MIN] [--yes]|unsubscribe <name> --yes|subscriptions|refresh [name]]',
+    usage: '[list|upcoming [--days N]|connect <google|outlook> [--device | --code <address>]|disconnect <google|outlook>|accounts|import <path>|export [--dest <path>]|add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>]|delete <id> --yes|subscribe <ics-url> [--name N] [--every MIN] [--yes]|unsubscribe <name> --yes|subscriptions|refresh [name]]',
     // A feed address can be a private one that grants read access; account sign-in takes no typed secret.
     secretArgs: { select: (args) => calendarFeedAddressPositions(args) },
     handler: async (args: readonly string[], ctx: CommandContext) => {

@@ -10,7 +10,7 @@ import type { CommandContext, CommandRegistry, SlashCommand } from '../command-r
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools/input-projection';
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/utils';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, stripYesFlag } from './confirmation.ts';
 import { handleContextWindowSubcommand } from './context-window.ts';
 import { isAgentHostSettingKey } from '../../config/host-settings.ts';
 import {
@@ -109,7 +109,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
     effect: 'mixed',
     aliases: ['cfg-ui'],
     description: 'Open, inspect, or update Agent settings',
-    usage: '[category|key|list|get <key>|set <key> <value> --yes|reset <key> --yes]',
+    usage: '[category|key|list|get <key>|set <key> <value>|reset <key>]',
     argsHint: '[list|get|set|reset]',
     async handler(args, ctx) {
       const parsed = stripYesFlag(args);
@@ -157,15 +157,15 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
+      // Owner-typed: the owner's own write; the line prints the previous value, so
+      // it can be put back. A model-run /settings line goes through the settings
+      // tool's admission instead (nativeSettingsCommandMutation), where a
+      // security-bearing key is put to the owner.
       if (sub === 'set') {
         const key = commandArgs[1];
         const rawValue = commandArgs.slice(2).join(' ');
         if (!key || rawValue.length === 0) {
-          throw commandRefusal('Usage: /settings set <key> <value> --yes');
-        }
-        if (!parsed.yes) {
-          requireYesFlag(ctx, `set setting ${key}`, '/settings set <key> <value> --yes');
-          return;
+          throw commandRefusal('Usage: /settings set <key> <value>');
         }
         try {
           // Text commands supply tokens; only the exact host boolean literals
@@ -185,11 +185,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
       if (sub === 'reset') {
         const key = commandArgs[1];
         if (!key) {
-          throw commandRefusal('Usage: /settings reset <key> --yes');
-        }
-        if (!parsed.yes) {
-          requireYesFlag(ctx, `reset setting ${key}`, '/settings reset <key> --yes');
-          return;
+          throw commandRefusal('Usage: /settings reset <key>');
         }
         try {
           const result = await resetHarnessSetting(ctx.platform.configManager, ctx.platform.secretsManager, key);

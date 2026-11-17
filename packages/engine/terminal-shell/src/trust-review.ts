@@ -1,5 +1,6 @@
 /** Trust evidence construction is shared; product command authority remains in its registrar. */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import type { CommandConfirmation } from './command-confirmation.js';
 import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/config';
 export interface TrustReviewBundle {
   readonly version: 1;
@@ -118,7 +119,20 @@ export function createTrustReviewTools<Context>(sources: TrustReviewSources<Cont
   return { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle };
 }
 
-/** Shared trust review/export/inspect flow; confirmation and inspection errors are product-owned policy. */
+/**
+ * `/trust bundle export <path>` over an existing file replaces it, which cannot
+ * be undone: both apps' `/trust` declare this as their registry confirmation,
+ * so it asks once; a new file is written at once.
+ */
+export function trustBundleExportConfirmation(args: readonly string[], resolvePath: (path: string) => string): CommandConfirmation | undefined {
+  const words = args.filter((word) => word !== '--yes');
+  if (words[0] !== 'bundle' || words[1] !== 'export' || !words[2]) return undefined;
+  const target = resolvePath(words[2]);
+  if (!existsSync(target)) return undefined;
+  return { title: `Replace ${target}?`, detail: `${target} already exists; the trust bundle replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
+}
+
+/** Shared trust review/export/inspect flow; inspection errors are product-owned policy. */
 export function createTrustCommandFlow<Context extends { print(text: string): void }, Bundle>(tools: {
   readonly buildTrustReviewBundle: (context: Context) => Promise<Bundle>;
   readonly formatTrustReview: (bundle: Bundle) => string;
@@ -129,8 +143,6 @@ export function createTrustCommandFlow<Context extends { print(text: string): vo
     args: readonly string[],
     ports: {
       readonly resolvePath: (path: string) => string;
-      readonly allowExport: (path: string) => boolean;
-      readonly missingPathSuffix?: ((mode: string) => string) | undefined;
       readonly inspectError?: ((error: unknown) => void) | undefined;
     },
   ): Promise<boolean> => {
@@ -144,11 +156,10 @@ export function createTrustCommandFlow<Context extends { print(text: string): vo
     if (mode !== 'export' && mode !== 'inspect') return false;
     const path = args[2];
     if (!path) {
-      context.print(`Usage: /trust bundle ${mode} <path>${ports.missingPathSuffix?.(mode) ?? ''}`);
+      context.print(`Usage: /trust bundle ${mode} <path>`);
       return true;
     }
     if (mode === 'export') {
-      if (!ports.allowExport(path)) return true;
       const bundle = await tools.buildTrustReviewBundle(context);
       const target = ports.resolvePath(path);
       // Owner-only (0600): the bundle lists secret key names and service names.

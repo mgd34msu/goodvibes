@@ -1,4 +1,4 @@
-import { createTrustReviewTools, createTrustCommandFlow } from '@goodvibes-jev/engine/terminal-shell/trust-review';
+import { createTrustReviewTools, createTrustCommandFlow, trustBundleExportConfirmation } from '@goodvibes-jev/engine/terminal-shell/trust-review';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -110,6 +110,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
     name: 'trust',
     description: "Review trust posture, set this workspace's trust level, or export trust bundles",
     usage: '[review|workspace [trusted|restricted]|bundle export <path>|bundle inspect <path>]',
+    confirm: (args, ctx) => trustBundleExportConfirmation(args, (path) => requireShellPaths(ctx).resolveWorkspacePath(path)),
     async handler(args, ctx) {
       const sub = args[0] ?? 'review';
       if (sub === 'workspace') {
@@ -160,7 +161,6 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
       if (
         await runTrustCommand(ctx, args, {
           resolvePath: (path) => shellPaths.resolveWorkspacePath(path),
-          allowExport: () => true,
         })
       )
         return;

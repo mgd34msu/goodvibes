@@ -105,7 +105,7 @@ function renderDiscoveredSkills(skills: readonly SkillRecord[]): string {
     `Discovered Agent skill files (${skills.length})`,
     ...skills.map(summarizeDiscoveredSkill),
     '',
-    'Import one with: /skills import-discovered <name> --yes',
+    'Import one with: /skills import-discovered <name>',
   ].join('\n');
 }
 
@@ -144,23 +144,11 @@ async function importDiscoveredSkill(args: readonly string[], ctx: CommandContex
   const parsed = parseSkillArgs(args);
   const name = parsed.rest.join(' ').trim();
   if (!name) {
-    throw commandRefusal('Usage: /skills import-discovered <name> [--enabled] --yes\n  Note: discovered skills import disabled unless --enabled; review then enable via /skills enable <name>.');
+    throw commandRefusal('Usage: /skills import-discovered <name> [--enabled]\n  Note: discovered skills import disabled unless --enabled; review then enable via /skills enable <name>.');
   }
   const discovered = findDiscoveredSkill(await discoverSkills(requireShellPaths(ctx)), name);
   if (!discovered) {
     throw commandRefusal(`Unknown discovered Agent skill ${name}\nRun /skills discover to inspect available skill files.`);
-  }
-  if (!parsed.yes) {
-    ctx.print([
-      'Agent skill import preview',
-      `  name ${discovered.name}`,
-      `  origin ${discovered.origin}`,
-      `  path ${discovered.path}`,
-      `  description ${discovered.description || '(none)'}`,
-      `  procedure characters ${discovered.body.length}`,
-      '  next rerun with --yes to import into the Agent-local skill registry',
-    ].join('\n'));
-    return;
   }
   // "Enable now": the owner may enable what was just imported; nobody has reviewed it, so the model may not.
   const enable = parsed.flags.get('enabled') === 'true';
@@ -574,7 +562,7 @@ export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): v
     aliases: ['skill', 'agent-skills', 'askills', 'local-skills'],
     description: 'Manage Agent-local skills',
     hidden: true,
-    usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled] --yes|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id>|bundle ...]',
+    usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled]|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id>|bundle ...]',
     handler: runAgentSkillsRuntimeCommand,
   });
 }

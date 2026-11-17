@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   clearAgentRuntimeProfileSelection,
@@ -19,7 +19,7 @@ import {
 } from '../../agent/runtime-profile.ts';
 import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { commandRefusal, stripYesFlag } from './confirmation.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 
@@ -63,7 +63,7 @@ function renderProfiles(homeDirectory: string): string {
       'Agent Profiles',
       defaultLine,
       '  No isolated Agent profiles yet.',
-      '  Create one with /agent-profile create <name> --template <id> --yes.',
+      '  Create one with /agent-profile create <name> --template <id>.',
     ].join('\n');
   }
   return ['Agent Profiles', defaultLine, ...profiles.map(profileLine)].join('\n');
@@ -88,11 +88,11 @@ function renderTemplates(homeDirectory: string): string {
     ...templates.map(templateLine),
     '',
     'Authoring flow:',
-    '  /agent-profile template export research ./agent-starter.json --yes',
+    '  /agent-profile template export research ./agent-starter.json',
     '  edit the JSON file',
-    '  /agent-profile template import ./agent-starter.json --yes',
-    '  /agent-profile create <name> --template <imported-id> --yes',
-    '  /agent-profile create-from-discovered <name> --yes',
+    '  /agent-profile template import ./agent-starter.json',
+    '  /agent-profile create <name> --template <imported-id>',
+    '  /agent-profile create-from-discovered <name>',
   ].join('\n');
 }
 
@@ -107,12 +107,12 @@ function renderGuide(homeDirectory: string): string {
     '1. Pick a base starter:',
     '   /agent-profile templates',
     '2. Export a starter JSON file:',
-    '   /agent-profile template export research ./agent-starter.json --yes',
+    '   /agent-profile template export research ./agent-starter.json',
     '3. Edit id, name, description, persona, skills, routines, and optional vibe in that JSON file.',
     '4. Import it into this Agent home:',
-    '   /agent-profile template import ./agent-starter.json --yes',
+    '   /agent-profile template import ./agent-starter.json',
     '5. Create an Agent profile from the imported starter:',
-    '   /agent-profile create <name> --template <imported-id> --yes',
+    '   /agent-profile create <name> --template <imported-id>',
     '',
     'This writes only Agent-local starter/profile state. It does not mutate connected GoodVibes host, default knowledge, or non-Agent knowledge segments.',
   ].join('\n');
@@ -131,18 +131,34 @@ function renderTemplatePreview(homeDirectory: string, templateId: string): strin
     file.template.vibe ? '  vibe included' : '',
     '',
     'Export/edit/import to customize this starter:',
-    `  /agent-profile template export ${file.template.id} ./agent-starter.json --include-vibe --yes`,
+    `  /agent-profile template export ${file.template.id} ./agent-starter.json --include-vibe`,
   ].join('\n');
 }
 
 export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'agent-profile',
-    // Deleting a profile removes its whole home: the registry asks once (command-confirmation.ts).
-    confirm(args) {
-      const name = args[0] === 'delete' ? args.slice(1).find((word) => !word.startsWith('--')) : undefined;
-      if (!name) return undefined;
-      return { title: `Delete Agent profile ${name}?`, detail: `The profile ${name} and everything in its home (config, sessions, memory, notes, personas, skills, routines) are deleted and cannot be recovered.`, confirmLabel: 'Delete' };
+    // Choosing the default, creating a profile and writing a new template file
+    // run at once. Deleting a profile, replacing an existing template (--replace)
+    // and exporting over an existing file cannot be undone: the registry asks once.
+    confirm(args, ctx) {
+      const sub = (args[0] ?? '').toLowerCase();
+      if (sub === 'delete') {
+        const name = args.slice(1).find((word) => !word.startsWith('--'));
+        if (!name) return undefined;
+        return { title: `Delete Agent profile ${name}?`, detail: `The profile ${name} and everything in its home (config, sessions, memory, notes, personas, skills, routines) are deleted and cannot be recovered.`, confirmLabel: 'Delete' };
+      }
+      const mode = (args[1] ?? '').toLowerCase();
+      if ((sub === 'template' || sub === 'starter') && mode === 'export' && args[2] && args[3]) {
+        const target = requireShellPaths(ctx).resolveWorkspacePath(args[3]);
+        if (!existsSync(target)) return undefined;
+        return { title: `Replace ${target}?`, detail: `${target} already exists; the exported starter template replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
+      }
+      if (args.includes('--replace') && (sub === 'create-from-discovered' || sub === 'create-discovered'
+        || ((sub === 'template' || sub === 'starter') && ['import', 'from-discovered', 'import-discovered'].includes(mode)))) {
+        return { title: 'Replace the starter template if one has this id?', detail: 'With --replace, a local starter template of the same id is overwritten and its current contents cannot be recovered. Without --replace an existing template is never touched.', confirmLabel: 'Replace' };
+      }
+      return undefined;
     },
     effect: 'mixed',
     aliases: ['runtime-profile', 'agent-profiles'],
@@ -179,23 +195,21 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         if (sub === 'default') {
           const target = commandArgs[1];
           if (target === 'clear' || target === 'none' || target === 'base') {
-            if (!parsed.yes) {
-              requireYesFlag(ctx, 'clear the default Agent profile', '/agent-profile default clear --yes');
-              return;
-            }
+            const previous = readAgentRuntimeProfileSelection(homeDirectory);
             clearAgentRuntimeProfileSelection(homeDirectory);
-            ctx.print('Default Agent profile cleared. Next launch uses the base Agent home unless --agent-profile is provided.');
+            ctx.print([
+              'Default Agent profile cleared. Next launch uses the base Agent home unless --agent-profile is provided.',
+              previous ? `  previous default ${previous.id} (put it back with /agent-profile default ${previous.id})` : '  there was no default before',
+            ].join('\n'));
             return;
           }
           if (target) {
-            if (!parsed.yes) {
-              requireYesFlag(ctx, `set default Agent profile ${target}`, '/agent-profile default <name> --yes');
-              return;
-            }
+            const previous = readAgentRuntimeProfileSelection(homeDirectory);
             const selected = setAgentRuntimeProfileSelection(homeDirectory, target);
             ctx.print([
               `Default Agent profile selected: ${selected.id}`,
               `  home ${selected.homeDirectory}`,
+              previous ? `  previous default ${previous.id}` : '  previous default none (the base Agent home)',
               '  next launch: goodvibes-agent',
               '  explicit override goodvibes-agent --agent-profile <name>',
             ].join('\n'));
@@ -215,16 +229,14 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         if (sub === 'use' || sub === 'select' || sub === 'switch') {
           const name = commandArgs[1];
           if (!name) {
-            throw commandRefusal('Usage: /agent-profile use <name> --yes');
+            throw commandRefusal('Usage: /agent-profile use <name>');
           }
-          if (!parsed.yes) {
-            requireYesFlag(ctx, `set default Agent profile ${name}`, '/agent-profile use <name> --yes');
-            return;
-          }
+          const previous = readAgentRuntimeProfileSelection(homeDirectory);
           const selected = setAgentRuntimeProfileSelection(homeDirectory, name);
           ctx.print([
             `Default Agent profile selected: ${selected.id}`,
             `  home ${selected.homeDirectory}`,
+            previous ? `  previous default ${previous.id}` : '  previous default none (the base Agent home)',
             '  next launch: goodvibes-agent',
             '  explicit override goodvibes-agent --agent-profile <name>',
           ].join('\n'));
@@ -250,11 +262,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
             const templateId = commandArgs[2];
             const pathArg = commandArgs[3];
             if (!templateId || !pathArg) {
-              throw commandRefusal('Usage: /agent-profile template export <id> <path> [--include-vibe] --yes');
-            }
-            if (!parsed.yes) {
-              requireYesFlag(ctx, `export Agent starter template ${templateId}`, '/agent-profile template export <id> <path> [--include-vibe] --yes');
-              return;
+              throw commandRefusal('Usage: /agent-profile template export <id> <path> [--include-vibe]');
             }
             const targetPath = shellPaths.resolveWorkspacePath(pathArg);
             mkdirSync(dirname(targetPath), { recursive: true });
@@ -266,32 +274,24 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
               `Agent starter template exported: ${template.id}`,
               `  path ${template.path ?? targetPath}`,
               template.vibeIncluded ? '  vibe included' : '',
-              '  edit it, then import it with /agent-profile template import <path> [--replace] --yes',
+              '  edit it, then import it with /agent-profile template import <path> [--replace]',
             ].filter(Boolean).join('\n'));
             return;
           }
           if (mode === 'import') {
             const pathArg = commandArgs[2];
             if (!pathArg) {
-              throw commandRefusal('Usage: /agent-profile template import <path> [--replace] --yes');
-            }
-            if (!parsed.yes) {
-              requireYesFlag(ctx, 'import Agent starter template', '/agent-profile template import <path> [--replace] --yes');
-              return;
+              throw commandRefusal('Usage: /agent-profile template import <path> [--replace]');
             }
             const sourcePath = shellPaths.resolveWorkspacePath(pathArg);
             const template = importAgentRuntimeProfileTemplate(homeDirectory, sourcePath, { replace: commandArgs.includes('--replace') });
-            ctx.print(`Agent starter template imported: ${template.id}\n  origin ${formatAgentRecordSource(template.source).toLowerCase()}\n  use /agent-profile create <name> --template ${template.id} --yes`);
+            ctx.print(`Agent starter template imported: ${template.id}\n  origin ${formatAgentRecordSource(template.source).toLowerCase()}\n  use /agent-profile create <name> --template ${template.id}`);
             return;
           }
           if (mode === 'from-discovered' || mode === 'import-discovered') {
             const templateId = commandArgs[2];
             if (!templateId) {
-              throw commandRefusal('Usage: /agent-profile template from-discovered <id> [--name <name>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace] --yes');
-            }
-            if (!parsed.yes) {
-              requireYesFlag(ctx, `create Agent starter template ${templateId} from discovered behavior`, '/agent-profile template from-discovered <id> --yes');
-              return;
+              throw commandRefusal('Usage: /agent-profile template from-discovered <id> [--name <name>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace]');
             }
             const template = await createAgentRuntimeProfileTemplateFromDiscovered(shellPaths, {
               id: templateId,
@@ -309,22 +309,18 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
               `  skills ${template.skillNames.join(', ')}`,
               `  routines ${template.routineNames.join(', ')}`,
               template.vibeIncluded ? '  vibe included' : '',
-              `  use /agent-profile create <name> --template ${template.id} --yes`,
+              `  use /agent-profile create <name> --template ${template.id}`,
             ].filter(Boolean).join('\n'));
             return;
           }
-          throw commandRefusal('Usage: /agent-profile template [show <id>|export <id> <path> [--include-vibe] --yes|import <path> --yes|from-discovered <id> --yes]');
+          throw commandRefusal('Usage: /agent-profile template [show <id>|export <id> <path> [--include-vibe]|import <path>|from-discovered <id>]');
         }
 
         if (sub === 'create') {
           const name = commandArgs[1];
           const templateId = parseFlag(commandArgs, '--template') ?? parseFlag(commandArgs, '--starter');
           if (!name) {
-            throw commandRefusal('Usage: /agent-profile create <name> [--template <id>] --yes');
-          }
-          if (!parsed.yes) {
-            requireYesFlag(ctx, `create Agent profile ${name}`, '/agent-profile create <name> [--template <id>] --yes');
-            return;
+            throw commandRefusal('Usage: /agent-profile create <name> [--template <id>]');
           }
           const profile = createAgentRuntimeProfile(homeDirectory, name, { templateId });
           ctx.print([
@@ -343,11 +339,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         if (sub === 'create-from-discovered' || sub === 'create-discovered') {
           const profileName = commandArgs[1];
           if (!profileName) {
-            throw commandRefusal('Usage: /agent-profile create-from-discovered <name> [--template-id <id>] [--profile-name <display>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace] --yes');
-          }
-          if (!parsed.yes) {
-            requireYesFlag(ctx, `create Agent profile ${profileName} from discovered behavior`, '/agent-profile create-from-discovered <name> --yes');
-            return;
+            throw commandRefusal('Usage: /agent-profile create-from-discovered <name> [--template-id <id>] [--profile-name <display>] [--description <summary>] [--persona <name>] [--skills all|name,name] [--routines all|name,name] [--include-vibe] [--replace]');
           }
           const created = await createAgentRuntimeProfileFromDiscovered(shellPaths, {
             profileName,
@@ -383,7 +375,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
           return;
         }
 
-        throw commandRefusal('Usage: /agent-profile [list|show <name>|default [<name>|clear] --yes|use <name> --yes|templates|guide|template show <id>|template export <id> <path> [--include-vibe] --yes|template import <path> [--replace] --yes|create <name> [--template <id>] --yes|create-from-discovered <name> [--include-vibe] --yes|delete <name>]');
+        throw commandRefusal('Usage: /agent-profile [list|show <name>|default [<name>|clear]|use <name>|templates|guide|template show <id>|template export <id> <path> [--include-vibe]|template import <path> [--replace]|create <name> [--template <id>]|create-from-discovered <name> [--include-vibe]|delete <name>]');
       } catch (error) {
         if (readRefusal(error)) throw error;
         throw commandRefusal(`Error: ${error instanceof Error ? error.message : String(error)}`, undefined, 'COMMAND_FAILED');

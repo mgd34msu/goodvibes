@@ -75,8 +75,15 @@ export const knowledgeCommand: SlashCommand = {
     'Agent Knowledge: isolated Agent-owned status, ask/search, source/node/issue lists, item lookup, map, connectors, ingest, and review queue.',
   hidden: true,
   usage: '<subcommand> [args]',
+  // Ingests, imports, review, reindex, consolidation and cancelling a run are
+  // recoverable and run at once. Letting a connector fetch from private hosts
+  // loosens the network guard, so that line asks once.
+  confirm(args) {
+    if ((args[0] ?? '').toLowerCase() !== 'ingest-connector' || !args.includes('--allow-private-hosts')) return undefined;
+    return { title: 'Let this connector fetch from private network hosts?', detail: 'The connector input may then be fetched from addresses on your local network or this machine, which ingests normally refuse.', confirmLabel: 'Allow' };
+  },
   argsHint:
-    'status|ask|search|list|get|map|connectors|ingest-url --yes|ingest-file --yes|ingest-artifact --yes|import-urls --yes|import-bookmarks --yes|import-browser-history --yes|ingest-connector --yes|review-issue --yes|reindex --yes|consolidate --yes|cancel-run --yes',
+    'status|ask|search|list|get|map|connectors|ingest-url|ingest-file|ingest-artifact|import-urls|import-bookmarks|import-browser-history --yes|ingest-connector|review-issue|reindex|consolidate|cancel-run',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
     if (args.length === 0 && context.openAgentWorkspace) {
       context.openAgentWorkspace('knowledge');
@@ -176,27 +183,8 @@ export const knowledgeCommand: SlashCommand = {
               return knowledge.jobs.cancelRun(runId);
             },
             describeError: (error) => (error instanceof Error ? error.message : String(error)),
-            allow(verb, subject, usage) {
-              if (confirmation.yes) return true;
-              const description =
-                verb === 'ingest-url'
-                  ? 'ingest URL into Agent Knowledge ' + subject
-                  : verb === 'import-bookmarks'
-                    ? 'import bookmark file into Agent Knowledge ' + subject
-                    : verb === 'import-urls'
-                      ? 'import URL list into Agent Knowledge ' + subject
-                      : verb === 'review-issue'
-                        ? 'review Agent Knowledge issue ' + subject
-                        : verb === 'reindex'
-                          ? 'reindex Agent Knowledge'
-                          : verb === 'cancel-run'
-                            ? 'cancel Agent Knowledge job run ' + subject
-                            : 'run Agent Knowledge consolidation';
-              requireYesFlag(context, description, usage + ' --yes');
-              return false;
-            },
           },
-          { fieldSeparator: ' ', reviewer: 'agent', confirmationSuffix: ' --yes', sourceLabel: 'knowledge source' },
+          { fieldSeparator: ' ', reviewer: 'agent', sourceLabel: 'knowledge source' },
         )
       )
         return;
@@ -223,15 +211,7 @@ export const knowledgeCommand: SlashCommand = {
         case 'ingest-file': {
           const [path] = positionalArgs(rest, ['--title', '--tags', '--folder', '--connector']);
           if (!path) {
-            print('[knowledge] Usage: /knowledge ingest-file <path> [--title <title>] [--tags <a,b>] [--folder <path>] --yes');
-            return;
-          }
-          if (!confirmation.yes) {
-            requireYesFlag(
-              context,
-              `ingest file into Agent Knowledge ${path}`,
-              '/knowledge ingest-file <path> [--title <title>] [--tags <a,b>] [--folder <path>] --yes',
-            );
+            print('[knowledge] Usage: /knowledge ingest-file <path> [--title <title>] [--tags <a,b>] [--folder <path>]');
             return;
           }
           sameSession();
@@ -252,15 +232,7 @@ export const knowledgeCommand: SlashCommand = {
         case 'ingest-artifact': {
           const [artifactId] = positionalArgs(rest, ['--title', '--tags', '--folder', '--connector']);
           if (!artifactId) {
-            print('[knowledge] Usage: /knowledge ingest-artifact <artifactId> [--title <title>] [--tags <a,b>] [--folder <path>] --yes');
-            return;
-          }
-          if (!confirmation.yes) {
-            requireYesFlag(
-              context,
-              `ingest artifact into Agent Knowledge ${artifactId}`,
-              '/knowledge ingest-artifact <artifactId> [--title <title>] [--tags <a,b>] [--folder <path>] --yes',
-            );
+            print('[knowledge] Usage: /knowledge ingest-artifact <artifactId> [--title <title>] [--tags <a,b>] [--folder <path>]');
             return;
           }
           sameSession();
@@ -315,7 +287,7 @@ export const knowledgeCommand: SlashCommand = {
           const [connectorId] = positionalArgs(rest, ['--input', '--path', '--content']);
           if (!connectorId) {
             print(
-              '[knowledge] Usage: /knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] --yes',
+              '[knowledge] Usage: /knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>]',
             );
             return;
           }
@@ -324,15 +296,7 @@ export const knowledgeCommand: SlashCommand = {
           const content = readFlag(rest, '--content');
           if (input === undefined && !path && !content) {
             print(
-              '[knowledge] Usage: /knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] --yes',
-            );
-            return;
-          }
-          if (!confirmation.yes) {
-            requireYesFlag(
-              context,
-              `ingest connector input into Agent Knowledge for ${connectorId}`,
-              '/knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] --yes',
+              '[knowledge] Usage: /knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>]',
             );
             return;
           }
@@ -424,19 +388,19 @@ export const knowledgeCommand: SlashCommand = {
               'Usage: /knowledge <subcommand>',
               '  status',
               '  ask <query> [--limit <n>] [--mode <concise|standard|detailed>]',
-              '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] --yes',
-              '  ingest-file <path> [--title <title>] [--tags <a,b>] [--folder <path>] --yes',
-              '  ingest-artifact <artifactId> [--title <title>] [--tags <a,b>] [--folder <path>] --yes',
-              '  ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] --yes',
-              '  import-bookmarks <path> --yes',
-              '  import-urls <path> --yes',
+              '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]',
+              '  ingest-file <path> [--title <title>] [--tags <a,b>] [--folder <path>]',
+              '  ingest-artifact <artifactId> [--title <title>] [--tags <a,b>] [--folder <path>]',
+              '  ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>]',
+              '  import-bookmarks <path>',
+              '  import-urls <path>',
               '  import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] [--limit <n>] [--since-days <n>] --yes',
               '  list [--kind <sources|nodes|issues>] [--limit <n>]',
               '  search <query> [--limit <n>]',
               '  get <id>',
               '  map [query] [--limit <n>]',
               '  queue [limit]',
-              '  review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>] --yes',
+              '  review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]',
               '  candidates [limit]',
               '  connectors [connectorId|doctor <connectorId>]',
               '  reports [limit]',
@@ -444,9 +408,9 @@ export const knowledgeCommand: SlashCommand = {
               '  lint',
               '  packet <task...> [--scope <path> ...]',
               '  explain <task...> [--scope <path> ...]',
-              '  reindex --yes',
-              '  consolidate [light|deep] --yes',
-              '  cancel-run [runId] --yes',
+              '  reindex',
+              '  consolidate [light|deep]',
+              '  cancel-run [runId]',
             ].join('\n'),
           );
       }

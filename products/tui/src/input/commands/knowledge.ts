@@ -106,10 +106,9 @@ export const knowledgeCommand: SlashCommand = {
           run: (id, options) => knowledge.jobs.run(id, options),
           runs: (limit, jobId) => knowledge.jobs.runs(limit, jobId),
           cancelRun: (runId) => knowledge.jobs.cancelRun(runId),
-          allow: () => true,
           describeError: summarizeError,
         },
-        { fieldSeparator: ': ', reviewer: 'tui', confirmationSuffix: '', sourceLabel: 'source' },
+        { fieldSeparator: ': ', reviewer: 'tui', sourceLabel: 'source' },
       )
     )
       return;

@@ -1076,6 +1076,8 @@ async function main(prepared: PreparedShellCliRuntime) {
         down: orchestrator.usage.output,
         cacheRead: orchestrator.usage.cacheRead,
         cacheWrite: orchestrator.usage.cacheWrite,
+        // The cost as spent, each response at its own model's price: a model switch does not reprice it.
+        costUsd: orchestrator.usage.costUsd,
         fleetCostUsd: footerFleetCost(fleetNodes, runningAgentCount > 0),
       },
       showExitNotice: input.showExitNotice,
@@ -1293,6 +1295,7 @@ async function main(prepared: PreparedShellCliRuntime) {
           down: orchestrator.usage.output,
           cacheRead: orchestrator.usage.cacheRead,
           cacheWrite: orchestrator.usage.cacheWrite,
+          costUsd: orchestrator.usage.costUsd,
           fleetCostUsd: footerFleetCost(() => ctx.services.processRegistry.query().nodes, true),
         },
         active.footerModel,

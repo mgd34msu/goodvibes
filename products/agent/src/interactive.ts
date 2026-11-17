@@ -1098,7 +1098,15 @@ async function main(prepared: PreparedShellCliRuntime) {
           ? promptInfo.visibleLines.slice(0, promptInfo.visibleCursorLine).reduce((sum: number, line: string) => sum + line.length + 1, 0) +
             promptInfo.visibleCursorCol
           : undefined,
-      usage: { available: isConversationUsageAvailable(orchestrator.usage), up: orchestrator.usage.input, down: orchestrator.usage.output },
+      // The cost as spent, each response at its own model's price: a model switch does not reprice it.
+      usage: {
+        available: isConversationUsageAvailable(orchestrator.usage),
+        up: orchestrator.usage.input,
+        down: orchestrator.usage.output,
+        cacheRead: orchestrator.usage.cacheRead,
+        cacheWrite: orchestrator.usage.cacheWrite,
+        costUsd: orchestrator.usage.costUsd,
+      },
       showExitNotice: input.showExitNotice,
       lastCopyTime: input.lastCopyTime,
       model: runtime.model, // prices the cost; the header names the model

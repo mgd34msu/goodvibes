@@ -9,9 +9,16 @@ declare module 'pdfjs-dist/build/pdf.mjs' {
     cleanup(): void;
   }
 
+  export interface PdfOutlineNode {
+    readonly title: string;
+    readonly items: readonly PdfOutlineNode[];
+  }
+
   export interface PdfDocumentProxy {
     readonly numPages: number;
     getPage(pageNumber: number): Promise<PdfPageProxy>;
+    /** The document's outline (bookmarks) as a tree; null when it has none. */
+    getOutline(): Promise<readonly PdfOutlineNode[] | null>;
     getMetadata(): Promise<{ readonly info: Record<string, unknown>; readonly metadata: { getAll(): Record<string, unknown> } | null }>;
   }
 

@@ -345,43 +345,28 @@ export async function applyStagedManagedBundle(
   const selectedSet = selectedKeys && selectedKeys.length > 0
     ? new Set(selectedKeys)
     : null;
-  const planned = readStoreForWrite(configDir).stagedManagedBundle;
-  if (!planned) {
-    throw new Error('No staged managed settings bundle is available.');
-  }
-  const split = (stage: StagedManagedBundle) => {
-    const staged = selectedSet
-      ? stage.changes.filter((change) => selectedSet.has(change.key))
-      : [...stage.changes];
-    return { staged, remaining: stage.changes.filter((change) => !staged.some((candidate) => candidate.key === change.key)) };
-  };
-  const plan = split(planned);
-  if (plan.staged.length === 0) {
-    throw new Error('No staged managed settings matched the requested keys.');
-  }
-  const remainingRisk = plan.remaining.length > 0 ? readBundleRisk(plan.remaining) : undefined;
-  return withStoreLock(configDir, () => applyPlannedManagedBundleLocked(configManager, configDir, planned, selectedSet, remainingRisk));
+  return withStoreLock(configDir, () => applyStagedManagedBundleLocked(configManager, configDir, selectedSet));
 }
 
-function applyPlannedManagedBundleLocked(
+function applyStagedManagedBundleLocked(
   configManager: ConfigManager,
   configDir: string,
-  planned: StagedManagedBundle,
   selectedSet: ReadonlySet<ConfigKey> | null,
-  remainingRisk: StagedManagedBundle['risk'] | undefined,
 ): { rollbackToken: string; appliedCount: number; remainingCount: number } {
-  const split = (stage: StagedManagedBundle) => {
-    const staged = selectedSet
-      ? stage.changes.filter((change) => selectedSet.has(change.key))
-      : [...stage.changes];
-    return { staged, remaining: stage.changes.filter((change) => !staged.some((candidate) => candidate.key === change.key)) };
-  };
+  // One read under the store lock: what is applied is exactly what is staged now.
   const store = readStoreForWrite(configDir);
   const stage = store.stagedManagedBundle;
-  if (!stage || stage.id !== planned.id || stage.changes.map((change) => change.key).join('\0') !== planned.changes.map((change) => change.key).join('\0')) {
-    throw new Error('The staged managed settings bundle changed while it was being applied; nothing was applied. Review it with /managed staged and apply again.');
+  if (!stage) {
+    throw new Error('No staged managed settings bundle is available.');
   }
-  const { staged: stagedChanges, remaining: remainingChanges } = split(stage);
+  const stagedChanges = selectedSet
+    ? stage.changes.filter((change) => selectedSet.has(change.key))
+    : [...stage.changes];
+  if (stagedChanges.length === 0) {
+    throw new Error('No staged managed settings matched the requested keys.');
+  }
+  const remainingChanges = stage.changes.filter((change) => !stagedChanges.some((candidate) => candidate.key === change.key));
+  const remainingRisk = remainingChanges.length > 0 ? readBundleRisk(remainingChanges) : undefined;
   const before = configSnapshot(configManager);
   // Refuse the whole apply before the first write: setDynamic persists per key.
   for (const change of stagedChanges) configManager.validateDynamic(change.key, change.nextValue, { bypassManagedLock: true });

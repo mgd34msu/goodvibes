@@ -117,7 +117,7 @@ export interface InboundMailCompositionOptions {
    */
   readonly routeBindings: Pick<
     RouteBindingManager,
-    'listBindings' | 'getBinding' | 'isRouteBindingEnabled'
+    'listBindings' | 'getBinding' | 'isRouteBindingEnabled' | 'start'
   >;
   readonly gatewayMethods: GatewayMethodCatalog;
   /**
@@ -667,6 +667,15 @@ export function composeInboundMail(
   const supervisorHealth = supervisor.health.bind(supervisor);
   const describeSupervisor = supervisor.describeStatus.bind(supervisor);
   supervisor.start = async () => {
+    // The owner's routes are read from disk on first use. Mail that arrived
+    // while the daemon was down is read the moment the source starts, so the
+    // routes are loaded first: otherwise that mail finds no route and is
+    // recorded as never announced. Routes that cannot be read do not stop the
+    // reader: the mail is still recorded, and the missing route is reported.
+    try { await options.routeBindings.start(); }
+    catch (error) {
+      logger.warn('Inbound mail started without the owner\'s channel routes', { surface: 'email-inbound', detail: error instanceof Error ? error.message : String(error) });
+    }
     attachBackground();
     const [status] = await Promise.all([startSupervisor(), further.start()]);
     return status;

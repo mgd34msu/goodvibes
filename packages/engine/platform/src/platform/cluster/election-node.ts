@@ -82,9 +82,10 @@ export class ClusterElection {
   private readonly host: SurfaceElectionHost;
   private readonly wireVersion: string;
   private readonly v1PeerWireVersion: string;
-  /** On while a tracked peer declares no ranking feature; a current node relaying
-   * compatibility does not count, so the mode ends once the last old build is
-   * upgraded (its next datagram replaces its record) or leaves the peer table. */
+  /** On while a peer heard recently declares no ranking feature; a current node
+   * relaying compatibility does not count, so the mode ends once the last old
+   * build is upgraded (its next datagram replaces its record) or has been silent
+   * past the liveness window (switched off for good: no restart needed). */
   private v1PeerRanking = false;
 
   private running = false;
@@ -378,7 +379,7 @@ export class ClusterElection {
     // through the identical mechanism, which means we also hear ourselves.
     if (message.nodeId === this.options.nodeId) return;
     if (!this.recordPeer(message)) return;
-    this.v1PeerRanking = [...this.peers.values()].some((peer) => peer.declaresNoRanking);
+    this.refreshRankingMode();
     this.recordHoldings(message);
     if (message.surfaceId === null) return;
     // Recorded above either way: a surface this node cannot serve still tells
@@ -488,7 +489,21 @@ export class ClusterElection {
       return;
     }
 
+    this.refreshRankingMode();
     for (const election of this.elections.values()) election.onWatchdogTick(mono);
+  }
+
+  /**
+   * Compatibility ranking counts only old-build peers heard within the
+   * liveness window, the longer of a holder's timeout and a candidate's
+   * lifetime: a peer silent that long holds nothing and stands for nothing.
+   * Run on every datagram and every watchdog tick, so the mode ends on its own
+   * once the last old build goes quiet.
+   */
+  private refreshRankingMode(): void {
+    const now = this.options.clock.now();
+    const window = Math.max(this.timing.masterTimeoutMs, this.timing.candidateTtlMs);
+    this.v1PeerRanking = [...this.peers.values()].some((peer) => peer.declaresNoRanking && now - peer.lastSeenAt < window);
   }
 
   // ── plumbing ──────────────────────────────────────────────────────────────

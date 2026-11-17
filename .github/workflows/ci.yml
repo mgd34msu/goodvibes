@@ -78,19 +78,17 @@ jobs:
       - name: Typecheck, API reports, exports and examples
         run: bun run validate --job typecheck
 
+  # The default suite reads source only (every workspace import resolves to
+  # source under Bun), so it starts at once beside the build instead of after it.
   proofs:
     name: Proofs
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # The Workers proof bundles the built engine (test/workers/worker.ts).
-    needs: [build]
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
-      - name: Restore the build output
-        uses: ./.github/actions/restore-build
       - name: Run the default test suite
         run: bun run validate --job proofs
 

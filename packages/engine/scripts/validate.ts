@@ -89,8 +89,8 @@ const STEPS: readonly Step[] = [
   script('typecheck', 'check:browser'),
   script('typecheck', 'check:metadata'),
 
-  // proofs: the default test suite. Two of its files read the built engine
-  // (the companion-bundle guard and the Workers bundle).
+  // proofs: the default test suite. It reads source only (the companion-bundle
+  // guard and the Workers bundle included), so CI runs it without the build.
   script('proofs', 'test'),
 
   // live-sandbox: the test/live files inside real bubblewrap, where a skip fails.

@@ -118,9 +118,9 @@ async function mintTuiDevicePairing(input: {
 
 /** What forgetting a stored credential did. The token stays valid on the host until it is revoked there. */
 function forgotten(result: RemoveTuiHostPairingResult, host: string, tokenId: string): TuiHostPairingResult {
-  if (result.status === 'removed') return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again with /host pair --bootstrap-shared --apply.` };
+  if (result.status === 'unavailable') return { status: 'blocked', host, message: `${result.reason} Nothing was forgotten.` };
   if (result.status === 'conflict') return changed();
-  return { status: 'blocked', host, message: `${result.reason} Nothing was forgotten.` };
+  return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again with /host pair --bootstrap-shared --apply.` };
 }
 
 /**
@@ -237,7 +237,7 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
       }
     }
     if (state.status === 'paired') {
-      let live: unknown;
+      let live: Awaited<ReturnType<typeof auth>>;
       try { live = await auth(state.token, signal); } catch (error) {
         if (!signal?.aborted && error instanceof GoodVibesError && error.kind === 'auth') return forgetPreview(home, host, state.tokenId);
         return { result: unverified(host) };

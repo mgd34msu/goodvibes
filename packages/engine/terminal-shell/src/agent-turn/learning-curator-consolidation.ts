@@ -126,7 +126,8 @@ function consolidationCandidate(
 }
 
 /** Domains whose duplicates the curator proposes to consolidate. */
-export 
+export const CONSOLIDATION_DOMAINS: readonly LocalLearningCandidateDomain[] = ['memory', 'persona', 'skill', 'routine'];
+
 const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'when', 'what', 'about', 'your', 'our', 'are', 'was', 'use', 'using']);
 
 function words(text: string): Set<string> {

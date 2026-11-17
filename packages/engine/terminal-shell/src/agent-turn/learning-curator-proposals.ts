@@ -144,7 +144,7 @@ function noteBehaviorProposalCandidate(record: LearningRecord, proposal: StoredL
   // The note records what was made from it, by this pass or the workspace promotion action.
   if (note.promoted?.some(entry => entry.domain === target)) return null;
   const proposalFields: NonNullable<LearningCandidateDraft['proposalFields']> = target === 'memory' ? {
-    cls: proposal.cls ?? 'fact',
+    cls: proposal?.cls ?? 'fact',
     scope: 'project', summary: note.title, detail: note.body, tags: note.tags.join(','),
   } : {
     target, name: note.title, description: note.title,
@@ -201,7 +201,7 @@ function workPlanCompletionCandidate(item: WorkPlanItem, proposal: StoredLearnin
     next: `Review the completed work notes, then capture this as Agent-local ${target} only if the user wants it reused.`,
     proposalTarget: target,
     proposalFields: target === 'memory' ? {
-      cls: proposal.cls ?? 'fact',
+      cls: proposal?.cls ?? 'fact',
       scope: 'project',
       summary: previewHarnessText(item.title, 140),
       detail,
@@ -259,7 +259,7 @@ function researchRunCompletionCandidate(run: AgentResearchRunRecord, proposal: S
     next: `Review the run ledger and report artifact, then capture this as Agent-local ${target} only if it should guide future work.`,
     proposalTarget: target,
     proposalFields: target === 'memory' ? {
-      cls: proposal.cls ?? 'fact',
+      cls: proposal?.cls ?? 'fact',
       scope: 'project',
       summary: previewHarnessText(run.note || run.title, 140),
       detail,
@@ -336,7 +336,7 @@ function sessionCompletionCandidate(record: LearningSessionRecord, proposal: Sto
     next: `Inspect the saved session transcript, then capture this as Agent-local ${target} only if it should guide future work.`,
     proposalTarget: target,
     proposalFields: target === 'memory' ? {
-      cls: proposal.cls ?? 'fact',
+      cls: proposal?.cls ?? 'fact',
       scope: 'project',
       summary: previewHarnessText(loadedText || labelBase, 140),
       detail,

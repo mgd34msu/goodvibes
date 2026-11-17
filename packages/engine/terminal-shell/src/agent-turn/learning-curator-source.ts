@@ -82,7 +82,7 @@ export interface LearningRecord {
  * paths and memory only; no work plan or saved-session list there).
  */
 export interface LearningCuratorNativeContext {
-  readonly workspace?: { readonly shellPaths: ShellPathService; readonly workPlan?: Pick<ProjectWorkPlan, 'snapshotNow'> | undefined } | undefined;
+  readonly workspace?: { readonly shellPaths?: ShellPathService | undefined; readonly workPlan?: Pick<ProjectWorkPlan, 'snapshotNow'> | undefined } | undefined;
   readonly clients?: { readonly agentKnowledgeApi?: { readonly memory?: Pick<MemoryApi, 'getAll'> | undefined } | undefined } | undefined;
   readonly session?: {
     readonly sessionManager?: Pick<SessionManager, 'list' | 'load'> | undefined;

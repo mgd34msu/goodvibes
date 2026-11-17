@@ -31,29 +31,36 @@ function nativeJobMeaning(job: ManagedAutomationJob) {
   };
 }
 
-const STRING_FIELDS = ['name', 'prompt', 'description', 'model', 'provider', 'template', 'thinking'] as const;
-const BOOLEAN_FIELDS = ['enabled', 'autoApprove', 'allowUnsafeExternalContent', 'lightContext', 'deleteAfterRun'] as const;
-const STRING_LIST_FIELDS = ['toolAllowlist', 'fallbackModels'] as const;
-const SHAPED_FIELDS = 'schedule, routing, executionIntent, target, externalContentSource, delivery, failure, reasoningEffort or wakeMode';
+type ScheduleKind = 'cron' | 'every' | 'at';
 
 /**
- * Parse a job create or update body, refusing one with a field of the wrong
- * type with a 400 that names the field: stored, a string "false" for `enabled`
- * would keep running a job the caller meant to pause. Naming the field runs
- * only on the refusal path; an accepted body is checked once, by the parser.
+ * The schedule a create body names. `kind` is optional (the published schema
+ * accepts `{ prompt, every }` and `{ prompt, at }` alone): without it the field
+ * present decides, `every`, then `at`, then `cron`/`schedule.expression`. A
+ * value the normalizer refuses is a 400 naming that field, never a cron error
+ * for an interval.
  */
-function parseJobInput<T>(parse: (body: Record<string, unknown>) => T, body: Record<string, unknown>): T {
+function readCreateSchedule(body: Record<string, unknown>): unknown {
+  if (isRecord(body.schedule) && body.schedule.kind !== undefined) return body.schedule;
+  const declared = body.kind, every = body.every, at = body.at, cron = body.cron, scheduleBody = body.schedule;
+  const kind: ScheduleKind | undefined = declared === 'cron' || declared === 'every' || declared === 'at' ? declared
+    : declared !== undefined ? undefined
+    : every !== undefined ? 'every'
+    : at !== undefined ? 'at'
+    : 'cron';
+  if (kind === undefined) {
+    throw new HandlerError(`kind must be "cron", "every" or "at"; got ${JSON.stringify(declared)}. Nothing was changed.`, 'INVALID_ARGUMENT', 400, 'kind');
+  }
+  const field = kind === 'cron' ? (typeof cron === 'string' || !isRecord(scheduleBody) ? 'cron' : 'schedule.expression') : kind;
   try {
-    return parse(body);
-  } catch {
-    const wrong = (field: string, ok: (value: unknown) => boolean): boolean => body[field] !== undefined && !ok(body[field]);
-    const named: readonly [string, string] | undefined =
-      STRING_FIELDS.filter((field) => wrong(field, (value) => typeof value === 'string')).map((field) => [field, 'a string'] as const)[0]
-      ?? BOOLEAN_FIELDS.filter((field) => wrong(field, (value) => typeof value === 'boolean')).map((field) => [field, 'true or false (a JSON boolean)'] as const)[0]
-      ?? STRING_LIST_FIELDS.filter((field) => wrong(field, (value) => Array.isArray(value) && value.every((entry) => typeof entry === 'string'))).map((field) => [field, 'an array of strings'] as const)[0]
-      ?? (wrong('timeoutMs', (value) => typeof value === 'number' && Number.isFinite(value)) ? ['timeoutMs', 'a finite number'] as const : undefined);
-    const problem = named ? `${named[0]} must be ${named[1]}` : `one of ${SHAPED_FIELDS} does not have an accepted shape`;
-    throw new HandlerError(`${problem}. Nothing was changed.`, 'INVALID_AUTOMATION_JOB', 400, named?.[0]);
+    if (kind === 'every') return normalizeEverySchedule(typeof every === 'string' || typeof every === 'number' ? every : '');
+    if (kind === 'at') return normalizeAtSchedule(typeof at === 'number' ? at : Date.parse(String(at)));
+    const expression = typeof cron === 'string' ? cron : isRecord(scheduleBody) && typeof scheduleBody.expression === 'string' ? scheduleBody.expression : '';
+    return normalizeCronSchedule(expression, typeof body.timezone === 'string' ? body.timezone : undefined, body.staggerMs ?? body.stagger);
+  } catch (error) {
+    if (error instanceof HandlerError) throw error;
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new HandlerError(`${field} is not an accepted ${kind} schedule: ${reason}. Nothing was changed.`, 'INVALID_ARGUMENT', 400, field);
   }
 }
 
@@ -71,7 +78,8 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
     const current = () => { context.signal?.throwIfAborted(); };
     try {
       current();
-      const patch = parseJobInput(parseUpdateAutomationJobInput, body);
+      // A wrong field is the parser's 400 INVALID_ARGUMENT naming it, nested fields included.
+      const patch = parseUpdateAutomationJobInput(body);
       const expected = patch.expectedMutationRevision;
       const selected = expected ? manager.retainJobTarget(jobId, expected) : undefined;
       const updated = await runNativeMutation({ host, method: 'automation.jobs.update', body, context,
@@ -94,11 +102,8 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
       const { manager, host } = input;
       const current = () => { context.signal?.throwIfAborted(); };
       current();
-      const schedule = isRecord(body.schedule) && body.schedule.kind !== undefined ? body.schedule
-        : body.kind === 'every' ? normalizeEverySchedule(typeof body.every === 'string' ? body.every : '')
-        : body.kind === 'at' ? normalizeAtSchedule(typeof body.at === 'number' ? body.at : Date.parse(String(body.at)))
-        : normalizeCronSchedule(typeof body.cron === 'string' ? body.cron : isRecord(body.schedule) && typeof body.schedule.expression === 'string' ? body.schedule.expression : '', typeof body.timezone === 'string' ? body.timezone : undefined, body.staggerMs ?? body.stagger);
-      const patch = parseJobInput(parseCreateAutomationJobInput, { ...body, name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40), schedule });
+      const schedule = readCreateSchedule(body);
+      const patch = parseCreateAutomationJobInput({ ...body, name: typeof body.name === 'string' ? body.name : body.prompt.slice(0, 40), schedule });
       try {
         const created = await runNativeMutation({ host, method, body, context, target: { schedule: nativeScheduleMeaning(patch.schedule) }, scopes: ['write:automation'], confirmation: 'none', assertTargetCurrent: current,
           mutate: (assertCurrent, _admission, withPublication) => manager.createJob(patch, { signal: context.signal, assertCurrent: () => { current(); assertCurrent(); }, withPublication }),

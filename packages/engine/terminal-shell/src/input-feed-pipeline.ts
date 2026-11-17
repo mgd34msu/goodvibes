@@ -64,8 +64,9 @@ function adopt<Key extends MutableKey>(
   result: Pick<FeedContextMutableInit, Key> & { readonly handled: boolean },
   keys: readonly Key[],
 ): boolean {
+  const after: Pick<FeedContextMutableInit, Key> = result;
   for (const key of keys) {
-    if (!Object.is(result[key], before[key])) context[key] = result[key];
+    if (!Object.is(after[key], before[key])) context[key] = after[key];
   }
   return result.handled;
 }

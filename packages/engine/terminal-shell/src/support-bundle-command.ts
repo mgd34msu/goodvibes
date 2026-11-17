@@ -43,7 +43,7 @@ function showSettingValue(key: string, value: unknown): string {
 export interface SupportBundleRuntime {
   readonly workingDirectory: string;
   readonly homeDirectory: string;
-  readonly configManager: Parameters<typeof retainCliConfig>[0] & Pick<ConfigManager, 'validateDynamic' | 'setMany'>;
+  readonly configManager: Parameters<typeof retainCliConfig>[0] & Pick<ConfigManager, 'get' | 'validateDynamic' | 'setMany'>;
   readonly cli: {
     readonly commandArgs: readonly string[];
     readonly binary: string;

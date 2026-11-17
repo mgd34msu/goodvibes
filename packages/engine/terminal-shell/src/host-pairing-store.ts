@@ -67,7 +67,7 @@ export type RemoveHostPairingResult<Reason extends string = string> =
 export type HostPairingIO = BoundedJsonFileIO;
 class HostPairingRefusal extends Error {
   constructor(
-    readonly cause: HostPairingUnavailableCause,
+    override readonly cause: HostPairingUnavailableCause,
     readonly detail: string,
     readonly path?: string | undefined,
     readonly expected?: string | undefined,

@@ -2,8 +2,9 @@ import type { LegacyImportOperatorSession } from './legacy-work-ledger-import-op
 import type { LegacyImportEntry } from './legacy-work-ledger-import-journal.js';
 import { legacyMigrationPreparationRevision, projectLegacyImportWorks } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { commandRefusal } from './command-confirmation.js';
+import type { TerminalCommandEffect } from './command-registry.js';
 interface Context { print(text: string): void }
-interface Registry<T extends Context> { register(command: { name: string; description: string; usage: string; argsHint: string; handler(args: string[], context: T): Promise<void> }): void }
+interface Registry<T extends Context> { register(command: { name: string; effect: TerminalCommandEffect; description: string; usage: string; argsHint: string; handler(args: string[], context: T): Promise<void> }): void }
 const quote = (value: string): string => JSON.stringify(value).replace(/[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
 const usage = 'preview|status|submit <project-id> | reconsider|recover|cancel|restart <project-id> [request-id]';
 /** The saved import's state and the one command that moves it on. */

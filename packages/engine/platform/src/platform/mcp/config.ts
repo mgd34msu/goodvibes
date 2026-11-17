@@ -31,6 +31,11 @@ export interface McpServerConfig {
   allowedPaths?: string[] | undefined;
   /** Optional allowed network hostnames for network-oriented tools. */
   allowedHosts?: string[] | undefined;
+  /**
+   * How long one tool call may wait for this server's answer, in milliseconds,
+   * before it is cancelled and the server told. Absent: 120 s. 0: no deadline.
+   */
+  toolTimeoutMs?: number | undefined;
 }
 
 export interface McpConfig {
@@ -94,6 +99,18 @@ function knownValue<T extends string>(server: string, field: string, value: unkn
   return undefined;
 }
 
+/** A tool-call deadline as written in a file: a whole, non-negative number of milliseconds, or absent. */
+function isToolTimeout(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function optionalToolTimeout(server: string, value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (isToolTimeout(value)) return value;
+  logger.warn('MCP server config: toolTimeoutMs must be a whole number of milliseconds (0 for no deadline); the default applies', { server, value: String(value) });
+  return undefined;
+}
+
 function normalizeServerConfig(name: string, raw: Record<string, unknown>): McpServerConfig | null {
   const command = typeof raw.command === 'string' && raw.command.trim() ? raw.command : undefined;
   const url = typeof raw.url === 'string' && raw.url.trim() ? raw.url : undefined;
@@ -109,6 +126,7 @@ function normalizeServerConfig(name: string, raw: Record<string, unknown>): McpS
     trustMode: knownValue<NonNullable<McpServerConfig['trustMode']>>(name, 'trustMode', raw.trustMode, MCP_TRUST_MODES),
     allowedPaths: optionalStringArray(raw.allowedPaths),
     allowedHosts: optionalStringArray(raw.allowedHosts),
+    toolTimeoutMs: optionalToolTimeout(name, raw.toolTimeoutMs),
   };
 }
 
@@ -200,7 +218,7 @@ function readServerEntry(entry: unknown): McpServerConfig | null {
 }
 
 /** Fields this module models; anything else in a file is the user's and is carried through a rewrite. */
-const MODELLED_SERVER_FIELDS = new Set(['name', 'command', 'url', 'args', 'env', 'headers', 'role', 'trustMode', 'allowedPaths', 'allowedHosts']);
+const MODELLED_SERVER_FIELDS = new Set(['name', 'command', 'url', 'args', 'env', 'headers', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'toolTimeoutMs']);
 
 function readUnmodelledFields(path: string): Map<string, Record<string, unknown>> {
   const found = new Map<string, Record<string, unknown>>();
@@ -307,6 +325,9 @@ function assertServerConfig(server: McpServerConfig): void {
   if (server.trustMode !== undefined && !MCP_TRUST_MODES.has(server.trustMode)) {
     throw new Error(`MCP server trustMode '${server.trustMode}' is not one of: ${[...MCP_TRUST_MODES].join(', ')}.`);
   }
+  if (server.toolTimeoutMs !== undefined && !isToolTimeout(server.toolTimeoutMs)) {
+    throw new Error('MCP server toolTimeoutMs must be a whole number of milliseconds, 0 for no deadline.');
+  }
   const hasCommand = Boolean(server.command?.trim());
   const hasUrl = Boolean(server.url?.trim());
   if (!hasCommand && !hasUrl) throw new Error('MCP server needs a command (stdio) or a url (HTTP).');
@@ -338,6 +359,7 @@ function writeMcpConfigFile(path: string, config: McpConfig, removedName?: strin
         ...(server.trustMode !== undefined ? { trustMode: server.trustMode } : {}),
         ...(server.allowedPaths !== undefined ? { allowedPaths: [...server.allowedPaths] } : {}),
         ...(server.allowedHosts !== undefined ? { allowedHosts: [...server.allowedHosts] } : {}),
+        ...(server.toolTimeoutMs !== undefined ? { toolTimeoutMs: server.toolTimeoutMs } : {}),
       };
     }), ...unparsed],
   };
@@ -476,5 +498,6 @@ function isServerEntry(s: unknown): s is McpServerConfig {
   if (srv['trustMode'] !== undefined && typeof srv['trustMode'] !== 'string') return false;
   if (srv['allowedPaths'] !== undefined && (!Array.isArray(srv['allowedPaths']) || !srv['allowedPaths'].every((a: unknown) => typeof a === 'string'))) return false;
   if (srv['allowedHosts'] !== undefined && (!Array.isArray(srv['allowedHosts']) || !srv['allowedHosts'].every((a: unknown) => typeof a === 'string'))) return false;
+  if (srv['toolTimeoutMs'] !== undefined && !isToolTimeout(srv['toolTimeoutMs'])) return false;
   return true;
 }

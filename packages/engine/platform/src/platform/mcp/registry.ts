@@ -596,7 +596,7 @@ export class McpRegistry {
         throw new Error(`MCP call '${qualifiedName}' denied by hook: ${(preResult as { reason?: string }).reason ?? 'no reason'}`);
       }
 
-      const deadlineMs = options?.deadlineMs ?? DEFAULT_TOOL_CALL_DEADLINE_MS;
+      const deadlineMs = options?.deadlineMs ?? this.serverConfigs.get(serverName)?.toolTimeoutMs ?? DEFAULT_TOOL_CALL_DEADLINE_MS;
       const deadline = new AbortController();
       const sentAt = performance.now();
       if (deadlineMs > 0) {
@@ -642,7 +642,7 @@ export class McpRegistry {
         if (deadline.signal.aborted && err === deadline.signal.reason) {
           const health = await this.checkServerHealth(serverName).catch(() => null);
           failure = new Error(`${summarizeError(err)} ${health?.responsive
-            ? `The server still answers a health check (${health.elapsedMs} ms), so the tool itself is slow; call it again with less work, or raise the deadline.`
+            ? `The server still answers a health check (${health.elapsedMs} ms), so the tool itself is slow and may still finish what it was asked; call it again with less work, or raise toolTimeoutMs for '${serverName}' in its MCP settings file.`
             : 'The server did not answer a health check either; run /mcp reload (or reload the MCP configuration) to restart it.'}`);
         }
         // Fail:mcp:call hook (fire-and-forget)

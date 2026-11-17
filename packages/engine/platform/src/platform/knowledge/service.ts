@@ -257,11 +257,23 @@ export class KnowledgeService {
     };
   }
 
-  private getConsolidationContext() {
+  /**
+   * Accepting a source-refresh candidate re-fetches that one source through the
+   * same refresh the refresh-stale job runs. A person's accept is admitted like
+   * any other fetch; a consolidation job was admitted when it was requested.
+   */
+  private getConsolidationContext(options: { readonly admitRefresh?: boolean | undefined } = {}) {
     return {
       store: this.store,
       memoryRegistry: this.options.memoryRegistry,
       syncReviewedMemory: this.syncReviewedMemory.bind(this),
+      refreshSource: async (sourceId: string): Promise<number> => {
+        if (options.admitRefresh) this.requireAdmission('knowledge source refresh');
+        const source = this.store.getSource(sourceId);
+        if (!source) return 0;
+        return refreshKnowledgeSources(this.getIngestContext(),
+          pickKnowledgeRefreshCandidates({ store: { listSources: () => [source] } }, 'stale', [sourceId], 1));
+      },
     };
   }
 
@@ -1011,7 +1023,7 @@ export class KnowledgeService {
       readonly detail?: string | undefined;
     } = {},
   ): Promise<KnowledgeConsolidationCandidateRecord> {
-    return decideKnowledgeConsolidationCandidate(this.getConsolidationContext(), id, decision, input);
+    return decideKnowledgeConsolidationCandidate(this.getConsolidationContext({ admitRefresh: true }), id, decision, input);
   }
 
   listJobRuns(limit = 100, jobId?: string): readonly KnowledgeJobRunRecord[] {

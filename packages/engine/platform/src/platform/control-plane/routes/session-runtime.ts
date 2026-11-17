@@ -345,7 +345,14 @@ export function createSessionRuntimeControls(deps: {
   readonly liveTurnHolder?: SessionLiveTurnControlsHolder | undefined;
   readonly channelSessions?: Pick<InboundIntakeBroker, 'getSession' | 'setChannelExecutionMode'> | undefined;
   readonly channelModeChanged?: ((sessionId: string, mode: GatePresetName, previousMode: GatePresetName) => void) | undefined;
+  /**
+   * The mode in force for a chosen mode (PermissionManager.modeInForce):
+   * jev-decides reads as ask-me while no decision model works, which is what
+   * decides the session's calls. Absent: the chosen mode is reported.
+   */
+  readonly modeInForce?: ((chosen: GatePresetName) => GatePresetName) | undefined;
 }): SessionRuntimeControls {
+  const inForce = (chosen: GatePresetName): GatePresetName => deps.modeInForce?.(chosen) ?? chosen;
   const LOCAL_RUNTIME_ALIAS = 'runtime';
   return {
     isLocalSession(sessionId: string): boolean {
@@ -370,11 +377,11 @@ export function createSessionRuntimeControls(deps: {
       const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);
       if (hosted) {
         if (!hosted.getPermissionMode) throw new GatewayVerbError('Hosted execution mode is unavailable.', 'LIVE_MODE_UNAVAILABLE', 409);
-        return hosted.getPermissionMode();
+        return inForce(hosted.getPermissionMode());
       }
       const channel = sessionId && deps.channelSessions?.getSession?.(sessionId);
-      if (channel && channel.channelPermissionMode !== undefined) return channel.channelPermissionMode;
-      return effectivePermissionMode(deps.config.get('permissions.mode'), deps.config.get('behavior.autoApprove') === true);
+      if (channel && channel.channelPermissionMode !== undefined) return inForce(channel.channelPermissionMode);
+      return inForce(effectivePermissionMode(deps.config.get('permissions.mode'), deps.config.get('behavior.autoApprove') === true));
     },
     setPermissionMode(mode: PermissionMode, sessionId?: string): void | Promise<void> {
       const hosted = sessionId && deps.liveTurnHolder?.getSession(sessionId);

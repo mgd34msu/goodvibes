@@ -204,6 +204,12 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    */
   readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'attachProfileFallback'> & Partial<Pick<ConfigManager, 'onDidInvalidate' | 'attachProfilePostalFallback' | 'subscribe' | 'resolveForConsumer' | 'setMany'>>;
   /**
+   * The mode in force for a chosen mode (the permission manager's
+   * modeInForce), so sessions.permissionMode.get reports what decides the
+   * session's calls. Absent: the chosen mode is reported.
+   */
+  readonly modeInForce?: ((chosen: import('../../gate/presets.js').GatePresetName) => import('../../gate/presets.js').GatePresetName) | undefined;
+  /**
    * Runtime store backing sessions.contextUsage.get and the local-session
    * resolution the session-runtime verbs gate on (getState().session.id).
    */
@@ -608,6 +614,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       providerRegistry: deps.providerRegistry,
       liveTurnHolder: deps.sessionLiveTurnControls,
       channelSessions: deps.sessionIntake,
+      modeInForce: deps.modeInForce,
       channelModeChanged: (sessionId, mode, previousMode) => {
         deps.runtimeBus?.emit('gate', createEventEnvelope('PRESET_CHANGED', {
           type: 'PRESET_CHANGED', mode, previousMode, preset: mode, previousPreset: previousMode,

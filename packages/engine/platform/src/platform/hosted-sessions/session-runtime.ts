@@ -199,6 +199,9 @@ export interface HostedSessionRuntime {
 /** Compose one hosted session's loop over an already-acquired workspace floor. */
 export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions): HostedSessionRuntime {
   const services = options.floor.services;
+  // The mode this session chose. The permission manager reads it through
+  // modeInForce, so jev-decides asks the owner while no decision model works
+  // and hands decisions to Jev as soon as one does, without a mode change.
   let permissionMode = options.permissionMode ?? effectivePermissionMode(services.configManager.get('permissions.mode'), services.configManager.get('behavior.autoApprove') === true);
   let modeRevision = 0;
   let permissionModePersisted = true;
@@ -241,7 +244,9 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     featureFlags: services.featureFlags,
     announcementStore,
     attended: options.attended,
-    permissionMode: () => permissionMode,
+    // The mode in force, not only the one chosen: with no working decision
+    // model, jev-decides asks the owner here as it does for tool calls.
+    permissionMode: () => services.permissionManager.modeInForce(permissionMode),
   });
 
   const inbox = options.ownerQuestions;

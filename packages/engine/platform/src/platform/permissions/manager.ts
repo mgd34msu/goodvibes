@@ -29,7 +29,7 @@ import { decisionModelReady, effectivePermissionMode, presetForMode, type GatePr
 import { gateDecisionsCalibrated } from '../gate/calibration.js';
 import { judgmentInputBoundary, runBoundary } from '../gate/boundary.js';
 import { readToolCall, shellCommandsIn } from '../gate/reading.js';
-import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode } from '../gate/execution-context.js';
+import { currentExecutionMode, currentExecutionModeForReadDecision, currentExecutionModeOwner, isInvocationAdmitted, withExecutionMode, type ExecutionModeOwner } from '../gate/execution-context.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
 import { currentTurnSurfaceId } from '../security/turn-boundary.js';
 import { effectPermittedForProvenance } from '../gate/surface-authority.js';
@@ -707,7 +707,7 @@ export class PermissionManager {
     if (!scope) throw new Error('Autonomous execution requires a coherent permission owner snapshot');
     assertAutonomousData(scope);
     const executionOwner = currentExecutionModeOwner();
-    const mode = executionOwner?.getMode() ?? effectivePermissionMode(scope.permissions.mode, scope.autoApprove, this.decisionModelWorks());
+    const mode = executionOwner ? this.ownerMode(executionOwner) : effectivePermissionMode(scope.permissions.mode, scope.autoApprove, this.decisionModelWorks());
     const frame = { ...scope, permissions: { ...scope.permissions, mode }, autoApprove: false,
       executionOwnerRevision: executionOwner?.getRevision(), source, surface, rules, rulePublication, policyRules, policyPublication, policyEnabled,
       exposure,
@@ -1711,7 +1711,7 @@ export class PermissionManager {
    */
   getMode(): GatePresetName {
     const scoped = currentExecutionModeOwner();
-    if (scoped) return scoped.getMode();
+    if (scoped) return this.ownerMode(scoped);
     const native = nativePermissionConfigs.get(this.configReader);
     if (native && Object.getOwnPropertyDescriptor(this.configReader, 'getAutonomousSnapshot')?.value === native.snapshot) {
       const frame = native.owner.readMode();
@@ -1732,11 +1732,11 @@ export class PermissionManager {
     };
     const frame = snapshot();
     const assertConfiguration = capturePermissionConfiguration(this.configReader, snapshot, frame);
-    const mode = owner?.getMode() ?? effectivePermissionMode(frame.permissions.mode, frame.autoApprove, this.decisionModelWorks());
+    const mode = owner ? this.ownerMode(owner) : effectivePermissionMode(frame.permissions.mode, frame.autoApprove, this.decisionModelWorks());
     return Object.freeze({ mode, assertCurrent: () => {
       assertConfiguration();
       if (currentExecutionModeOwner() !== owner || owner?.getRevision() !== ownerRevision
-        || (owner && owner.getMode() !== mode)) {
+        || (owner && this.ownerMode(owner) !== mode)) {
         throw new Error('Execution mode owner or configuration changed during the invocation');
       }
     } });
@@ -1788,6 +1788,21 @@ export class PermissionManager {
   /** Whether Jev can decide now: the decision-model settings, read when a decision is made. */
   private decisionModelWorks(): boolean {
     return this.configReader.isDecisionModelReady?.() ?? true;
+  }
+
+  /**
+   * The mode in force for a mode a session or surface chose: jev-decides is
+   * ask-me while no decision model works, the same rule the configured mode
+   * follows, so judgments go to the owner rather than to a model that cannot
+   * answer. Read per call: setting up a decision model takes effect at once.
+   */
+  modeInForce(chosen: unknown): GatePresetName {
+    return effectivePermissionMode(chosen, false, this.decisionModelWorks());
+  }
+
+  /** A session owner's mode in force; the owner holds the mode the session chose. */
+  private ownerMode(owner: ExecutionModeOwner): GatePresetName {
+    return this.modeInForce(owner.getMode());
   }
 
   /**

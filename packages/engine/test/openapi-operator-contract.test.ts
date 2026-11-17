@@ -4,8 +4,9 @@
  * Proves the published OpenAPI 3.1 operator contract is complete and honest:
  *
  *   - every cataloged operator method appears (REST-bound methods as path
- *     operations, invoke-only methods listed on the generic invoke endpoint,
- *     and ALL methods in the x-operator-methods index);
+ *     operations, invoke-only methods listed on the generic invoke endpoint
+ *     at the path the daemon routes, and ALL methods in the x-operator-methods
+ *     index);
  *   - replay keys declared on the methods are named, header and body alike;
  *   - auth schemes mirror the contract's auth block.
  *
@@ -16,6 +17,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { GATEWAY_METHOD_INVOKE_PATH } from '../daemon-api/src/operator.ts';
 
 const ROOT = join(import.meta.dir, '..');
 const openapiText = readFileSync(join(ROOT, 'contracts/artifacts/operator-openapi.json'), 'utf8');
@@ -66,8 +68,8 @@ describe('published OpenAPI operator contract', () => {
     }
   });
 
-  test('invoke-only methods are listed on the generic invoke endpoint, not dropped', () => {
-    const invokeOp = doc.paths['/api/control/gateway-methods/{methodId}/invoke']?.post;
+  test('invoke-only methods are listed on the generic invoke endpoint the daemon serves, not dropped', () => {
+    const invokeOp = doc.paths[GATEWAY_METHOD_INVOKE_PATH]?.post;
     expect(invokeOp).toBeDefined();
     const listed = new Set(invokeOp!['x-invoke-only-methods'] ?? []);
     const invokeOnly = contract.operator.methods.filter((m) => !m.http);

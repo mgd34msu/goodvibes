@@ -6,6 +6,7 @@ import { resolveAndValidatePath, summarizeError } from '@goodvibes-jev/engine/pl
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
+import { commandRefusal } from './command-confirmation.js';
 export interface LocalCommandContext {
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
@@ -35,10 +36,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
 ) {
   function toggleBlocks(typeFilter: string, collapsed: boolean, ctx: Context): void {
     const VALID_TYPES = ['all', 'thinking', 'tool', 'code'] as const;
-    if (!VALID_TYPES.includes(typeFilter as (typeof VALID_TYPES)[number])) {
-      ctx.print(policy.invalidBlockType(typeFilter, VALID_TYPES));
-      return;
-    }
+    if (!VALID_TYPES.includes(typeFilter as (typeof VALID_TYPES)[number])) throw commandRefusal(policy.invalidBlockType(typeFilter, VALID_TYPES));
     const blockRegistry = ctx.session.conversationManager.getBlockRegistry();
     if (!blockRegistry || blockRegistry.length === 0) {
       ctx.print('No blocks found.');
@@ -98,29 +96,19 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
       // The prompt after the path is free text, sent as typed.
       rawRest: 1,
       async handler(args: string[], ctx: Context) {
-        if (args.length === 0) {
-          ctx.print('Usage: /image <path> [prompt text]\nSupported formats: PNG, JPEG, WebP, GIF');
-          return;
-        }
+        if (args.length === 0) throw commandRefusal('Usage: /image <path> [prompt text]', 'Supported formats: PNG, JPEG, WebP, GIF');
         const rawPath = args[0];
         if (rawPath === undefined) return;
         const promptText = args.slice(1).join(' ') || `Attached image: ${rawPath.split('/').pop() ?? rawPath}`;
         const projectRoot = ctx.workspace.shellPaths?.workingDirectory ?? ctx.platform.configManager.getWorkingDirectory();
-        if (!projectRoot) {
-          ctx.print(policy.error('working directory is unavailable.'));
-          return;
-        }
+        if (!projectRoot) throw commandRefusal(policy.error('working directory is unavailable.'));
         let resolvedPath: string;
         try {
           resolvedPath = resolveAndValidatePath(rawPath, projectRoot);
         } catch (err) {
-          ctx.print(policy.error(summarizeError(err)));
-          return;
+          throw commandRefusal(policy.error(summarizeError(err)));
         }
-        if (!existsSync(resolvedPath)) {
-          ctx.print(policy.imageFailure('File not found', rawPath));
-          return;
-        }
+        if (!existsSync(resolvedPath)) throw commandRefusal(policy.imageFailure('File not found', rawPath));
         const ext = resolvedPath.slice(resolvedPath.lastIndexOf('.')).toLowerCase();
         const mediaType = (
           { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' } as Record<
@@ -128,21 +116,14 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
             string
           >
         )[ext];
-        if (!mediaType) {
-          ctx.print(policy.imageFailure('Unsupported image format', ext) + policy.supportedFormats);
-          return;
-        }
+        if (!mediaType) throw commandRefusal(policy.imageFailure('Unsupported image format', ext) + policy.supportedFormats);
         const stat = statSync(resolvedPath);
-        if (stat.size > MAX_IMAGE_ATTACH_BYTES) {
-          ctx.print(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). ${policy.maximumImageSize}`);
-          return;
-        }
+        if (stat.size > MAX_IMAGE_ATTACH_BYTES) throw commandRefusal(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB).`, policy.maximumImageSize);
         let data: string;
         try {
           data = (await readFile(resolvedPath)).toString('base64');
         } catch (err) {
-          ctx.print(policy.imageFailure('Failed to read image', summarizeError(err)));
-          return;
+          throw commandRefusal(policy.imageFailure('Failed to read image', summarizeError(err)));
         }
         const currentModel = await requireProviderApi(ctx).getCurrentModel();
         if (!currentModel.capabilities.multimodal) {
@@ -152,10 +133,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
           { type: 'text', text: promptText },
           { type: 'image', data, mediaType },
         ];
-        if (!ctx.submitTurn) {
-          ctx.print('The image was not sent: this surface cannot send a message.');
-          return;
-        }
+        if (!ctx.submitTurn) throw commandRefusal('The image was not sent: this surface cannot send a message.');
         ctx.submitTurn(promptText, content);
       },
     } satisfies TerminalSlashCommand<Context>,
@@ -268,10 +246,7 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
       async handler(args: string[], ctx: Context) {
         const providerApi = requireProviderApi(ctx);
         const modelId = args[0];
-        if (!modelId) {
-          ctx.print('Usage: /unpin <model-id>');
-          return;
-        }
+        if (!modelId) throw commandRefusal('Usage: /unpin <model-id>');
         const favorites = await providerApi.getFavorites();
         const pinned = favorites.pinned.find(
           (entry) => entry.registryKey === modelId || (policy.unpinByModelId && entry.modelId === modelId),

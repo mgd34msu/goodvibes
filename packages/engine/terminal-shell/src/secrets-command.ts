@@ -13,7 +13,7 @@ import {
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import type { TerminalSlashCommand } from './command-registry.js';
-import { requireYesFlag, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag, type ConfirmableCommand } from './command-confirmation.js';
 import type { CommandSubcommandHints } from './command-args-hint.js';
 
 interface SecretsCommandContext {
@@ -83,7 +83,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
       const store = manager(context);
       const parsed = policy.confirmMutations ? stripYesFlag(args) : { rest: args, yes: true };
       const [subcommand, ...rest] = parsed.rest;
-      const invalidReference = () => context.print('[secrets] Invalid secret reference. Use /secrets providers for examples.');
+      const invalidReference = (): never => { throw commandRefusal('[secrets] Invalid secret reference.', 'Use /secrets providers for examples.'); };
       if (!subcommand || subcommand === 'list') {
         const records = (await store.listDetailed()).filter((record) => record.source !== 'env');
         context.print(
@@ -114,18 +114,16 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
       if (subcommand === 'test') {
         const reference = rest.join(' ').trim();
         if (!reference) {
-          context.print('[secrets] Usage: /secrets test <secret-ref>');
-          return;
+          throw commandRefusal('[secrets] Usage: /secrets test <secret-ref>');
         }
         if (!isGoodVibesSecretRefInput(reference)) {
           invalidReference();
-          return;
         }
         try {
           const result = await resolveSecretRef(reference, { resolveLocalSecret: (key) => store.get(key) });
           context.print(policy.resolved(describeSecretRef(reference), result.value ? 'resolved <redacted>' : 'missing'));
         } catch (error) {
-          context.print(policy.failed(describeSecretRef(reference), summarizeError(error)));
+          throw commandRefusal(policy.failed(describeSecretRef(reference), summarizeError(error)));
         }
         return;
       }
@@ -142,15 +140,13 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         }
         const unknownFlags = [...flags].filter((flag) => !SET_OPTIONS.has(flag));
         if (unknownFlags.length) {
-          context.print(
+          throw commandRefusal(
             `[secrets] An argument starting with -- is not a known option (${[...SET_OPTIONS].join(', ')}). To store a value that starts with --, put it after a bare --.\nUsage: ${mutationUsage(subcommand)}`,
           );
-          return;
         }
         const [key, ...parts] = positional;
         if (!key) {
-          context.print(`[secrets] Usage: ${mutationUsage(subcommand)}`);
-          return;
+          throw commandRefusal(`[secrets] Usage: ${mutationUsage(subcommand)}`);
         }
         if (!parsed.yes) {
           requireYesFlag(
@@ -165,8 +161,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         const medium = flags.has('--plaintext') ? 'plaintext' : 'secure';
         if (policy.concealedEntry && subcommand === 'set' && parts.length === 0) {
           if (!context.beginConcealedInput) {
-            context.print(`[secrets] Usage: ${mutationUsage(subcommand)}`);
-            return;
+            throw commandRefusal(`[secrets] Usage: ${mutationUsage(subcommand)}`);
           }
           context.print(`[secrets] Enter value for ${key} (input is masked; press Enter to store, Esc to cancel).`);
           context.beginConcealedInput({
@@ -189,20 +184,17 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         // quotes is an ordinary character). Several words would have to be
         // re-joined with guessed spacing, so they are refused instead.
         if (parts.length > 1) {
-          context.print(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly; inside the quotes write \\\\ for a backslash and \\" for a quote, or run /secrets set ${key}${suffix} with no value to type it masked where that is offered.\nUsage: ${mutationUsage(subcommand)}`);
-          return;
+          throw commandRefusal(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly; inside the quotes write \\\\ for a backslash and \\" for a quote, or run /secrets set ${key}${suffix} with no value to type it masked where that is offered.\nUsage: ${mutationUsage(subcommand)}`);
         }
         const value = parts[0] ?? '';
         if (!value.length) {
-          context.print(`[secrets] Nothing was stored: no value given for ${key}.\nUsage: ${mutationUsage(subcommand)}`);
-          return;
+          throw commandRefusal(`[secrets] Nothing was stored: no value given for ${key}.\nUsage: ${mutationUsage(subcommand)}`);
         }
         if (
           (subcommand === 'link' && !isGoodVibesSecretRefInput(value)) ||
           (subcommand === 'set' && isMalformedGoodVibesSecretRefInput(value))
         ) {
           invalidReference();
-          return;
         }
         await store.set(key, value, { scope, medium });
         context.print(
@@ -215,21 +207,18 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
       if (subcommand === 'trust') {
         const key = rest.find((value) => !value.startsWith('--'));
         if (!key) {
-          context.print(`[secrets] Usage: ${trustUsage}`);
-          return;
+          throw commandRefusal(`[secrets] Usage: ${trustUsage}`);
         }
         if (!parsed.yes) {
           requireYesFlag(context, `use ${key} from this project's secret store`, trustUsage);
           return;
         }
         if (!store.confirmProjectSecret) {
-          context.print(`[secrets] Nothing was confirmed: this app does not read this project's secret store. Store ${key} with /secrets set ${key} <value> --user${suffix}.`);
-          return;
+          throw commandRefusal(`[secrets] Nothing was confirmed: this app does not read this project's secret store. Store ${key} with /secrets set ${key} <value> --user${suffix}.`);
         }
         const confirmed = store.confirmProjectSecret(key);
-        context.print(confirmed.length
-          ? `[secrets] ${key} from this project's secret store is used from now on (${confirmed.join(', ')}).`
-          : `[secrets] Nothing was confirmed: ${key} is not in this project's secret store. /secrets list shows what is stored.`);
+        if (!confirmed.length) throw commandRefusal(`[secrets] Nothing was confirmed: ${key} is not in this project's secret store.`, '/secrets list shows what is stored.');
+        context.print(`[secrets] ${key} from this project's secret store is used from now on (${confirmed.join(', ')}).`);
         return;
       }
       if (subcommand === 'get') {
@@ -239,7 +228,8 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
           return;
         }
         const value = await store.get(key);
-        context.print(value === null ? `[secrets] Not found: ${key}` : `[secrets] ${key} = <stored> (use /secrets list to see all keys)`);
+        if (value === null) throw commandRefusal(`[secrets] Not found: ${key}`, 'Use /secrets list to see all keys.');
+        context.print(`[secrets] ${key} = <stored> (use /secrets list to see all keys)`);
         return;
       }
       if (subcommand === 'delete') {
@@ -247,15 +237,13 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         const unknownFlags = [...flags].filter((flag) => !SET_OPTIONS.has(flag));
         if (unknownFlags.length) {
           // Deleting at a default scope the person did not ask for is not recoverable.
-          context.print(
+          throw commandRefusal(
             `[secrets] An argument starting with -- is not a known option (${[...SET_OPTIONS].join(', ')}). Nothing was deleted.\nUsage: ${deletionUsage}`,
           );
-          return;
         }
         const key = rest.find((value) => !value.startsWith('--'));
         if (!key) {
-          context.print(`[secrets] Usage: ${deletionUsage}`);
-          return;
+          throw commandRefusal(`[secrets] Usage: ${deletionUsage}`);
         }
         if (!parsed.yes) {
           requireYesFlag(context, `delete secret ${key}`, deletionUsage);
@@ -268,7 +256,7 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
         context.print(policy.deleted(key));
         return;
       }
-      context.print(`[secrets] Usage: /secrets ${usage}`);
+      throw commandRefusal(`[secrets] Usage: /secrets ${usage}`);
     },
   };
 }

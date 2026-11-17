@@ -7,6 +7,7 @@ import { describeRetainedConnectionFailure, RetainedOperatorConnection, type Ret
 import type { OpenSelection, SelectionItem, SelectionResult } from './selection-modal.js';
 import { stripDangerousAnsi } from './ansi-sanitize.js';
 import { isPairedOperatorPrincipal } from './native/native-paired-principal.js';
+import { commandRefusal } from './command-confirmation.js';
 
 export interface PaymentWindowCommandContext {
   readonly print: (message: string) => void;
@@ -55,8 +56,7 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
         environment: policy.environment, fetchImpl: policy.fetchImpl, signal: ownerAbort.signal,
       });
     } catch (error) {
-      context.print(`[payments] ${describeRetainedConnectionFailure(error, 'reopen /payments pending')}`);
-      return;
+      throw commandRefusal(`[payments] ${describeRetainedConnectionFailure(error, 'reopen /payments pending')}`);
     }
     let closed = false;
     let replacing = false;
@@ -312,8 +312,7 @@ export function createPaymentApproveCommand<Context extends PaymentWindowCommand
         environment: policy.environment, fetchImpl: policy.fetchImpl, signal: ownerAbort.signal,
       });
     } catch (error) {
-      context.print(`[payments] ${describeRetainedConnectionFailure(error, 'run /payments approve again')} Nothing was approved.`);
-      return;
+      throw commandRefusal(`[payments] ${describeRetainedConnectionFailure(error, 'run /payments approve again')} Nothing was approved.`);
     }
     const finish = () => { ownerAbort.abort(); void connection.close(); };
     const report = (message: string) => { context.print(message); context.renderRequest(); };
@@ -442,8 +441,7 @@ export function createPaymentStandingCommand<Context extends PaymentWindowComman
         environment: policy.environment, fetchImpl: policy.fetchImpl, signal: ownerAbort.signal,
       });
     } catch (error) {
-      context.print(`[payments] ${describeRetainedConnectionFailure(error, 'run /payments standing again')}`);
-      return;
+      throw commandRefusal(`[payments] ${describeRetainedConnectionFailure(error, 'run /payments standing again')}`);
     }
     const finish = () => { ownerAbort.abort(); void connection.close(); };
     const report = (message: string) => { context.print(message); context.renderRequest(); };

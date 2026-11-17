@@ -280,8 +280,7 @@ export function createLocalProviderCommands<Context extends LocalProviderCommand
           }
           const file = paths.resolveUserPath(policy.surfaceRoot, 'providers', `${name}.json`);
           if (!existsSync(file)) {
-            context.print(`No custom provider '${name}' found at ${file}`);
-            return;
+            throw commandRefusal(`No custom provider '${name}' found at ${file}`);
           }
           try {
             await unlink(file);

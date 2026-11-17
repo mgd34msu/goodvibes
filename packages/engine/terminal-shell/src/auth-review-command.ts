@@ -1,10 +1,10 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { requireYesFlag } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag } from './command-confirmation.js';
 import { buildAuthInspectionSnapshot, inspectProviderAuth } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
 interface AuthReviewContext {
-  print(message: string): void;
+  throw commandRefusal(message: string): void;
 }
 export function createAuthReviewHandler<Context extends AuthReviewContext>(policy: {
   readonly review: (snapshot: Awaited<ReturnType<typeof buildAuthInspectionSnapshot>>, providers: string[]) => string[];
@@ -18,7 +18,6 @@ export function createAuthReviewHandler<Context extends AuthReviewContext>(polic
     const provider = args[1];
     if (sub !== 'review' && !provider) {
       ctx.print(`Usage: /auth ${sub} <provider>`);
-      return true;
     }
     try {
       if (sub === 'review') {
@@ -70,8 +69,7 @@ export function createAuthBundleHandler<Context extends AuthReviewContext, Bundl
       path = args[2];
     if (mode !== 'export' && mode !== 'inspect') return false;
     if (!path) {
-      context.print(`Usage: /auth bundle ${mode} <path>${mode === 'export' && policy.confirmExport ? ' --yes' : ''}`);
-      return true;
+      throw commandRefusal(`Usage: /auth bundle ${mode} <path>${mode === 'export' && policy.confirmExport ? ' --yes' : ''}`);
     }
     const target = services.resolvePath(path);
     if (mode === 'export') {

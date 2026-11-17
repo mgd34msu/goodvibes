@@ -4,6 +4,7 @@ import {
   type NativeConversationIntakeState,
 } from './native-conversation-intake.js';
 import { nativeWorkSubmissionLines, type NativeWorkSubmissionActions } from './native-work-submission.js';
+import { commandRefusal } from '../command-confirmation.js';
 /** Recovery verbs share dispatch; the product declares whether a hosted turn may be resumed here. */
 export async function handleNativeIntakeCommand(
   args: readonly string[],
@@ -16,15 +17,9 @@ export async function handleNativeIntakeCommand(
 ): Promise<boolean> {
   const action = args[0];
   if (action !== 'intake-status' && action !== 'intake-retry' && action !== 'intake-resume' && action !== 'intake-cancel') return false;
-  if (args.length !== 1) {
-    context.print('Usage: /work intake-status | intake-retry | intake-resume | intake-cancel');
-    return true;
-  }
+  if (args.length !== 1) throw commandRefusal('Usage: /work intake-status | intake-retry | intake-resume | intake-cancel');
   const intake = context.nativeConversationIntake;
-  if (!intake) {
-    context.print('Native conversation intake is unavailable in this shell.');
-    return true;
-  }
+  if (!intake) throw commandRefusal('Native conversation intake is unavailable in this shell.');
   const result = await (action === 'intake-status'
     ? intake.status()
     : action === 'intake-retry'
@@ -49,13 +44,9 @@ export async function handleNativeSubmissionCommand(
   if (action !== 'submit-file' && action !== 'submission-status' && action !== 'submission-retry' && action !== 'submission-discard') return false;
   const path = args[1];
   if (args.length !== (action === 'submit-file' ? 2 : 1) || (action === 'submit-file' && path === undefined)) {
-    print('Usage: /work submit-file <JSON-path> | submission-status | submission-retry | submission-discard');
-    return true;
+    throw commandRefusal('Usage: /work submit-file <JSON-path> | submission-status | submission-retry | submission-discard');
   }
-  if (!submission) {
-    print('Native source submission is unavailable in this shell.');
-    return true;
-  }
+  if (!submission) throw commandRefusal('Native source submission is unavailable in this shell.');
   const result =
     action === 'submit-file' && path !== undefined
       ? await submission.submitFile(path)

@@ -1,6 +1,7 @@
 import { summarizeWorkPlanEdit, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createAgentWorkPlanTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn/work-plan-tool';
 import { isDirectOwnerCommandContext, type CommandRegistry } from '../command-registry.ts';
+import { commandRefusal } from './confirmation.ts';
 
 const LOCAL_STATUS: Readonly<Record<string, WorkPlanItemStatus>> = {
   pending: 'pending', start: 'in_progress', blocked: 'blocked', done: 'done', failed: 'failed', cancelled: 'cancelled',
@@ -30,7 +31,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
         return;
       }
       const store = ctx.workspace?.workPlan;
-      if (!store) { ctx.print('Local work plan is unavailable in this shell. Native owner work uses /work submit-file <JSON-path>.'); return; }
+      if (!store) throw commandRefusal('Local work plan is unavailable in this shell.', 'Native owner work uses /work submit-file <JSON-path>.');
       let input: LocalWorkPlanCommand;
       if ((action === 'show' || action === 'list') && args.length <= 1) input = { action: 'list' };
       else if (action === 'markdown' && args.length === 1) {
@@ -42,7 +43,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
         for (let i = 2; i < args.length; i += 2) {
           const key = args[i]!;
           if (!['--owner', '--source', '--notes'].includes(key) || args[i + 1] === undefined || key in fields) {
-            ctx.print(`Usage: ${USAGE}`); return;
+            throw commandRefusal(`Usage: ${USAGE}`);
           }
           fields[key] = args[i + 1]!;
         }
@@ -53,14 +54,15 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
         input = { action: 'remove', id: args[1]! };
       } else if (action === 'clear-completed' && args.length === 2 && args[1] === '--yes') {
         input = { action: 'clear_completed' };
-      } else { ctx.print(`Usage: ${USAGE}`); return; }
+      } else throw commandRefusal(`Usage: ${USAGE}`);
       if (input.action === 'list') {
         const result = await createAgentWorkPlanTool(store).execute({ ...input });
-        ctx.print((result.output ?? result.error ?? 'No local work-plan result.').split('\n').map(clean).join('\n'));
+        if (!result.success) throw commandRefusal(clean(result.error ?? 'The local work plan could not be read.'));
+        ctx.print((result.output ?? 'No local work-plan result.').split('\n').map(clean).join('\n'));
         return;
       }
       if (!isDirectOwnerCommandContext(ctx, 'workplan')) {
-        ctx.print('Local work-plan edits require a fresh terminal owner command.'); return;
+        throw commandRefusal('Local work-plan edits require a fresh terminal owner command; nothing was changed.', 'Ask the owner to type the /workplan line in the terminal.');
       }
       // Each edit is one transaction on the plan's rows; its answer carries the plan's counts.
       if (input.action === 'create') {

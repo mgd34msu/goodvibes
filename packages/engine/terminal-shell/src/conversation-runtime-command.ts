@@ -6,6 +6,7 @@ import type { ConversationManager, TranscriptReadingOptions } from '@goodvibes-j
 import type { TranscriptCommandContext } from './transcript-reading.js';
 import type { TerminalSlashCommand } from './command-registry.js';
 import type { UiSessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
+import { commandRefusal } from './command-confirmation.js';
 type RuntimeTranscriptConversation = Pick<ConversationManager, 'getMessageSnapshot' | 'getTranscriptEventIndex' | 'getMessageCount'> & {
   nextTranscriptEventLine(currentLine: number, kind?: TranscriptEventKind | 'all', options?: TranscriptReadingOptions): Promise<number>;
   prevTranscriptEventLine(currentLine: number, kind?: TranscriptEventKind | 'all', options?: TranscriptReadingOptions): Promise<number>;
@@ -190,8 +191,7 @@ async function buildConversationRestoreReview(ctx: Context, source: ReturnType<t
           return;
         }
         if (sub !== 'review' && sub !== 'status') {
-          ctx.print('Usage: /conversation [review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]');
-          return;
+          throw commandRefusal('Usage: /conversation [review|events [kind]|groups [kind]|hotspots|composer|find <query> [kind]|next [kind]|prev [kind]|restore]');
         }
 
         const index = await readTranscriptIndex(ctx, source);

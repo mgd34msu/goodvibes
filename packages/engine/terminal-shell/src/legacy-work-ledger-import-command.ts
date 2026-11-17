@@ -58,7 +58,7 @@ export function registerLegacyImportCommands<T extends Context>(registry: Regist
         }
         context.print(lines.join('\n'));
       } catch (error) {
-        context.print(`Legacy import ${initial && action !== 'submit' ? 'read' : 'operation'} unavailable: ${quote(error instanceof Error ? error.message : String(error))}${action === 'preview' || action === 'status' ? '' : `\nA request already sent stays saved with its id; run /work-import status ${project} for the next step.`}`);
+        throw commandRefusal(`Legacy import ${initial && action !== 'submit' ? 'read' : 'operation'} unavailable: ${quote(error instanceof Error ? error.message : String(error))}${action === 'preview' || action === 'status' ? '' : `\nA request already sent stays saved with its id; run /work-import status ${project} for the next step.`}`);
       } finally { session?.dispose(); }
     } });
 }

@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import type { ConfigKey, ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
+import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
 import { switchAlwaysSpeak } from './tts-runtime-commands.js';
 import { inspectVoiceBundle, isVoiceBundleKey, readVoiceBundle, type VoiceBundle } from './voice-settings-review.js';
@@ -130,16 +131,12 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
               ctx.print(`Voice bundle exported to ${target} (${Object.keys(settings).length} changed voice setting${Object.keys(settings).length === 1 ? '' : 's'}).`);
               return;
             }
-            if (!existsSync(target)) {
-              ctx.print('File not found: ' + target);
-              return;
-            }
+            if (!existsSync(target)) throw commandRefusal('File not found: ' + target);
             let value: unknown;
             try {
               value = JSON.parse(readFileSync(target, 'utf-8'));
             } catch (error) {
-              ctx.print('could not read voice bundle: ' + (error instanceof Error ? error.message : String(error)));
-              return;
+              throw commandRefusal('Could not read the voice bundle: ' + (error instanceof Error ? error.message : String(error)));
             }
             if (mode === 'inspect') {
               ctx.print(inspectVoiceBundle(value));
@@ -150,23 +147,16 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
               return;
             }
             const read = readVoiceBundle(value);
-            if ('problem' in read) {
-              ctx.print('Nothing was applied. ' + read.problem);
-              return;
-            }
+            if ('problem' in read) throw commandRefusal('Nothing was applied. ' + read.problem);
             const changes = Object.entries(read.bundle.settings).map(([key, setting]) => ({ key: key as ConfigKey, value: setting }));
             const result = ctx.platform.configManager.setMany(changes, { kind: 'owner', surface: 'voice' });
-            if (!result.ok) {
-              ctx.print(`Voice bundle not applied: ${result.refusal.reason} ${result.refusal.next.join(' ')}`.trim());
-              return;
-            }
+            if (!result.ok) throw commandRefusal(`Voice bundle not applied: ${result.refusal.reason}`, result.refusal.next.join(' ') || undefined);
             // The daemon's settings in the bundle went to it as one update; it is applied only once the daemon took it.
             const refused = result.pending ? await result.pending.settle() : [];
             if (refused.length > 0) {
               const first = refused[0]!;
               const kept = result.saved.length - refused.length;
-              ctx.print(`Voice bundle not fully applied: the daemon refused ${refused.map(refusal => refusal.key).join(', ')} (${first.error instanceof Error ? first.error.message : String(first.error)}), which keep their previous values${kept > 0 ? `; the other ${kept} setting${kept === 1 ? ' was' : 's were'} saved` : ''}.`);
-              return;
+              throw commandRefusal(`Voice bundle not fully applied: the daemon refused ${refused.map(refusal => refusal.key).join(', ')} (${first.error instanceof Error ? first.error.message : String(first.error)}), which keep their previous values${kept > 0 ? `; the other ${kept} setting${kept === 1 ? ' was' : 's were'} saved` : ''}.`);
             }
             ctx.print(`Voice bundle applied: ${result.saved.length} setting${result.saved.length === 1 ? '' : 's'} from ${target}.`);
             return;
@@ -174,8 +164,9 @@ export function createVoiceExperienceCommand<Context extends ExperienceContext>(
         }
         ctx.print(policy.help);
       } catch (error) {
-        if (!policy.reportFailure) throw error;
-        ctx.print('voice command failed: ' + (error instanceof Error ? error.message : String(error)));
+        // A refusal already says what was not done; anything else is reported as one.
+        if (!policy.reportFailure || readRefusal(error)) throw error;
+        throw commandRefusal('voice command failed: ' + (error instanceof Error ? error.message : String(error)));
       }
     },
   };

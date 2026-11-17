@@ -5,7 +5,7 @@ import type { ExportMessage } from '@goodvibes-jev/engine/platform/platform/expo
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalSlashCommand } from './command-registry.js';
-import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
 import { formatTranscript, parseTranscriptFormat, type TranscriptFormat } from './session-export-format.js';
 interface ContentContext {
   readonly session: {
@@ -97,7 +97,7 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
         await writeFile(resolvedPath, fileContent, 'utf-8');
         ctx.print(policy.exported(messages.length, resolvedPath));
       } catch (error) {
-        ctx.print(policy.failed('export conversation', error));
+        throw commandRefusal(policy.failed('export conversation', error));
       }
     },
   };
@@ -131,18 +131,15 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
     handler(args, ctx) {
       const last = ctx.session.conversationManager.getLastUserMessage();
       if (!last) {
-        ctx.print('No message to retry.');
-        return;
+        throw commandRefusal('No message to retry.');
       }
       if (!ctx.submitTurn) {
-        ctx.print('Retry is unavailable here: this surface cannot resubmit a message, so the conversation was left unchanged.');
-        return;
+        throw commandRefusal('Retry is unavailable here: this surface cannot resubmit a message, so the conversation was left unchanged.');
       }
       // Remove the old turn only when the message can be sent again, and send
       // nothing if it could not be removed (that would duplicate the turn).
       if (policy.retryRemovesLastTurn && !ctx.session.conversationManager.undo()) {
-        ctx.print('Nothing was retried: the last turn could not be removed, and sending it again would duplicate it. Type the message as a new prompt if you still want an answer.');
-        return;
+        throw commandRefusal('Nothing was retried: the last turn could not be removed, and sending it again would duplicate it. Type the message as a new prompt if you still want an answer.');
       }
       ctx.submitTurn(args.length ? args.join(' ') : last);
     },
@@ -191,7 +188,7 @@ export function createSessionSaveCommand<Context extends ContentContext>(policy:
         const result = manager.save(rawName, messages, meta, records, undefined, ctx.session.conversationManager.branchState?.(), { replace });
         ctx.print(policy.saved(rawName, result, records?.length ?? 0));
       } catch (error) {
-        ctx.print(policy.failed(error));
+        throw commandRefusal(policy.failed(error));
       }
     },
   };

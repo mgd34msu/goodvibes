@@ -20,8 +20,8 @@ const CHANNEL_COMMAND_EDITOR_SPECS: Readonly<Record<AgentWorkspaceChannelCommand
     fields: [
       { id: 'message', label: 'Message', value: '', required: true, multiline: true, hint: 'Plain-text message. Ctrl-J inserts a new line.' },
       { id: 'title', label: 'Title', value: '', required: false, multiline: false, hint: 'Optional delivery title. Blank uses the Agent default.' },
-      { id: 'channel', label: 'Channel target', value: '', required: false, multiline: false, hint: 'Optional surface[:route[:label]], such as slack:ops:Ops or telephony:+15551234567.' },
-      { id: 'route', label: 'Route target', value: '', required: false, multiline: false, hint: 'Optional route id or route:label.' },
+      { id: 'channel', label: 'Channel target', value: '', required: false, multiline: false, hint: 'Optional surface[:route][ | label], such as slack:C123 | Ops or telephony:+15551234567. The route id is taken whole, colons included.' },
+      { id: 'route', label: 'Route target', value: '', required: false, multiline: false, hint: 'Optional route id, or route id | label.' },
       { id: 'webhook', label: 'Webhook URL', value: '', required: false, multiline: false, hint: 'Optional http(s) webhook target.' },
       { id: 'link', label: 'Link target', value: '', required: false, multiline: false, hint: 'Optional link delivery target.' },
       { id: 'confirm', label: 'Confirm', value: '', required: true, multiline: false, hint: 'Type yes to run /channels send with --yes.' },

@@ -135,11 +135,11 @@ export function createAgentAutonomyScheduleTool(
           },
           deliveryChannel: {
             type: 'string',
-            description: 'Optional delivery channel target.',
+            description: 'Optional delivery channel target: "<channel>", "<channel>:<route id>" or "<channel>:<route id> | <label>".',
           },
           deliveryRoute: {
             type: 'string',
-            description: 'Optional connected route target: routeId:label.',
+            description: 'Optional connected route target: "<route id>" or "<route id> | <label>" (the route id is taken whole, colons included).',
           },
           deliveryWebhook: {
             type: 'string',

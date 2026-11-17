@@ -284,7 +284,7 @@ async function handleRoutinePromotion(runtime: CliCommandRuntime, args: readonly
       output: json
         ? JSON.stringify(failure, null, 2)
         : [
-            'Usage: goodvibes-agent routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route[:label]]>|--delivery-route <route[:label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
+            'Usage: goodvibes-agent routines promote <id> (--cron <expr>|--every <interval>|--at <iso-time>) [--timezone <tz>] [--name <schedule-name>] [--provider <id>] [--model <model>] [--delivery-channel <channel[:route][ | label]>|--delivery-route <route[ | label]>|--delivery-webhook <url>|--delivery-link <url>] [--disabled] --yes',
             ...parsed.errors.map((error) => `  ${error}`),
           ].join('\n'),
       exitCode: 2,

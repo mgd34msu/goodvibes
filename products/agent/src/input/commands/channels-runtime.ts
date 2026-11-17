@@ -458,7 +458,7 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
         }
         if (!parsed.yes) {
           ctx.print(formatAgentChannelDeliveryPreview(preview, router.listStrategies().length));
-          requireYesFlag(ctx, 'send a channel delivery message', '/channels send --channel <surface[:route[:label]]> --message <text> --yes');
+          requireYesFlag(ctx, 'send a channel delivery message', '/channels send --channel "<surface[:route][ | label]>" --message <text> --yes');
           return;
         }
         try {

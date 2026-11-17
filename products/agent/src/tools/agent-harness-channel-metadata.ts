@@ -137,7 +137,7 @@ function describeChannel(
           ],
           settingsFilter: `settings action:"list" prefix:"surfaces.${channel.id}" includeHidden:true`,
           connectedHostBoundary: 'host action:"capability" query:"delivery"',
-          deliveryTargetShape: 'surface[:route[:label]]',
+          deliveryTargetShape: 'surface[:route][ | label]',
           exampleTarget: `${channel.id}:route:Label`,
         },
       }

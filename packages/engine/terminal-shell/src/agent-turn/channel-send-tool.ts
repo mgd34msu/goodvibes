@@ -83,11 +83,11 @@ export function createAgentChannelSendTool(
           },
           channel: {
             type: 'string',
-            description: 'Channel target. Give exactly one of channel, route or webhook.',
+            description: 'Channel target: "<channel>", "<channel>:<route id>" or "<channel>:<route id> | <label>" (the route id is taken whole, colons included). Give exactly one of channel, route or webhook.',
           },
           route: {
             type: 'string',
-            description: 'Route id or route:label. Give exactly one of channel, route or webhook.',
+            description: 'Route id, or "<route id> | <label>" (the route id is taken whole, colons included). Give exactly one of channel, route or webhook.',
           },
           webhook: {
             type: 'string',

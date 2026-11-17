@@ -39,9 +39,19 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
     };
     const ownerInbox = deps.ownerInbox;
     const listContracts = deps.listContracts;
+    const receipts = new CheckinReceiptStore(controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'checkin-receipts.json'));
     const stateReader = createRuntimeCheckinStateReader({
       listSessions: () => sessionLister.listSessions(500),
       listRuns: () => automation.listRuns(),
+      // The last check-in that told the owner, or judged and stayed quiet, already covered what failed before it.
+      lastSettledCheckinAt: async () => {
+        try {
+          return (await receipts.list()).find((receipt) => receipt.outcome === 'delivered' || receipt.outcome === 'quiet')?.ranAt ?? null;
+        } catch (error) {
+          logger.warn('check-in: receipts could not be read; failed runs are reported from one day back', { error: summarizeError(error) });
+          return null;
+        }
+      },
       ...(ownerInbox ? { listOwnerItems: () => ownerInbox.listNow({ status: 'open' }) } : {}),
       // A contract escalation waits in the contract, not the owner inbox.
       ...(listContracts ? { listContracts } : {}),
@@ -63,7 +73,7 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
           });
         },
       },
-      receipts: new CheckinReceiptStore(controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'checkin-receipts.json')),
+      receipts,
       automation,
     });
     deps.disposal?.add('check-in evaluation lifetime', () => checkinService.dispose());

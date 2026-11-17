@@ -54,6 +54,12 @@ export interface CheckinRuntimeReaders {
   listOwnerItems?(): readonly CheckinOwnerItemView[];
   /** Contracts; absent when the host runs none. */
   listContracts?(): readonly CheckinContractView[];
+  /**
+   * When the last check-in that was delivered, or judged and stayed quiet,
+   * ran (from the receipt store, so it survives a restart); null when none
+   * has. Failed runs are reported from then on. Absent: the last snapshot.
+   */
+  lastSettledCheckinAt?(): Promise<number | null> | number | null;
   now?(): number;
 }
 
@@ -123,8 +129,10 @@ export function createRuntimeCheckinStateReader(readers: CheckinRuntimeReaders):
         .filter((r) => r.status === 'completed' && typeof r.endedAt === 'number' && r.endedAt >= at - RECENT_COMPLETION_WINDOW_MS)
         .length;
 
-      // Failed since the previous check-in (the first one looks back one day).
-      const failedSince = lastSnapshotAt ?? at - RECENT_COMPLETION_WINDOW_MS;
+      // Failed since the last check-in that delivered or judged quiet (none: one day back).
+      // A check-in whose delivery failed did not move it, so its failures are told next time.
+      const settledAt = readers.lastSettledCheckinAt ? await readers.lastSettledCheckinAt() : lastSnapshotAt;
+      const failedSince = settledAt ?? at - RECENT_COMPLETION_WINDOW_MS;
       const failedRuns = runs
         .filter((r) => r.status === 'failed' && typeof r.endedAt === 'number' && r.endedAt > failedSince)
         .map((r) => `Automation run${r.jobId ? ` of ${r.jobId}` : ''} failed${r.error ? `: ${r.error}` : ''}`);

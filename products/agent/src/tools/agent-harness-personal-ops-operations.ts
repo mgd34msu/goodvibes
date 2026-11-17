@@ -1,8 +1,9 @@
 import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES } from '@goodvibes-jev/engine/platform/platform/knowledge';
-import { hasMethod } from './agent-harness-personal-ops-discovery.ts';
+import { contractHasMethod as hasMethod } from './agent-harness-personal-ops-discovery.ts';
 import type { PersonalOpsLiveRecord } from './agent-harness-personal-ops-types.ts';
 
-export function taskOperationRecords(methodIds: readonly string[]): readonly PersonalOpsLiveRecord[] {
+/** Each host record exists when the operator contract serves the exact method it calls. */
+export function taskOperationRecords(): readonly PersonalOpsLiveRecord[] {
   const records: PersonalOpsLiveRecord[] = [
     {
       id: 'workplan-list',
@@ -43,7 +44,7 @@ export function taskOperationRecords(methodIds: readonly string[]): readonly Per
       confirmationRequired: false,
     },
   ];
-  if (hasMethod(methodIds, 'tasks.list')) {
+  if (hasMethod('tasks.list')) {
     records.push({
       id: 'host-tasks-list',
       label: 'List connected-host tasks',
@@ -56,7 +57,7 @@ export function taskOperationRecords(methodIds: readonly string[]): readonly Per
       capability: 'host-task-read',
     });
   }
-  if (hasMethod(methodIds, 'tasks.get') || hasMethod(methodIds, 'tasks.status')) {
+  if (hasMethod('tasks.get') || hasMethod('tasks.status')) {
     records.push({
       id: 'host-task-inspect',
       label: 'Inspect connected-host task',
@@ -70,7 +71,7 @@ export function taskOperationRecords(methodIds: readonly string[]): readonly Per
       requiredFields: ['taskId'],
     });
   }
-  if (hasMethod(methodIds, 'tasks.cancel')) {
+  if (hasMethod('tasks.cancel')) {
     records.push({
       id: 'host-task-cancel',
       label: 'Cancel connected-host task',
@@ -85,7 +86,7 @@ export function taskOperationRecords(methodIds: readonly string[]): readonly Per
       confirmationRequired: true,
     });
   }
-  if (hasMethod(methodIds, 'tasks.retry')) {
+  if (hasMethod('tasks.retry')) {
     records.push({
       id: 'host-task-retry',
       label: 'Retry connected-host task',
@@ -103,12 +104,12 @@ export function taskOperationRecords(methodIds: readonly string[]): readonly Per
   return records;
 }
 
-export function reminderOperationRecords(methodIds: readonly string[], deliveryConfigured: boolean): readonly PersonalOpsLiveRecord[] {
+export function reminderOperationRecords(deliveryConfigured: boolean): readonly PersonalOpsLiveRecord[] {
   const records: PersonalOpsLiveRecord[] = [
     {
       id: 'reminder-create',
       label: 'Create confirmed reminder',
-      status: hasMethod(methodIds, 'automation.schedules.create') ? deliveryConfigured ? 'ready' : 'attention' : 'needs-setup',
+      status: hasMethod('automation.schedules.create') ? deliveryConfigured ? 'ready' : 'attention' : 'needs-setup',
       summary: deliveryConfigured
         ? 'Create one connected reminder schedule with real timing and a visible delivery path.'
         : 'Create one reminder only after confirming timing and delivery scope; no configured delivery target was detected.',
@@ -124,7 +125,7 @@ export function reminderOperationRecords(methodIds: readonly string[], deliveryC
     {
       id: 'autonomous-schedule-create',
       label: 'Create autonomous schedule',
-      status: hasMethod(methodIds, 'automation.schedules.create') ? 'ready' : 'needs-setup',
+      status: hasMethod('automation.schedules.create') ? 'ready' : 'needs-setup',
       summary: 'Create one visible autonomous schedule only when task, cadence, success criteria, and user request provenance are explicit.',
       userRoute: 'Agent Workspace -> Automation',
       modelRoute: 'schedule action:"create" task:"..." successCriteria:"..." scheduleKind:"..." scheduleValue:"..."',
@@ -135,7 +136,7 @@ export function reminderOperationRecords(methodIds: readonly string[], deliveryC
       confirmationRequired: true,
     },
   ];
-  if (hasMethod(methodIds, 'automation.schedules.list')) {
+  if (hasMethod('automation.schedules.list')) {
     records.push({
       id: 'schedule-list',
       label: 'List connected schedules',
@@ -149,7 +150,7 @@ export function reminderOperationRecords(methodIds: readonly string[], deliveryC
     });
   }
   // The edit tool dispatches automation.jobs.update, so that is the method it is gated on.
-  if (hasMethod(methodIds, 'automation.jobs.update')) {
+  if (hasMethod('automation.jobs.update')) {
     records.push({
       id: 'schedule-edit',
       label: 'Edit connected schedule',
@@ -165,7 +166,7 @@ export function reminderOperationRecords(methodIds: readonly string[], deliveryC
       confirmationRequired: true,
     });
   }
-  if (hasMethod(methodIds, 'automation.schedules.run')) {
+  if (hasMethod('automation.schedules.run')) {
     records.push({
       id: 'schedule-run-now',
       label: 'Run schedule now',
@@ -180,7 +181,7 @@ export function reminderOperationRecords(methodIds: readonly string[], deliveryC
       confirmationRequired: true,
     });
   }
-  if (hasMethod(methodIds, 'automation.schedules.disable')) {
+  if (hasMethod('automation.schedules.disable')) {
     records.push({
       id: 'schedule-pause',
       label: 'Pause connected schedule',
@@ -195,7 +196,7 @@ export function reminderOperationRecords(methodIds: readonly string[], deliveryC
       confirmationRequired: true,
     });
   }
-  if (hasMethod(methodIds, 'automation.schedules.enable')) {
+  if (hasMethod('automation.schedules.enable')) {
     records.push({
       id: 'schedule-resume',
       label: 'Resume connected schedule',
@@ -210,7 +211,7 @@ export function reminderOperationRecords(methodIds: readonly string[], deliveryC
       confirmationRequired: true,
     });
   }
-  if (hasMethod(methodIds, 'automation.schedules.delete')) {
+  if (hasMethod('automation.schedules.delete')) {
     records.push({
       id: 'schedule-delete',
       label: 'Delete connected schedule',

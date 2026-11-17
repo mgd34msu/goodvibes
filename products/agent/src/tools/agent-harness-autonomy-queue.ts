@@ -615,7 +615,7 @@ async function captureQueueItems(context: CommandContext, options: CatalogRankin
   assertCurrent();
   const readingOptions: CatalogRankingOptions = { signal: options.signal, assertCurrent };
   const [methods, records, watchers] = await Promise.all([
-    contractMethodsForAutonomy(readingOptions),
+    contractMethodsForAutonomy(),
     captureAutonomyLiveRecords(context, readingOptions),
     watcherReadModelLiveRecords(context, readingOptions),
   ]);

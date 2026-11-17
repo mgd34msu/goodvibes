@@ -246,6 +246,7 @@ export {
 
 export {
   GoogleConnectionOwner,
+  existingGoogleConnectionOwner,
   sharedGoogleConnectionOwner,
   subscribeGoogleCredentialChanges,
   type GoogleConnectionOwnerOptions,

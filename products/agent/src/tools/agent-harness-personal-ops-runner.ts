@@ -1,13 +1,9 @@
-import { isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { readPersonalOpsResultField } from './agent-harness-personal-ops-readings.ts';
+import { classicPersonalOpsResultField } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platform/utils';
-import { protectPersonalOpsData, protectPersonalOpsResult } from './agent-harness-personal-ops-source.ts';
 import { randomUUID } from 'node:crypto';
-import { lstatSync } from 'node:fs';
-import { captureAgentExportPath } from './agent-artifact-effect.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';
-import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
@@ -16,6 +12,7 @@ import { previewHarnessText } from './agent-harness-text.ts';
 import { personalOpsReadRunRoute, savedLabelsUntrusted } from './agent-harness-personal-ops-records.ts';
 import { PERSONAL_OPS_READ_CONTROL_FIELDS, type PersonalOpsConnectorSignal, type PersonalOpsConnectorTool, type PersonalOpsExecutionStep, type PersonalOpsIntakeCandidate, type PersonalOpsLane, type PersonalOpsLaneId, type PersonalOpsLiveRecord, type PersonalOpsReadRunResult, type PersonalOpsRoutePacket, type PersonalOpsWorkflow, type PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
 import { artifactShowRoute } from './agent-harness-personal-ops-routes.ts';
+import { PERSONAL_OPS_REVIEW_PURPOSE } from './agent-personal-ops-native-fields.ts';
 
 export function laneById(lanes: readonly PersonalOpsLane[], laneId: PersonalOpsLaneId): PersonalOpsLane {
   return lanes.find((lane) => lane.id === laneId)!;
@@ -216,21 +213,19 @@ export async function redactedPersonalOpsText(value: string, options: JudgmentRe
 
 export function stringifyForPreview(value: unknown): string {
   if (typeof value === 'string') return value;
-  return JSON.stringify(captureCatalogData(value), null, 2) ?? '';
+  return JSON.stringify(value, null, 2) ?? '';
 }
 
-export async function boundedPersonalOpsResult(value: unknown, includeParameters: boolean, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const protectedValue = await protectPersonalOpsResult(value, options);
+/** A bounded preview of a result already masked at the read's output boundary. */
+export function boundedPersonalOpsResult(protectedValue: unknown, includeParameters: boolean): Record<string, unknown> {
   const text = stringifyForPreview(protectedValue);
   const max = includeParameters ? 6000 : 1600;
   return {
-    format: typeof value,
+    format: typeof protectedValue,
     characters: text.length,
     truncated: text.length > max,
     preview: text.length <= max ? text : `${text.slice(0, max).trimEnd()}...`,
-    redaction: isClassicOperation() ? 'The complete result is protected by native credential and source rules before the display preview is bounded; semantic meanings are unassessed.'
-      : 'The complete result is protected through canonical field and text readings before the display preview is bounded.',
-    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
+    redaction: 'The complete result was masked once by the credential and personal-data rules before this preview was bounded.',
   };
 }
 
@@ -241,8 +236,9 @@ export function recordObject(value: unknown): Record<string, unknown> | null {
   return isObjectRecord(value) ? value : null;
 }
 
-export async function stringField(record: Record<string, unknown>, purpose: string, options: CatalogRankingOptions = {}): Promise<string> {
-  const key = await readPersonalOpsResultField(record, purpose, options);
+/** The value of the first conventional provider key present for a display purpose (`classicPersonalOpsResultField`'s table). */
+export function stringField(record: Record<string, unknown>, purpose: string): string {
+  const key = classicPersonalOpsResultField(record, purpose);
   if (key === null) return '';
   const value = record[key];
   if (typeof value === 'string') return value.trim();
@@ -250,28 +246,29 @@ export async function stringField(record: Record<string, unknown>, purpose: stri
   return '';
 }
 
-export async function candidateResultItems(value: unknown, options: CatalogRankingOptions = {}): Promise<readonly unknown[]> {
+const COLLECTION_PURPOSE = 'primary returned personal record collection or its enclosing result object';
+
+export function candidateResultItems(value: unknown, depth = 0): readonly unknown[] {
   if (Array.isArray(value)) return value;
   const object = recordObject(value);
-  if (!object) return [];
-  const key = await readPersonalOpsResultField(object, 'primary returned personal record collection or its enclosing result object', options);
-  return key === null ? [] : candidateResultItems(object[key], options);
+  if (!object || depth > 4) return [];
+  const key = classicPersonalOpsResultField(object, COLLECTION_PURPOSE);
+  return key === null ? [] : candidateResultItems(object[key], depth + 1);
 }
 
-export async function reviewCardFromObject(
+export function reviewCardFromObject(
   lane: PersonalOpsLane,
   sourceRecord: PersonalOpsLiveRecord,
   item: Record<string, unknown>,
   index: number,
   includeParameters: boolean,
-  options: CatalogRankingOptions = {},
-): Promise<Record<string, unknown>> {
+): Record<string, unknown> {
   const calendar = lane.id === 'calendar';
-  const id = await stringField(item, calendar ? 'calendar event identifier' : 'email message or thread identifier', options) || `${sourceRecord.id}:item-${index + 1}`;
-  const subject = await stringField(item, calendar ? 'calendar event title' : 'email message subject', options);
-  const actor = await stringField(item, calendar ? 'calendar event organizer, calendar or location' : 'email message sender', options);
-  const time = await stringField(item, calendar ? 'calendar event start time' : 'message received time', options);
-  const body = await stringField(item, calendar ? 'calendar event description' : 'message body or preview text', options);
+  const id = stringField(item, calendar ? 'calendar event identifier' : 'email message or thread identifier') || `${sourceRecord.id}:item-${index + 1}`;
+  const subject = stringField(item, calendar ? 'calendar event title' : 'email message subject');
+  const actor = stringField(item, calendar ? 'calendar event organizer, calendar or location' : 'email message sender');
+  const time = stringField(item, calendar ? 'calendar event start time' : 'message received time');
+  const body = stringField(item, calendar ? 'calendar event description' : 'message body or preview text');
   const label = subject || actor || `${calendar ? 'Calendar event' : 'Inbox item'} ${index + 1}`;
   const summaryParts = [
     actor ? `${calendar ? 'source' : 'from'} ${actor}` : '',
@@ -286,8 +283,7 @@ export async function reviewCardFromObject(
     summary: previewHarnessText(summary, includeParameters ? 420 : 180),
     sourceRecordId: sourceRecord.id,
     sourceTool: sourceRecord.qualifiedName,
-    confidence: isClassicOperation() ? 'native-fields' : 'normalized',
-    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
+    confidence: 'native-fields',
     followUpBoundary: calendar
       ? 'Calendar create, edit, delete, RSVP, and reschedule actions require a separate confirmed route.'
       : 'Reply, send, label, archive, move, and delete actions require a separate confirmed route.',
@@ -295,29 +291,27 @@ export async function reviewCardFromObject(
   };
 }
 
-export function personalOpsReadReviewRecords(...args: Parameters<typeof ownedPersonalOpsReadReviewRecords>): ReturnType<typeof ownedPersonalOpsReadReviewRecords> {
-  return withConfiguredDecisionModelPolicy(() => ownedPersonalOpsReadReviewRecords(...args));
-}
-
-async function ownedPersonalOpsReadReviewRecords(
+/**
+ * Review cards from a result already masked at the read's output boundary:
+ * the items are found and their fields read by the conventional provider keys
+ * in code, so a card never waits on a reading. Without recognisable items the
+ * bounded preview is the one card.
+ */
+export function personalOpsReadReviewRecords(
   lane: PersonalOpsLane,
   sourceRecord: PersonalOpsLiveRecord,
-  result: unknown,
+  protectedResult: unknown,
   includeParameters: boolean,
-  options: CatalogRankingOptions = {},
-): Promise<readonly Record<string, unknown>[]> {
-  const protectedResult = await protectPersonalOpsResult(result, options);
-  const items = await candidateResultItems(protectedResult, options);
+): readonly Record<string, unknown>[] {
   const objectCards: Record<string, unknown>[] = [];
-  for (const [index, item] of items.entries()) {
+  for (const [index, item] of candidateResultItems(protectedResult).entries()) {
     const object = recordObject(item);
     if (!object) continue;
-    objectCards.push(await reviewCardFromObject(lane, sourceRecord, object, index, includeParameters, options));
+    objectCards.push(reviewCardFromObject(lane, sourceRecord, object, index, includeParameters));
     if (objectCards.length === 8) break;
   }
   if (objectCards.length > 0) return objectCards;
-  const protectedText = stringifyForPreview(protectedResult);
-  const preview = protectedText.slice(0, includeParameters ? 6000 : 1600);
+  const preview = stringifyForPreview(protectedResult).slice(0, includeParameters ? 6000 : 1600);
   return [{
     id: `${sourceRecord.id}:raw-preview`,
     kind: lane.id === 'calendar' ? 'calendar-read-preview' : 'inbox-read-preview',
@@ -326,22 +320,13 @@ async function ownedPersonalOpsReadReviewRecords(
     sourceRecordId: sourceRecord.id,
     sourceTool: sourceRecord.qualifiedName,
     confidence: 'raw-preview',
-    ...(isClassicOperation() ? { operationProvenance: 'classic', semanticAssessment: 'not-evaluated' } : {}),
     followUpBoundary: 'Use this preview to summarize locally; any provider mutation requires a separate confirmed route.',
   }];
 }
 
-export async function reviewRecordFieldValues(records: readonly Record<string, unknown>[], names: readonly string[], limit: number, options: CatalogRankingOptions = {}): Promise<readonly string[]> {
-  const values: string[] = [];
-  const seen = new Set<string>();
-  for (const record of records) {
-    const value = previewHarnessText(await redactedPersonalOpsText(await stringField(record, `review record field serving one of: ${names.join(', ')}`, options), options), 120);
-    if (!value || seen.has(value.toLowerCase())) continue;
-    seen.add(value.toLowerCase());
-    values.push(value);
-    if (values.length >= limit) break;
-  }
-  return values;
+function cardText(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  return typeof value === 'string' ? previewHarnessText(value.trim(), 120) : '';
 }
 
 /** One saved card's label with the id that names the same card, so the two never drift apart. */
@@ -351,14 +336,12 @@ export interface ReviewRecordEntry {
 }
 
 /** Cards are de-duplicated on their id (their label when they have none), never on two separate lists. */
-export async function reviewRecordEntries(records: readonly Record<string, unknown>[], limit: number, options: CatalogRankingOptions = {}): Promise<readonly ReviewRecordEntry[]> {
+export function reviewRecordEntries(records: readonly Record<string, unknown>[], limit: number): readonly ReviewRecordEntry[] {
   const entries: ReviewRecordEntry[] = [];
   const seen = new Set<string>();
-  const read = async (record: Record<string, unknown>, names: string): Promise<string> =>
-    previewHarnessText(await redactedPersonalOpsText(await stringField(record, `review record field serving one of: ${names}`, options), options), 120);
   for (const record of records) {
-    const label = await read(record, 'label, subject, title, summary');
-    const id = await read(record, 'id');
+    const label = cardText(record, 'label');
+    const id = cardText(record, 'id');
     const identity = id || label;
     if (!identity) continue;
     const key = `${id ? 'id' : 'label'}:${identity.toLowerCase()}`;
@@ -370,6 +353,11 @@ export async function reviewRecordEntries(records: readonly Record<string, unkno
   return entries;
 }
 
+/**
+ * Saves the cards of one read as an artifact. The cards and preview were masked
+ * at the read's output boundary, so they are stored as they are; the title the
+ * caller chose is the one new text and is masked here.
+ */
 export async function savePersonalOpsReviewArtifact(options: {
   readonly context: CommandContext;
   readonly lane: PersonalOpsLane;
@@ -380,17 +368,10 @@ export async function savePersonalOpsReviewArtifact(options: {
   readonly title?: string;
   readonly invocationArgs: Record<string, unknown>;
   readonly executionOptions?: Parameters<Tool['execute']>[1];
-  readonly sourceOwner?: CatalogRankingOptions['sourceOwner'];
   readonly signal?: AbortSignal | undefined;
-  readonly assertCurrent?: (() => void) | undefined;
 }): Promise<Record<string, unknown>> {
-  const assertEffectCurrent = () => {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    if (!harnessCatalogInvocationAuthority(options.invocationArgs, options.executionOptions, 'write')) throw new ToolInputProjectionError('held');
-  };
-  assertEffectCurrent();
-  const source = () => captureCatalogData({ lane: options.lane, sourceRecord: options.sourceRecord, inputFields: options.inputFields, reviewRecords: options.reviewRecords, output: options.output, title: options.title });
-  const sourceJson = JSON.stringify(source());
+  options.signal?.throwIfAborted();
+  if (!harnessCatalogInvocationAuthority(options.invocationArgs, options.executionOptions, 'write')) throw new ToolInputProjectionError('held');
   const store = options.context.platform.artifactStore;
   if (!store?.create) {
     return {
@@ -399,27 +380,13 @@ export async function savePersonalOpsReviewArtifact(options: {
       policy: 'Review-card persistence requires the Agent artifact store; raw connector output was not written.',
     };
   }
-  const storagePath = store.storagePath;
-  if (typeof storagePath !== 'string' || lstatSync(storagePath).isSymbolicLink()) throw new ToolInputProjectionError('held');
-  const physicalRoot = captureAgentExportPath(storagePath, storagePath);
-  const assertWriteCurrent = () => {
-    assertEffectCurrent();
-    physicalRoot.assertCurrent();
-    if (options.context.platform.artifactStore !== store || store.storagePath !== storagePath
-      || lstatSync(storagePath).isSymbolicLink()
-      || JSON.stringify(source()) !== sourceJson) throw new ToolInputProjectionError('stale');
-  };
-  assertWriteCurrent();
-  const reading: CatalogRankingOptions = { signal: options.signal, sourceOwner: options.sourceOwner, assertCurrent: assertWriteCurrent };
   const createdAt = new Date().toISOString();
-  const safeTitle = previewHarnessText(await redactedPersonalOpsText(options.title || `${options.lane.label} review cards`, reading), 96)
+  const safeTitle = previewHarnessText(await redactedPersonalOpsText(options.title || `${options.lane.label} review cards`, { signal: options.signal }), 96)
     .replace(/[^a-zA-Z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'personal-ops-review';
   // Both lists come from the same entries, so reviewRecordIds[i] always names the card reviewLabels[i] shows.
-  const reviewEntries = await reviewRecordEntries(options.reviewRecords, 5, reading);
-  const reviewLabels = reviewEntries.map((entry) => entry.label);
-  const reviewRecordIds = reviewEntries.map((entry) => entry.id);
-  const reviewKinds = await reviewRecordFieldValues(options.reviewRecords, ['kind'], 5, reading);
+  const reviewEntries = reviewRecordEntries(options.reviewRecords, 5);
+  const reviewKinds = [...new Set(options.reviewRecords.map(record => cardText(record, 'kind')).filter(Boolean))].slice(0, 5);
   const payload = {
     version: 1,
     createdAt,
@@ -433,30 +400,21 @@ export async function savePersonalOpsReviewArtifact(options: {
     policy: 'Saved Personal Ops review-card artifacts contain redacted review cards and bounded previews only; full raw connector output and full input values are not stored.',
   };
   // Filenames become catalog labels: a plain UUID suffix keeps them unique; the
-  // card screen skips UUID-shaped tokens. User titles and existing filenames
-  // still face the unchanged source boundary.
-  const nonce = randomUUID();
-  const protectedPayload = await protectPersonalOpsData(payload, reading);
-  const protectedMetadata = await protectPersonalOpsData({
-    purpose: 'personal-ops-review-cards', laneId: options.lane.id, sourceRecordId: options.sourceRecord.id,
-    sourceTool: options.sourceRecord.qualifiedName ?? '', reviewRecordCount: options.reviewRecords.length,
-    reviewLabels, reviewKinds, reviewRecordIds, fullRawConnectorOutputStored: false,
-  }, reading);
-  if (!protectedPayload || typeof protectedPayload !== 'object' || Array.isArray(protectedPayload)
-    || !protectedMetadata || typeof protectedMetadata !== 'object' || Array.isArray(protectedMetadata)) throw new ToolInputProjectionError('held');
-  const metadata: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(captureCatalogData(protectedMetadata))) metadata[key] = value;
-  assertWriteCurrent();
+  // card screen skips UUID-shaped tokens.
   const descriptor = await store.create({
     kind: 'data',
     mimeType: 'application/json',
-    filename: `${safeTitle}-${nonce}.json`,
-    text: `${JSON.stringify(protectedPayload, null, 2)}\n`,
+    filename: `${safeTitle}-${randomUUID()}.json`,
+    text: `${JSON.stringify(payload, null, 2)}\n`,
     acquisitionMode: 'inline-data',
     fetchMode: 'not-applicable',
-    metadata,
-  }, { signal: options.signal, assertCurrent: assertWriteCurrent });
-  assertWriteCurrent();
+    metadata: {
+      purpose: PERSONAL_OPS_REVIEW_PURPOSE, laneId: options.lane.id, sourceRecordId: options.sourceRecord.id,
+      sourceTool: options.sourceRecord.qualifiedName ?? '', reviewRecordCount: options.reviewRecords.length,
+      reviewLabels: reviewEntries.map((entry) => entry.label), reviewKinds, reviewRecordIds: reviewEntries.map((entry) => entry.id),
+      fullRawConnectorOutputStored: false,
+    },
+  }, { signal: options.signal });
   return {
     status: 'saved',
     artifactId: descriptor.id,

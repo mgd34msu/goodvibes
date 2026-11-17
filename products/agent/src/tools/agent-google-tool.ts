@@ -51,6 +51,7 @@ import { assertDeliveryCurrent } from '@goodvibes-jev/engine/platform/platform/u
 import {
   beginGoogleConsent,
   GoogleApiClient,
+  existingGoogleConnectionOwner,
   GoogleConnectionOwner,
   sharedGoogleConnectionOwner,
   subscribeGoogleCredentialChanges,
@@ -865,6 +866,31 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
 }
 
 const googleProjectors = new WeakMap<Tool, ReturnType<typeof createGoogleSettingsProjector>>();
+/** Whether a Google account is connected for a session, and what its granted scopes permit when they are known. */
+export type AgentGoogleConnectionState =
+  | { readonly status: 'connected'; readonly scopesKnown: boolean; readonly canReadMail: boolean; readonly canReadCalendar: boolean }
+  | { readonly status: 'not-connected' | 'unreadable' | 'no-google-tool' };
+
+/**
+ * The connection the `google` tool and the `/google` commands of a session
+ * share (keyed by the session's secret store). After the first answer it is
+ * held until a Google credential or client setting changes, so this is an
+ * in-memory read. Scopes are known once the token has been refreshed in this
+ * session; until then a connected account is reported as connected with
+ * `scopesKnown: false` and both permissions assumed.
+ */
+export async function googleConnectionState(scope: object | undefined): Promise<AgentGoogleConnectionState> {
+  const owner = scope ? existingGoogleConnectionOwner(scope) : undefined;
+  if (!owner) return { status: 'no-google-tool' };
+  let connection: Awaited<ReturnType<GoogleConnectionOwner['connection']>>;
+  try { connection = await owner.connection(); } catch { return { status: 'unreadable' }; }
+  if (connection === null) return { status: 'not-connected' };
+  const scopes = connection.tokens.scopes();
+  if (scopes.length === 0) return { status: 'connected', scopesKnown: false, canReadMail: true, canReadCalendar: true };
+  const summary = summarizeCredentials({ ...connection.credentials, scopes }, Date.now());
+  return { status: 'connected', scopesKnown: true, canReadMail: summary.canReadMail, canReadCalendar: summary.canReadCalendar };
+}
+
 export function agentGoogleInputProjector(tool: Tool) { return googleProjectors.get(tool); }
 export function registerAgentGoogleTool(registry: ToolRegistry, options: AgentGoogleToolOptions): void {
   if (!registry.has('google')) {

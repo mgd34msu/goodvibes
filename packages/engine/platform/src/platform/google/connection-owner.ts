@@ -169,3 +169,8 @@ export function sharedGoogleConnectionOwner(scope: object, create: () => GoogleC
   sharedOwners.set(scope, owner);
   return owner;
 }
+
+/** The connection owner of one scope when one was made, without making one. */
+export function existingGoogleConnectionOwner(scope: object): GoogleConnectionOwner | undefined {
+  return sharedOwners.get(scope);
+}

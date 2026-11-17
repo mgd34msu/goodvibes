@@ -180,6 +180,8 @@ export interface McpToolRecord {
 
 export interface McpToolSchema {
   readonly inputSchema?: unknown;
+  /** The server's own `readOnlyHint`/`destructiveHint`, when it declares them. */
+  readonly annotations?: unknown;
 }
 
 export interface McpSchemaSummary {

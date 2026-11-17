@@ -12,33 +12,27 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { LANE_IDS, QUEUE_CAPABILITIES, type AgentHarnessPersonalOpsArgs, type McpToolSchema, type PersonalOpsBriefingStatus, type PersonalOpsLane, type PersonalOpsLaneId, type PersonalOpsLaneResolution, type PersonalOpsLiveRecord, type PersonalOpsReadRunResult, type PersonalOpsStatus, type PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
-import { mcpToolRecords, mcpToolSchemas, readLimit, readString, toolsByServer } from './agent-harness-personal-ops-discovery.ts';
+import { connectorSignals, mcpServerRecords, mcpToolRecords, mcpToolSchema, qualifiedToolName, readLimit, readString } from './agent-harness-personal-ops-discovery.ts';
 import { buildLanes } from './agent-harness-personal-ops-lanes.ts';
-import { PERSONAL_OPS_LIVE_READ_TEMPLATE, describeLane, laneStatusRank, savedArtifactScanWindowFull, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedLabelsUntrusted, savedRecordsAtCap, searchText } from './agent-harness-personal-ops-records.ts';
+import { PERSONAL_OPS_LIVE_READ_TEMPLATE, connectorRecords, describeLane, laneStatusRank, savedArtifactScanWindowFull, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedLabelsUntrusted, savedRecordsAtCap, searchText } from './agent-harness-personal-ops-records.ts';
 import { boundedPersonalOpsResult, executionRouteForRecord, liveRecordSearchText, invalidInputFields, missingRequiredInputFields, personalOpsReadNextRoutes, personalOpsReadReviewRecords, readInputFields, readRunControlBoolean, readRunControlString, redactedPersonalOpsText, resolveRunRecord, savePersonalOpsReviewArtifact, summarizeRunRecord } from './agent-harness-personal-ops-runner.ts';
+import { protectPersonalOpsResult } from './agent-harness-personal-ops-source.ts';
 import { buildPersonalOpsIntakeCandidates, nextActions } from './agent-harness-personal-ops-intake.ts';
 import { artifactShowRoute } from './agent-harness-personal-ops-routes.ts';
 import { UNTRUSTED_CONTENT_RULE } from '../trust/untrusted-content.ts';
 
 export function personalOpsCatalogStatus(context: CommandContext): Record<string, unknown> {
-  // Only the two parts this status reads: channels and routines.
+  // Only what this summary counts: channels and routines. Lane status needs the
+  // contract, the connectors and the Google connection, which personal_ops reads.
   const channels = buildAgentWorkspaceChannels(context);
   const localRoutines = buildAgentWorkspaceRoutineCounters(context).items;
-  const readyChannels = channels.filter(channel => channel.ready).length;
-  const readyRoutines = localRoutines.filter(routine => routine.enabled === true && routine.reviewState === 'reviewed' && (routine.missingRequirementCount ?? 0) === 0).length;
-  // Startup counts native registrations only. Capability discovery is an explicit
-  // awaited personal_ops read and cannot be inferred from a connector name.
   return {
     modes: ['personal_ops_briefing', 'personal_ops', 'personal_ops_queue', 'personal_ops_lane', 'personal_ops_intake', 'run_personal_ops_read'],
-    lanes: LANE_IDS.length, laneIds: LANE_IDS,
-    ready: 1 + Number(readyChannels > 0) + Number(readyRoutines > 0), partial: 0,
-    'needs-setup': Number(readyChannels === 0) + Number(readyRoutines === 0), gap: 4,
-    workflows: 0, readyWorkflows: 0, attentionWorkflows: 0, setupWorkflows: 0,
-    bestReadyStatus: 3,
-    // These counts cover native lanes only; connector-derived lane status appears in personal_ops action:"status".
-    countsCover: 'native-only',
+    laneIds: LANE_IDS,
+    lanes: 'call personal_ops action:"status"',
+    channelsReady: channels.filter(channel => channel.ready).length,
+    routinesReady: localRoutines.filter(routine => routine.enabled === true && routine.reviewState === 'reviewed' && (routine.missingRequirementCount ?? 0) === 0).length,
     configuredChannels: channels.length, configuredRoutines: localRoutines.length,
-    capabilityDiscovery: 'read-on-request',
   };
 }
 
@@ -197,12 +191,7 @@ export function personalOpsBriefingSummary(...args: Parameters<typeof ownedPerso
 async function ownedPersonalOpsBriefingSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const includeParameters = args.includeParameters === true;
   const request = readString(args.query) || readString(args.target) || 'daily personal operations';
-  const tools = await mcpToolRecords(context, options);
-  const lanes = await buildLanes(context, {
-    ...options,
-    toolsByServer: toolsByServer(tools),
-    schemasByQualifiedName: await mcpToolSchemas(context, tools, options),
-  });
+  const lanes = await buildLanes(context, options);
   const orderedLaneIds: readonly PersonalOpsLaneId[] = ['inbox', 'calendar', 'tasks', 'reminders', 'routines', 'delivery', 'notes'];
   const allSteps = [
     ...orderedLaneIds
@@ -274,13 +263,7 @@ export function personalOpsSummary(...args: Parameters<typeof ownedPersonalOpsSu
 
 async function ownedPersonalOpsSummary(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const includeParameters = args.includeParameters === true;
-  const tools = await mcpToolRecords(context, options);
-  const schemasByQualifiedName = await mcpToolSchemas(context, tools, options);
-  const lanes = await buildLanes(context, {
-    ...options,
-    toolsByServer: toolsByServer(tools),
-    schemasByQualifiedName,
-  });
+  const lanes = await buildLanes(context, options);
   const workflows = lanes.flatMap((lane) => lane.workflows ?? []);
   return {
     lanes: lanes.map((lane) => describeLane(lane, includeParameters)),
@@ -384,12 +367,7 @@ async function ownedPersonalOpsQueueSummary(context: CommandContext, args: Agent
   args = snapshotJudgmentInput(args) as AgentHarnessPersonalOpsArgs;
   const includeParameters = args.includeParameters === true;
   const query = readString(args.query) || readString(args.target);
-  const tools = await mcpToolRecords(context, options);
-  const lanes = await buildLanes(context, {
-    ...options,
-    toolsByServer: toolsByServer(tools),
-    schemasByQualifiedName: await mcpToolSchemas(context, tools, options),
-  });
+  const lanes = await buildLanes(context, options);
   const queueLanes = lanes.filter((lane) => lane.id === 'inbox' || lane.id === 'calendar');
   const catalogItems = queueLanes
     .flatMap((lane) => (lane.liveRecords ?? [])
@@ -475,12 +453,7 @@ async function ownedPersonalOpsIntakeSummary(context: CommandContext, args: Agen
     };
   }
   const includeParameters = args.includeParameters === true;
-  const tools = await mcpToolRecords(context, options);
-  const lanes = await buildLanes(context, {
-    ...options,
-    toolsByServer: toolsByServer(tools),
-    schemasByQualifiedName: await mcpToolSchemas(context, tools, options),
-  });
+  const lanes = await buildLanes(context, options);
   const limit = readLimit(args.limit, includeParameters ? 8 : 4);
   const ranking = await buildPersonalOpsIntakeCandidates(request, lanes, includeParameters, options);
   const candidates = ranking.candidates.slice(0, limit);
@@ -501,51 +474,46 @@ export function runPersonalOpsRead(...args: Parameters<typeof ownedRunPersonalOp
   return withConfiguredDecisionModelPolicy(() => ownedRunPersonalOpsRead(...args));
 }
 
+/** A lane value for one exact connector read: only its id and label are read downstream. */
+function connectorReadLane(laneId: 'inbox' | 'calendar'): PersonalOpsLane {
+  const label = laneId === 'inbox' ? 'Inbox' : 'Calendar';
+  return { id: laneId, label, status: 'ready', outcome: '', current: '', next: '', userRoute: '', modelRoute: `personal_ops action:"lane" laneId:"${laneId}"`, signals: [] };
+}
+
+/**
+ * An exact `mcp:<server>:<tool>` record id is resolved against the MCP registry
+ * directly: one tool listing, one schema, one server record, classified in
+ * code. Discovery by lane is for intake and lookups by text, not for a read.
+ */
+async function resolveConnectorReadRecord(context: CommandContext, recordId: string, options: CatalogRankingOptions): Promise<{ readonly lane: PersonalOpsLane; readonly record: PersonalOpsLiveRecord } | null> {
+  const tool = (await mcpToolRecords(context, options)).find(entry => qualifiedToolName(entry) === recordId);
+  if (!tool) return null;
+  const schema = await mcpToolSchema(context, recordId, options);
+  const servers = mcpServerRecords(context).filter(server => server.name === tool.serverName);
+  const inventory = { servers, tools: [tool], schemas: new Map<string, McpToolSchema>(schema ? [[recordId, schema]] : []) };
+  for (const laneId of ['inbox', 'calendar'] as const) {
+    const signals = connectorSignals(inventory, laneId);
+    if (signals.length === 0) continue;
+    const record = connectorRecords(signals, laneId === 'inbox' ? 'Inbox' : 'Calendar', laneId).find(entry => entry.id === recordId);
+    if (record) return { lane: connectorReadLane(laneId), record };
+  }
+  return null;
+}
+
 async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarnessPersonalOpsArgs, options: CatalogRankingOptions = {}, invocationArgs: Record<string, unknown> = {}, executionOptions?: Parameters<Tool['execute']>[1]): Promise<PersonalOpsReadRunResult> {
   options.signal?.throwIfAborted();
-  const originalArgs = args;
   args = captureCatalogData(args);
-  const argsJson = JSON.stringify(args);
-  const sourceApi = context.clients?.mcpApi ?? context.extensions?.mcpRegistry;
-  const sessionId = context.session?.runtime?.sessionId;
-  const registry = context.extensions?.toolRegistry;
-  const assertCurrent = () => {
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    if ((context.clients?.mcpApi ?? context.extensions?.mcpRegistry) !== sourceApi
-      || context.extensions?.toolRegistry !== registry || context.session?.runtime?.sessionId !== sessionId
-      || JSON.stringify(captureCatalogData(originalArgs)) !== argsJson) throw new ToolInputProjectionError('stale');
-  };
-  assertCurrent();
   if (args.laneId === 'inbox' && args.recordId === STYLE_DRAFT_RECORD_ID) {
     if (readString(args.query) || readString(args.target)) throw new ToolInputProjectionError('invalid');
     if (!harnessCatalogInvocationAuthority(invocationArgs, executionOptions)) throw new ToolInputProjectionError('held');
-    return runPersonalOpsStyleDraft(args.fields, { ...options, assertCurrent });
+    return runPersonalOpsStyleDraft(args.fields, options);
   }
   const includeParameters = args.includeParameters === true;
-  const tools = await mcpToolRecords(context, { ...options, assertCurrent });
-  assertCurrent();
-  const schemas = await mcpToolSchemas(context, tools, { ...options, assertCurrent });
-  assertCurrent();
-  const sourceJson = JSON.stringify(captureCatalogData({ tools, schemas: Array.from(schemas.entries()) }));
-  const assertSelectionCurrent = () => {
-    assertCurrent();
-    if (JSON.stringify(captureCatalogData({ tools, schemas: Array.from(schemas.entries()) })) !== sourceJson) throw new ToolInputProjectionError('stale');
-  };
-  const exactLane = args.laneId === 'inbox' && typeof args.recordId === 'string'
-    && args.recordId.length > 0 && args.recordId === readString(args.recordId)
-    && !readString(args.target) && !readString(args.query) ? 'inbox' : undefined;
-  const lanes = await buildLanes(context, {
-    ...options, assertCurrent: assertSelectionCurrent,
-    toolsByServer: toolsByServer(tools),
-    schemasByQualifiedName: schemas,
-  }, exactLane);
-  const resolved = await resolveRunRecord(lanes, {
-    laneId: readString(args.laneId),
-    recordId: readString(args.recordId),
-    target: readString(args.target),
-    query: readString(args.query),
-  }, { ...options, assertCurrent: assertSelectionCurrent });
-  assertSelectionCurrent();
+  const registry = context.extensions?.toolRegistry;
+  const lookup = { laneId: readString(args.laneId), recordId: readString(args.recordId), target: readString(args.target), query: readString(args.query) };
+  const resolved = lookup.recordId.startsWith('mcp:')
+    ? await resolveConnectorReadRecord(context, lookup.recordId, options)
+    : await resolveRunRecord(await buildLanes(context, options), lookup, options);
   if (!resolved) {
     return {
       status: 'missing_lookup',
@@ -579,7 +547,7 @@ async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarne
       reason: 'not_read_only',
       record: recordSummary,
       next: 'Use the returned provider-effect route with its own current recorded admission.',
-      policy: 'personal_ops action:"read" refuses send, edit, label, archive, delete, move, create, RSVP, and reschedule operations.',
+      policy: 'personal_ops action:"read" runs only tools the server marks read-only or whose name starts with a read verb; send, edit, label, archive, delete, move, create, RSVP, and reschedule operations go through their own routes.',
     };
   }
   if (!record.qualifiedName) {
@@ -609,7 +577,7 @@ async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarne
       invalidFields,
       sampleInput: record.sampleInput ?? {},
       runRoute,
-      policy: 'Each field must match the type its connector sample shows; nothing was sent to the provider.',
+      policy: 'Each field must have the type the tool\'s input schema declares; nothing was sent to the provider.',
     };
   }
   if (!harnessCatalogInvocationAuthority(invocationArgs, executionOptions)) {
@@ -618,8 +586,8 @@ async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarne
       record: recordSummary,
       inputPreview: fields,
       runRoute,
-      next: 'Ask the user to approve this exact read (the connector tool and the fields in inputPreview). Once that approval is recorded for this session, call the same personal_ops read again; adding confirm or explicitUserRequest does not grant it.',
-      policy: 'Reading live personal inbox/calendar data requires current recorded admission and a separately admitted MCP child. Caller annotations grant no authority.',
+      next: 'This call carries no admission from the permission gate, so the connector was not called. Make the same personal_ops read as an ordinary tool call; the gate decides it as it decides any read (in ask-me mode the owner is asked once). Adding confirm or explicitUserRequest grants nothing.',
+      policy: 'Reading live personal inbox/calendar data runs only under the admission the permission gate gave this call, and the MCP child is admitted on its own.',
     };
   }
   if (!registry || !isAgentMcpCallRouteInstalled() || !registry.getToolDefinitions().some(definition => definition.name === 'mcp')) {
@@ -631,88 +599,85 @@ async function ownedRunPersonalOpsRead(context: CommandContext, args: AgentHarne
     };
   }
 
+  let result: unknown;
   try {
-    assertSelectionCurrent();
-    const currentTools = await mcpToolRecords(context, { ...options, assertCurrent: assertSelectionCurrent });
-    assertSelectionCurrent();
-    const currentSchemas = await mcpToolSchemas(context, currentTools, { ...options, assertCurrent: assertSelectionCurrent });
-    assertSelectionCurrent();
-    if (JSON.stringify(captureCatalogData({ tools: currentTools, schemas: Array.from(currentSchemas.entries()) })) !== sourceJson) throw new ToolInputProjectionError('stale');
-    if (!harnessCatalogInvocationAuthority(invocationArgs, executionOptions)) throw new ToolInputProjectionError('held');
+    // The MCP client refuses to send when the tool's schema changed since it was listed; nothing is re-listed here.
     const child = await registry.executeNested(`personal-ops-read-${crypto.randomUUID()}`, 'mcp', { mode: 'call', qualifiedName: record.qualifiedName, input: fields }, executionOptions);
-    assertSelectionCurrent();
     if (!child.success) throw new Error(child.error ?? 'The admitted MCP child failed.');
-    let result: unknown = child.output ?? null;
+    result = child.output ?? null;
     if (typeof child.output === 'string') { try { result = JSON.parse(child.output); } catch { /* Preserve actual non-JSON connector text. */ } }
-    const reading = { ...options, assertCurrent: assertSelectionCurrent };
-    const reviewRecords = await personalOpsReadReviewRecords(lane, record, result, includeParameters, reading);
-    const output = await boundedPersonalOpsResult(result, includeParameters, reading);
-    assertSelectionCurrent();
-    const saveRequested = readRunControlBoolean(args.fields, ['saveReviewCards', 'saveReview']);
-    let savedReviewArtifact: Record<string, unknown> | null = null;
-    if (saveRequested) {
-      try {
-        savedReviewArtifact = await savePersonalOpsReviewArtifact({
-          context,
-          lane,
-          sourceRecord: record,
-          inputFields: fields,
-          reviewRecords,
-          output,
-          title: readRunControlString(args.fields, 'artifactTitle'),
-          invocationArgs,
-          executionOptions,
-          sourceOwner: options.sourceOwner,
-          signal: options.signal,
-          assertCurrent: assertSelectionCurrent,
-        });
-      } catch (saveError) {
-        // The provider read already succeeded; a failed save must not make the agent repeat the live read.
-        assertSelectionCurrent();
-        options.signal?.throwIfAborted();
-        if (saveError instanceof ToolInputProjectionError) throw saveError;
-        savedReviewArtifact = {
-          status: 'failed',
-          reason: previewHarnessText(await redactedPersonalOpsText(summarizeError(saveError), { signal: options.signal, assertCurrent: assertSelectionCurrent }), 320),
-          policy: 'The provider read succeeded and its review cards are returned below; only saving them as an artifact failed. Do not repeat the live read to save them; retry the save only after the artifact store is repaired.',
-        };
-      }
-    }
-    assertSelectionCurrent();
-    const nextRoutes = personalOpsReadNextRoutes({ lane, runRoute, savedReviewArtifact });
-    return {
-      status: 'executed',
-      record: recordSummary,
-      input: fields,
-      output,
-      reviewSummary: {
-        kind: lane.id === 'calendar' ? 'calendar' : 'inbox',
-        records: reviewRecords.length,
-        source: record.qualifiedName,
-      },
-      reviewRecords,
-      // Subjects, senders, titles and notes in `output` and `reviewRecords` were written by whoever
-      // can reach the connector, not by the owner.
-      untrustedContent: { surface: 'document', origin: record.qualifiedName ?? 'an MCP tool', fields: ['output', 'reviewRecords'], rule: UNTRUSTED_CONTENT_RULE },
-      ...(savedReviewArtifact ? { savedReviewArtifact } : {}),
-      nextRoutes,
-      followUp: [
-        'Summarize or draft only in the Agent transcript.',
-        'Each send, label, archive, delete, calendar edit, RSVP, or reschedule route requires separate current recorded effect admission.',
-      ],
-      policy: 'This route executed one selected read-only MCP connector tool and returned bounded, redacted output for review.',
-    };
   } catch (error) {
-    assertSelectionCurrent();
+    options.signal?.throwIfAborted();
     if (error instanceof ToolInputProjectionError) throw error;
     return {
       status: 'failed',
       record: recordSummary,
       input: fields,
-      error: previewHarnessText(await redactedPersonalOpsText(summarizeError(error), { signal: options.signal, assertCurrent: assertSelectionCurrent }), 320),
+      error: previewHarnessText(await redactedPersonalOpsText(summarizeError(error), { signal: options.signal }), 320),
       policy: 'Connector failures are reported as reviewable errors; no fallback personal data is fabricated.',
     };
   }
+
+  // The provider answered: from here nothing turns the read into a refusal or asks
+  // for it again. The result is masked once; anything that cannot be derived is a note.
+  const notes: string[] = [];
+  let protectedResult: unknown = null;
+  try {
+    protectedResult = await protectPersonalOpsResult(result, { signal: options.signal });
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    notes.push(`The provider answered, but its result could not be masked for display (${summarizeError(error)}), so none of it is shown. Narrow the read (fewer items or fields) and run it again if the content is needed.`);
+  }
+  const reviewRecords = notes.length === 0 ? personalOpsReadReviewRecords(lane, record, protectedResult, includeParameters) : [];
+  const output = notes.length === 0 ? boundedPersonalOpsResult(protectedResult, includeParameters) : { format: typeof result, shown: false };
+  let savedReviewArtifact: Record<string, unknown> | null = null;
+  if (notes.length === 0 && readRunControlBoolean(args.fields, ['saveReviewCards', 'saveReview'])) {
+    try {
+      savedReviewArtifact = await savePersonalOpsReviewArtifact({
+        context,
+        lane,
+        sourceRecord: record,
+        inputFields: fields,
+        reviewRecords,
+        output,
+        title: readRunControlString(args.fields, 'artifactTitle'),
+        invocationArgs,
+        executionOptions,
+        signal: options.signal,
+      });
+    } catch (saveError) {
+      options.signal?.throwIfAborted();
+      savedReviewArtifact = {
+        status: 'failed',
+        reason: previewHarnessText(summarizeError(saveError), 320),
+        policy: 'The provider read succeeded and its review cards are returned below; only saving them as an artifact failed. Do not repeat the live read to save them; retry the save only after the artifact store is repaired.',
+      };
+    }
+  }
+  const nextRoutes = personalOpsReadNextRoutes({ lane, runRoute, savedReviewArtifact });
+  return {
+    status: 'executed',
+    record: recordSummary,
+    input: fields,
+    output,
+    ...(notes.length > 0 ? { notes } : {}),
+    reviewSummary: {
+      kind: lane.id === 'calendar' ? 'calendar' : 'inbox',
+      records: reviewRecords.length,
+      source: record.qualifiedName,
+    },
+    reviewRecords,
+    // Subjects, senders, titles and notes in `output` and `reviewRecords` were written by whoever
+    // can reach the connector, not by the owner.
+    untrustedContent: { surface: 'document', origin: record.qualifiedName ?? 'an MCP tool', fields: ['output', 'reviewRecords'], rule: UNTRUSTED_CONTENT_RULE },
+    ...(savedReviewArtifact ? { savedReviewArtifact } : {}),
+    nextRoutes,
+    followUp: [
+      'Summarize or draft only in the Agent transcript.',
+      'Each send, label, archive, delete, calendar edit, RSVP, or reschedule route requires separate current recorded effect admission.',
+    ],
+    policy: 'This route executed one selected read-only MCP connector tool and returned bounded, redacted output for review.',
+  };
 }
 
 export function describePersonalOpsLane(...args: Parameters<typeof ownedDescribePersonalOpsLane>): ReturnType<typeof ownedDescribePersonalOpsLane> {
@@ -734,12 +699,8 @@ async function ownedDescribePersonalOpsLane(context: CommandContext, args: Agent
   }
   const normalized = input.toLowerCase();
   const exactLane = args.laneId === 'notes' || args.laneId === 'reminders' || args.laneId === 'inbox' ? args.laneId : undefined;
-  // The notes and reminders lanes read no connector, so a connector list or schema failure must not fail them.
-  const needsConnectors = exactLane !== 'notes' && exactLane !== 'reminders';
-  const tools = needsConnectors ? await mcpToolRecords(context, options) : [];
-  const lanes = await buildLanes(context, {
-    ...options, toolsByServer: toolsByServer(tools),
-    schemasByQualifiedName: needsConnectors ? await mcpToolSchemas(context, tools, options) : new Map() }, exactLane);
+  // The notes and reminders lanes read no connector, so a connector list failure cannot fail them.
+  const lanes = await buildLanes(context, options, exactLane);
   options.signal?.throwIfAborted();
   const exact = lanes.find((lane) => lane.id === normalized);
   if (exact) return { status: 'found', lane: describeLane(exact, true) };

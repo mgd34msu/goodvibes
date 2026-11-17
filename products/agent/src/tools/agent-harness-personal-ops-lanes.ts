@@ -1,20 +1,47 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
-import { calendarWorkflows, connectorSignalsMatching, inboxWorkflows, contractMethodsForLane, contractMethodsForLanes, retainPersonalOpsContractSource, reminderWorkflows, taskWorkflows } from './agent-harness-personal-ops-discovery.ts';
+import { googleConnectionState, type AgentGoogleConnectionState } from './agent-google-tool.ts';
+import { calendarWorkflows, connectorSignals, contractLaneMethods, inboxWorkflows, NO_CONNECTORS, readConnectorInventory, reminderWorkflows, taskWorkflows, type ConnectorInventory, type GoogleLaneRoute } from './agent-harness-personal-ops-discovery.ts';
 import { NOTE_CAPTURE_ROUTE } from './agent-harness-personal-ops-routes.ts';
 import { cappedCount, channelRecords, connectorRecords, localRecord, refreshableSavedRecordCount, reminderOperationRecords, routineReceiptRecord, savedArtifactScanWindowFull, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedProviderEffectReceiptRecords, savedReviewArtifactRecords, savedReviewQueueRecords, taskOperationRecords } from './agent-harness-personal-ops-records.ts';
-import type { McpToolRecord, McpToolSchema, PersonalOpsLane, PersonalOpsLiveRecord } from './agent-harness-personal-ops-types.ts';
+import type { PersonalOpsLane, PersonalOpsLiveRecord } from './agent-harness-personal-ops-types.ts';
 import { personalOpsStyleDraftRecord, personalOpsStyleDraftWorkflow } from './agent-harness-personal-ops-style-draft.ts';
 
-/** Methods a lane reading could not settle are left out of the lane; say so instead of dropping them silently. */
-export function withUnassessed(lane: PersonalOpsLane, unassessed: readonly string[] | undefined): PersonalOpsLane {
-  if (!unassessed?.length) return lane;
-  return { ...lane, signals: [...lane.signals, `${unassessed.length} method(s) not assessed for this lane (reading could not settle them): ${unassessed.join(', ')}`] };
+/** What the session's Google connection serves: the built-in google tool is the inbox and calendar route when it is connected. */
+interface GoogleLanes {
+  readonly state: AgentGoogleConnectionState;
+  readonly inbox: GoogleLaneRoute | null;
+  readonly calendar: GoogleLaneRoute | null;
+}
+
+const NO_GOOGLE_LANES: GoogleLanes = { state: { status: 'not-connected' }, inbox: null, calendar: null };
+
+async function readGoogleLanes(context: CommandContext): Promise<GoogleLanes> {
+  const state = await googleConnectionState(context.platform?.secretsManager);
+  if (state.status !== 'connected') return { state, inbox: null, calendar: null };
+  const granted = state.scopesKnown ? 'its granted scopes permit' : 'its scopes are confirmed on the first google call, which is expected to permit';
+  return {
+    state,
+    inbox: state.canReadMail ? { modelRoute: 'google action:"mail.list"', summary: `A Google account is connected; ${granted} reading mail through the built-in google tool.` } : null,
+    calendar: state.canReadCalendar ? { modelRoute: 'google action:"calendar.list"', summary: `A Google account is connected; ${granted} reading the calendar through the built-in google tool.` } : null,
+  };
+}
+
+/** The setup step a lane names when nothing serves it, from the Google connection's actual state. */
+function googleSetupNext(state: AgentGoogleConnectionState, lane: 'inbox' | 'calendar'): string {
+  const work = lane === 'inbox' ? 'triage and draft replies' : 'route agenda briefing, conflicts, and reminders';
+  if (state.status === 'connected') return `The connected Google account was not granted ${lane === 'inbox' ? 'mail' : 'calendar'} read access; re-authorize with /google reauthorize, then ${work} through the built-in google tool.`;
+  if (state.status === 'unreadable') return 'The credential store could not be read, so whether a Google account is connected is unknown; run google action:"status" to see the reason.';
+  return `Connect a Google account with /google connect, then ${work} through the built-in google tool.`;
+}
+
+function googleSignal(state: AgentGoogleConnectionState, route: GoogleLaneRoute | null): string {
+  if (route) return `Google account connected (${route.modelRoute})`;
+  if (state.status === 'connected') return 'Google account connected without read access for this lane';
+  if (state.status === 'unreadable') return 'Google connection unknown (credential store unreadable)';
+  return 'No Google account connected';
 }
 
 function notesLane(snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>): PersonalOpsLane {
@@ -61,16 +88,17 @@ function remindersLane(scheduleMethods: readonly string[],
     workflows: reminderWorkflows(scheduleMethods, configuredTargets > 0 || readyChannels > 0),
     liveRecords: [
       ...reminderEffectReceiptRecords,
-      ...reminderOperationRecords(scheduleMethods, configuredTargets > 0 || readyChannels > 0),
+      ...reminderOperationRecords(configuredTargets > 0 || readyChannels > 0),
     ],
   };
 }
 
-function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }: {
+function inboxLane({ snapshot, google, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }: {
   readonly snapshot: ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>;
+  readonly google: GoogleLanes;
   readonly emailMethods: readonly string[];
   readonly unavailableEmailMethods: readonly string[];
-  readonly emailConnectors: Awaited<ReturnType<typeof connectorSignalsMatching>>;
+  readonly emailConnectors: ReturnType<typeof connectorSignals>;
   readonly inboxArtifactRecords: readonly PersonalOpsLiveRecord[];
   readonly inboxReviewQueueRecords: readonly PersonalOpsLiveRecord[];
   readonly inboxEffectReceiptRecords: readonly PersonalOpsLiveRecord[];
@@ -80,9 +108,11 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
   return {
     id: 'inbox',
     label: 'Inbox',
-    status: emailMethods.length > 0 || emailConnectors.length > 0 || inboxArtifactRecords.length > 0 || inboxEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
+    status: google.inbox ? 'ready'
+      : emailMethods.length > 0 || emailConnectors.length > 0 || inboxArtifactRecords.length > 0 || inboxEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
     outcome: 'Triage inbound email or message inboxes, summarize threads, draft replies, and send only after confirmation.',
-    current: emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
+    current: google.inbox ? google.inbox.summary
+      : emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
       ? 'The daemon contract exposes email-like methods; Personal Ops workflow cards now guide inbox triage and draft boundaries around exact methods.'
       : emailConnectors.length > 0
         ? 'A configured MCP connector looks email-capable; Personal Ops workflow cards now guide inbox triage, schema-derived operation records, and draft boundaries around its exact tools.'
@@ -93,7 +123,8 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
       : unavailableEmailMethods.length > 0
         ? `The operator contract advertises ${unavailableEmailMethods.length} email method(s), but they are unavailable (route not served by this daemon) and cannot be dispatched.`
       : 'No email/IMAP/SMTP methods are present in the current GoodVibes platform operator contract.',
-    next: emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
+    next: google.inbox ? `List unread mail with ${google.inbox.modelRoute}, read a thread with google action:"mail.read", draft in the conversation, and send only through google action:"mail.send" under its own admission.`
+      : emailMethods.length > 0 && emailConnectors.length === 0 && inboxArtifactRecords.length === 0 && inboxEffectReceiptRecords.length === 0
       ? 'Use the inbox workflow cards to inspect exact methods, read selected threads, summarize priorities, and keep send as a separate confirmation.'
       : emailConnectors.length > 0
         ? 'Use the inbox workflow cards and operation records to inspect matching MCP connector schemas, then route triage only through reviewed connector actions.'
@@ -101,10 +132,11 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
           ? 'Use saved thread queue records for local draft review or recap, then repair an email connector before reading fresh inbox data or sending.'
           : inboxEffectReceiptRecords.length > 0
             ? 'Review saved inbox provider-effect receipts, then repair an email connector before reading fresh inbox data or sending another provider effect.'
-      : 'Connect a Google account with /google connect, then triage and draft replies through the built-in google tool.',
+      : googleSetupNext(google.state, 'inbox'),
     userRoute: 'Agent Workspace -> Personal Ops -> Delivery channels',
-    modelRoute: emailConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"email"' : 'host action:"methods" query:"email"',
+    modelRoute: google.inbox ? google.inbox.modelRoute : emailConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"email"' : 'host action:"methods" query:"email"',
     signals: [
+      googleSignal(google.state, google.inbox),
       `${emailMethods.length} dispatchable email-like daemon method(s)`,
       ...(unavailableEmailMethods.length > 0 ? [`${unavailableEmailMethods.length} advertised-but-unavailable email method(s) (route not served by this daemon)`] : []),
       `${emailConnectors.length} email-like MCP connector(s)`,
@@ -116,7 +148,7 @@ function inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConne
     ],
     methodIds: emailMethods,
     connectorSignals: emailConnectors,
-    workflows: [...inboxWorkflows(emailMethods, emailConnectors, unavailableEmailMethods), personalOpsStyleDraftWorkflow()],
+    workflows: [...inboxWorkflows(emailMethods, emailConnectors, unavailableEmailMethods, google.inbox), personalOpsStyleDraftWorkflow()],
     liveRecords: [
       personalOpsStyleDraftRecord(),
       ...inboxReviewQueueRecords,
@@ -131,83 +163,43 @@ export function buildLanes(...args: Parameters<typeof ownedBuildLanes>): ReturnT
   return withConfiguredDecisionModelPolicy(() => ownedBuildLanes(...args));
 }
 
+/**
+ * Each source is read once: the workspace snapshot, the contract lanes (a
+ * per-process partition of the compiled contract), the MCP inventory when an
+ * inbox or calendar lane is wanted, the Google connection, and the saved
+ * records. Lane membership and connector classification are decided in code.
+ */
 async function ownedBuildLanes(
   context: CommandContext,
-  options: CatalogRankingOptions & {
-    readonly toolsByServer?: ReadonlyMap<string, readonly McpToolRecord[]>;
-    readonly schemasByQualifiedName?: ReadonlyMap<string, McpToolSchema>;
-  } = {},
+  options: CatalogRankingOptions & { readonly connectors?: ConnectorInventory } = {},
   exactLane?: 'notes' | 'reminders' | 'inbox',
 ): Promise<readonly PersonalOpsLane[]> {
-  if (exactLane !== undefined && exactLane !== 'notes' && exactLane !== 'reminders' && exactLane !== 'inbox') throw new ToolInputProjectionError('invalid');
-  const signal = options.signal, callerCurrent = options.assertCurrent, retainCurrent = options.retainCurrent;
-  const staged = new Map<string | (() => void), Set<() => void>>();
-  const retainChild = (guard: () => void, key?: string) => {
-    const guards = staged.get(key ?? guard) ?? new Set<() => void>();
-    guards.add(guard); staged.set(key ?? guard, guards);
-  };
-  const assertCaller = () => {
-    signal?.throwIfAborted();
-    assertSynchronousJudgmentGuard(callerCurrent, () => new ToolInputProjectionError('held'));
-    signal?.throwIfAborted();
-  };
-  signal?.throwIfAborted(); assertCaller();
-  const original = buildAgentWorkspaceRuntimeSnapshot(context);
-  const workspaceCapture = captureCatalogSnapshot(original);
-  const assertSnapshot = workspaceCapture.assertCurrent;
-  const assertSource = () => {
-    signal?.throwIfAborted();
-    assertSnapshot(buildAgentWorkspaceRuntimeSnapshot(context));
-  };
-  const assertCurrent = () => { assertSource(); assertCaller(); assertSource(); };
-  const assertChildren = () => { for (const guards of staged.values()) for (const guard of guards) guard(); };
-  const publicationCurrent = () => { assertSource(); assertChildren(); assertSource(); };
-  const readOptions = { ...options, assertCurrent, retainCurrent: retainChild };
-  const lanes = await withModelReadingSource(workspaceCapture.captured, readOptions, async (snapshot, current): Promise<readonly PersonalOpsLane[]> => {
-  // Each child owns its active source. Previously completed children remain
-  // current at phase boundaries without entering every later child's callbacks.
-  const childOptions = { ...current, assertCurrent: assertCaller, retainCurrent: retainChild };
-  const readChild = async <T>(read: () => Promise<T>): Promise<T> => {
-    current.assertCurrent?.(); assertChildren(); current.assertCurrent?.();
-    const result = await read();
-    current.assertCurrent?.(); assertChildren(); current.assertCurrent?.();
-    return result;
-  };
-  // Readiness counts only DISPATCHABLE methods (capability-advertisement honesty): a
-  // method the contract marks invokable:false has no serving route, so it
-  // must not make a lane read "ready"/"partial". The unavailable lists feed
-  // honest degraded wording instead.
-  let contract: { readonly scope: 'all'; readonly values: Awaited<ReturnType<typeof contractMethodsForLanes>> }
-    | { readonly scope: 'reminders'; readonly values: Awaited<ReturnType<typeof contractMethodsForLane>> }
-    | { readonly scope: 'inbox'; readonly values: Awaited<ReturnType<typeof contractMethodsForLane>> }
-    | { readonly scope: 'notes' };
-  if (exactLane === 'notes') {
-    await readChild(() => retainPersonalOpsContractSource(childOptions));
-    contract = { scope: 'notes' };
-  } else if (exactLane === 'reminders') {
-    contract = { scope: 'reminders', values: await readChild(() => contractMethodsForLane('reminders', childOptions)) };
-  } else if (exactLane === 'inbox') {
-    contract = { scope: 'inbox', values: await readChild(() => contractMethodsForLane('inbox', childOptions)) };
-  } else {
-    contract = { scope: 'all', values: await readChild(() => contractMethodsForLanes(childOptions)) };
-  }
-  const toolsByName = options.toolsByServer ?? new Map<string, readonly McpToolRecord[]>();
-  const schemasByQualifiedName = options.schemasByQualifiedName ?? new Map<string, McpToolSchema>();
+  options.signal?.throwIfAborted();
+  const snapshot = buildAgentWorkspaceRuntimeSnapshot(context);
+  if (exactLane === 'notes') return [notesLane(snapshot)];
   // A lane's reads are skipped when the caller asked for another lane alone.
   const wants = (lane: 'inbox' | 'calendar' | 'tasks' | 'reminders') => exactLane === undefined || exactLane === lane;
   const none: readonly PersonalOpsLiveRecord[] = [];
-  const emailConnectors = wants('inbox') ? await readChild(() => connectorSignalsMatching(context, { ...childOptions, lane: 'inbox', toolsByServer: toolsByName, schemasByQualifiedName })) : [];
-  const calendarConnectors = wants('calendar') ? await readChild(() => connectorSignalsMatching(context, { ...childOptions, lane: 'calendar', toolsByServer: toolsByName, schemasByQualifiedName })) : [];
-  const inboxArtifactRecords = wants('inbox') ? await readChild(() => savedReviewArtifactRecords(context, 'inbox', emailConnectors, childOptions)) : none;
-  const calendarArtifactRecords = wants('calendar') ? await readChild(() => savedReviewArtifactRecords(context, 'calendar', calendarConnectors, childOptions)) : none;
-  const inboxReviewQueueRecords = wants('inbox') ? await readChild(() => savedReviewQueueRecords(context, 'inbox', emailConnectors, childOptions)) : none;
-  const calendarReviewQueueRecords = wants('calendar') ? await readChild(() => savedReviewQueueRecords(context, 'calendar', calendarConnectors, childOptions)) : none;
-  const inboxEffectReceiptRecords = wants('inbox') ? await readChild(() => savedProviderEffectReceiptRecords(context, 'inbox', childOptions)) : none;
-  const calendarEffectReceiptRecords = wants('calendar') ? await readChild(() => savedProviderEffectReceiptRecords(context, 'calendar', childOptions)) : none;
+  const readsConnectors = wants('inbox') || wants('calendar');
+  const [connectors, google]: readonly [ConnectorInventory, GoogleLanes] = readsConnectors
+    ? await Promise.all([options.connectors ?? readConnectorInventory(context, options), readGoogleLanes(context)])
+    : [NO_CONNECTORS, NO_GOOGLE_LANES];
+  const emailConnectors = wants('inbox') ? connectorSignals(connectors, 'inbox') : [];
+  const calendarConnectors = wants('calendar') ? connectorSignals(connectors, 'calendar') : [];
+  const [inboxArtifactRecords, calendarArtifactRecords, inboxReviewQueueRecords, calendarReviewQueueRecords,
+    inboxEffectReceiptRecords, calendarEffectReceiptRecords, taskEffectReceiptRecords, reminderEffectReceiptRecords] = await Promise.all([
+    wants('inbox') ? savedReviewArtifactRecords(context, 'inbox', emailConnectors, options) : none,
+    wants('calendar') ? savedReviewArtifactRecords(context, 'calendar', calendarConnectors, options) : none,
+    wants('inbox') ? savedReviewQueueRecords(context, 'inbox', emailConnectors, options) : none,
+    wants('calendar') ? savedReviewQueueRecords(context, 'calendar', calendarConnectors, options) : none,
+    wants('inbox') ? savedProviderEffectReceiptRecords(context, 'inbox', options) : none,
+    wants('calendar') ? savedProviderEffectReceiptRecords(context, 'calendar', options) : none,
+    wants('tasks') ? savedProviderEffectReceiptRecords(context, 'tasks', options) : none,
+    wants('reminders') ? savedProviderEffectReceiptRecords(context, 'reminders', options) : none,
+  ]);
+  options.signal?.throwIfAborted();
   const refreshableInboxQueueRecords = refreshableSavedRecordCount(inboxReviewQueueRecords);
   const refreshableCalendarQueueRecords = refreshableSavedRecordCount(calendarReviewQueueRecords);
-  const taskEffectReceiptRecords = wants('tasks') ? await readChild(() => savedProviderEffectReceiptRecords(context, 'tasks', childOptions)) : none;
-  const reminderEffectReceiptRecords = wants('reminders') ? await readChild(() => savedProviderEffectReceiptRecords(context, 'reminders', childOptions)) : none;
   const readyChannels = snapshot.channels.filter((channel) => channel.ready).length;
   const enabledChannels = snapshot.channels.filter((channel) => channel.enabled).length;
   const configuredTargets = snapshot.channels.filter((channel) => channel.defaultTarget === 'configured').length;
@@ -216,27 +208,29 @@ async function ownedBuildLanes(
     && routine.reviewState === 'reviewed'
     && (routine.missingRequirementCount ?? 0) === 0
   )).length;
-  if (contract.scope === 'notes') return [notesLane(snapshot)];
-  if (contract.scope === 'reminders') return [withUnassessed(remindersLane(contract.values.available,
-    reminderEffectReceiptRecords, configuredTargets, readyChannels), contract.values.unassessed)];
-  if (contract.scope === 'inbox') return [withUnassessed(inboxLane({ snapshot, emailMethods: contract.values.available,
-    unavailableEmailMethods: contract.values.unavailable, emailConnectors, inboxArtifactRecords,
-    inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }), contract.values.unassessed)];
-  const { inbox: email, calendar, tasks, reminders } = contract.values;
+  const email = contractLaneMethods('inbox'), calendar = contractLaneMethods('calendar');
   const emailMethods = email.available, unavailableEmailMethods = email.unavailable;
   const calendarMethods = calendar.available, unavailableCalendarMethods = calendar.unavailable;
-  const taskMethods = tasks.available, scheduleMethods = reminders.available;
-  const unassessedByLane: Readonly<Record<string, readonly string[] | undefined>> = {
-    inbox: email.unassessed, calendar: calendar.unassessed, tasks: tasks.unassessed, reminders: reminders.unassessed,
+  const taskMethods = contractLaneMethods('tasks').available, scheduleMethods = contractLaneMethods('reminders').available;
+  const inbox = () => inboxLane({ snapshot, google, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords,
+    inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels });
+  const withScanWindow = (lanes: readonly PersonalOpsLane[]): readonly PersonalOpsLane[] => {
+    if (!savedArtifactScanWindowFull(context)) return lanes;
+    const readsSavedArtifacts = new Set(['inbox', 'calendar', 'tasks', 'reminders']);
+    return lanes.map(lane => readsSavedArtifacts.has(lane.id) ? { ...lane, signals: [...lane.signals, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL] } : lane);
   };
+  if (exactLane === 'reminders') return withScanWindow([remindersLane(scheduleMethods, reminderEffectReceiptRecords, configuredTargets, readyChannels)]);
+  if (exactLane === 'inbox') return withScanWindow([inbox()]);
   const allLanes: readonly PersonalOpsLane[] = [
-    inboxLane({ snapshot, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }),
+    inbox(),
     {
       id: 'calendar',
       label: 'Calendar',
-      status: calendarMethods.length > 0 || calendarConnectors.length > 0 || calendarArtifactRecords.length > 0 || calendarEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
+      status: google.calendar ? 'ready'
+        : calendarMethods.length > 0 || calendarConnectors.length > 0 || calendarArtifactRecords.length > 0 || calendarEffectReceiptRecords.length > 0 ? 'partial' : 'gap',
       outcome: 'Read agenda context, identify conflicts, prepare briefings, and create reminders for calendar-driven work.',
-      current: calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
+      current: google.calendar ? google.calendar.summary
+        : calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
         ? 'The daemon contract exposes calendar-like methods; Personal Ops workflow cards now guide agenda briefing and conflict-scan boundaries.'
         : calendarConnectors.length > 0
           ? 'A configured MCP connector looks calendar-capable; Personal Ops workflow cards now guide agenda briefing, schema-derived operation records, and conflict-scan boundaries around its exact tools.'
@@ -247,7 +241,8 @@ async function ownedBuildLanes(
         : unavailableCalendarMethods.length > 0
           ? `The operator contract advertises ${unavailableCalendarMethods.length} calendar method(s), but they are unavailable (route not served by this daemon) and cannot be dispatched. The local Agent calendar (/calendar) remains available.`
         : 'No calendar/CalDAV/agenda methods are present in the current GoodVibes platform operator contract.',
-      next: calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
+      next: google.calendar ? `Read the agenda with ${google.calendar.modelRoute}, brief conflicts in the conversation, and create events only through google action:"calendar.create" under its own admission.`
+        : calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0
         ? 'Use the calendar workflow cards to inspect exact methods, fetch a bounded agenda window, and propose reminders or follow-ups.'
         : calendarConnectors.length > 0
           ? 'Use the calendar workflow cards and operation records to inspect matching MCP connector schemas, then route agenda work only through reviewed connector actions.'
@@ -255,10 +250,11 @@ async function ownedBuildLanes(
             ? 'Use saved event queue records for recap or reminder creation, then repair a calendar connector before reading fresh agenda data or editing events.'
             : calendarEffectReceiptRecords.length > 0
               ? 'Review saved calendar provider-effect receipts, then repair a calendar connector before reading fresh agenda data or editing events.'
-        : 'Connect a Google account with /google connect, then route agenda briefing, conflicts, and reminders through this lane.',
+        : googleSetupNext(google.state, 'calendar'),
       userRoute: 'Agent Workspace -> Personal Ops -> Create reminder',
-      modelRoute: calendarConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"calendar"' : 'host action:"methods" query:"calendar"',
+      modelRoute: google.calendar ? google.calendar.modelRoute : calendarConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"calendar"' : 'host action:"methods" query:"calendar"',
       signals: [
+        googleSignal(google.state, google.calendar),
         `${calendarMethods.length} dispatchable calendar-like daemon method(s)`,
         ...(unavailableCalendarMethods.length > 0 ? [`${unavailableCalendarMethods.length} advertised-but-unavailable calendar method(s) (route not served by this daemon)`] : []),
         `${calendarConnectors.length} calendar-like MCP connector(s)`,
@@ -270,7 +266,7 @@ async function ownedBuildLanes(
       ],
       methodIds: calendarMethods,
       connectorSignals: calendarConnectors,
-      workflows: calendarWorkflows(calendarMethods, calendarConnectors, unavailableCalendarMethods),
+      workflows: calendarWorkflows(calendarMethods, calendarConnectors, unavailableCalendarMethods, google.calendar),
       liveRecords: [
         ...calendarReviewQueueRecords,
         ...calendarArtifactRecords,
@@ -301,7 +297,7 @@ async function ownedBuildLanes(
       workflows: taskWorkflows(taskMethods),
       liveRecords: [
         ...taskEffectReceiptRecords,
-        ...taskOperationRecords(taskMethods),
+        ...taskOperationRecords(),
       ],
     },
     remindersLane(scheduleMethods, reminderEffectReceiptRecords, configuredTargets, readyChannels),
@@ -343,16 +339,5 @@ async function ownedBuildLanes(
       liveRecords: channelRecords(snapshot),
     },
   ];
-  return allLanes.map(lane => withUnassessed(lane, unassessedByLane[lane.id]));
-  });
-  assertCurrent(); publicationCurrent();
-  for (const [key, guards] of staged) {
-    retainCurrent?.(() => { for (const guard of guards) guard(); }, typeof key === 'string' ? key : undefined);
-    assertCurrent(); publicationCurrent();
-  }
-  retainCurrent?.(publicationCurrent, 'personal-ops-lanes');
-  assertCurrent(); publicationCurrent();
-  if (!savedArtifactScanWindowFull(context)) return lanes;
-  const readsSavedArtifacts = new Set(['inbox', 'calendar', 'tasks', 'reminders']);
-  return lanes.map(lane => readsSavedArtifacts.has(lane.id) ? { ...lane, signals: [...lane.signals, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL] } : lane);
+  return withScanWindow(allLanes);
 }

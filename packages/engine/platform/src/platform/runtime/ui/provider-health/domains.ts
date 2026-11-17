@@ -132,24 +132,33 @@ export function buildProviderHealthDomainSummaries(
       : ['/mcp review'],
   });
 
-  const intelligenceIssues = [
-    intelligence.diagnosticsStatus,
-    intelligence.symbolSearchStatus,
-    intelligence.hoverStatus,
-  ].filter((status) => status !== 'ready').length;
+  // No language server known means no workspace has asked for code intelligence
+  // in this process yet; they start on the first lookup, so that is not a fault.
+  const intelligenceStarted = intelligence.languageServers.length > 0;
+  const intelligenceIssues = intelligenceStarted
+    ? [
+      intelligence.diagnosticsStatus,
+      intelligence.symbolSearchStatus,
+      intelligence.hoverStatus,
+    ].filter((status) => status !== 'ready').length
+    : 0;
   const runningServers = intelligence.languageServers.filter((server) => server.state === 'running').length;
   summaries.push({
     name: 'intelligence',
-    level: intelligenceIssues > 0 ? 'warn' : 'good',
-    summary: intelligenceIssues > 0
-      ? `${intelligenceIssues} readiness surface(s) degraded`
-      : `ready (${runningServers} of ${intelligence.languageServers.length} language server(s) running)`,
+    level: !intelligenceStarted ? 'info' : intelligenceIssues > 0 ? 'warn' : 'good',
+    summary: !intelligenceStarted
+      ? 'no language server started yet (they start on the first code lookup)'
+      : intelligenceIssues > 0
+        ? `${intelligenceIssues} readiness surface(s) degraded`
+        : `ready (${runningServers} of ${intelligence.languageServers.length} language server(s) running)`,
     next: intelligenceIssues > 0 ? '/intelligence repair' : '/intelligence review',
-    details: [
-      intelligence.diagnosticsStatus !== 'ready' ? `diagnostics=${intelligence.diagnosticsStatus}` : '',
-      intelligence.symbolSearchStatus !== 'ready' ? `symbols=${intelligence.symbolSearchStatus}` : '',
-      intelligence.hoverStatus !== 'ready' ? `hover=${intelligence.hoverStatus}` : '',
-    ].filter(Boolean),
+    details: intelligenceStarted
+      ? [
+        intelligence.diagnosticsStatus !== 'ready' ? `diagnostics=${intelligence.diagnosticsStatus}` : '',
+        intelligence.symbolSearchStatus !== 'ready' ? `symbols=${intelligence.symbolSearchStatus}` : '',
+        intelligence.hoverStatus !== 'ready' ? `hover=${intelligence.hoverStatus}` : '',
+      ].filter(Boolean)
+      : ['syntax diagnostics and symbols come from the built-in parser'],
     nextSteps: intelligenceIssues > 0
       ? ['/intelligence diagnostics', '/intelligence repair', '/health intelligence']
       : ['/intelligence review'],

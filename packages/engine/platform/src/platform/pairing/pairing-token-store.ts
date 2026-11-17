@@ -45,7 +45,9 @@
  * own earlier unused offer, and a client that repeats a pairing attempt whose
  * reply it lost gets that attempt's offer re-issued, so neither adds a second
  * live credential. The first authentication claims it (one write
- * per device). After that, last-seen is stamped in memory and written with the
+ * per device); that claim adds a device, so it is bounded by
+ * `device.nodes.maxPaired` exactly as a mint is, and a refused claim leaves the
+ * offer usable until it expires. After that, last-seen is stamped in memory and written with the
  * next write or by a timer, never inside a request. With managed token rotation
  * on ({@link PairingTokenManager.setRotationLimit}), a device token older than
  * the limit is refused here, the owner of "may this token authenticate", and
@@ -124,6 +126,12 @@ interface StoredPairingToken {
   nativeContinuationRevision?: { readonly id: string; readonly createdAt: number; readonly tokenHash: string };
   /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
   client?: 'agent' | undefined;
+  /**
+   * Set on an offer minted for a device moving off the shared token: its first
+   * use is exempt from `device.nodes.maxPaired`, as its mint was. Cleared by
+   * the first use.
+   */
+  capExempt?: true | undefined;
   /**
    * The operator scopes this device holds, when it was paired with a narrower
    * list than full operator authority (`*` in the list is full authority).
@@ -757,6 +765,37 @@ export class PairingTokenManager {
     this.#rotationLimit = read;
   }
 
+  /**
+   * What claiming `offer` against `tokens` does under `device.nodes.maxPaired`.
+   * The first use of an offer adds a paired node, so it is bounded as a mint
+   * is: below the cap it adds; at the cap a node already paired under the same
+   * name is superseded by it; any other node is refused, and the offer stays
+   * usable until it expires, so it works once a device is unpaired. The
+   * Agent's credential and an offer minted for a shared-token migration are
+   * exempt, as their mints were. One filter, only for an unclaimed offer.
+   */
+  private capAtClaim(offer: StoredPairingToken, tokens: readonly StoredPairingToken[]):
+    { readonly refused: CredentialRefusal } | { readonly supersedes: StoredPairingToken | undefined } {
+    if (offer.offeredUntil === undefined || offer.client === 'agent' || offer.capExempt === true) return { supersedes: undefined };
+    const cap = this.currentCap();
+    if (cap === null) return { supersedes: undefined };
+    const paired = tokens.filter(record => record.offeredUntil === undefined && record.client !== 'agent');
+    if (paired.length < cap) return { supersedes: undefined };
+    const normalized = offer.name.trim().toLowerCase();
+    const existing = normalized ? paired.find(record => record.name.trim().toLowerCase() === normalized) : undefined;
+    if (existing) return { supersedes: existing };
+    return {
+      refused: {
+        code: 'DEVICE_NODES_MAX_PAIRED',
+        state: `device.nodes.maxPaired is ${cap} and ${paired.length} ${paired.length === 1 ? 'device is' : 'devices are'} already paired, so this pairing code cannot add another`,
+        reason: 'The paired-device limit is reached',
+        next: [
+          "Unpair a device on the owner's machine, or raise device.nodes.maxPaired, then use this pairing code again before it expires",
+        ],
+      },
+    };
+  }
+
   /** Why this record does not authenticate now, or null when it does. */
   private refusalOf(record: StoredPairingToken, now: number): CredentialRefusal | null {
     if (isExpiredOffer(record, now)) {
@@ -767,7 +806,10 @@ export class PairingTokenManager {
         next: ["Show a new pairing code on the owner's machine and use it right away"],
       };
     }
-    if (record.offeredUntil !== undefined) return null;
+    if (record.offeredUntil !== undefined) {
+      const atCap = this.capAtClaim(record, this.snapshot.tokens);
+      return 'refused' in atCap ? atCap.refused : null;
+    }
     let limit: number | null = null;
     try { limit = this.#rotationLimit?.() ?? null; } catch { limit = null; }
     if (limit === null || !Number.isFinite(limit) || limit <= 0 || now - record.createdAt <= limit) return null;
@@ -1540,6 +1582,8 @@ export class PairingTokenManager {
         ...(input.mintedBy !== undefined && input.mintedBy !== replacedId ? { mintedBy: input.mintedBy } : {}),
         ...(attemptId !== undefined ? { attemptId } : {}),
         ...(input.client === 'agent' ? { client: 'agent' as const } : {}),
+        // A migration's mint skipped the cap; its first use does too.
+        ...(!options.enforceCap ? { capExempt: true as const } : {}),
         ...(scopes !== undefined ? { scopes } : {}),
       };
       // A device paired again keeps answering for what its old pairing minted.
@@ -1596,16 +1640,34 @@ export class PairingTokenManager {
       return null;
     }
     if (record.offeredUntil !== undefined) {
+      let superseded = false;
       try {
-        // Only adds a device, so a failed claim is re-verifiable like a mint.
+        // Adds a device (and at the cap may supersede the same node's older record),
+        // so a failed claim that replaced nothing is re-verifiable like a mint.
         record = this.mutate(current => {
+          superseded = false;
           const found = current.tokens.find(item => item.tokenHash === hash);
           if (!found || isExpiredOffer(found, now)) return { value: undefined, changed: false };
+          // The cap is judged on the file as it is now, so two offers used at once cannot both pass it.
+          const atCap = this.capAtClaim(found, current.tokens);
+          if ('refused' in atCap) return { value: undefined, changed: false };
+          const replaced = atCap.supersedes;
+          if (replaced) {
+            logger.info('Pairing at the device.nodes.maxPaired cap: a pairing code re-pairs an already paired node', {
+              name: replaced.name, maxPaired: this.currentCap(),
+            });
+            current.tokens = current.tokens.filter(item => item.id !== replaced.id);
+            if (found.mintedBy === replaced.id) found.mintedBy = undefined;
+            // A device paired again keeps answering for what its old pairing minted.
+            for (const item of current.tokens) if (item.mintedBy === replaced.id) item.mintedBy = found.id;
+            superseded = true;
+          }
           found.offeredUntil = undefined;
           found.attemptId = undefined;
+          found.capExempt = undefined;
           found.lastSeenAt = now;
           return { value: found, changed: true };
-        }, true, () => true);
+        }, true, () => !superseded);
       } catch (error) {
         // Unclaimed, the offer would expire under a device that is using it; refuse instead.
         logger.warn('Pairing token first use could not be recorded; the request is refused', { path: this.filePath, error: String(error) });

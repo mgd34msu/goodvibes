@@ -414,7 +414,7 @@ function applyStagedManagedBundleLocked(
     restoreWrittenSettings(configManager, written, before);
     throw error;
   }
-  const nextStage = remainingChanges.length > 0
+  const nextStage: StagedManagedBundle | undefined = remainingChanges.length > 0
     ? {
         ...stage,
         changeCount: remainingChanges.filter((entry) => entry.changed).length,

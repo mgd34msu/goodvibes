@@ -5,15 +5,12 @@
  * The standing rule this module implements: if something is persisted across
  * restarts and crashes, recovery has to do the housekeeping. Each individual
  * store already knew how to WRITE its artefact and how to retire it on a clean
- * path; none of them reclaimed what a SIGKILL left behind. Four stores, four
+ * path; none of them reclaimed what a SIGKILL left behind. Three stores, three
  * kinds of residue:
  *
  *   - liveness markers      `<home>/.goodvibes/<root>/liveness/<id>.json`
  *                           removed only on a clean exit, so a crash leaks one
  *                           file per session id ever opened.
- *   - transcript journals   `<home>/.goodvibes/<root>/transcript-<id>.journal`
- *                           deleted on snapshot or replay, so a session that
- *                           crashes and is never resumed leaks its journal.
  *   - quarantine files      `<path>.unrecognized`, written so a human can
  *                           inspect a corrupt file, never removed afterwards.
  *   - anchor sidecars       `<sessionsDir>/<id>.anchors.json`, outlives the
@@ -34,8 +31,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { reapQuarantinedFiles } from '../config/read-versioned.js';
 import { reapOrphanedAnchorSidecars } from '../rewind/turn-anchors.js';
-import { reapOrphanedJournals } from './transcript-journal.js';
-import { checkSessionLiveness, reapStaleLivenessMarkers } from './session-liveness-marker.js';
+import { reapStaleLivenessMarkers } from './session-liveness-marker.js';
 import type { SessionSurface } from './session-surface.js';
 
 /**
@@ -61,15 +57,14 @@ export interface DurabilityHousekeepingInput {
 
 export interface DurabilityHousekeepingOutcome {
   readonly livenessMarkers: number;
-  readonly transcriptJournals: number;
   readonly quarantineFiles: number;
   readonly anchorSidecars: number;
-  /** Sum of the four counts above, zero means nothing was reclaimed. */
+  /** Sum of the three counts above, zero means nothing was reclaimed. */
   readonly total: number;
 }
 
 /**
- * Run all four reaps once and return what each reclaimed.
+ * Run all three reaps once and return what each reclaimed.
  *
  * Each reap is isolated: one throwing is logged at warn level and counted as
  * zero, and the remaining reaps still run. The caller never sees an exception.
@@ -83,15 +78,6 @@ export function runDurabilityHousekeeping(input: DurabilityHousekeepingInput): D
       keepSessionIds: currentSessionId ? [currentSessionId] : [],
     }).reaped, 0);
 
-  const transcriptJournals = safely('transcript journals', () =>
-    reapOrphanedJournals(surface, {
-      currentSessionId,
-      // Composition happens here so transcript-journal.ts keeps no dependency
-      // on the liveness marker: a journal whose session is open in another
-      // running instance is live state, not residue.
-      isSessionLive: (sessionId) => checkSessionLiveness(surface, sessionId).live,
-    }).reaped, 0);
-
   const quarantineFiles = safely('quarantine files', () =>
     reapQuarantinedFiles(quarantineDirsFor(input)).reaped, 0);
 
@@ -100,10 +86,9 @@ export function runDurabilityHousekeeping(input: DurabilityHousekeepingInput): D
 
   const outcome: DurabilityHousekeepingOutcome = {
     livenessMarkers,
-    transcriptJournals,
     quarantineFiles,
     anchorSidecars,
-    total: livenessMarkers + transcriptJournals + quarantineFiles + anchorSidecars,
+    total: livenessMarkers + quarantineFiles + anchorSidecars,
   };
   discloseHousekeeping(outcome);
   return outcome;
@@ -148,7 +133,6 @@ function discloseHousekeeping(outcome: DurabilityHousekeepingOutcome): void {
   if (outcome.total === 0) return;
   logger.info('durability housekeeping reclaimed crash residue', {
     livenessMarkers: outcome.livenessMarkers,
-    transcriptJournals: outcome.transcriptJournals,
     quarantineFiles: outcome.quarantineFiles,
     anchorSidecars: outcome.anchorSidecars,
     total: outcome.total,
@@ -157,7 +141,7 @@ function discloseHousekeeping(outcome: DurabilityHousekeepingOutcome): void {
 
 /**
  * Every directory that can accumulate `.unrecognized` files: the home-scoped
- * surface root (transcript-journal quarantines) and the per-project session,
+ * surface root and the per-project session,
  * state, recovery and checkpoint directories (versioned-config quarantines),
  * plus whatever the caller adds.
  */

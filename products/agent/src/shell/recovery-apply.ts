@@ -3,10 +3,9 @@
  *
  * Loading, applying and forgetting a snapshot is a sequence that goes wrong in
  * the middle: a snapshot deleted before the conversation accepted it is lost
- * with the failure, and one applied without the journal tail is older than the
- * last thing the process logged. The platform's `applyRecoverySnapshot` keeps
- * the file until the conversation accepted it, replays the journal on top, and
- * never throws. This module binds it to the agent's live objects and finishes
+ * with the failure. The platform's `applyRecoverySnapshot` keeps the file until
+ * the conversation accepted it and the session store holds it, and never
+ * throws. This module binds it to the agent's live objects and finishes
  * the restore: the runtime moves to the snapshot's session, the restored
  * conversation is persisted so `sessions resume` can reach it, and the
  * last-session pointer names it.
@@ -63,7 +62,7 @@ export function buildAgentRecoveryApply(input: AgentRecoveryApplyInput): (sessio
       confirmation: confirmRecoveryRestore(true)!,
     });
     if (!result.applied) return result;
-    // The transcript journal and every later snapshot key off runtime.sessionId,
+    // Every later snapshot keys off runtime.sessionId,
     // so it moves only once the restore really happened.
     input.runtime.sessionId = sessionId;
     // The restore reset the live conversation, which dropped the side branches;

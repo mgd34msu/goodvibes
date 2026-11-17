@@ -10,13 +10,11 @@ import type { CommandContext } from '../command-registry.ts';
 export interface LoadedSavedSession {
   readonly name: string;
   readonly meta: SessionMeta;
-  /** Messages now in the conversation: the saved snapshot plus any turns recovered from the journal. */
+  /** Messages now in the conversation. */
   readonly messageCount: number;
   /** The Agent runs no connected-host agents, so saved agent records are counted and not restored. */
   readonly agentRecordCount: number;
   readonly restoredAnchorCount: number;
-  /** Turns that existed only in the transcript journal and were put back. */
-  readonly journalReplayed: number;
   /** Lines for the person about what the load left out (a damaged side branch) or could not recover. */
   readonly notices: readonly string[];
 }
@@ -56,7 +54,6 @@ export async function loadSavedSessionIntoLive(
     messageCount: loaded.messageCount,
     agentRecordCount: loaded.agentRecords.length,
     restoredAnchorCount: loaded.restoredAnchorCount,
-    journalReplayed: loaded.journalReplay.replayed,
     notices: describeResumeShortfalls(loaded),
   };
 }

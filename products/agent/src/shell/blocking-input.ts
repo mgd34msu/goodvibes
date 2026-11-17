@@ -112,14 +112,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     if (data === '\x12') {
       const result = applyRecovery(recoveryPending);
       if (result.applied) {
-        const replayed = result.journalReplay.replayed;
-        systemMessageRouter.high(
-          `[Recovery] Session restored (${result.messageCount} messages${replayed > 0 ? `, including ${replayed} recorded after the last snapshot` : ''}).`,
-          'success',
-        );
-        if (result.journalReplay.failed !== undefined) {
-          systemMessageRouter.high(`[Recovery] Recovery of the journal failed (${result.journalReplay.failed}); it was kept and will be retried on the next resume.`, 'error');
-        }
+        systemMessageRouter.high(`[Recovery] Session restored (${result.messageCount} messages).`, 'success');
       } else if (result.refusal === 'apply-failed') {
         systemMessageRouter.high('[Recovery] The saved session could not be restored. The saved copy is still on disk and will be offered again at the next launch.', 'error');
       } else if (result.refusal === 'unusable-snapshot') {

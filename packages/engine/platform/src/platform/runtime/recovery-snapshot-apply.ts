@@ -2,17 +2,15 @@
  * recovery-snapshot-apply.ts, restoring a crash-recovery snapshot the user
  * explicitly asked for.
  *
- * transcript-journal-replay.ts (this file's sibling) folds a journal tail onto
- * a conversation that was already hydrated from the session store. This handles
- * the case that store cannot: a session that crashed before its first clean
- * save has no entry to hydrate FROM, so the recovery snapshot is the whole
- * conversation rather than a gap-filler on top of one.
+ * The snapshot is the whole conversation as it stood at the last turn moment
+ * (prompt accepted, each tool batch done): it holds the turn that was in flight
+ * when the process died, including a session that crashed before its first
+ * clean save.
  *
  * What lives here and what does not
  * ─────────────────────────────────
  * Here: read the snapshot, check what came back is a conversation,
- * put it on the live conversation, fold in any journal records newer than it,
- * save the result to the session store, retire the snapshot, and report how
+ * put it on the live conversation, save the result to the session store, retire the snapshot, and report how
  * many messages ended up there.
  *
  * Not here: WHETHER to restore. That is a question for the user, asked in
@@ -43,7 +41,6 @@
  */
 
 import { loadRecoveryConversation, removeRecoveryPoint } from './session-recovery.js';
-import { replayJournalForSession, type ReplayIntoConversationResult } from './transcript-journal-replay.js';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.js';
 import type { SessionSurface } from './session-surface.js';
 import { logger } from '../utils/logger.js';
@@ -80,8 +77,8 @@ export function confirmRecoveryRestore(userSaidYes: boolean): RecoveryRestoreCon
 /**
  * What restoring needs a conversation to be able to do.
  *
- * `rebuildHistory` is optional for the same reason it is in journal replay: it
- * is a rendering concern, and a headless surface has nothing to re-lay-out.
+ * `rebuildHistory` is optional: it is a rendering concern, and a headless
+ * surface has nothing to re-lay-out.
  */
 export type RestorableConversation =
   Pick<ConversationManager, 'resetAll' | 'toJSON' | 'fromJSON' | 'title' | 'getTitleSource' | 'getMessageCount'> & {
@@ -89,7 +86,7 @@ export type RestorableConversation =
   };
 
 export interface ApplyRecoverySnapshotOptions {
-  /** The surface that owns the session's storage, where the snapshot and journal live. */
+  /** The surface that owns the session's storage, where the snapshot lives. */
   readonly surface: SessionSurface;
   /** The session whose recovery snapshot is being restored. */
   readonly sessionId: string;
@@ -127,13 +124,9 @@ export interface ApplyRecoverySnapshotResult {
    * be deleted.
    */
   readonly retired: boolean;
-  /** Messages the conversation holds once the snapshot (plus any journal tail) is in place. 0 when nothing was applied. */
+  /** Messages the conversation holds once the snapshot is in place. 0 when nothing was applied. */
   readonly messageCount: number;
-  /** Journal records that post-dated the snapshot and were folded in on top of it. */
-  readonly journalReplay: ReplayIntoConversationResult;
 }
-
-const NOTHING_REPLAYED: ReplayIntoConversationResult = { replayed: 0, hadCorruptTail: false };
 
 // ─── Content validation ─────────────────────────────────────────────────────
 
@@ -167,20 +160,14 @@ function readOptionalString(snapshot: unknown, key: string): string | undefined 
   return typeof value === 'string' ? value : undefined;
 }
 
-function readOptionalNumber(snapshot: unknown, key: string): number | undefined {
-  const value = (snapshot as Record<string, unknown> | null)?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**
  * Restore the recovery snapshot the user asked for, retiring it in the process.
  *
  * The sequence is the one a normal resume runs, reset, fromJSON,
- * rebuildHistory, then fold in journal records newer than the snapshot, with
- * the messages coming from the retired recovery file instead of the session
- * store.
+ * rebuildHistory, with the messages coming from the retired recovery file
+ * instead of the session store.
  *
  * Never throws: a failed restore reports a refusal so the surface can say what
  * happened, because a crash-recovery path that itself crashes takes the boot
@@ -194,7 +181,7 @@ export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): Ap
   // for a later attempt instead of being the only copy lost with the refusal.
   const snapshot = loadRecoveryConversation({ surface }, sessionId);
   if (!snapshot) {
-    return { applied: false, refusal: 'no-snapshot', retired: false, messageCount: 0, journalReplay: NOTHING_REPLAYED };
+    return { applied: false, refusal: 'no-snapshot', retired: false, messageCount: 0 };
   }
 
   const retire = (): boolean => {
@@ -215,7 +202,6 @@ export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): Ap
       refusal: 'unusable-snapshot',
       retired: retire(),
       messageCount: 0,
-      journalReplay: NOTHING_REPLAYED,
     };
   }
 
@@ -243,29 +229,16 @@ export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): Ap
       refusal: 'apply-failed',
       retired: false,
       messageCount: 0,
-      journalReplay: NOTHING_REPLAYED,
     };
   }
-  // Anything the journal recorded after the snapshot was written goes on top,
-  // so a restore is never older than the last thing the process managed to log.
-  // A snapshot without its write time (an older file) replays every record.
-  let persisted = false;
-  const journalReplay = replayJournalForSession({
-    surface,
-    sessionId,
-    snapshotTimestamp: readOptionalNumber(snapshot, 'timestamp') ?? 0,
-    conversation,
-    persistSnapshot: (replayed) => { persistSnapshot(replayed); persisted = true; },
-  });
   // The session store holds the restored messages before the snapshot goes:
   // until then the snapshot is the only durable copy of them.
-  if (!persisted && journalReplay.replayed === 0) {
-    try {
-      persistSnapshot(messages);
-      persisted = true;
-    } catch (error) {
-      logger.warn('[Recovery] The restored session could not be saved; the snapshot is kept for the next launch', { sessionId, error: summarizeError(error) });
-    }
+  let persisted = false;
+  try {
+    persistSnapshot(messages);
+    persisted = true;
+  } catch (error) {
+    logger.warn('[Recovery] The restored session could not be saved; the snapshot is kept for the next launch', { sessionId, error: summarizeError(error) });
   }
   const retired = persisted ? retire() : false;
 
@@ -273,6 +246,5 @@ export function applyRecoverySnapshot(options: ApplyRecoverySnapshotOptions): Ap
     applied: true,
     retired,
     messageCount: conversation.getMessageCount(),
-    journalReplay,
   };
 }

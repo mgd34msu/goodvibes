@@ -9,8 +9,8 @@
  *
  * What accepting a snapshot actually does, and why each step is here:
  *   - `runtime.sessionId` moves to the snapshot's session, once the restore has
- *     actually happened. The transcript journal rebinds on that field
- *     (turn-event-wiring.ts), and every later turn snapshot keys off it.
+ *     actually happened. Every later turn snapshot (turn-event-wiring.ts)
+ *     keys off that field.
  *     Without this the restored conversation would be written back under the
  *     fresh boot session id, the recovery point would be gone and its content
  *     would live somewhere the user never asked for. It moves AFTER the apply
@@ -105,9 +105,8 @@ export function buildRecoveryOfferWiring(input: RecoveryOfferWiringInput): Recov
       // The prompt turns the refusal into a receipt.
       if (!result.applied) return result;
       // Now that the conversation really is the recovered one, the runtime
-      // moves to its session. The transcript journal rebinds on this field
-      // (turn-event-wiring.ts) and every later turn snapshot keys off it, so
-      // leaving it on the fresh boot session would write the restored
+      // moves to its session. Every later turn snapshot (turn-event-wiring.ts)
+      // keys off this field, so leaving it on the fresh boot session would write the restored
       // conversation back under an id the user never asked for. Both the
       // persist above and the one below name the session explicitly, so
       // neither depends on this assignment having happened first.

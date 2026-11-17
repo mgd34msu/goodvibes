@@ -38,8 +38,6 @@ export type SessionLoadResult =
     readonly ok: true;
     readonly messageCount: number;
     readonly agentRecordsRestored: number;
-    /** Turns that existed only in the transcript journal and were put back. */
-    readonly journalReplayed: number;
     /** What the load left out or could not recover. */
     readonly notices: readonly string[];
   }
@@ -76,7 +74,6 @@ export async function loadSessionWithAgents(ctx: CommandContext, sessionManager:
       ok: true,
       messageCount: resumed.resumedMessageCount,
       agentRecordsRestored: resumed.agentRecordsRestored,
-      journalReplayed: resumed.journalReplay.replayed,
       notices: describeResumeShortfalls(resumed),
     };
   } catch (error) {
@@ -88,9 +85,6 @@ export async function loadSessionWithAgents(ctx: CommandContext, sessionManager:
 export function describeSessionLoad(name: string, result: Extract<SessionLoadResult, { ok: true }>): string {
   return [
     `Session loaded: ${name} (${result.messageCount} messages)${result.agentRecordsRestored > 0 ? ` [${result.agentRecordsRestored} agent records restored]` : ''}`,
-    ...(result.journalReplayed > 0
-      ? [`  recovered ${result.journalReplayed} turn record${result.journalReplayed === 1 ? '' : 's'} written after the last save`]
-      : []),
     ...result.notices.map((line) => `  ${line}`),
   ].join('\n');
 }

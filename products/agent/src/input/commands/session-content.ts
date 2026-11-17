@@ -65,7 +65,6 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
             `  id ${args[0]}`,
             `  messages ${loaded.messageCount}`,
             ...(loaded.agentRecordCount > 0 ? [`  ignored connected-host records ${loaded.agentRecordCount}`] : []),
-            ...(loaded.journalReplayed > 0 ? [`  recovered ${loaded.journalReplayed} turn record${loaded.journalReplayed === 1 ? '' : 's'} written after the last save`] : []),
             ...(loaded.restoredAnchorCount > 0 ? [`  rewind points ${loaded.restoredAnchorCount} restored`] : []),
             ...loaded.notices.map((line) => `  ${line}`),
           ].join('\n'),

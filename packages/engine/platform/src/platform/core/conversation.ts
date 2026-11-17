@@ -146,7 +146,7 @@ function sameToolCalls(a: ToolCall[] | undefined, b: ToolCall[] | undefined): bo
  * its own tokens) is not mistaken for a replay.
  *
  * This is the store boundary on purpose. Every durable writer, the recovery
- * snapshot, the session store, the transcript journal, serializes this
+ * snapshot and the session store, serializes this
  * message array, so one guard here covers all of them, and none of them needs
  * its own idea of what a duplicate is.
  *

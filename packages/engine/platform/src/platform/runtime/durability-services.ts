@@ -69,8 +69,8 @@ export interface DurabilityServicesInput {
    */
   /**
    * Resolves the live session id, read fresh on every crash-residue sweep so
-   * the running session's own transcript journal and liveness marker are
-   * exempt from reaping.
+   * the running session's own liveness marker and anchor sidecar are exempt
+   * from reaping.
    *
    * A getter, not a value: the id is reassigned in place when a recovery
    * snapshot is accepted, and this sweep repeats for the life of the process.
@@ -161,7 +161,7 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
   });
   appendOnlyRetentionScheduler.start();
   // Crash-residue reclaim the sweep above does not cover (liveness markers,
-  // orphaned transcript journals, .unrecognized quarantine files, anchor
+  // .unrecognized quarantine files, anchor
   // sidecars whose session file is gone). Runs once now and every few hours
   // after that; the timer is unref'd and the disposer stops it.
   const stopDurabilityHousekeeping = startDurabilityHousekeeping({

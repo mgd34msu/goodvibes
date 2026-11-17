@@ -294,9 +294,6 @@ export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<R
         return 'resume-failed';
       }
       deps.receipt(`Recovery snapshot restored: ${result.messageCount} message(s) from session ${info.sessionId}. The recovery point has been retired.`);
-      if (result.journalReplay.failed !== undefined) {
-        deps.receipt(`Recovery of the journal failed (${result.journalReplay.failed}); it was kept and will be retried on the next resume.`);
-      }
       deps.render();
       return 'resumed';
     }

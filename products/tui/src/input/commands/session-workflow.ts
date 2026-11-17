@@ -223,7 +223,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
             });
           })();
         if (!outcome) return true;
-        const { meta, journalReplay, restoredAnchorCount, resumedMessageCount } = outcome;
+        const { meta, restoredAnchorCount, resumedMessageCount } = outcome;
 
         ctx.renderRequest();
         ctx.print(
@@ -234,17 +234,6 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         }
         for (const line of outcome.notices) ctx.print(`  ${line}`);
         for (const warning of outcome.warnings ?? []) ctx.print(`  [Resume] ${warning}; the resumed conversation stands.`);
-        if (journalReplay.replayed > 0) {
-          ctx.print(`  [Recovery] Replayed ${journalReplay.replayed} journal record(s): restored turns since last snapshot.`);
-        }
-        if (journalReplay.failed !== undefined) {
-          ctx.print(`  [Recovery] Recovery of the journal failed (${journalReplay.failed}); it was kept and will be retried on the next resume.`);
-        }
-        if (journalReplay.hadCorruptTail && journalReplay.replayed === 0) {
-          ctx.print('  [Recovery] Journal tail was corrupt or unrecognised (quarantined). Proceeding with snapshot only.');
-        } else if (journalReplay.hadCorruptTail) {
-          ctx.print('  [Recovery] Journal tail was partially corrupt (quarantined). Replay stopped at last good record.');
-        }
         const returnContextMode = getReturnContextMode(ctx.platform.configManager);
         if (returnContextMode !== 'off' && meta.returnContext) {
           // The platform's session loader already dropped any legacy open-view list from a

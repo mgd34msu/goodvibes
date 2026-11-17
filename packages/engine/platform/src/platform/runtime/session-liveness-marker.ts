@@ -21,8 +21,8 @@
  * Location: <homeDirectory>/.goodvibes/<surfaceRoot>/liveness/<sessionId>.json.
  * Both halves come off the caller's SessionSurface rather than being spelled
  * out here, so the markers land under the same scope as the sessions and
- * recovery snapshots they describe, mirrors the transcript-journal.ts
- * convention (homeDirectory-scoped, under the surface's own directory).
+ * recovery snapshots they describe (homeDirectory-scoped, under the surface's
+ * own directory).
  */
 import { existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';

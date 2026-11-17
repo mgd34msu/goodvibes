@@ -2,7 +2,7 @@
  * surface.ts, the daemon's single surface-root identifier.
  *
  * Every piece of the daemon's own on-disk state (sessions, recovery snapshots,
- * checkpoints, the transcript journal, watchers, triggers, control-plane stores)
+ * checkpoints, watchers, triggers, control-plane stores)
  * lives under `.goodvibes/<surface root>/`. The segment used to be spelled as a
  * bare string literal at each call site, which is how a writer and a reader
  * ended up disagreeing about where the last-session pointer lives.

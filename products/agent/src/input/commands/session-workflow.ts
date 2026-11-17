@@ -154,7 +154,6 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
             `  name ${meta.title || '(untitled)'}`,
             `  messages ${loaded.messageCount}`,
             `  model ${ctx.session.runtime.model || meta.model}`,
-            ...(loaded.journalReplayed > 0 ? [`  recovered ${loaded.journalReplayed} turn record${loaded.journalReplayed === 1 ? '' : 's'} written after the last save`] : []),
             ...(restoredAnchorCount > 0 ? [`  rewind points ${restoredAnchorCount} restored from before the resume`] : []),
             ...loaded.notices.map((line) => `  ${line}`),
           ].join('\n'),

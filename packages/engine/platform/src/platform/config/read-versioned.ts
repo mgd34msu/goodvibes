@@ -12,9 +12,8 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
 /**
- * The suffix every quarantined file on this platform gets. Exported so the
- * other producer of these files (the transcript journal's corrupt-tail
- * quarantine) and the reclaim sweep below all agree on one spelling.
+ * The suffix every quarantined file on this platform gets. Exported so every
+ * producer of these files and the reclaim sweep below agree on one spelling.
  */
 export const UNRECOGNIZED_SUFFIX = '.unrecognized';
 

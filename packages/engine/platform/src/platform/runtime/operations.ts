@@ -149,35 +149,6 @@ export {
 } from './notification-privacy.js';
 
 export {
-  JOURNAL_ORPHAN_MAX_AGE_MS,
-  JOURNAL_ORPHAN_MAX_FILES,
-  JOURNAL_SCHEMA_VERSION,
-  journalPathFor,
-  openTranscriptJournal,
-  reapOrphanedJournals,
-  replayJournal,
-} from './transcript-journal.js';
-export type {
-  JournalEventType,
-  JournalHeader,
-  JournalReapOptions,
-  JournalReapResult,
-  JournalRecord,
-  ReplayResult,
-  TranscriptJournal,
-} from './transcript-journal.js';
-
-export {
-  replayJournalForSession,
-  replayJournalIntoConversation,
-} from './transcript-journal-replay.js';
-export type {
-  JournalReplayConversation,
-  ReplayIntoConversationOptions,
-  ReplayIntoConversationResult,
-} from './transcript-journal-replay.js';
-
-export {
   applyRecoverySnapshot,
   confirmRecoveryRestore,
 } from './recovery-snapshot-apply.js';

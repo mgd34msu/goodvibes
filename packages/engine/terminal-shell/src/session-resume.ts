@@ -3,9 +3,8 @@
  *
  * `resumeSessionCore` is the routine: every command that opens a saved session
  * (`/session resume`, `/load`, Enter in `/sessions`, the session picker and
- * browser, the start-up resume flags) runs it, so the turns that exist only in
- * the transcript journal come back, the saved model is re-resolved through the
- * live provider registry, rewind anchors and footer usage are restored and the
+ * browser, the start-up resume flags, a headless `--continue`) runs it, so the
+ * saved model is re-resolved through the live provider registry, rewind anchors and footer usage are restored and the
  * session's agent records replace the live list, whichever command was typed.
  * `loadSavedSessionIntoLive` is the same routine behind the refusals a command
  * needs (a running turn, a session another terminal holds open).
@@ -27,9 +26,7 @@ import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/
 import {
   checkSessionLiveness,
   removeLivenessMarker,
-  replayJournalForSession,
   writeLivenessMarker,
-  type ReplayIntoConversationResult,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 /** Runs when a saved session becomes the live one in `conversation`; awaited by the resume routine. */
 export type SessionOpenedListener = (sessionId: string) => Promise<unknown>;
@@ -60,11 +57,10 @@ export interface SessionResumeDeps {
   readonly runtime: SessionResumeRuntime;
   /**
    * The app's declare-once session-storage handle. Both resume seams pass the
-   * SAME one the runtime writes through, so the anchor sidecar and the
-   * transcript journal this routine reads are guaranteed to be the files the
-   * live session actually wrote, the scope can no longer be re-guessed per
-   * seam. A shell with no session storage (a test harness) omits it; nothing
-   * is read from sidecars or the journal then.
+   * SAME one the runtime writes through, so the anchor sidecar this routine
+   * reads is guaranteed to be the file the live session actually wrote, the
+   * scope can no longer be re-guessed per seam. A shell with no session
+   * storage (a test harness) omits it; nothing is read from sidecars then.
    */
   readonly surface?: SessionSurface | undefined;
   /**
@@ -102,7 +98,7 @@ export interface SessionAgentRecordSink {
 }
 export interface SessionResumeOutcome {
   readonly meta: SessionMeta;
-  /** Messages in the saved snapshot, before any journal replay. */
+  /** Messages in the saved session. */
   readonly savedMessageCount: number;
   /** The agent records saved with the session. */
   readonly agentRecords: SavedAgentRecords;
@@ -110,7 +106,6 @@ export interface SessionResumeOutcome {
   readonly agentRecordsRestored: number;
   readonly resumedMessageCount: number;
   readonly restoredAnchorCount: number;
-  readonly journalReplay: ReplayIntoConversationResult;
   /** Steps after the transcript was committed that failed; the resume itself stands. */
   readonly warnings?: readonly string[] | undefined;
   /** Lines for the person about what the resume left out (a damaged side branch); empty when nothing was. */
@@ -118,14 +113,8 @@ export interface SessionResumeOutcome {
 }
 /**
  * The canonical resume sequence: load, reset + restore the conversation,
- * restore rewind anchors and agent records, replay any post-snapshot journal
- * records, reselect the model and hydrate footer usage.
- *
- * Sessions saved by an older TUI can carry a legacy pane list in their
- * return context (`returnContext.openPanels` plus an "Open panels: ..."
- * line). The platform's session loader (`loadedReturnContext`) drops both, so
- * `meta.returnContext` here never has them, and the journal-replay rewrite
- * below writes the session back without them.
+ * restore rewind anchors and agent records, reselect the model and hydrate
+ * footer usage.
  */
 export async function resumeSessionCore(sessionId: string, deps: SessionResumeDeps): Promise<SessionResumeOutcome> {
   if (deps.canResume?.() === false) throw new Error('A turn is still running. Wait before resuming a session.');
@@ -163,33 +152,6 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
         return agentRecords.length;
       }, () => 0)
     : 0;
-  // Journal replay: recover turns that post-date the loaded snapshot.
-  const journalReplay: ReplayIntoConversationResult = !surface ? { replayed: 0, hadCorruptTail: false } : attempt(
-    'replaying the transcript journal',
-    () =>
-      replayJournalForSession({
-        surface,
-        sessionId,
-        snapshotTimestamp: meta.timestamp ?? 0,
-        conversation: deps.conversation,
-        persistSnapshot: (replayedMessages) => {
-          deps.sessionManager.save(sessionId, replayedMessages as never[], {
-            title: deps.conversation.title || meta.title,
-            model: meta.model,
-            provider: meta.provider,
-            timestamp: Date.now(),
-            titleSource: meta.titleSource,
-            returnContext: meta.returnContext,
-            // Machinery: this write exists only to durably close the journal gap
-            // the replay just filled. The user's own save/fork/rename acts stamp
-            // 'user' at their own call sites (session-workflow.ts).
-            saveSource: 'auto',
-          }, undefined, undefined, deps.conversation.branchState());
-          markConversationDurable(deps.conversation, sessionId, 'store');
-        },
-      }),
-    (failed): ReplayIntoConversationResult => ({ replayed: 0, hadCorruptTail: false, failed }),
-  );
   // The saved model is re-resolved through the live provider registry only now:
   // selecting it changes the registry's current model, which a refused resume
   // must never do. It applies only while the resumed session is still the live one.
@@ -204,8 +166,8 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
       /* A saved model may no longer exist locally; the saved id stands. */
     }
   }
-  // Hydrate the footer's token counters from the resumed (+ journal-replayed)
-  // history now, before the caller renders.
+  // Hydrate the footer's token counters from the resumed history now, before
+  // the caller renders.
   attempt('restoring footer usage', () => deps.hydrateSessionUsage?.(), () => undefined);
   // What waited for this session while it was closed goes into its conversation
   // now, before the next request; a failure leaves it waiting for the next open.
@@ -224,7 +186,6 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
     agentRecordsRestored,
     resumedMessageCount: deps.conversation.getMessageCount(),
     restoredAnchorCount,
-    journalReplay,
     ...(warnings.length ? { warnings } : {}),
     notices: describeLeftOutBranches(leftOut),
   };
@@ -288,16 +249,13 @@ export function describeLeftOutBranches(leftOut: readonly LeftOutBranch[]): stri
 /**
  * What a resume left out or could not recover, one line each, worded the same
  * in every command that opens a saved session: damaged side branches, recovery
- * steps that failed after the transcript was committed, and journal turns that
- * could not be put back. Empty when the resume restored everything.
+ * steps that failed after the transcript was committed. Empty when the resume
+ * restored everything.
  */
-export function describeResumeShortfalls(outcome: Pick<SessionResumeOutcome, 'notices' | 'warnings' | 'journalReplay'>): string[] {
+export function describeResumeShortfalls(outcome: Pick<SessionResumeOutcome, 'notices' | 'warnings'>): string[] {
   return [
     ...outcome.notices,
     ...(outcome.warnings ?? []).map((warning) => `${warning}; the loaded conversation stands.`),
-    ...(outcome.journalReplay.failed !== undefined
-      ? [`The turns written since the last save could not be put back (${outcome.journalReplay.failed}); the journal file was kept and is read again at the next resume.`]
-      : []),
   ];
 }
 function restoreSessionConversation(
@@ -423,7 +381,7 @@ export interface LoadSavedSessionDeps {
 
 export interface LoadedSavedSession extends SessionResumeOutcome {
   readonly name: string;
-  /** Messages now in the conversation: the saved snapshot plus any turns recovered from the journal. */
+  /** Messages now in the conversation. */
   readonly messageCount: number;
 }
 

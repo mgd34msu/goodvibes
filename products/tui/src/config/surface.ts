@@ -2,7 +2,7 @@
  * surface.ts, the TUI's single surface-root identifier.
  *
  * Every piece of the TUI's own on-disk state (sessions, the last-session
- * pointer, recovery snapshots, checkpoints, the transcript journal, the
+ * pointer, recovery snapshots, checkpoints, the
  * multi-instance liveness markers) lives under `.goodvibes/tui/`. That scope
  * segment used to be spelled as a bare `'tui'` string literal at each call
  * site, which is how a writer and a reader ended up disagreeing about where

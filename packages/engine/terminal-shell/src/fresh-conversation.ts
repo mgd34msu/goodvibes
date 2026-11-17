@@ -39,7 +39,7 @@ export interface FreshConversationContext {
 }
 
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
-import { journalPathFor, openTranscriptJournal, removeRecoveryPoint } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { removeRecoveryPoint } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 
 export interface FreshConversationResult {
   /** Session id the previous conversation was saved under, or null when there was nothing to keep. */
@@ -114,10 +114,7 @@ export function startFreshConversation(ctx: FreshConversationContext, surface?: 
   });
   try {
     ctx.cancelPendingRecovery?.();
-    if (surface) {
-      openTranscriptJournal(journalPathFor(surface, liveId), liveId).rotate();
-      removeRecoveryPoint(surface, liveId);
-    }
+    if (surface) removeRecoveryPoint(surface, liveId);
   } catch (error) {
     // Memory still holds the conversation, so disk must not say it is empty.
     try { sessionManager?.save(liveId, liveMessages as Parameters<SessionManager['save']>[1], liveMeta, undefined, undefined, liveBranches); } catch { /* the next autosave rewrites it */ }

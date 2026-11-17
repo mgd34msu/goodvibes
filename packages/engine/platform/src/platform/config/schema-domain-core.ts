@@ -24,6 +24,7 @@ export const coreConfigDefaults = {
     systemPromptFile: '',
     optimizerMode: 'off',
     optimizerPinnedModel: '',
+    visionFallbackModel: '',
     localContextIngestion: true,
   },
   behavior: {
@@ -280,6 +281,13 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     default: '',
     description:
       'Provider-qualified model id (e.g. anthropic:claude-sonnet-4) the provider optimizer routes to while provider.optimizerMode is "pinned"; a change applies at once. Empty leaves the optimizer unpinned (falls back to manual).',
+  },
+  {
+    key: 'provider.visionFallbackModel',
+    type: 'string',
+    default: '',
+    description:
+      'Model (provider-qualified, e.g. openai:gpt-4o, or a unique bare id) that reads an image you attach when the current model cannot accept images. Empty (default): such an image is refused and sent nowhere, and the refusal names the models that can read it. Setting this sends those images to the named model\'s provider.',
   },
   {
     key: 'behavior.autoApprove',

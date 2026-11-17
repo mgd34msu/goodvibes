@@ -454,7 +454,11 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     semantic.setGapRepairer(createWebKnowledgeGapRepairer({ searchService: webSearchService, ingestService: ingest }));
   }
   const mediaProviders = new MediaProviderRegistry();
-  ensureBuiltinMediaProviders(mediaProviders, artifactStore, providerRegistry);
+  ensureBuiltinMediaProviders(mediaProviders, artifactStore, providerRegistry, {
+    // Media generation keys saved in the secret store, not only the environment.
+    secrets: secretsManager,
+    visionFallbackModel: () => configManager.get('provider.visionFallbackModel').trim() || undefined,
+  });
   const multimodalService = new MultimodalService(artifactStore, mediaProviders, voiceService, knowledgeService);
   const pluginManager = new PluginManager({
     pathOptions: { cwd: shellPaths.workingDirectory, homeDir: shellPaths.homeDirectory },

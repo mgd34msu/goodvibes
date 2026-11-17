@@ -101,7 +101,12 @@ The built-in image understanding provider, which answers a request that names
 no provider, reads an image with the session's current model only. When that
 model does not accept images it refuses with `MEDIA_MODEL_CANNOT_READ_IMAGES`
 and names the models that do; the image is not sent to another vendor. Name a
-model (`modelId`) or a scoped provider to use another one.
+model (`modelId`) or a scoped provider to use another one, or name a standing
+choice in the `provider.visionFallbackModel` setting, which then reads such
+images.
+
+Generation keys are read from the environment first, then from the secret
+store under the same name (for example `FAL_KEY`).
 
 Each generation provider states what it makes: BytePlus, Runway and Alibaba
 make video; fal and Comfy make images and video. A lookup for one kind of

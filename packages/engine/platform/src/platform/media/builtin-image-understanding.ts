@@ -138,7 +138,7 @@ async function resolveModel(
           ? `The current model cannot read images; choose one of: ${choices.join(', ')}. The image was not sent anywhere`
           : 'The current model cannot read images, and no registered model can; the image was not sent anywhere',
         next: choices.length > 0
-          ? ['Pass modelId naming one of them, or switch the session to one with /model']
+          ? ['Pass modelId naming one of them, switch the session to one with /model, or name one in the provider.visionFallbackModel setting']
           : ['Add a provider whose models accept images, then switch to one with /model'],
         status: 409,
       }));

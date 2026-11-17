@@ -16,6 +16,10 @@
  * The keep-awake toggle's own state (granted vs. denied classes, and the
  * honest lid-split `note` when part of the requested coverage was refused)
  * renders alongside it, verbatim, the same as PowerChip's tooltip.
+ *
+ * Sleep hooks: when the daemon cannot see the host going to sleep, work is not
+ * checkpointed before sleep and nothing catches up on wake; sleepEdge.note says
+ * why, verbatim.
  */
 import { usePowerStatus, useSetKeepAwake } from '../../hooks/usePowerStatus';
 import { formatError } from '../../lib/errors';
@@ -56,7 +60,7 @@ export function PowerSettings() {
   // status.isPending/isError are both false here, so react-query's discriminated
   // union guarantees status.data is defined (the 'success' branch), no defensive
   // null check needed (and eslint's no-unnecessary-condition catches one if added).
-  const { work, keepAwake } = status.data;
+  const { work, keepAwake, sleepEdge } = status.data;
   const pendingEnabled = setKeepAwake.isPending ? setKeepAwake.variables : keepAwake.enabled;
   const heldSince = typeof work.heldSince === 'number' ? whenLabel(work.heldSince) : '';
 
@@ -112,6 +116,11 @@ export function PowerSettings() {
           control={<span className="power-panel__work-state">{work.held ? 'Held' : 'Idle'}</span>}
         />
       </div>
+      {sleepEdge.note && (
+        <div className="banner warning" role="alert">
+          Sleep hooks are off: {sleepEdge.note}
+        </div>
+      )}
       {work.capExpired && (
         <div className="banner warning" role="alert">
           The work inhibitor's cap ({work.capMinutes}m) ran out for work that is still running; that

@@ -101,6 +101,8 @@ export type OpsEvent =
       workReasons: readonly string[];
       /** The honest-split note when part of the requested coverage was refused. */
       note?: string | undefined;
+      /** Why work is not checkpointed before sleep and caught up on wake, when the sleep-edge hooks cannot fire. */
+      sleepEdgeNote?: string | undefined;
     }
   /** A subscriber threw an error during event dispatch; emitted after dedup threshold. */
   | {

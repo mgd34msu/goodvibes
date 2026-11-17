@@ -42,6 +42,7 @@ export function emitOpsPowerStateChanged(
     keepAwake: boolean;
     workReasons: readonly string[];
     note?: string | undefined;
+    sleepEdgeNote?: string | undefined;
   }
 ): void {
   bus.emit('ops', createEventEnvelope('OPS_POWER_STATE_CHANGED', {

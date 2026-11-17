@@ -11,7 +11,16 @@ import { keepAwakeCondition, type PowerState } from '@goodvibes-jev/engine/platf
  * because X"), real state names, never invented. Returns null when neither
  * applies (nothing to show).
  */
-export function describePowerStatus(state: Pick<PowerState, 'work' | 'keepAwake'>): string | null {
+export function describePowerStatus(state: Pick<PowerState, 'work' | 'keepAwake'> & Partial<Pick<PowerState, 'sleepEdge'>>): string | null {
+  const held = describeHeld(state);
+  // The sleep-edge hooks being off (no checkpoint before sleep, no catch-up on
+  // wake) is true whatever is held, so it is said beside either note.
+  const edge = state.sleepEdge?.note ? `sleep hooks off: ${state.sleepEdge.note}` : null;
+  if (held && edge) return `${held}; ${edge}`;
+  return held ?? edge;
+}
+
+function describeHeld(state: Pick<PowerState, 'work' | 'keepAwake'>): string | null {
   if (state.keepAwake.enabled) {
     // On but not holding: the OS refused the inhibitor, so saying "sleep disabled" would be false.
     if (keepAwakeCondition(state.keepAwake) === 'refused') return 'keep-awake refused by the OS: this host can still sleep';

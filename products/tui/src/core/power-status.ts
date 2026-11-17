@@ -27,6 +27,8 @@ export interface PowerSurfaceState {
   readonly workReasons: readonly string[];
   /** The honest-split note when part of the requested coverage was refused (verbatim). */
   readonly note: string | null;
+  /** Why work is not checkpointed before sleep and caught up on wake (verbatim); null while the hooks can fire. */
+  readonly sleepEdgeNote: string | null;
 }
 
 /** The neutral state (no inhibition, nothing held), the pre-event seed default. */
@@ -35,6 +37,7 @@ export const IDLE_POWER_STATE: PowerSurfaceState = {
   inhibited: false,
   workReasons: [],
   note: null,
+  sleepEdgeNote: null,
 };
 
 /** Flatten the full PowerState (power.status.get) into the surface projection. */
@@ -44,6 +47,7 @@ export function powerSurfaceFromState(state: PowerState): PowerSurfaceState {
     inhibited: state.keepAwake.held || state.work.held,
     workReasons: state.work.reasons,
     note: state.keepAwake.note,
+    sleepEdgeNote: state.sleepEdge?.note ?? null,
   };
 }
 
@@ -53,6 +57,7 @@ export interface PowerStateChangedPayload {
   readonly keepAwake: boolean;
   readonly workReasons: readonly string[];
   readonly note?: string | undefined;
+  readonly sleepEdgeNote?: string | undefined;
 }
 
 /** Flatten an OPS_POWER_STATE_CHANGED event payload into the surface projection. */
@@ -62,6 +67,7 @@ export function powerSurfaceFromEvent(ev: PowerStateChangedPayload): PowerSurfac
     inhibited: ev.inhibited,
     workReasons: ev.workReasons,
     note: ev.note ?? null,
+    sleepEdgeNote: ev.sleepEdgeNote ?? null,
   };
 }
 
@@ -95,6 +101,8 @@ export function powerStatusLines(state: PowerSurfaceState): string[] {
   if (lines.length === 0) {
     lines.push('sleep is not being held; the host sleeps on its own schedule');
   }
+  // The sleep-edge hooks being off is true whatever is held, so it is said either way.
+  if (state.sleepEdgeNote) lines.push(`sleep hooks off: ${state.sleepEdgeNote}`);
   return lines;
 }
 

@@ -69,6 +69,7 @@ export function wireRuntimePower(input: RuntimePowerWiringInput): PowerManager {
           keepAwake: state.keepAwake.enabled,
           workReasons: state.work.reasons,
           note: state.keepAwake.note ?? undefined,
+          sleepEdgeNote: state.sleepEdge.note ?? undefined,
         });
       }
       : undefined,

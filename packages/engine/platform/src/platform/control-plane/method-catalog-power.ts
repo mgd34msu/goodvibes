@@ -39,13 +39,19 @@ const POWER_STATE_SCHEMA = objectSchema({
     // client never has to infer it from enabled/held/note.
     state: { type: 'string', enum: ['off', 'held', 'held-partial', 'refused'] },
   }, ['enabled', 'held', 'grantedClasses', 'deniedClasses', 'note']),
-}, ['platform', 'work', 'keepAwake']);
+  // Whether the checkpoint-before-sleep and wake catch-up hooks can fire, and
+  // why not once that is known (null while watching or before start).
+  sleepEdge: objectSchema({
+    watching: BOOLEAN_SCHEMA,
+    note: NULLABLE_STRING_SCHEMA,
+  }, ['watching', 'note']),
+}, ['platform', 'work', 'keepAwake', 'sleepEdge']);
 
 export const builtinGatewayPowerMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'power.status.get',
     title: 'Get Sleep-Ownership State',
-    description: 'The host sleep-ownership state: whether the automatic work inhibitor is held (and the live "held because X" reasons, cap, and expiry), and the owner keep-awake toggle with the classes the OS actually granted vs refused, a refused lid-switch block is stated honestly ("idle sleep blocked; lid-close suspend is controlled by your OS here"), never papered over. Surfaces render the always-visible "sleep disabled" chip from this state and the runtime.ops OPS_POWER_STATE_CHANGED event.',
+    description: 'The host sleep-ownership state: whether the automatic work inhibitor is held (and the live "held because X" reasons, cap, and expiry), and the owner keep-awake toggle with the classes the OS actually granted vs refused, a refused lid-switch block is stated honestly ("idle sleep blocked; lid-close suspend is controlled by your OS here"), never papered over. sleepEdge says whether work is checkpointed before sleep and caught up on wake, and its note says why not when it cannot be. Surfaces render the always-visible "sleep disabled" chip from this state and the runtime.ops OPS_POWER_STATE_CHANGED event.',
     category: 'health',
     scopes: ['read:health'],
     http: { method: 'GET', path: '/api/power/status' },

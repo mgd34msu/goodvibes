@@ -20,6 +20,7 @@ import type { Database } from 'bun:sqlite';
 import { openSqliteFile, type SqliteFile, type SqliteMigration } from '../state/sqlite-file.js';
 import type { RevisionSource } from '../utils/revision.js';
 import { logger } from '../utils/logger.js';
+import { canonicalFilePath } from '../utils/canonical-path.js';
 import type { OwnerAnswer, OwnerAnswerSource, OwnerItemKind } from './owner-inbox.js';
 
 /** Item kinds the question store holds; approvals live in the approval broker. */
@@ -52,7 +53,9 @@ export const OWNER_ASKER_SESSION_FILE_METADATA = 'askerSessionFile';
  * session with the same id is never mistaken for it.
  */
 export function sessionFileMatches(recorded: string | undefined, wanted: string | undefined): boolean {
-  return recorded === undefined || recorded === wanted;
+  if (recorded === undefined) return true;
+  // Compared in canonical form: a question recorded under another spelling of the same folder is the session's.
+  return wanted !== undefined && (recorded === wanted || canonicalFilePath(recorded) === canonicalFilePath(wanted));
 }
 
 export interface StoredOwnerItem {

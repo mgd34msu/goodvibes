@@ -36,6 +36,7 @@ import {
   type HeldProcessLock,
 } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
+import { canonicalFilePath } from '../utils/canonical-path.js';
 
 export type OwnerAskerKind = 'session' | 'agent';
 
@@ -43,10 +44,12 @@ export type OwnerAskerKind = 'session' | 'agent';
  * The one identity of a session asker: its saved file when it has one (a
  * terminal session: the file names the app, the project store and the id, so
  * namesakes in another app or project are other sessions), otherwise its id (a
- * hosted session, a channel's). Locks, delivery and settling all key by it.
+ * hosted session, a channel's). The file is taken in canonical form
+ * (utils/canonical-path.ts), so a recorded spelling through a symlink or a
+ * relative part is the same identity. Locks, delivery and settling key by it.
  */
 export function sessionAskerKey(asker: { readonly session: string; readonly sessionFile?: string | undefined }): string {
-  return asker.sessionFile ?? asker.session;
+  return asker.sessionFile !== undefined ? canonicalFilePath(asker.sessionFile) : asker.session;
 }
 
 /** The lock file that says asker `id` of `kind` is running, beside the store at `storePath`. */

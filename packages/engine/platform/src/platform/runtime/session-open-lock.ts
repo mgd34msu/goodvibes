@@ -28,6 +28,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { askerLivenessPath, claimAskerRunning, holdAskerRunning, sessionAskerKey, settleAskerLock } from '../control-plane/owner-asker-liveness.js';
 import { resolveSessionStorePath } from './session-persistence-scope.js';
+import { canonicalFilePath } from '../utils/canonical-path.js';
 import { ownerInboxStorePath } from '../control-plane/question-store.js';
 import { ProcessLockBusyError, withProcessLockSync } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
@@ -38,11 +39,14 @@ export type SessionIdentitySurface = Pick<SessionSurface, 'homeDirectory' | 'ses
 
 /**
  * The one identity of session `sessionId` of this surface: the path of its
- * saved file (whether or not it exists yet). The owner inbox records it on the
- * questions the session asks; the session lock is keyed by it.
+ * saved file (whether or not it exists yet), in canonical form: the sessions
+ * folder's real path (resolved once per process and remembered) plus the file
+ * name, so the project reached through a symlink or another spelling is the
+ * same session. The owner inbox records it on the questions the session asks;
+ * the session lock is keyed by it.
  */
 export function sessionIdentityFile(surface: Pick<SessionSurface, 'sessionsDir'>, sessionId: string): string {
-  return resolveSessionStorePath(surface.sessionsDir, sessionId);
+  return canonicalFilePath(resolveSessionStorePath(surface.sessionsDir, sessionId));
 }
 
 /** The lock file a process holds while `sessionId` is open in it. */

@@ -36,7 +36,10 @@ session does not. An idle session writes nothing.
 
 A session is identified by its saved file, which names the app (`tui`, `agent`), the project it lives
 in and the session id: a TUI session and an Agent session saved under the same name, or two
-projects' sessions with one name, are different sessions. The owner inbox records that file on every
+projects' sessions with one name, are different sessions. The path is taken in canonical form (the
+sessions folder's real path, resolved once per process), so a project reached through a symlink or
+another spelling of its folder is still the same session; a question recorded under another spelling
+is compared in the same canonical form and still reaches the session. The owner inbox records that file on every
 question a session asks and delivers the answer only to that session; a question recorded before the
 file was kept is matched by its session id, as it always was.
 

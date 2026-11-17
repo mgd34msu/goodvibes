@@ -10,7 +10,9 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { NativeHeadlessMode } from './native-headless-options.ts';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
-import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
+import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
+import { closeSessionHere, createSessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { announceHeadlessRecovery, refusedHeadlessRun } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 
@@ -98,26 +100,41 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           writeSessionPointer: () => ctx._writeLastSessionPointer(ctx.runtime.sessionId),
         });
       };
-      let result: NativeHeadlessResult;
-      if (mode === 'submit') {
-        if (prompt === undefined || !/\S/u.test(prompt)) {
-          result = { exitCode: 2, response: '', error: 'A prompt is required.', stopReason: 'invalid-input' };
-        } else {
-          try {
-            result = await runTurn(prompt, signal);
-          } catch (error) {
-            result = {
-              exitCode: signal.aborted ? 130 : 1,
-              response: '',
-              error: summarizeError(error),
-              stopReason: signal.aborted ? 'cancelled' : 'unexpected_error',
-            };
-          }
-        }
-      } else {
-        result = await executeNativeHeadless({ mode, prompt, resolveHost, signal: signal, runTurn });
+      // The session to resume is taken, or refused, before anything is sent anywhere (native intake included).
+      const surface = createSessionSurface({ surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT, workingDirectory, homeDirectory });
+      let claimed: string | undefined;
+      try {
+        claimed = await claimHeadlessSession(cli.flags, surface);
+      } catch (error) {
+        const refused = refusedHeadlessRun(error);
+        if (refused) return refused;
+        throw error;
       }
-      return result;
+      try {
+        let result: NativeHeadlessResult;
+        if (mode === 'submit') {
+          if (prompt === undefined || !/\S/u.test(prompt)) {
+            result = { exitCode: 2, response: '', error: 'A prompt is required.', stopReason: 'invalid-input' };
+          } else {
+            try {
+              result = await runTurn(prompt, signal);
+            } catch (error) {
+              result = {
+                exitCode: signal.aborted ? 130 : 1,
+                response: '',
+                error: summarizeError(error),
+                stopReason: signal.aborted ? 'cancelled' : 'unexpected_error',
+              };
+            }
+          }
+        } else {
+          result = await executeNativeHeadless({ mode, prompt, resolveHost, signal: signal, runTurn });
+        }
+        return result;
+      } finally {
+        // Already released when the run moved into the session and ended; otherwise (it never got that far) here.
+        if (claimed !== undefined) closeSessionHere(surface, claimed);
+      }
     }),
   });
 }

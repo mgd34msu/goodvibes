@@ -11,7 +11,9 @@ import type { NativeHeadlessMode } from './native-headless-options.ts';
 import { createAgentNativeHostSelection } from '../runtime/agent-native-host-selection.ts';
 import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
-import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
+import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
+import { closeSessionHere, createSessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { announceHeadlessRecovery, refusedHeadlessRun } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 
@@ -49,78 +51,94 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
   return runHeadlessCommand(runtime, mode, {
     write: writeNativeHeadlessResult,
     run: (prompt, mode, outer) => runWithHeadlessTimeout(outer, limits.timeoutMs, async (signal) => {
-      const result = await executeNativeHeadless({
-        mode,
-        prompt,
-        resolveHost,
-        signal: signal,
-        async runTurn(state, signal) {
-          if (signal.aborted) return { exitCode: 130, response: '', stopReason: 'cancelled' };
-          const ctx = await bootstrapRuntime(process.stderr, { configManager, workingDir: workingDirectory, homeDirectory });
-          const sessionSnapshot = (): SessionSnapshot => {
-            const messages = ctx.conversation.getMessageSnapshot();
-            return {
-              messages: conversationMessagesAsSessionRecords(messages),
-              timestamp: Date.now(),
-              title: ctx.conversation.title,
-              ...buildPersistedSessionContextFromFacts(messages, ctx.conversation.getTitleSource(), {
-                pendingApprovals: ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
-              }),
+      // The session to resume is taken, or refused, before the prompt goes to native intake: a refused run
+      // leaves no input record on the host.
+      const surface = createSessionSurface({ surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, workingDirectory, homeDirectory });
+      let claimed: string | undefined;
+      try {
+        claimed = await claimHeadlessSession(cli.flags, surface);
+      } catch (error) {
+        const refused = refusedHeadlessRun(error);
+        if (refused) return refused;
+        throw error;
+      }
+      try {
+        const result = await executeNativeHeadless({
+          mode,
+          prompt,
+          resolveHost,
+          signal: signal,
+          async runTurn(state, signal) {
+            if (signal.aborted) return { exitCode: 130, response: '', stopReason: 'cancelled' };
+            const ctx = await bootstrapRuntime(process.stderr, { configManager, workingDir: workingDirectory, homeDirectory });
+            const sessionSnapshot = (): SessionSnapshot => {
+              const messages = ctx.conversation.getMessageSnapshot();
+              return {
+                messages: conversationMessagesAsSessionRecords(messages),
+                timestamp: Date.now(),
+                title: ctx.conversation.title,
+                ...buildPersistedSessionContextFromFacts(messages, ctx.conversation.getTitleSource(), {
+                  pendingApprovals: ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
+                }),
+              };
             };
-          };
-          // The crash snapshot at each turn moment, as the Agent writes it, so a killed run can be resumed.
-          const recoverable = keepHeadlessSessionRecoverable({
-            bus: ctx.runtimeBus,
-            surface: ctx.services.surface,
-            runtime: ctx.runtime,
-            conversation: ctx.conversation,
-            snapshot: sessionSnapshot,
-            title: () => ctx.conversation.title ?? '',
-            writeSessionPointer: (sessionId) => ctx._writeLastSessionPointer(sessionId),
-          });
-          let sessionReady = false;
-          return settleHeadlessTurn(async () => {
-            // A session another running copy has open is refused, not written to.
-            let recovered: Awaited<ReturnType<typeof restoreHeadlessSession>>;
-            try {
-              recovered = await restoreHeadlessSession(cli.flags, {
-                surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
-                conversation: ctx.conversation, runtime: ctx.runtime,
-                // Called as a method: the provider API's selectModel reads `this`.
-                selectModel: (model: string) => {
-                  const api = ctx.commandContext.clients?.providerApi;
-                  if (!api) throw new Error('No provider API in this run; the saved model id stands.');
-                  return api.selectModel(model);
-                },
-                canResume: () => !ctx.commandContext.isGenerating?.(),
-              }, signal);
-            } catch (error) {
-              const refused = refusedHeadlessRun(error);
-              if (refused) return refused;
-              throw error;
-            }
-            const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
-            sessionReady = true;
-            const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, limits);
-            return recovery ? { ...result, recovery } : result;
-          }, {
-            shutdown: async () => {
+            // The crash snapshot at each turn moment, as the Agent writes it, so a killed run can be resumed.
+            const recoverable = keepHeadlessSessionRecoverable({
+              bus: ctx.runtimeBus,
+              surface: ctx.services.surface,
+              runtime: ctx.runtime,
+              conversation: ctx.conversation,
+              snapshot: sessionSnapshot,
+              title: () => ctx.conversation.title ?? '',
+              writeSessionPointer: (sessionId) => ctx._writeLastSessionPointer(sessionId),
+            });
+            let sessionReady = false;
+            return settleHeadlessTurn(async () => {
+              // A session another running copy has open is refused, not written to.
+              let recovered: Awaited<ReturnType<typeof restoreHeadlessSession>>;
               try {
-                await ctx.shutdown(sessionSnapshot());
-                recoverable.saved();
-              } finally {
-                recoverable.dispose();
+                recovered = await restoreHeadlessSession(cli.flags, {
+                  surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
+                  conversation: ctx.conversation, runtime: ctx.runtime,
+                  // Called as a method: the provider API's selectModel reads `this`.
+                  selectModel: (model: string) => {
+                    const api = ctx.commandContext.clients?.providerApi;
+                    if (!api) throw new Error('No provider API in this run; the saved model id stands.');
+                    return api.selectModel(model);
+                  },
+                  canResume: () => !ctx.commandContext.isGenerating?.(),
+                }, signal);
+              } catch (error) {
+                const refused = refusedHeadlessRun(error);
+                if (refused) return refused;
+                throw error;
               }
-            },
-            sessionReady: () => sessionReady,
-            discardUnusedSession: () => {
-              discardUnusedSession(ctx.services.sessionManager, ctx.runtime.sessionId, sessionReady, ctx.conversation.getMessageSnapshot().length);
-            },
-            writeSessionPointer: () => ctx._writeLastSessionPointer(ctx.runtime.sessionId),
-          });
-        },
-      });
-      return result;
+              const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
+              sessionReady = true;
+              const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, limits);
+              return recovery ? { ...result, recovery } : result;
+            }, {
+              shutdown: async () => {
+                try {
+                  await ctx.shutdown(sessionSnapshot());
+                  recoverable.saved();
+                } finally {
+                  recoverable.dispose();
+                }
+              },
+              sessionReady: () => sessionReady,
+              discardUnusedSession: () => {
+                discardUnusedSession(ctx.services.sessionManager, ctx.runtime.sessionId, sessionReady, ctx.conversation.getMessageSnapshot().length);
+              },
+              writeSessionPointer: () => ctx._writeLastSessionPointer(ctx.runtime.sessionId),
+            });
+          },
+        });
+        return result;
+      } finally {
+        // Already released when the run moved into the session and ended; otherwise (it never got that far) here.
+        if (claimed !== undefined) closeSessionHere(surface, claimed);
+      }
     }),
   });
 }

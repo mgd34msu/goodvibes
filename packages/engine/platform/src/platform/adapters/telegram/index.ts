@@ -3,7 +3,8 @@ import type { SurfaceAdapterContext } from '../types.js';
 import { constantTimeEquals, ingressAnswerResponse, parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
-import { submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
+import { gateAnswerText, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
+import { ingressOutcome } from '../../channels/ingress-alarm.js';
 import { parseTelegramBotCommand, telegramBotCommandReply } from './commands.js';
 import type { TelegramReceiveScope } from '../../channels/telegram/receive-progress.js';
 
@@ -212,6 +213,27 @@ export async function processTelegramUpdate(
     });
   }
   const threadId = readNumberString(message.message_thread_id);
+  // The one way an update that started or continued no work tells its sender why.
+  // The poller's sender delivers the notice; a webhook answer without one carries
+  // it inline as a Bot API call, which Telegram performs for a successful answer.
+  const notifySender = async (notice: string): Promise<boolean> => {
+    if (!deps.sendMessage) return false;
+    try {
+      await deps.sendMessage({ chatId, text: notice, threadId });
+      return true;
+    } catch (error) {
+      logger.warn('processTelegramUpdate: notice to the sender failed', { chatId, error: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+  };
+  const noticeFields = (notice: string, notified: boolean): Record<string, unknown> => ({
+    noticeToSender: notice,
+    notified,
+    ...(notified ? {} : {
+      method: 'sendMessage', chat_id: chatId, text: notice,
+      ...(threadId && /^\d+$/.test(threadId) ? { message_thread_id: Number(threadId) } : {}),
+    }),
+  });
   const delegated = await context.delegatedTelegram?.selects(chatId, threadId) ?? false;
   const botUsername = readString(context.configManager.get('surfaces.telegram.botUsername'));
   const botHandle = normalizeBotUsername(botUsername);
@@ -261,7 +283,10 @@ export async function processTelegramUpdate(
   // already acted on, so it must not bind, spawn or answer a second time. A delegated chat reports edits itself.
   if (!delegated && (payload.edited_message === message || payload.edited_channel_post === message)) {
     logger.info('processTelegramUpdate: edited message ignored', { chatId, updateId: readNumberString(payload.update_id) });
-    return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', reason: 'edited-message' });
+    // Told only to a sender who addressed the bot; an edit of group chatter stays silent.
+    const notice = mentioned ? 'Edits are not read. Send the corrected request as a new message.' : undefined;
+    const notified = notice ? await notifySender(notice) : false;
+    return Response.json({ ok: true, acknowledged: true, queued: false, outcome: 'ignored', reason: 'edited-message', ...(notice ? noticeFields(notice, notified) : {}) });
   }
 
   const binding = await context.routeBindings.upsertBinding({
@@ -305,19 +330,7 @@ export async function processTelegramUpdate(
       botUsername,
       isPrivateChat: readString(chat?.type) === 'private',
     });
-    let replied = false;
-    if (deps.sendMessage) {
-      try {
-        await deps.sendMessage({ chatId, text: reply, threadId });
-        replied = true;
-      } catch (error) {
-        logger.warn('processTelegramUpdate: onboarding reply failed', {
-          command: botCommand.command,
-          chatId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
+    const replied = await notifySender(reply);
     logger.info('processTelegramUpdate: standard bot command handled', {
       command: botCommand.command,
       bindingId: binding.id,
@@ -333,32 +346,19 @@ export async function processTelegramUpdate(
       command: botCommand.command,
       bindingId: binding.id,
       replied,
-      // Webhook mode can answer inline: Telegram accepts a method call as the
-      // webhook response body, so a daemon with no outbound sender still
-      // replies. The poller ignores these fields and uses sendMessage.
-      method: 'sendMessage',
-      chat_id: chatId,
-      text: reply,
-      ...(threadId && /^\d+$/.test(threadId) ? { message_thread_id: Number(threadId) } : {}),
+      ...noticeFields(reply, replied),
     });
   }
 
   if (!task) {
-    // A photo, voice note or file carries nothing this adapter can read. Say so in a private chat,
-    // where the sender is talking to the bot; stay silent in groups, where an unaddressed
-    // attachment is ordinary chatter.
+    // A photo, voice note or file carries nothing this adapter can read, and a bare
+    // `/goodvibes` asks for nothing. Say so to a sender who addressed the bot (a private
+    // chat always does); stay silent in groups, where an unaddressed message is ordinary chatter.
     const attachment = telegramAttachmentKind(message);
-    const unsupportedReply = attachment && readString(chat?.type) === 'private'
-      ? `I cannot read ${attachment}s yet. Send the request as text.` : undefined;
-    let notified = false;
-    if (unsupportedReply && deps.sendMessage) {
-      try {
-        await deps.sendMessage({ chatId, text: unsupportedReply, threadId });
-        notified = true;
-      } catch (error) {
-        logger.warn('processTelegramUpdate: unsupported-attachment reply failed', { chatId, error: error instanceof Error ? error.message : String(error) });
-      }
-    }
+    const unsupportedReply = !mentioned ? undefined
+      : attachment ? `I cannot read ${attachment}s yet. Send the request as text.`
+        : 'That message has no request in it. Send what you want done as text.';
+    const notified = unsupportedReply ? await notifySender(unsupportedReply) : false;
     logger.info('handleTelegramSurfaceWebhook: message acknowledged without queueing', {
       reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
       ...(attachment ? { attachment } : {}),
@@ -367,12 +367,7 @@ export async function processTelegramUpdate(
       threadId,
     });
     return Response.json({
-      ...(unsupportedReply ? {
-        // Webhook mode can answer inline, as for standard commands; the poller uses sendMessage.
-        method: 'sendMessage', chat_id: chatId, text: unsupportedReply,
-        ...(threadId && /^\d+$/.test(threadId) ? { message_thread_id: Number(threadId) } : {}),
-        notified,
-      } : {}),
+      ...(unsupportedReply ? noticeFields(unsupportedReply, notified) : {}),
       ok: true,
       acknowledged: true,
       queued: false,
@@ -400,5 +395,25 @@ export async function processTelegramUpdate(
     },
     signal: deps.signal,
   });
+  const withSenderNotice = async (response: Response, notice: string): Promise<Response> => {
+    const notified = await notifySender(notice);
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = await response.clone().json();
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) body = parsed as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+    return Response.json({ ...body, ...noticeFields(notice, notified) }, { status: response.status });
+  };
+  // The gate showed a work proposal itself; any other gate answer is a message the sender never sees otherwise.
+  if (outcome.kind === 'answered' && outcome.outcome !== 'work-proposed') {
+    return withSenderNotice(outcome.response, gateAnswerText(outcome.outcome));
+  }
+  // A failure redelivery can fix (capacity, a busy session) is retried, and the poller tells the
+  // sender when it gives up; any other failure is final, so the sender is told now.
+  if (outcome.kind === 'not-started' && ingressOutcome(outcome.response) !== 'failed') {
+    return withSenderNotice(outcome.response, `Nothing was started: ${outcome.error}`);
+  }
   return surfaceOutcomeResponse(outcome);
 }

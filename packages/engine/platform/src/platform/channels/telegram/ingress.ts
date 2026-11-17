@@ -35,7 +35,7 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { IngressProcessingHealth, ingressOutcome, type ChannelIngressAlarm } from '../ingress-alarm.js';
 import { TelegramApiError, TelegramBotApi, TelegramUpdateResponseError, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
-import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError } from './receive-progress.js';
+import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError, type TelegramReceiveScope } from './receive-progress.js';
 import { bindEarlierTelegramCursor, TelegramOffsetStore, TelegramOffsetStoreError, type TelegramPollingCursor } from './offset-store.js';
 import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './conflict-policy.js';
 import { TelegramCursorMigration } from './cursor-migration.js';
@@ -181,6 +181,30 @@ export function describeWebhookUrlProblem(rawUrl: string): string | null {
     return `web.publicBaseUrl points at ${url.hostname}, which Telegram's servers cannot reach`;
   }
   return null;
+}
+
+/**
+ * Tells the sender of an update that was skipped after its last retry why
+ * nothing started, with the reason the processor gave. A failed notice is
+ * logged; the skip itself already reached the owner through the processing health.
+ */
+async function notifySkippedSender(api: TelegramBotApi, scope: TelegramReceiveScope, response: Response): Promise<void> {
+  let reason = `HTTP ${response.status}`;
+  try {
+    const body: unknown = await response.clone().json();
+    const error = body && typeof body === 'object' ? (body as Record<string, unknown>).error : undefined;
+    if (typeof error === 'string' && error.trim()) reason = error.trim().slice(0, 300);
+  } catch {
+    // The status is the reason when the answer carried no readable error.
+  }
+  const text = `Your message was not taken after ${UPDATE_RETRY_LIMIT} tries (${reason}), so nothing was started. Send it again in a few minutes.`;
+  try {
+    await api.sendMessage({ chatId: scope.conversationId, text, threadId: scope.threadId });
+  } catch (error) {
+    logger.warn('Telegram ingress: could not tell the sender a skipped message was not taken', {
+      surface: 'telegram', conversationId: scope.conversationId, error: summarizeError(error),
+    });
+  }
 }
 
 export class TelegramIngressSupervisor {
@@ -1132,6 +1156,9 @@ export class TelegramIngressSupervisor {
           this.updateRetries.delete(updateId);
           receiveProgress?.gap(scope);
           this.processing.recordFailure(`Telegram update was refused ${UPDATE_RETRY_LIMIT} times (HTTP ${response.status}) and was skipped`, { updateId });
+          // The last try is the end of this message: the sender, who passed the channel
+          // policy to get this far, is told why nothing started instead of hearing nothing.
+          if (scope) await notifySkippedSender(api, scope, response);
         } else {
           if (!response.ok) receiveProgress?.gap(scope);
           if (outcome === 'processed') this.processing.recordSuccess();

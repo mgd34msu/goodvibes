@@ -15,7 +15,7 @@ export { ConfigError } from '@goodvibes-jev/engine/platform/platform/types';
 
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { GoodVibesConfig } from '@goodvibes-jev/engine/platform/platform/config';
-import { getProviderIdFromModel } from './provider-model.ts';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export function getConfigSnapshot(configManager: Pick<ConfigManager, 'getRaw'>): Readonly<GoodVibesConfig> {
   return configManager.getRaw();

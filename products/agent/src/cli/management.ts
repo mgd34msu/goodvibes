@@ -17,7 +17,7 @@ import 'node:child_process';
 import 'node:os';
 import type { ConfigManager } from '../config/index.ts';
 import '../config/index.ts';
-import '../config/provider-model.ts';
+import '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
 import '../config/secrets.ts';
 import { createShellPathService } from '@/runtime/index.ts';

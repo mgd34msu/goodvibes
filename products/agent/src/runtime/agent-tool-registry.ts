@@ -15,14 +15,11 @@ import { registerAgentKnowledgeIngestTool } from '../tools/agent-knowledge-inges
 import { registerAgentKnowledgeTool } from '../tools/agent-knowledge-tool.ts';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
 import { registerAgentLocalRegistryTool } from '../tools/agent-local-registry-tool.ts';
-import { registerAgentMediaGenerateTool } from '../tools/agent-media-generate-tool.ts';
 import { registerAgentModelCompareTool } from '../tools/agent-model-compare-tool.ts';
-import { registerAgentNotifyTool } from '../tools/agent-notify-tool.ts';
 import { registerAgentOperatorActionTool } from '../tools/agent-operator-action-tool.ts';
 import { registerAgentOperatorBriefingTool } from '../tools/agent-operator-briefing-tool.ts';
 import { registerAgentOperatorMethodTool } from '../tools/agent-operator-method-tool.ts';
 import { registerAgentReminderScheduleTool } from '../tools/agent-reminder-schedule-tool.ts';
-import { registerAgentReviewPacketShareTool } from '../tools/agent-review-packet-share-tool.ts';
 import { registerAgentResearchReportTool } from '../tools/agent-research-report-tool.ts';
 import { registerAgentTurnTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
@@ -163,6 +160,10 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
     shellPaths: services.shellPaths,
     artifactStore: services.artifactStore,
+    notificationConfig: configManager,
+    webhookNotifier: services.webhookNotifier,
+    mediaProviders: services.mediaProviders,
+    channelDeliveryRouter: services.channelDeliveryRouter,
   });
   registerAgentBrowserTool(toolRegistry, {
     screenshotDirectory: agentBrowserScreenshotRoot(services.shellPaths.homeDirectory),
@@ -204,10 +205,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   registerAgentKnowledgeTool(toolRegistry, services.shellPaths, configManager);
   registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   registerAgentLocalRegistryTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
-  registerAgentMediaGenerateTool(toolRegistry, services.mediaProviders, services.artifactStore);
   registerAgentResearchReportTool(toolRegistry, services.artifactStore, deps.researchReportSourceOwner ?? deps.researchSourceOwner,
     deps.researchReportSourceOwner ? 'report-only' : 'shared', deps.researchSourceOwner);
-  registerAgentReviewPacketShareTool(toolRegistry, services.artifactStore, services.channelDeliveryRouter);
   registerAgentModelCompareTool(toolRegistry, {
     modelCatalog: services.providerRegistry,
     providerRegistry: services.providerRegistry,
@@ -225,7 +224,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
       };
     },
   });
-  registerAgentNotifyTool(toolRegistry, configManager, services.webhookNotifier);
   registerAgentOperatorActionTool(toolRegistry, services.shellPaths, configManager);
   registerAgentOperatorBriefingTool(toolRegistry, services.shellPaths, configManager);
   registerAgentOperatorMethodTool(toolRegistry, services.shellPaths, configManager);

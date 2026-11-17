@@ -20,7 +20,7 @@ import {
   toDeliveryTargetInput,
   validateDeliveryTargets,
   type RoutineScheduleDeliveryTargetSpec,
-} from './schedule-delivery-targets.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;
 type ScheduleCreateOutput = OperatorMethodOutput<'automation.schedules.create'>;

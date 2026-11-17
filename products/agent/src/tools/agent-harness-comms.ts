@@ -10,7 +10,7 @@ import { resolveChannelDraftNativeReference } from './agent-channel-draft-refere
 import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
 import { delegatedOperatorConnection, forgetDelegatedCredential } from '../agent/agent-delegation-credential.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger, labelUntrustedContent } from '../trust/untrusted-content.ts';
-import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '../agent/payments-channel-guard.ts';
+import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   aggregateUnifiedInbox,
   fetchInboundChannelFeed,
@@ -46,7 +46,7 @@ import {
   channelProfileRouteFilePath,
 } from '../agent/channel-profile-routing.ts';
 import { buildAgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
-import { deliverAgentChannelMessage } from '../agent/channel-delivery.ts';
+import { deliverAgentChannelMessage } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { requireConfirmedAction, type EffectResult } from './agent-harness-tool-utils.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import {

@@ -8,7 +8,7 @@ import {
   type RoutineScheduleReceipt,
   type RoutineScheduleReceiptSnapshot,
 } from './routine-schedule-promotion.ts';
-import { deliveryTargetFlag } from './schedule-delivery-targets.ts';
+import { deliveryTargetFlag } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from './schedule-next-routes.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -2,27 +2,27 @@ import type { ArtifactDescriptor, ArtifactRecord, ArtifactReference, ArtifactSto
 import type { ChannelDeliveryRequest, ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentArtifactEffectGuard, captureAgentArtifactSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
+import { agentArtifactEffectGuard, captureAgentArtifactSource } from './artifact-effect.js';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import {
   buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,
   formatAgentChannelDeliveryResult,
   requireOneDeliveryTarget,
   type AgentChannelDeliveryInput,
-} from '../agent/channel-delivery.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+} from './channel-delivery.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 export interface AgentReviewPacketShareToolArgs {
-  readonly archiveArtifactId?: unknown;
-  readonly message?: unknown;
-  readonly title?: unknown;
-  readonly channel?: unknown;
-  readonly route?: unknown;
-  readonly webhook?: unknown;
-  readonly link?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
+  readonly archiveArtifactId?: unknown | undefined;
+  readonly message?: unknown | undefined;
+  readonly title?: unknown | undefined;
+  readonly channel?: unknown | undefined;
+  readonly route?: unknown | undefined;
+  readonly webhook?: unknown | undefined;
+  readonly link?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
 }
 
 type AgentReviewPacketShareArtifactStore = Pick<ArtifactStore, 'get' | 'list' | 'readContent'>;

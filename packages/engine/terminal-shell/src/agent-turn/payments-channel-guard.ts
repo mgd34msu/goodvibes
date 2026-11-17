@@ -90,8 +90,8 @@ export class CardMaterialRefusedError extends Error {
  * number is about to leave the machine.
  */
 export function resolveDeliverySurfaceName(target: {
-  readonly kind?: string;
-  readonly surfaceKind?: string;
+  readonly kind?: string | undefined;
+  readonly surfaceKind?: string | undefined;
 }): string {
   const named = target.surfaceKind ?? (target.kind === 'surface' ? undefined : target.kind);
   const trimmed = named?.trim();
@@ -111,7 +111,7 @@ export function resolveDeliverySurfaceName(target: {
 export async function screenOutboundForCardMaterial(input: {
   readonly surface: string;
   readonly message: string;
-  readonly title?: string;
+  readonly title?: string | undefined;
 }, options: { readonly signal?: AbortSignal; readonly assertCurrent?: () => void } = {}): Promise<CardMaterialRefusal | null> {
   const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
@@ -157,8 +157,8 @@ export async function screenOutboundForCardMaterial(input: {
  * Refusing the answer afterwards is too late.
  */
 export function mayOfferCardEntryOnDelivery(target: {
-  readonly kind?: string;
-  readonly surfaceKind?: string;
+  readonly kind?: string | undefined;
+  readonly surfaceKind?: string | undefined;
 }): boolean {
   return mayEnterCardDetails(resolveDeliverySurfaceName(target));
 }

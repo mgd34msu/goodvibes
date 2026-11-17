@@ -48,7 +48,7 @@ import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } fr
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureStrictJudgmentJson, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '../agent/payments-channel-guard.ts';
+import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertDeliveryCurrent } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   beginGoogleConsent,

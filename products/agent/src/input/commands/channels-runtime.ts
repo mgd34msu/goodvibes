@@ -10,7 +10,7 @@ import {
   deliverAgentChannelMessage,
   formatAgentChannelDeliveryPreview,
   formatAgentChannelDeliveryResult,
-} from '../../agent/channel-delivery.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   formatAgentChannelDeliveryReceiptLine,
   readAgentChannelDeliveryReceipts,

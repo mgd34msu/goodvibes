@@ -11,7 +11,7 @@ import {
   deliverAgentChannelMessage,
   formatAgentChannelDeliveryPreview,
   formatAgentChannelDeliveryResult,
-} from '../agent/channel-delivery.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { agentChannelDeliveryReceiptPath, recordAgentChannelDeliveryReceipt } from '../agent/channel-delivery-receipts.ts';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';

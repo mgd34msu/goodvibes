@@ -19,7 +19,7 @@ import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '
 import { fetchDaemonCredentialAvailability } from '../config/credential-status.ts';
 import { join } from 'node:path';
 import { AgentConfigManager, type ConfigManager } from '../config/index.ts';
-import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '../config/provider-model.ts';
+import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import { GlobalNetworkTransportInstaller } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';

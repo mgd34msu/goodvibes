@@ -24,7 +24,7 @@ import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
 import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
-import { getProviderIdFromModel } from '../config/provider-model.ts';
+import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { PermissionManager } from '@goodvibes-jev/engine/platform/platform/permissions';

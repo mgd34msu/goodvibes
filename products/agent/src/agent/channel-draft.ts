@@ -42,7 +42,7 @@ import {
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { AgentChannelDeliveryInput } from './channel-delivery.ts';
+import type { AgentChannelDeliveryInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';
 

@@ -2,9 +2,9 @@ import type { WebhookNotifierSendResult } from '@goodvibes-jev/engine/platform/p
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '../agent/payments-channel-guard.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { screenOutboundForCardMaterial, CardMaterialRefusedError } from './payments-channel-guard.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 interface AgentNotificationConfigReader {
   getCategory(category: string): unknown;
@@ -17,10 +17,10 @@ interface AgentNotificationSender {
 }
 
 export interface AgentNotifyToolArgs {
-  readonly message?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
-  readonly preview?: unknown;
+  readonly message?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
+  readonly preview?: unknown | undefined;
 }
 
 type JsonRecord = Record<string, unknown>;

@@ -234,6 +234,10 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         memoryRegistry: services.memoryRegistry,
         gatewayMethods: services.gatewayMethods,
         artifactStore: services.artifactStore,
+        notificationConfig: services.configManager,
+        webhookNotifier: services.webhookNotifier,
+        mediaProviders: services.mediaProviders,
+        channelDeliveryRouter: services.channelDeliveryRouter,
       }),
     },
     // Called for every session the engine binds to a workspace (create and

@@ -5,7 +5,7 @@ import { CONTENT_DERIVATION_SITE } from '@goodvibes-jev/engine/platform/platform
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { isDeepStrictEqual } from 'node:util';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import { screenOutboundForCardMaterial } from './payments-channel-guard.ts';
+import { screenOutboundForCardMaterial } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { decisionOrClassic } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { JudgmentPort } from '@goodvibes-jev/judgment/decisions';
 

@@ -19,7 +19,7 @@ import {
   type RoutineScheduleKind,
   type RoutineScheduleSpec,
 } from './routine-schedule-promotion.ts';
-import { readOptionValue as optionValue } from './schedule-delivery-targets.ts';
+import { readOptionValue as optionValue } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 type SchedulePatchInput = OperatorMethodInput<'automation.jobs.update'>;
 type SchedulePatchOutput = OperatorMethodOutput<'automation.jobs.update'>;

@@ -39,6 +39,9 @@ import { registerAgentDocumentsTool } from './documents-tool.js';
 import { registerAgentResearchRunsTool } from './research-runs-tool.js';
 import { registerAgentResearchSourcesTool } from './research-sources-tool.js';
 import { registerAgentReviewPacketPresetsTool } from './review-packet-presets-tool.js';
+import { registerAgentNotifyTool } from './notify-tool.js';
+import { registerAgentMediaGenerateTool } from './media-generate-tool.js';
+import { registerAgentReviewPacketShareTool } from './review-packet-share-tool.js';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 
@@ -54,6 +57,14 @@ export interface AgentTurnToolDeps {
   readonly shellPaths: ShellPathService;
   /** The home's artifact store, which artifacts, documents and review packets are kept in. */
   readonly artifactStore: ArtifactStore;
+  /** Where the notification settings are read (`agent_notify`). */
+  readonly notificationConfig: Parameters<typeof registerAgentNotifyTool>[1];
+  /** The process's one webhook notifier; the daemon's in a hosted turn. */
+  readonly webhookNotifier: Parameters<typeof registerAgentNotifyTool>[2];
+  /** The process's one media provider registry; the daemon's in a hosted turn. */
+  readonly mediaProviders: Parameters<typeof registerAgentMediaGenerateTool>[1];
+  /** The process's one channel delivery router; the daemon's in a hosted turn. */
+  readonly channelDeliveryRouter: Parameters<typeof registerAgentReviewPacketShareTool>[2];
 }
 
 /**
@@ -76,6 +87,9 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentResearchRunsTool(registry, deps.shellPaths);
   registerAgentResearchSourcesTool(registry, deps.shellPaths);
   registerAgentReviewPacketPresetsTool(registry, deps.artifactStore);
+  registerAgentReviewPacketShareTool(registry, deps.artifactStore, deps.channelDeliveryRouter);
+  registerAgentMediaGenerateTool(registry, deps.mediaProviders, deps.artifactStore);
+  registerAgentNotifyTool(registry, deps.notificationConfig, deps.webhookNotifier);
 }
 
 /**
@@ -91,9 +105,9 @@ export const AGENT_PROCESS_TOOL_NAMES: readonly string[] = Object.freeze([
   'security', 'sessions', 'settings', 'setup', 'support', 'terminal', 'vibe', 'workspace',
   // Tools over the Agent process's own stores and connections.
   'accounts', 'agent_autonomy_schedule', 'agent_channel_send', 'agent_knowledge', 'agent_knowledge_ingest',
-  'agent_learning_consolidation', 'agent_local_registry', 'agent_media_generate', 'agent_model_compare', 'agent_notify',
+  'agent_learning_consolidation', 'agent_local_registry', 'agent_model_compare',
   'agent_operator_action', 'agent_operator_briefing', 'agent_operator_method', 'agent_reminder_schedule',
-  'agent_research_report', 'agent_review_packet_share', 'agent_schedule_edit', 'agent_work_plan', 'browser', 'google',
+  'agent_research_report', 'agent_schedule_edit', 'agent_work_plan', 'browser', 'google',
   'schedule',
 ]);
 
@@ -121,6 +135,12 @@ export interface AgentHostedTurnDeps {
   readonly gatewayMethods: GatewayMethodCatalog;
   /** The home's artifact store. */
   readonly artifactStore: ArtifactStore;
+  /** The daemon's settings, read for notification targets. */
+  readonly notificationConfig: AgentTurnToolDeps['notificationConfig'];
+  /** The daemon's own notification, media and channel-delivery services. */
+  readonly webhookNotifier: AgentTurnToolDeps['webhookNotifier'];
+  readonly mediaProviders: AgentTurnToolDeps['mediaProviders'];
+  readonly channelDeliveryRouter: AgentTurnToolDeps['channelDeliveryRouter'];
 }
 
 export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceTurn {
@@ -135,6 +155,10 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         gatewayMethods: deps.gatewayMethods,
         shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: deps.homeDirectory }),
         artifactStore: deps.artifactStore,
+        notificationConfig: deps.notificationConfig,
+        webhookNotifier: deps.webhookNotifier,
+        mediaProviders: deps.mediaProviders,
+        channelDeliveryRouter: deps.channelDeliveryRouter,
       });
       registry.declareElsewhere(AGENT_PROCESS_TOOL_NAMES, HOSTED_REFUSAL);
       return undefined;

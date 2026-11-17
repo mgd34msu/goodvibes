@@ -3,22 +3,22 @@ import type { MediaProviderRegistry } from '@goodvibes-jev/engine/platform/platf
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev/engine/platform/platform/gate';
-import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '../agent/payments-channel-guard.ts';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { CardMaterialRefusedError, screenOutboundForCardMaterial } from './payments-channel-guard.js';
 import {
   formatAgentMediaGenerationResult,
   generateAgentMedia,
-} from '../agent/media-generation.ts';
-import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
+} from './media-generation.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 export interface AgentMediaGenerateToolArgs {
-  readonly prompt?: unknown;
-  readonly providerId?: unknown;
-  readonly modelId?: unknown;
-  readonly outputMimeType?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
-  readonly preview?: unknown;
+  readonly prompt?: unknown | undefined;
+  readonly providerId?: unknown | undefined;
+  readonly modelId?: unknown | undefined;
+  readonly outputMimeType?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
+  readonly preview?: unknown | undefined;
 }
 
 function readString(value: unknown): string {

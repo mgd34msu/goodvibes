@@ -7,9 +7,9 @@ import {
   readOptionValue as optionValue,
   validateDeliveryTargets,
   type RoutineScheduleDeliveryTargetSpec,
-} from './schedule-delivery-targets.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
-export { isRoutineScheduleDeliverySurfaceKind } from './schedule-delivery-targets.ts';
+export { isRoutineScheduleDeliverySurfaceKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export function parseRoutineSchedulePromotionArgs(args: readonly string[]): ParsedRoutineSchedulePromotionArgs {
   let routineId: string | null = null;

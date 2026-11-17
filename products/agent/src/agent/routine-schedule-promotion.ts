@@ -13,7 +13,7 @@ import {
   type RoutineScheduleDeliveryKind,
   type RoutineScheduleDeliverySurfaceKind,
   type RoutineScheduleDeliveryTargetSpec,
-} from './schedule-delivery-targets.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export const ROUTINE_SCHEDULE_ROUTE = '/api/automation/schedules';
 export const ROUTINE_SCHEDULE_METHOD = 'automation.schedules.create';
@@ -45,7 +45,7 @@ export type {
   RoutineScheduleDeliveryKind,
   RoutineScheduleDeliverySurfaceKind,
   RoutineScheduleDeliveryTargetSpec,
-} from './schedule-delivery-targets.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface RoutineScheduleReceiptDeliveryTarget {
   readonly kind: RoutineScheduleDeliveryKind;

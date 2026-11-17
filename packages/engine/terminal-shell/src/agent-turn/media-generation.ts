@@ -15,18 +15,18 @@ import { assertDeliveryCurrent, type DeliveryLifetime } from '@goodvibes-jev/eng
 
 export interface AgentMediaGenerationInput {
   readonly prompt: string;
-  readonly providerId?: string;
-  readonly modelId?: string;
-  readonly outputMimeType?: string;
-  readonly options?: Record<string, unknown>;
+  readonly providerId?: string | undefined;
+  readonly modelId?: string | undefined;
+  readonly outputMimeType?: string | undefined;
+  readonly options?: Record<string, unknown> | undefined;
 }
 
 export interface AgentGeneratedMediaArtifact {
   readonly artifactId: string;
   readonly mimeType: string;
-  readonly filename?: string;
+  readonly filename?: string | undefined;
   readonly sizeBytes: number;
-  readonly sourceUri?: string;
+  readonly sourceUri?: string | undefined;
 }
 
 export interface AgentMediaGenerationResult {
@@ -34,7 +34,7 @@ export interface AgentMediaGenerationResult {
   readonly artifacts: readonly AgentGeneratedMediaArtifact[];
   readonly metadata: Record<string, unknown>;
   /** The job was accepted and is still running: collect it with this task. */
-  readonly pending?: MediaProviderTask;
+  readonly pending?: MediaProviderTask | undefined;
 }
 
 function readText(value: string | undefined): string | undefined {

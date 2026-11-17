@@ -17,7 +17,7 @@
  */
 
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { getModelIdFromProviderModel, getProviderIdFromModel } from '../config/provider-model.ts';
+import { getModelIdFromProviderModel, getProviderIdFromModel } from './provider-model.js';
 
 type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;
 type ScheduleDeliveryInput = NonNullable<ScheduleCreateInput['delivery']>;
@@ -50,10 +50,10 @@ export type RoutineScheduleDeliveryKind = 'webhook' | 'surface' | 'integration' 
 
 export interface RoutineScheduleDeliveryTargetSpec {
   readonly kind: RoutineScheduleDeliveryKind;
-  readonly surfaceKind?: RoutineScheduleDeliverySurfaceKind;
-  readonly address?: string;
-  readonly routeId?: string;
-  readonly label?: string;
+  readonly surfaceKind?: RoutineScheduleDeliverySurfaceKind | undefined;
+  readonly address?: string | undefined;
+  readonly routeId?: string | undefined;
+  readonly label?: string | undefined;
 }
 
 export function isRoutineScheduleDeliverySurfaceKind(value: string): value is RoutineScheduleDeliverySurfaceKind {
@@ -215,8 +215,8 @@ export function deliveryTargetFlag(target: {
 
 /** Splits a `provider/model` value into its parts, inferring the provider when only a model is given. */
 export function normalizeProviderModel(provider: string | undefined, model: string | undefined): {
-  readonly provider?: string;
-  readonly model?: string;
+  readonly provider?: string | undefined;
+  readonly model?: string | undefined;
 } {
   if (!model) return provider ? { provider } : {};
   // A bare model id carries no provider; only a `provider:model` value names one.

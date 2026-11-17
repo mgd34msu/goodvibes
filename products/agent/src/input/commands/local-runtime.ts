@@ -16,7 +16,7 @@ import {
 } from '../../config/credential-scope.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
-import { formatAgentMediaGenerationResult, generateAgentMedia } from '../../agent/media-generation.ts';
+import { formatAgentMediaGenerationResult, generateAgentMedia } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface MediaGenerateArgs {
   readonly prompt: string;

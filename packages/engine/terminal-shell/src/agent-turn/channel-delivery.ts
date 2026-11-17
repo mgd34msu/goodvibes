@@ -8,14 +8,14 @@ import {
   CardMaterialRefusedError,
   resolveDeliverySurfaceName,
   screenOutboundForCardMaterial,
-} from './payments-channel-guard.ts';
-import { parseChannelDeliveryTarget, parseRouteDeliveryTarget, type RoutineScheduleDeliveryTargetSpec } from './schedule-delivery-targets.ts';
+} from './payments-channel-guard.js';
+import { parseChannelDeliveryTarget, parseRouteDeliveryTarget, type RoutineScheduleDeliveryTargetSpec } from './schedule-delivery-targets.js';
 import { randomUUID } from 'node:crypto';
 
 type AgentChannelDeliveryRouter = Pick<ChannelDeliveryRouter, 'deliver' | 'listStrategies'>;
 type AgentChannelDeliverySurfaceKind = ChannelDeliverySurfaceKind | 'telephony';
 type AgentChannelDeliveryTarget = Omit<ChannelDeliveryTarget, 'surfaceKind'> & {
-  readonly surfaceKind?: AgentChannelDeliverySurfaceKind;
+  readonly surfaceKind?: AgentChannelDeliverySurfaceKind | undefined;
 };
 type AgentChannelDeliveryRequest = Omit<ChannelDeliveryRequest, 'target'> & {
   readonly target: AgentChannelDeliveryTarget;
@@ -23,11 +23,11 @@ type AgentChannelDeliveryRequest = Omit<ChannelDeliveryRequest, 'target'> & {
 
 export interface AgentChannelDeliveryInput {
   readonly message: string;
-  readonly title?: string;
-  readonly channel?: string;
-  readonly route?: string;
-  readonly webhook?: string;
-  readonly link?: string;
+  readonly title?: string | undefined;
+  readonly channel?: string | undefined;
+  readonly route?: string | undefined;
+  readonly webhook?: string | undefined;
+  readonly link?: string | undefined;
 }
 
 export interface AgentChannelDeliveryPreview {
@@ -38,7 +38,7 @@ export interface AgentChannelDeliveryPreview {
 }
 
 export interface AgentChannelDeliveryResult {
-  readonly responseId?: string;
+  readonly responseId?: string | undefined;
   readonly message: string;
   readonly title: string;
   readonly target: AgentChannelDeliveryTarget;

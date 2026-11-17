@@ -171,6 +171,7 @@ export type {
   MediaGenerationInput,
   MediaProviderLike,
   MediaProviderRegistryLike,
+  MediaOutputKindLike,
   MediaTransformInput,
   MultimodalAnalysisInput,
   MultimodalAnalysisResult,

@@ -133,6 +133,8 @@ export interface MediaProviderDescriptor {
   readonly id: string;
   readonly label: string;
   readonly capabilities: readonly MediaProviderCapability[];
+  /** What a generation provider makes, when it says. */
+  readonly outputs?: readonly MediaOutputKind[] | undefined;
 }
 
 // A provider without a synchronous answer keeps registration order; its status() is for display only.
@@ -197,6 +199,7 @@ export class MediaProviderRegistry {
         id: provider.id,
         label: provider.label,
         capabilities: [...provider.capabilities],
+        ...(provider.outputs ? { outputs: [...provider.outputs] } : {}),
       }))
       .sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
   }

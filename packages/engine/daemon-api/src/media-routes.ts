@@ -20,6 +20,7 @@ import {
   WEB_SEARCH_VERBOSITIES,
   type DaemonMediaRouteContext,
   type MediaArtifact,
+  type MediaOutputKindLike,
   type MultimodalAnalysisResult,
   type MultimodalArtifactInput,
   type MultimodalDetail,
@@ -593,21 +594,51 @@ async function handleMediaGenerate(context: DaemonMediaRouteContext, req: Reques
   if (admin) return admin;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
-  const provider = context.mediaProviders.findProvider('generate', typeof body.providerId === 'string' ? body.providerId : undefined);
-  if (!provider?.generate) return jsonErrorResponse({ error: 'No media generation provider is registered' }, { status: 404 });
   const prompt = typeof body.prompt === 'string' ? body.prompt : '';
   if (!prompt.trim()) return jsonErrorResponse({ error: 'Missing media generation prompt' }, { status: 400 });
+  const providerId = typeof body.providerId === 'string' && body.providerId.trim() ? body.providerId.trim() : undefined;
+  const options = typeof body.options === 'object' && body.options !== null ? body.options as Record<string, unknown> : {};
+  // The kind asked for picks the provider, so an image request is never sent to a video-only one.
+  const output = generationOutputKind(typeof body.outputMimeType === 'string' ? body.outputMimeType : undefined, options);
+  const provider = await context.mediaProviders.resolveProvider('generate', providerId, output ? { output } : {});
+  if (!provider?.generate) {
+    if (!output) return jsonErrorResponse({ error: 'No media generation provider is registered' }, { status: 404 });
+    const makers = context.mediaProviders.list()
+      .filter((entry) => entry.capabilities.includes('generate') && (!entry.outputs || entry.outputs.includes(output)));
+    const names = makers.map((entry) => `${entry.label} (${entry.id})`).join(', ');
+    return jsonErrorResponse({
+      error: providerId
+        ? `The media provider ${providerId} does not make ${output}, or is not configured; nothing was sent.`
+        : `No configured media provider makes ${output}; nothing was sent.`,
+      code: 'MEDIA_OUTPUT_UNAVAILABLE',
+      state: makers.length > 0 ? `providers that make ${output}: ${names}` : `no registered provider makes ${output}`,
+      next: makers.length > 0
+        ? [`Configure the key for one of ${names}, or pass its id as providerId.`]
+        : [`Ask for a different outputMimeType, or register a provider that makes ${output}.`],
+    }, { status: 409 });
+  }
   try {
     return Response.json(await provider.generate({
       prompt,
       outputMimeType: typeof body.outputMimeType === 'string' ? body.outputMimeType : undefined,
       modelId: typeof body.modelId === 'string' ? body.modelId : undefined,
-      options: typeof body.options === 'object' && body.options !== null ? body.options as Record<string, unknown> : {},
+      options,
       metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
     }));
   } catch (error) {
     return readServiceErrorResponse(error);
   }
+}
+
+/**
+ * The kind of media a generate request asks for: the major type of its
+ * `outputMimeType`, or an image when `options.image` is true (the same reading
+ * the generation providers make), undefined when it names none.
+ */
+function generationOutputKind(outputMimeType: string | undefined, options: Record<string, unknown>): MediaOutputKindLike | undefined {
+  const major = outputMimeType?.trim().toLowerCase().split('/')[0];
+  if (major === 'image' || major === 'video' || major === 'audio') return major;
+  return options.image === true ? 'image' : undefined;
 }
 
 /**

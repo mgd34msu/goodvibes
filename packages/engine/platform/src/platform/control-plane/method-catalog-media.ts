@@ -271,7 +271,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
     id: 'media.generate',
     effect: 'outward',
     title: 'Generate Media Artifact',
-    description: 'Generate a media artifact through a registered media provider. A job the provider accepted but had not finished when the wait ended comes back with artifacts empty and pending set (providerId, taskId, resume); the job is paid for and keeps running, and media.collect finishes it.',
+    description: 'Generate a media artifact through a registered media provider. A job the provider accepted but had not finished when the wait ended comes back with artifacts empty and pending set (providerId, taskId, resume); the job is paid for and keeps running, and media.collect finishes it. The kind asked for (the major type of outputMimeType, or image with options.image true) chooses the provider: without providerId the first configured provider that makes that kind is used, and when none does (or the named provider does not) the answer is 409 MEDIA_OUTPUT_UNAVAILABLE naming the providers that make it; nothing is sent.',
     category: 'media',
     scopes: ['write:media'],
     access: 'admin',

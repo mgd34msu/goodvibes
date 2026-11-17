@@ -155,12 +155,31 @@ export interface MediaProviderLike {
   readonly generate?: ((input: MediaGenerationInput) => Promise<unknown>) | undefined;
 }
 
+/** A kind of media a generation provider makes. */
+export type MediaOutputKindLike = 'image' | 'video' | 'audio';
+
 export interface MediaProviderRegistryLike {
   readonly status: () => Promise<unknown>;
   readonly findProvider: (
     capability: 'understand' | 'transform' | 'generate',
     providerId?: string,
   ) => MediaProviderLike | null;
+  /**
+   * findProvider after each candidate has read credentials it does not yet
+   * know, narrowed to providers that make `output` when one is asked for.
+   */
+  readonly resolveProvider: (
+    capability: 'understand' | 'transform' | 'generate',
+    providerId?: string,
+    filter?: { readonly output?: MediaOutputKindLike | undefined },
+  ) => Promise<MediaProviderLike | null>;
+  /** Registered providers, with what each generation provider makes. */
+  readonly list: () => readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly capabilities: readonly string[];
+    readonly outputs?: readonly MediaOutputKindLike[] | undefined;
+  }[];
   /** Finishes a generation job an earlier generate answered as pending. */
   readonly collect: (
     task: { readonly providerId: string; readonly taskId: string; readonly resume?: Readonly<Record<string, string>> | undefined },

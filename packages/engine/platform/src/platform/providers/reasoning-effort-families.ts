@@ -191,21 +191,6 @@ export async function readFamilyReasoningEffortSpec(modelId: string, site: strin
   }, () => undefined);
 }
 
-/**
- * Makes the family row available to the synchronous resolvers before a
- * request is built: reads the id's family when a reasoning level was asked
- * for and neither the catalog nor the model's own declaration already
- * outranks the table. With no level asked for nothing goes on the wire, so
- * nothing needs reading. Adapters await this at the top of a request.
- */
-export async function prepareReasoningEffort(requested: string | undefined, input: ReasoningEffortSpecRequest, site: string): Promise<void> {
-  if (requested === undefined || requested === '') return;
-  if (documentedReasoningEffortSpec(input.modelId)) return;
-  const declared = input.spec?.source === 'catalog' ? input.spec : catalogReasoningSpec(input) ?? input.spec;
-  if (declared && reasoningEffortSourceRank(declared.source) >= reasoningEffortSourceRank('family')) return;
-  await readFamilyReasoningEffortSpec(input.modelId, site);
-}
-
 /** What is known about one model when deciding which spec governs it. */
 export interface ReasoningEffortSpecRequest {
   readonly modelId: string;

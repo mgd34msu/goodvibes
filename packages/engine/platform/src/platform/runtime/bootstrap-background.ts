@@ -2,7 +2,6 @@ import type { ConfigManager } from '../config/manager.js';
 import { logger } from '../utils/logger.js';
 import type { NoticeLevel } from '../core/conversation.js';
 import type { ProviderRegistry } from '../providers/registry.js';
-import { autoRegisterProviders } from '../providers/auto-register.js';
 import { scan, scanLocalhost, loadPersistedProviders, persistProviders, scanMcpServers } from '../discovery/index.js';
 import type { McpRegistry } from '../mcp/registry.js';
 import type { ShellPathService } from './shell-paths.js';
@@ -91,7 +90,6 @@ export function startBackgroundProviderDiscovery(
   const runScan: typeof scan = options.scan
     ?? (options.registerNetworkServers === true ? scan : (_onProgress, signal) => scanLocalhost(signal));
   const trusted = (server: { readonly host: string }): boolean => options.registerNetworkServers === true || isLoopbackHost(server.host);
-  autoRegisterProviders(providerRegistry);
   let stopped = false;
   const lifetime = new AbortController();
   const handle: BackgroundRuntimeTaskHandle = {

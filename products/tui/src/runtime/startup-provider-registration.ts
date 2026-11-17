@@ -1,4 +1,3 @@
-import { autoRegisterProviders } from '@goodvibes-jev/engine/platform/platform/providers';
 import { loadPersistedProviders } from '@goodvibes-jev/engine/platform/platform/discovery';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
@@ -11,7 +10,6 @@ import type { BackgroundProviderDiscoveryOptions } from '@goodvibes-jev/engine/p
  */
 export function registerStartupProviders(options: BackgroundProviderDiscoveryOptions): void {
   const { configManager, providerRegistry, runtime, requestRender, restoreRuntimeModel, systemMessageRouter, shellPaths, surfaceRoot } = options;
-  autoRegisterProviders(providerRegistry);
   const persisted = loadPersistedProviders({ ...shellPaths, surfaceRoot });
   if (persisted.length === 0) return;
   try {

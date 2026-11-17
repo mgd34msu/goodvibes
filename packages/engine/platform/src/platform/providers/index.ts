@@ -82,11 +82,6 @@ export { readProviderHealth } from './provider-health.js';
 export type { ProviderStatus, ProviderHealthEntry, CompositeHealthStatus } from './provider-health.js';
 export { AnthropicCompatProvider } from './anthropic-compat.js';
 export {
-  AUTO_REGISTER_CATALOG,
-  autoRegisterProviders,
-} from './auto-register.js';
-export type { AutoRegisterEntry } from './auto-register.js';
-export {
   createDiscoveredProvider,
 } from './discovered-factory.js';
 export { getDiscoveredTraits } from './discovered-traits.js';
@@ -209,7 +204,6 @@ export type {
 } from './reasoning-effort.js';
 export {
   findFamilyReasoningEffortSpec,
-  prepareReasoningEffort,
   readFamilyReasoningEffortSpec,
   resolveEffortForRequest,
   resolveReasoningEffortSpec,

@@ -137,7 +137,7 @@ function own(value: unknown): ProtectedPaymentRequest {
     || input['ownerApprovedMaxMinorUnits'] !== undefined && !amount(input['ownerApprovedMaxMinorUnits'])
     || input['standingAuthorizationId'] !== undefined && !text(input['standingAuthorizationId'])) throw new ProtectedPaymentRequestError();
   const authority = host['authority'];
-  if (authority['kind'] !== 'pairing-token' || authority['principalId'] !== row['principalId'] || !text(authority['tokenId'])
+  if ((authority['kind'] !== 'pairing-token' && authority['kind'] !== 'local') || authority['principalId'] !== row['principalId'] || !text(authority['tokenId'])
     || !text(authority['authorityId']) || !text(authority['authorityRevision']) || !Array.isArray(authority['scopes'])
     || authority['scopes'].some(scope => !text(scope)) || missingScopes(authority['scopes'], ['write:payments']).length > 0) throw new ProtectedPaymentRequestError();
   const config = host['configuration'], limits = config['limits'];

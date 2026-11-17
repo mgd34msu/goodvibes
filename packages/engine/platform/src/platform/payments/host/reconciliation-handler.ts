@@ -17,13 +17,13 @@ export function purchaseReconciliationHandler(owner: PurchaseReconciliations): T
       || typeof purchaseId !== 'string' || !purchaseId.trim() || purchaseId.length > 128
       || typeof operationId !== 'string' || !operationId.trim() || operationId.length > 256
       || (outcome !== 'purchased' && outcome !== 'not-purchased')) throw new HandlerError('Inspect the merchant’s order history, then confirm the exact purchase and your finding.', 'INVALID_ARGUMENT', 400);
-    const forbidden = () => new HandlerError('Reconciling a purchase requires current paired owner access with admin and write:payments.', 'FORBIDDEN', 403);
+    const forbidden = () => new HandlerError('Reconciling a purchase requires the owner with admin and write:payments: an app on the daemon\'s own machine or a paired device.', 'FORBIDDEN', 403);
     const authority = context.nativeExecutionAuthority;
     const snapshot = () => ({ principalId: context.principalId, principalKind: context.principalKind,
       admin: context.admin, scopes: [...context.scopes], explicitUserRequest: context.explicitUserRequest });
     const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
     const has = (scopes: readonly string[]) => missingScopes(scopes, ['write:payments']).length === 0;
-    if (!authority || !expected || expected.kind !== 'pairing-token' || !context.admin || context.principalKind !== 'token'
+    if (!authority || !expected || (expected.kind !== 'pairing-token' && expected.kind !== 'local') || !context.admin || context.principalKind !== 'token'
       || expected.principalId !== context.principalId || !has(expected.scopes) || !has(context.scopes)) throw forbidden();
     const paired = structuredClone(expected), original = snapshot(), signal = context.signal, isAuthorized = context.isAuthorized;
     const current = () => {

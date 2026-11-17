@@ -62,15 +62,21 @@ export function retainDetachedCheckout(deps: PaymentsHandlerDeps, seam: BrowserC
   options: { readonly ownerRequest: boolean } = { ownerRequest: true }) {
   const native = context.nativeExecutionAuthority, authorized = context.isAuthorized;
   const paired = native?.current();
-  if (!native || !native.issueContinuation || !native.revokeContinuation || !authorized || !paired || paired.kind !== 'pairing-token' || !context.admin || context.principalKind !== 'token'
+  // A paired device, or an app on the owner's own machine with the operator
+  // token (native kind 'local', established by the transport from a loopback
+  // request): no pairing on the owner's own machine. The operator token from
+  // elsewhere has no native authority, so it never reaches here.
+  if (!native || !native.issueContinuation || !native.revokeContinuation || !authorized || !paired
+    || (paired.kind !== 'pairing-token' && paired.kind !== 'local') || !context.admin || context.principalKind !== 'token'
     || (options.ownerRequest && !context.explicitUserRequest) || context.principalId !== paired.principalId
     || missingScopes(context.scopes, ['write:payments']).length > 0
     || missingScopes(paired.scopes, ['write:payments']).length > 0
     || authorized?.(['write:payments']) !== true) {
     throw new HandlerError(options.ownerRequest
-      ? 'Checkout admission requires an explicit request from the current paired administrative owner with write:payments. '
+      ? 'Checkout admission requires an explicit request from the owner (an app on the daemon\'s own machine, or a paired device) '
+        + 'with admin and write:payments. '
         + 'A purchase a schedule or trigger starts names the owner\'s standing authorisation instead (standingId from payments.standing.list).'
-      : 'Checkout admission under a standing authorisation requires the current paired administrative principal with write:payments.', 'FORBIDDEN', 403);
+      : 'Checkout admission under a standing authorisation requires the owner\'s own machine or a paired administrative principal with write:payments.', 'FORBIDDEN', 403);
   }
   return detachedSource(deps, seam, native, authorized, paired);
 }

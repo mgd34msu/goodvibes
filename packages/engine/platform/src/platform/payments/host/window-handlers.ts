@@ -27,7 +27,8 @@ function unavailable(): HandlerError {
   return new HandlerError('Purchase windows are unavailable on this payment host.', 'FAILED_PRECONDITION', 409);
 }
 function forbidden(): HandlerError {
-  return new HandlerError('Answering a purchase requires current paired owner access with admin and write:payments. Pair this client and refresh the purchase.', 'FORBIDDEN', 403);
+  return new HandlerError('Answering a purchase requires the owner with admin and write:payments: an app on the daemon\'s own machine or a paired device. '
+    + 'From another device, pair it; then refresh the purchase.', 'FORBIDDEN', 403);
 }
 
 /** `stopped` is the payment host's health: the store that stopped itself, if any. */
@@ -115,7 +116,8 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
 function pairedOwner(context: HandlerContextEnvelope) {
   const authority = context.nativeExecutionAuthority;
   const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
-  if (!expected || !authority || expected.kind !== 'pairing-token' || !context.admin
+  // A paired device or an app on the owner's own machine ('local').
+  if (!expected || !authority || (expected.kind !== 'pairing-token' && expected.kind !== 'local') || !context.admin
     || context.principalKind !== 'token' || context.principalId !== expected.principalId
     || !scope(context.scopes, 'write:payments') || !scope(expected.scopes, 'write:payments')
     || !authorizedFor(context, 'write:payments')) throw forbidden();

@@ -1,5 +1,5 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { Ranked } from '@goodvibes-jev/judgment';
 import type { CommandContext } from '../input/command-registry.ts';
 import {
@@ -39,6 +39,7 @@ interface HarnessKeybindingArgs {
   readonly combos?: unknown;
   readonly value?: unknown;
   readonly limit?: unknown;
+  readonly includeParameters?: unknown;
 }
 
 type KeybindingOperationEffect =
@@ -63,9 +64,9 @@ interface KeybindingOperationRoute {
 type KeybindingEntry = { readonly action: KeyAction; readonly description: string; readonly combos: KeyCombo[] };
 type KeybindingContext = Pick<CommandContext, 'workspace'>;
 type KeybindingExecutionContext = KeybindingContext & Pick<CommandContext,
-  'renderRequest' | 'cancelGeneration' | 'clearScreen' | 'openWorkspacePicker' | 'openAgentWorkspace'
+  'renderRequest' | 'clearScreen' | 'openWorkspacePicker' | 'openAgentWorkspace'
   | 'dismissAgentWorkspace' | 'focusPrompt' | 'openPromptHistorySearch' | 'openConversationSearch'
-  | 'pasteFromClipboard' | 'openBlockActions' | 'isGenerating'>;
+  | 'pasteFromClipboard' | 'openBlockActions'>;
 
 interface KeybindingLookup {
   readonly source: 'actionId' | 'target' | 'key' | 'query';
@@ -99,10 +100,19 @@ function readFieldMap(value: unknown): Readonly<Record<string, string>> {
   return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, typeof entry === 'string' ? entry : String(entry)]));
 }
 
-function requireKeybindingsManager(context: KeybindingContext): KeybindingsManager {
-  const manager = context.workspace.keybindingsManager;
-  if (!manager) throw new Error('workspace.keybindingsManager is unavailable in this Agent runtime');
-  return manager;
+/** The refusal every keybinding operation returns: what did not happen, why, and what to do next. */
+function refused(status: 'unavailable' | 'not_found' | 'ambiguous' | 'not_applied', reason: string, next: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { status, reason, next, ...extra };
+}
+
+const NO_MANAGER = (): Record<string, unknown> => refused('unavailable',
+  'This Agent runtime has no live keybinding manager, so keybindings can be listed (defaults) but not run or changed.',
+  'Ask the owner to edit keybindings.json directly, or run this from the interactive Agent.');
+
+/** The config path as the model may see it: home shown as ~. */
+function shownConfigPath(context: KeybindingContext, manager: KeybindingsManager | null): string | null {
+  const path = manager?.getConfigPath();
+  return path ? harnessDisplayPath(path, context.workspace.shellPaths?.homeDirectory) : null;
 }
 
 function readKeybindingsManager(context: KeybindingContext): KeybindingsManager | null {
@@ -152,18 +162,20 @@ function readModifierFlag(parameter: 'ctrl' | 'shift' | 'alt', value: unknown): 
     const flag = MODIFIER_FLAG_WORDS[value.trim().toLowerCase()];
     if (flag !== undefined) return flag;
   }
-  throw new Error(`set_keybinding was not applied: ${parameter} must be true or false (also accepted: yes/no, on/off, 1/0); got ${JSON.stringify(value)}.`);
+  throw new ComboInputError(`${parameter} must be true or false (also accepted: yes/no, on/off, 1/0); got ${JSON.stringify(value)}.`);
 }
 
-async function normalizeCombo(value: unknown, _evidence: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeyCombo | null> {
-  options.signal?.throwIfAborted();
+/** A combo the caller described in a way the shell cannot match. */
+class ComboInputError extends Error {}
+
+function normalizeCombo(value: unknown): KeyCombo | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const raw = captureCatalogData(value), fields = Object.getOwnPropertyDescriptors(raw);
-  const key = normalizeKeyName(readString(fields.key?.value));
+  const fields = value as Readonly<Record<string, unknown>>;
+  const key = normalizeKeyName(readString(fields.key));
   if (!key) return null;
   const combo: KeyCombo = { key };
   for (const parameter of ['ctrl', 'shift', 'alt'] as const) {
-    const flag = readModifierFlag(parameter, fields[parameter]?.value);
+    const flag = readModifierFlag(parameter, fields[parameter]);
     if (flag !== undefined) combo[parameter] = flag;
   }
   return combo;
@@ -185,29 +197,28 @@ function parseComboLabel(value: string): KeyCombo | null {
   return combo;
 }
 
-async function combosFromArgs(args: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeyCombo[]> {
-  const combos = await readCombosFromArgs(args, options);
+function combosFromArgs(args: HarnessKeybindingArgs): KeyCombo[] {
+  const combos = readCombosFromArgs(args);
   for (const combo of combos) {
     const reason = invalidKeyReason(combo.key);
-    if (reason) throw new Error(`set_keybinding was not applied: ${reason}`);
+    if (reason) throw new ComboInputError(reason);
   }
   return combos;
 }
 
-async function readCombosFromArgs(args: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeyCombo[]> {
+function readCombosFromArgs(args: HarnessKeybindingArgs): KeyCombo[] {
   if (Array.isArray(args.combos)) {
-    const combos: Array<KeyCombo | null> = [];
-    for (const value of args.combos) combos.push(await normalizeCombo(value, args, options));
+    const combos = args.combos.map((value) => normalizeCombo(value));
     if (combos.every((combo): combo is KeyCombo => combo !== null)) return combos;
-    throw new Error('set_keybinding combos must be objects with key and optional boolean ctrl/shift/alt fields.');
+    throw new ComboInputError('combos must be objects with key and optional boolean ctrl/shift/alt fields.');
   }
-  const combo = await normalizeCombo(args.combo, args, options);
+  const combo = normalizeCombo(args.combo);
   if (combo) return [combo];
-  const fieldCombo = await normalizeCombo(args.fields, args, options);
+  const fieldCombo = normalizeCombo(args.fields);
   if (fieldCombo) return [fieldCombo];
   const labelCombo = parseComboLabel(readString(args.value));
   if (labelCombo) return [labelCombo];
-  throw new Error('set_keybinding requires combo, combos, fields (key plus optional ctrl/shift/alt), or a value such as "Ctrl+G".');
+  throw new ComboInputError('no combo was given: pass combo, combos, fields (key plus optional ctrl/shift/alt), or a value such as "Ctrl+G".');
 }
 
 function comboFingerprint(combo: KeyCombo): string {
@@ -270,44 +281,20 @@ function bindingCandidate(manager: KeybindingsManager | null, entry: KeybindingE
   };
 }
 
-function captureKeybindingSources(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions, retainSources = true) {
-  const signal = options.signal, owner = options.sourceOwner, outerCurrent = options.assertCurrent;
-  const retainCurrent = options.retainCurrent, preserved = options.requirePreservedSource;
-  signal?.throwIfAborted(); outerCurrent?.();
+/** One read of the manager per call; a description built from it is consistent by construction. */
+function readKeybindingSources(context: KeybindingContext, options: CatalogRankingOptions) {
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
   const manager = readKeybindingsManager(context);
-  const entries = captureCatalogData(manager?.getAll() ?? defaultKeybindingEntries());
-  const configPath = manager?.getConfigPath() ?? null;
-  const input = captureCatalogData(args);
-  const defaults = captureCatalogData(defaultKeybindingEntries());
-  const revision = JSON.stringify({ entries, configPath, input, defaults });
-  const getAll = manager?.getAll, getConfigPath = manager?.getConfigPath, format = manager?.formatCombo;
-  const assertBinding = () => {
-    if (options.signal !== signal || options.sourceOwner !== owner || options.assertCurrent !== outerCurrent
-      || options.retainCurrent !== retainCurrent || options.requirePreservedSource !== preserved) throw new ToolInputProjectionError('held');
-    signal?.throwIfAborted();
-  };
-  const assertSource = () => {
-    assertBinding();
-    if (readKeybindingsManager(context) !== manager || manager?.getAll !== getAll || manager?.getConfigPath !== getConfigPath
-      || manager?.formatCombo !== format || JSON.stringify(captureCatalogData({
-        entries: manager?.getAll() ?? defaultKeybindingEntries(), configPath: manager?.getConfigPath() ?? null, input: args, defaults: defaultKeybindingEntries(),
-      })) !== revision) throw new ToolInputProjectionError('stale');
-  };
-  const assertCurrent = () => { assertBinding(); outerCurrent?.(); assertSource(); };
-  assertCurrent();
-  if (retainSources) retainCurrent?.(assertSource, 'agent.harness.keybindings.sources');
-  assertCurrent();
-  return { manager, entries, configPath, input, assertCurrent, assertSource };
+  return { manager, entries: manager?.getAll() ?? defaultKeybindingEntries(), configPath: shownConfigPath(context, manager) };
 }
 
-async function rankKeybindings(sources: ReturnType<typeof captureKeybindingSources>, query: string, options: CatalogRankingOptions) {
-  sources.assertCurrent();
+async function rankKeybindings(sources: ReturnType<typeof readKeybindingSources>, query: string, options: CatalogRankingOptions) {
   if (!query) return { matches: sources.entries.map(entry => ({ entry, judgment: undefined })), judgments: [] };
-  return rankHarnessCatalog(sources.entries, query, entry => ({ id: entry.action, description: bindingDescription(sources.manager, entry), evidence: entry }),
-    'agent.harness.keybindings', { ...options, requirePreservedSource: true, assertCurrent: sources.assertCurrent });
+  return rankHarnessCatalog(sources.entries, query, entry => ({ id: entry.action, description: bindingDescription(sources.manager, entry) }),
+    'agent.harness.keybindings', options);
 }
 
-async function resolveHarnessKeybinding(sources: ReturnType<typeof captureKeybindingSources>, args: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeybindingResolution | null> {
+async function resolveHarnessKeybinding(sources: ReturnType<typeof readKeybindingSources>, args: HarnessKeybindingArgs, options: CatalogRankingOptions): Promise<KeybindingResolution | null> {
   const { manager, entries } = sources;
   const lookup = keybindingLookupFromArgs(args);
   if (!lookup) return null;
@@ -323,7 +310,7 @@ async function resolveHarnessKeybinding(sources: ReturnType<typeof captureKeybin
   if (exactCombos.length > 1) return { status: 'ambiguous', input: lookup.input, candidates: exactCombos.map(entry => bindingCandidate(manager, entry)).slice(0, 8) };
   if (lookup.source === 'key' || (combo && (combo.ctrl || combo.alt || combo.shift))) return null;
   const { matches } = await rankKeybindings(sources, lookup.input, options);
-  sources.assertCurrent();
+  options.signal?.throwIfAborted();
   const single = matches.length === 1 ? matches[0] : undefined;
   if (single?.judgment?.reading.verdict === 'yes' && single.judgment?.reading.outcome === 'act') return { status: 'found', action: single.entry.action, lookup: { ...lookup, resolvedBy: 'search' }, judgment: single.judgment };
   if (matches.length > 0) return { status: 'ambiguous', input: lookup.input, candidates: matches.map(({ entry, judgment }) => ({ ...bindingCandidate(manager, entry), judgment })).slice(0, 8) };
@@ -342,15 +329,22 @@ function keybindingModelRoute(action: KeyAction): string {
 
 function keybindingModelAccess(action: KeyAction, operation: KeybindingOperationRoute): Record<string, unknown> {
   return {
-    inspect: `agent_harness mode:"keybinding" actionId:"${action}"`,
-    run: operation.supported ? `agent_harness mode:"run_keybinding" actionId:"${action}"` : 'not exposed',
-    set: `agent_harness mode:"set_keybinding" actionId:"${action}" combo:{...}`,
-    reset: `agent_harness mode:"reset_keybinding" actionId:"${action}"`,
+    inspect: `workspace action:"keybinding" actionId:"${action}"`,
+    run: operation.supported ? `workspace action:"run_keybinding" actionId:"${action}"` : 'not exposed',
+    set: `workspace action:"set_keybinding" actionId:"${action}" combo:{...}`,
+    reset: `workspace action:"reset_keybinding" actionId:"${action}"`,
     preferred: keybindingModelRoute(action),
-    directInspect: `workspace action:"keybinding" actionId:"${action}"`,
-    directRun: operation.supported ? `workspace action:"run_keybinding" actionId:"${action}"` : 'not exposed',
-    directSet: `workspace action:"set_keybinding" actionId:"${action}" combo:{...}`,
-    directReset: `workspace action:"reset_keybinding" actionId:"${action}"`,
+  };
+}
+
+/** The list form: what the binding is and how to run it; the single-binding view has the rest. */
+function summarizeBinding(manager: KeybindingsManager | null, action: KeyAction, combos: KeyCombo[]): Record<string, unknown> {
+  return {
+    action,
+    description: ACTION_DESCRIPTIONS[action],
+    labels: combos.map((combo) => formatCombo(manager, combo)),
+    customized: !combosEqual(combos, DEFAULT_KEYBINDINGS[action]),
+    run: keybindingModelRoute(action),
   };
 }
 
@@ -377,12 +371,14 @@ function describeBinding(manager: KeybindingsManager | null, action: KeyAction, 
 function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
   switch (action) {
     case 'clear-cancel':
+      // While the model's own tool call runs a generation is in progress, so the
+      // model would cancel the turn that asked and never read the result.
       return {
-        supported: true,
+        supported: false,
         effect: 'shell-action',
-        preferredMode: 'run_keybinding',
-        confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
-        note: 'Runs the available cancel-generation route. Prompt clearing and double-press exit remain direct user interaction.',
+        preferredMode: 'direct-user-interaction',
+        confirmation: 'Direct user interaction only.',
+        note: 'Cancels the running generation, which is the model\'s own turn; only the owner presses it. Prompt clearing and double-press exit are direct user interaction too.',
       };
     case 'screen-clear':
       return {
@@ -548,22 +544,14 @@ function describeFixedShortcut(shortcut: Record<string, string>): Record<string,
 }
 
 export async function listHarnessShortcuts(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const sources = captureKeybindingSources(context, args, options);
-  const keybindings = await listHarnessKeybindings(context, sources.input, options);
-  const query = readString(sources.input.query);
-  const allFixed = captureCatalogData(FIXED_SHORTCUTS);
-  const assertSource = () => {
-    sources.assertSource();
-    if (JSON.stringify(captureCatalogData(FIXED_SHORTCUTS)) !== JSON.stringify(allFixed)) throw new ToolInputProjectionError('stale');
-  };
-  const assertCurrent = () => { sources.assertCurrent(); assertSource(); };
-  options.retainCurrent?.(assertSource, 'agent.harness.shortcuts.sources');
-  const selected = query ? await rankHarnessCatalog(allFixed, query,
-    shortcut => ({ id: shortcut.key, description: `${shortcut.key}\n${shortcut.description}`, evidence: shortcut }),
-    'agent.harness.shortcuts', { ...options, requirePreservedSource: true, assertCurrent })
-    : { matches: allFixed.map(entry => ({ entry, judgment: undefined })), judgments: [] };
-  assertCurrent();
-  const fixed = selected.matches.slice(0, readLimit(sources.input.limit, 200)).map(({ entry, judgment }) => ({
+  const keybindings = await listHarnessKeybindings(context, args, options);
+  const query = readString(args.query);
+  const selected = query ? await rankHarnessCatalog(FIXED_SHORTCUTS, query,
+    shortcut => ({ id: shortcut.key, description: `${shortcut.key}\n${shortcut.description}` }),
+    'agent.harness.shortcuts', options)
+    : { matches: FIXED_SHORTCUTS.map(entry => ({ entry, judgment: undefined })), judgments: [] };
+  options.signal?.throwIfAborted();
+  const fixed = selected.matches.slice(0, readLimit(args.limit, 200)).map(({ entry, judgment }) => ({
     ...describeFixedShortcut(entry), ...(judgment ? { judgment } : {}),
   }));
   const degraded = keybindings.status === 'degraded';
@@ -582,12 +570,13 @@ export async function listHarnessShortcuts(context: KeybindingContext, args: Har
 }
 
 export async function listHarnessKeybindings(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const sources = captureKeybindingSources(context, args, options);
+  const sources = readKeybindingSources(context, options);
   const { manager } = sources;
-  const selected = await rankKeybindings(sources, readString(sources.input.query), options);
-  sources.assertCurrent();
-  const entries = selected.matches.slice(0, readLimit(sources.input.limit, 200)).map(({ entry, judgment }) => ({
-    ...describeBinding(manager, entry.action, entry.combos), ...(judgment ? { judgment } : {}),
+  const selected = await rankKeybindings(sources, readString(args.query), options);
+  options.signal?.throwIfAborted();
+  const long = args.includeParameters === true;
+  const entries = selected.matches.slice(0, readLimit(args.limit, 200)).map(({ entry, judgment }) => ({
+    ...(long ? describeBinding(manager, entry.action, entry.combos) : summarizeBinding(manager, entry.action, entry.combos)), ...(judgment ? { judgment } : {}),
   }));
   return {
     status: manager ? 'available' : 'degraded',
@@ -597,16 +586,16 @@ export async function listHarnessKeybindings(context: KeybindingContext, args: H
     returned: entries.length,
     total: sources.entries.length,
     policy: manager
-      ? 'Reads the live resolved keybindings, including modelOperation route metadata. run_keybinding executes only supported shell-safe actions. set_keybinding/reset_keybinding write the same keybindings.json file the user can edit and reload the runtime manager.'
+      ? 'Reads the live resolved keybindings; workspace action:"keybinding" actionId:"<action>" (or includeParameters:true) shows a binding's defaults and routes. run_keybinding executes only supported shell-safe actions. set_keybinding/reset_keybinding write the same keybindings.json file the user can edit and reload the runtime manager.'
       : 'Live keybinding manager is unavailable; default keybindings are shown for discovery only. run_keybinding, set_keybinding, and reset_keybinding require a live manager.',
   };
 }
 
 export async function describeHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown> | null> {
-  const sources = captureKeybindingSources(context, args, options);
+  const sources = readKeybindingSources(context, options);
   const { manager, entries } = sources;
-  const resolved = await resolveHarnessKeybinding(sources, sources.input, options);
-  sources.assertCurrent();
+  const resolved = await resolveHarnessKeybinding(sources, args, options);
+  options.signal?.throwIfAborted();
   if (resolved?.status === 'ambiguous') return { status: 'ambiguous', input: resolved.input, candidates: resolved.candidates };
   if (!resolved) return null;
   const entry = entries.find((candidate) => candidate.action === resolved.action);
@@ -619,6 +608,12 @@ export async function describeHarnessKeybinding(context: KeybindingContext, args
   } : null;
 }
 
+function unknownKeybinding(mode: string, args: HarnessKeybindingArgs): Record<string, unknown> {
+  const given = readString(args.actionId) || readString(args.target) || readString(args.key) || readString(args.query);
+  return refused('not_found', given ? `No keybinding action matches ${JSON.stringify(given)}, so nothing was done.` : `${mode} needs an actionId, key, target or query.`,
+    'List the actions with workspace action:"keybindings" and repeat with one actionId.');
+}
+
 function runUnavailable(action: KeyAction, route: KeybindingOperationRoute, reason?: string): Record<string, unknown> {
   return {
     status: 'keybinding_route_unavailable',
@@ -629,17 +624,19 @@ function runUnavailable(action: KeyAction, route: KeybindingOperationRoute, reas
 }
 
 export async function runHarnessKeybinding(context: KeybindingExecutionContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const manager = requireKeybindingsManager(context);
-  const sources = captureKeybindingSources(context, args, options, false);
-  const resolved = await resolveHarnessKeybinding(sources, sources.input, options);
-  sources.assertCurrent();
-  if (resolved?.status === 'ambiguous') return { status: 'ambiguous', input: resolved.input, candidates: resolved.candidates };
-  if (!resolved) throw new Error('run_keybinding requires a valid keybinding actionId, key, target or query.');
-  const entry = manager.getAll().find((candidate) => candidate.action === resolved.action);
-  if (!entry) throw new Error(`No live keybinding entry found for ${resolved.action}.`);
+  const sources = readKeybindingSources(context, options);
+  const manager = sources.manager;
+  if (!manager) return NO_MANAGER();
+  const resolved = await resolveHarnessKeybinding(sources, args, options);
+  options.signal?.throwIfAborted();
+  if (resolved?.status === 'ambiguous') return refused('ambiguous', `${resolved.input} matches more than one keybinding, so nothing was run.`,
+    'Repeat with one actionId from candidates.', { input: resolved.input, candidates: resolved.candidates });
+  if (!resolved) return unknownKeybinding('run_keybinding', args);
+  const entry = sources.entries.find((candidate) => candidate.action === resolved.action);
+  if (!entry) return unknownKeybinding('run_keybinding', args);
   const route = keybindingOperationRoute(resolved.action);
   const descriptor = {
-    configPath: manager.getConfigPath(),
+    configPath: sources.configPath,
     ...describeBinding(manager, entry.action, entry.combos, resolved.lookup),
     ...(resolved.judgment ? { judgment: resolved.judgment } : {}),
   };
@@ -654,13 +651,6 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
   }
 
   switch (resolved.action) {
-    case 'clear-cancel':
-      if (!context.cancelGeneration) return runUnavailable(resolved.action, route, 'Cancel-generation route is unavailable.');
-      if (context.isGenerating && !context.isGenerating()) {
-        return { status: 'nothing_to_cancel', action: resolved.action, reason: 'No generation is running, so nothing was cancelled.', keybinding: descriptor };
-      }
-      context.cancelGeneration();
-      return { status: 'executed', action: resolved.action, effect: 'cancel-generation', keybinding: descriptor };
     case 'screen-clear':
       if (!context.clearScreen) return runUnavailable(resolved.action, route, 'Clear-screen route is unavailable.');
       context.clearScreen();
@@ -775,23 +765,27 @@ function chordConflicts(manager: KeybindingsManager, action: KeyAction, combos: 
 }
 
 export async function setHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const manager = requireKeybindingsManager(context);
-  const sources = captureKeybindingSources(context, args, options, false);
-  const resolved = await resolveHarnessKeybinding(sources, sources.input, options);
-  sources.assertCurrent();
-  if (resolved?.status === 'ambiguous') throw new Error(`Ambiguous keybinding action ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
-  if (!resolved) throw new Error('set_keybinding requires a valid keybinding actionId, key, target or query.');
-  const modifierGuards = new Set<() => void>();
-  const assertModifiersCurrent = () => { sources.assertCurrent(); for (const guard of modifierGuards) guard(); };
-  const combos = await combosFromArgs(sources.input, { ...options, assertCurrent: assertModifiersCurrent,
-    retainCurrent(guard, key) { modifierGuards.add(guard); options.retainCurrent?.(guard, key); } });
-  assertModifiersCurrent();
-  const configPath = manager.getConfigPath();
+  const sources = readKeybindingSources(context, options);
+  const manager = sources.manager;
+  if (!manager) return NO_MANAGER();
+  const resolved = await resolveHarnessKeybinding(sources, args, options);
+  options.signal?.throwIfAborted();
+  if (resolved?.status === 'ambiguous') return refused('ambiguous', `${resolved.input} matches more than one keybinding, so nothing was changed.`,
+    'Repeat with one actionId from candidates.', { input: resolved.input, candidates: resolved.candidates });
+  if (!resolved) return unknownKeybinding('set_keybinding', args);
+  let combos: KeyCombo[];
+  try { combos = combosFromArgs(args); } catch (failure) {
+    if (!(failure instanceof ComboInputError)) throw failure;
+    return refused('not_applied', `set_keybinding was not applied: ${failure.message}`,
+      'Repeat with combo:{ key:"g", ctrl:true } or value:"Ctrl+G".', { action: resolved.action });
+  }
+  const configPath = sources.configPath;
   // The manager reads, drops any legacy-name entry for this action, writes once and reloads;
   // a file it cannot read or parse is left as it is and the call is refused with the reason.
   let loadNotices: readonly string[];
-  try { loadNotices = manager.setOverride(resolved.action, combos); } catch (error) {
-    throw new Error(`set_keybinding was not applied: ${error instanceof Error ? error.message : String(error)}`);
+  try { loadNotices = manager.setOverride(resolved.action, combos); } catch (failure) {
+    return refused('not_applied', `set_keybinding was not applied: ${failure instanceof Error ? failure.message : String(failure)}`,
+      'Fix or move keybindings.json as the reason says, then repeat the call.', { action: resolved.action, configPath });
   }
   options.signal?.throwIfAborted();
   const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
@@ -813,17 +807,19 @@ export async function setHarnessKeybinding(context: KeybindingContext, args: Har
 }
 
 export async function resetHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const manager = requireKeybindingsManager(context);
-  const sources = captureKeybindingSources(context, args, options, false);
-  const resolved = await resolveHarnessKeybinding(sources, sources.input, options);
-  sources.assertCurrent();
-  if (resolved?.status === 'ambiguous') throw new Error(`Ambiguous keybinding action ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
-  if (!resolved) throw new Error('reset_keybinding requires a valid keybinding actionId, key, target or query.');
-  const configPath = manager.getConfigPath();
-  sources.assertCurrent();
+  const sources = readKeybindingSources(context, options);
+  const manager = sources.manager;
+  if (!manager) return NO_MANAGER();
+  const resolved = await resolveHarnessKeybinding(sources, args, options);
+  options.signal?.throwIfAborted();
+  if (resolved?.status === 'ambiguous') return refused('ambiguous', `${resolved.input} matches more than one keybinding, so nothing was changed.`,
+    'Repeat with one actionId from candidates.', { input: resolved.input, candidates: resolved.candidates });
+  if (!resolved) return unknownKeybinding('reset_keybinding', args);
+  const configPath = sources.configPath;
   let loadNotices: readonly string[];
-  try { loadNotices = manager.clearOverride(resolved.action); } catch (error) {
-    throw new Error(`reset_keybinding was not applied: ${error instanceof Error ? error.message : String(error)}`);
+  try { loadNotices = manager.clearOverride(resolved.action); } catch (failure) {
+    return refused('not_applied', `reset_keybinding was not applied: ${failure instanceof Error ? failure.message : String(failure)}`,
+      'Fix or move keybindings.json as the reason says, then repeat the call.', { action: resolved.action, configPath });
   }
   options.signal?.throwIfAborted();
   const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);

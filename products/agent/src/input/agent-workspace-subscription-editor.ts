@@ -141,12 +141,12 @@ export async function submitAgentWorkspaceSubscriptionLoginFinishEditor(
   }
 }
 
-export function submitAgentWorkspaceSubscriptionLogoutEditor(
+export async function submitAgentWorkspaceSubscriptionLogoutEditor(
   host: AgentWorkspaceSubscriptionEditorHost,
   editor: AgentWorkspaceLocalEditor,
   context: CommandContext | null,
   readField: AgentWorkspaceSubscriptionFieldReader,
-): void {
+): Promise<void> {
   if (!isAffirmative(readField('confirm'))) {
     host.localEditor = { ...editor, message: 'Subscription logout not confirmed. Type yes, then press Enter.' };
     host.status = 'Subscription logout not confirmed.';
@@ -155,7 +155,7 @@ export function submitAgentWorkspaceSubscriptionLogoutEditor(
   try {
     const provider = readField('provider') || 'openai';
     const { manager } = subscriptionServices(context);
-    const removed = manager.logout(provider);
+    const removed = await manager.logout(provider);
     host.localEditor = null;
     host.runtimeSnapshot = context ? buildAgentWorkspaceRuntimeSnapshot(context) : host.runtimeSnapshot;
     host.status = removed ? `Logged out of ${provider}.` : `No subscription session existed for ${provider}.`;

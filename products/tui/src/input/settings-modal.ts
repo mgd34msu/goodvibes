@@ -539,6 +539,7 @@ export class SettingsModal extends TerminalSettingsModalState<
         setSubscriptionLogoutConfirmationTarget: (v) => {
           this.subscriptionLogoutConfirmationTarget = v;
         },
+        requestRender: () => this.requestRender?.(),
       },
       key,
     );

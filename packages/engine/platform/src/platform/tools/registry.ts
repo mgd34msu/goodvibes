@@ -1108,7 +1108,7 @@ export class ToolRegistry {
             if (mutation.subscriptionImport) {
               const imported = mutation.subscriptionImport;
               subscriptionTransition = imported.owner.beginPreparedImport(imported.mutation);
-              const receipt = imported.owner.finishPreparedImport(imported.mutation, subscriptionTransition, assertPlanAuthority);
+              const receipt = await imported.owner.finishPreparedImport(imported.mutation, subscriptionTransition, assertPlanAuthority);
               if (receipt.status !== 'committed') return joined(receipt);
               completedPaths.push(...receipt.completedPaths); subscriptionCompleted = true;
               imported.owner.assertCompletedImport(imported.mutation); assertPlanAuthority();

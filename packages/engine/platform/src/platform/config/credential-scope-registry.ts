@@ -182,6 +182,14 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
     why: 'A subscribed feed URL grants read access to a calendar the daemon polls on a schedule; the suffix is an upper-snake slug of the name the person gave the subscription (calendar-subscription-registry.ts).',
   },
 
+  // ── Provider subscriptions ───────────────────────────────────────────────
+  {
+    key: 'GOODVIBES_SUBSCRIPTION_TOKENS_',
+    match: 'prefix',
+    scope: 'daemon-needed',
+    why: 'The access and refresh tokens of a provider sign-in; the daemon hosts the turns that send them and renews them. The suffix is the provider id in upper snake case (subscriptions.ts subscriptionTokensKey); the record that names them is in the shared subscriptions file.',
+  },
+
   // ── Payments ─────────────────────────────────────────────────────────────
   {
     key: 'GOODVIBES_PAYMENTS_CARD_',

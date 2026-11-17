@@ -58,7 +58,7 @@ export async function withProviderServices<T>(
     configManager,
     daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
   });
-  const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths));
+  const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths), { secrets: secretsManager });
   const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'services.json'), project: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'services.json') }, {
     secretsManager,
     subscriptionManager,

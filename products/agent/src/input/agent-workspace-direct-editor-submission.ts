@@ -77,8 +77,7 @@ export function trySubmitDirectHostActionEditor(
     return true;
   }
   if (editor.kind === 'subscription-logout') {
-    submitAgentWorkspaceSubscriptionLogoutEditor(host, editor, context, readField);
-    requestRender?.();
+    runExclusive(host, requestRender, () => submitAgentWorkspaceSubscriptionLogoutEditor(host, editor, context, readField));
     return true;
   }
   if (editor.kind === 'email-connect-wizard') {

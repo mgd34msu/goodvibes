@@ -150,8 +150,11 @@ class SubscriptionModalSurface implements ConfigModalSurface {
       // can never sign out the wrong row.
       if (this.pendingLogout === provider) {
         this.pendingLogout = null;
-        this.manager.logout(provider);
-        ctx.setStatus(`Signed out ${provider}.`);
+        ctx.setStatus(`Signing out ${provider}…`);
+        void this.manager.logout(provider).then(
+          () => ctx.setStatus(`Signed out ${provider}.`),
+          (error: unknown) => ctx.setStatus(`Signed out ${provider}, but its sign-in tokens could not be removed from the secret store: ${error instanceof Error ? error.message : String(error)}`),
+        ).finally(() => this.requestRender());
       } else {
         this.pendingLogout = provider;
         ctx.setStatus(`Sign out ${provider}? Press Enter again to confirm.`);

@@ -19,6 +19,7 @@ import { PAYMENTS_CARDS_ROW_KEY } from '@goodvibes-jev/engine/terminal-shell/pay
 import { listSettingEditText } from './settings-modal-lists.ts';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 
@@ -133,6 +134,8 @@ export interface HandleSubscriptionLogoutKeyContext {
   readonly serviceRegistry: Pick<ServiceInspectionQuery, 'getAll'> | null;
   setSubscriptionEntries(entries: SubscriptionEntry[]): void;
   setSubscriptionLogoutConfirmationTarget(value: string | null): void;
+  /** Called when the sign-out has finished removing the tokens, so the list is drawn again. */
+  requestRender?(): void;
 }
 
 export function handleSubscriptionLogoutKey(
@@ -144,8 +147,15 @@ export function handleSubscriptionLogoutKey(
   const confirmState = { subject: target, label: target };
   const result = handleConfirmInput(confirmState, key);
   if (result === 'confirmed') {
-    ctx.subscriptionManager?.logout(target);
-    ctx.setSubscriptionEntries(buildSubscriptionEntries(ctx.subscriptionManager, ctx.serviceRegistry));
+    // The record leaves the file at once; the tokens leave the secret store when its write finishes.
+    const manager = ctx.subscriptionManager;
+    void manager?.logout(target).catch((error: unknown) => {
+      logger.warn('Signed out, but the sign-in tokens could not be removed from the secret store', { provider: target, error: summarizeError(error) });
+    }).finally(() => {
+      ctx.setSubscriptionEntries(buildSubscriptionEntries(manager, ctx.serviceRegistry));
+      ctx.requestRender?.();
+    });
+    ctx.setSubscriptionEntries(buildSubscriptionEntries(manager, ctx.serviceRegistry));
     ctx.setSubscriptionLogoutConfirmationTarget(null);
   } else if (result === 'cancelled') {
     ctx.setSubscriptionLogoutConfirmationTarget(null);

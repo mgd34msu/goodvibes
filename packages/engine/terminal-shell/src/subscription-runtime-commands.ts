@@ -367,7 +367,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             requireYesFlag(ctx, `log out provider subscription ${provider}`, '/subscription logout <provider> --yes');
             return;
           }
-          const removed = manager.logout(provider);
+          const removed = await manager.logout(provider);
           print(
             removed
               ? `Logged out of ${provider}. Ambient API key resolution will apply again if configured.`
@@ -428,7 +428,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
               return;
             }
             const lines = describeImport(manager, bundle);
-            for (const subscription of bundle.subscriptions) manager.saveSubscription(subscription);
+            for (const subscription of bundle.subscriptions) await manager.saveSubscription(subscription);
             print([`Imported ${bundle.subscriptions.length} subscription sign-in(s) from ${targetPath}:`, ...lines].join('\n'));
             return;
           }

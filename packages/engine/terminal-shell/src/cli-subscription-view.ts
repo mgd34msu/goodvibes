@@ -174,7 +174,7 @@ export function createCliSubscriptionView<Runtime extends SubscriptionRuntime, S
       if (sub === 'logout' || sub === 'remove') {
         const provider = rest[0];
         if (!provider) return usage(`Usage: ${policy.binary(runtime)} subscription logout <provider>`);
-        const removed = services.subscriptionManager.logout(provider);
+        const removed = await services.subscriptionManager.logout(provider);
         return removed
           ? cliCommandDone(`Subscription removed${separator}${provider}`)
           : cliCommandRefusal(runtime.cli, 'subscription_not_stored', `No stored subscription session existed for ${provider}.`,

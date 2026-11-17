@@ -19,7 +19,7 @@ export function createSendStack(configuration: DaemonCliConfiguration): { readon
     secretsManager, diagnosticMode: 'structural',
     // Secret resolution does not consult subscriptions. One-shot send must not
     // trigger an unrelated legacy subscription migration while acquiring them.
-    subscriptionManager: new SubscriptionManager(sharedSubscriptionsPath(shellPaths)),
+    subscriptionManager: new SubscriptionManager(sharedSubscriptionsPath(shellPaths), { secrets: secretsManager }),
   });
   const router = new ChannelDeliveryRouter({ configManager: config, secretsManager, serviceRegistry,
     artifactStore: new ArtifactStore({ configManager: config }) });

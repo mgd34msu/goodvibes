@@ -6,6 +6,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { observeImportFile, assertImportFileCurrent, type ImportFileObservation, type PreparedImportTransitionFacts } from './prepared-import.js';
 import type { PreparedConfigMutationReceipt } from './prepared-mutation.js';
+import type { SecretsManager } from './secrets.js';
 import {
   buildOAuthAuthorizationStart,
   createOAuthState,
@@ -109,6 +110,68 @@ export interface ProviderSubscription {
    * Cleared by the refresh's own write; a holder that died lets it lapse.
    */
   readonly refreshingUntil?: number | undefined;
+  /**
+   * Which entry of the provider's token secret goes with this record. The two
+   * tokens live in the secret store (see {@link subscriptionTokensKey}); the
+   * file keeps the record and this number.
+   */
+  readonly tokenRevision?: number | undefined;
+}
+
+/** The secret store a manager keeps sign-in tokens in. */
+export type SubscriptionTokenStore = Pick<SecretsManager, 'resolveLocalSecretSync' | 'set' | 'delete'>;
+
+export interface SubscriptionManagerOptions {
+  /**
+   * Where the access and refresh tokens are kept. Every process that shares
+   * the subscriptions file passes the same store; without one the tokens stay
+   * in the file, as a file written before the secret store held them does.
+   */
+  readonly secrets?: SubscriptionTokenStore | undefined;
+}
+
+/** The secret-store key family holding each provider's sign-in tokens. */
+export const SUBSCRIPTION_TOKENS_KEY_PREFIX = 'GOODVIBES_SUBSCRIPTION_TOKENS_';
+
+/** The secret-store key holding `provider`'s access and refresh tokens. */
+export function subscriptionTokensKey(provider: string): string {
+  return SUBSCRIPTION_TOKENS_KEY_PREFIX + provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+interface TokenEntry {
+  readonly revision: number;
+  readonly accessToken: string;
+  readonly refreshToken?: string | undefined;
+}
+/**
+ * One provider's token secret: the current entry and the one before it, so a
+ * reader whose record still names the previous revision (a write between the
+ * secret and the record) gets the tokens that go with it.
+ */
+interface TokenSecret extends TokenEntry {
+  readonly previous?: TokenEntry | undefined;
+}
+
+function parseTokenEntry(value: unknown): TokenEntry | null {
+  if (!value || typeof value !== 'object') return null;
+  const entry = value as Record<string, unknown>;
+  if (typeof entry.revision !== 'number' || typeof entry.accessToken !== 'string' || !entry.accessToken) return null;
+  return {
+    revision: entry.revision,
+    accessToken: entry.accessToken,
+    ...(typeof entry.refreshToken === 'string' && entry.refreshToken ? { refreshToken: entry.refreshToken } : {}),
+  };
+}
+
+/** A record as the file holds it: the tokens are in the secret store, or inline in a file written before that. */
+type StoredSubscription = Omit<ProviderSubscription, 'accessToken' | 'refreshToken'> & {
+  readonly accessToken?: string | undefined;
+  readonly refreshToken?: string | undefined;
+};
+
+function storedForm(subscription: ProviderSubscription, revision: number): StoredSubscription {
+  const { accessToken: _access, refreshToken: _refresh, ...record } = subscription;
+  return { ...record, tokenRevision: revision };
 }
 
 /**
@@ -164,7 +227,7 @@ type FailedRefreshSettlement =
 
 interface SubscriptionStore {
   readonly version: 1;
-  readonly subscriptions: Record<string, ProviderSubscription>;
+  readonly subscriptions: Record<string, StoredSubscription>;
   readonly pending: Record<string, PendingSubscriptionLogin>;
 }
 
@@ -338,7 +401,7 @@ export class SubscriptionManager {
     if (!record || record.transition !== transition || !['pending', 'committing', 'committed'].includes(record.phase)) throw new Error('Subscription import transition is not authentic.');
     this.assertImportRecord(record, record.facts.beforeGeneration + (record.phase === 'committed' ? 2 : 1));
   }
-  finishPreparedImport(handle: PreparedSubscriptionImport, transition: PreparedSubscriptionImportTransition, beforeEffect: () => void): PreparedConfigMutationReceipt {
+  async finishPreparedImport(handle: PreparedSubscriptionImport, transition: PreparedSubscriptionImportTransition, beforeEffect: () => void): Promise<PreparedConfigMutationReceipt> {
     const record = this.preparedImports.get(handle);
     if (!record || record.phase !== 'pending' || record.transition !== transition) throw new Error('Subscription import is spent.');
     record.phase = 'committing';
@@ -346,21 +409,126 @@ export class SubscriptionManager {
     try {
       const current = () => { beforeEffect(); this.assertPreparedImportTransition(handle, transition); };
       current();
-      writeJsonFileAtomic(this.path, record.store, { mode: 0o600, cleanupStaleTemps: false, assertCurrent: current });
+      // The imported sign-ins' tokens go to the secret store first; the file gets the records that name them.
+      const store = this.secrets ? await this.storeImportedTokens(record) : record.store;
+      current();
+      writeJsonFileAtomic(this.path, store, { mode: 0o600, cleanupStaleTemps: false, assertCurrent: current });
       completedPaths.push(this.path); record.observation = observeImportFile(this.path); record.phase = 'committed';
     } catch { record.phase = 'failed'; }
     finally { this.importGeneration++; }
     return Object.freeze({ status: record.phase === 'committed' ? 'committed' : completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths),
       ...(record.phase === 'failed' ? { uncertainPath: this.path } : {}) });
   }
+  /** The import's store with each imported sign-in's tokens moved into the secret store. */
+  private async storeImportedTokens(record: SubscriptionImportRecord): Promise<SubscriptionStore> {
+    const subscriptions = { ...record.store.subscriptions };
+    for (const item of record.facts.items) {
+      if (item.kind !== 'active') continue;
+      const imported = subscriptions[item.provider];
+      if (!imported || typeof imported.accessToken !== 'string' || !imported.accessToken) continue;
+      const revision = await this.storeTokens(imported as ProviderSubscription, this.read().subscriptions[item.provider]?.tokenRevision);
+      subscriptions[item.provider] = storedForm(imported as ProviderSubscription, revision);
+    }
+    return { ...record.store, subscriptions };
+  }
+
   assertCompletedImport(handle: PreparedSubscriptionImport): void {
     const record = this.preparedImports.get(handle);
     if (!record || record.phase !== 'committed') throw new Error('Subscription import did not commit.');
     this.assertImportRecord(record, record.facts.beforeGeneration + 2);
   }
 
-  public constructor(path: string) {
+  private readonly secrets: SubscriptionTokenStore | undefined;
+
+  public constructor(path: string, options: SubscriptionManagerOptions = {}) {
     this.path = path;
+    this.secrets = options.secrets;
+    if (this.secrets) void this.moveInlineTokens();
+  }
+
+  /** The record with its tokens, or null when they are not where it says (signed out). */
+  private withTokens(record: StoredSubscription | undefined): ProviderSubscription | null {
+    if (!record) return null;
+    if (typeof record.accessToken === 'string' && record.accessToken) return record as ProviderSubscription;
+    if (!this.secrets || record.tokenRevision === undefined) return null;
+    const secret = this.readTokenSecret(record.provider);
+    const entry = secret?.revision === record.tokenRevision ? secret
+      : secret?.previous?.revision === record.tokenRevision ? secret.previous : undefined;
+    if (!entry) return null;
+    return { ...record, accessToken: entry.accessToken, ...(entry.refreshToken ? { refreshToken: entry.refreshToken } : {}) };
+  }
+
+  /** The last token secret read or written per provider, for a read made while this process is writing it. */
+  private readonly tokenSecrets = new Map<string, TokenSecret>();
+
+  private readTokenSecret(provider: string): TokenSecret | null {
+    const read = this.secrets?.resolveLocalSecretSync(subscriptionTokensKey(provider));
+    // 'unsupported' is a write of this key in flight (or a store that cannot be read now): the last one known stands.
+    if (read?.state === 'unsupported') return this.tokenSecrets.get(provider) ?? null;
+    if (read?.state !== 'resolved') { this.tokenSecrets.delete(provider); return null; }
+    try {
+      const parsed = JSON.parse(read.value) as Record<string, unknown>;
+      const current = parseTokenEntry(parsed);
+      if (!current) return null;
+      const previous = parseTokenEntry(parsed.previous);
+      const secret = previous ? { ...current, previous } : current;
+      this.tokenSecrets.set(provider, secret);
+      return secret;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Store `subscription`'s tokens as the provider's next revision, keeping the
+   * current entry as the previous one; returns that revision. The record is
+   * written after, naming it, so a reader never sees a record whose tokens
+   * are not stored yet.
+   */
+  private async storeTokens(subscription: ProviderSubscription, after: number | undefined): Promise<number> {
+    const secret = this.readTokenSecret(subscription.provider);
+    const revision = Math.max(after ?? 0, secret?.revision ?? 0) + 1;
+    const value: TokenSecret = {
+      revision,
+      accessToken: subscription.accessToken,
+      ...(subscription.refreshToken ? { refreshToken: subscription.refreshToken } : {}),
+      ...(secret ? { previous: { revision: secret.revision, accessToken: secret.accessToken, ...(secret.refreshToken ? { refreshToken: secret.refreshToken } : {}) } } : {}),
+    };
+    // Every process that shares the subscriptions file reads the daemon tier.
+    await this.secrets!.set(subscriptionTokensKey(subscription.provider), JSON.stringify(value), { scope: 'daemon' });
+    this.tokenSecrets.set(subscription.provider, value);
+    return revision;
+  }
+
+  /** The form a record is written in: tokens in the secret store when there is one. */
+  private async storable(subscription: ProviderSubscription, after: number | undefined): Promise<StoredSubscription> {
+    if (!this.secrets) return subscription;
+    return storedForm(subscription, await this.storeTokens(subscription, after));
+  }
+
+  /**
+   * Move tokens a file written before the secret store held them still keeps
+   * inline into the secret store, then drop them from the file; a record that
+   * changed meanwhile is left for the next pass.
+   */
+  private async moveInlineTokens(): Promise<void> {
+    try {
+      for (const record of Object.values(this.read().subscriptions)) {
+        if (typeof record.accessToken !== 'string' || !record.accessToken) continue;
+        const inline = record as ProviderSubscription;
+        const revision = await this.storeTokens(inline, record.tokenRevision);
+        this.mutate((store) => {
+          const current = store.subscriptions[inline.provider];
+          if (!current || current.accessToken !== inline.accessToken || current.refreshToken !== inline.refreshToken) return false;
+          store.subscriptions[inline.provider] = storedForm({ ...(current as ProviderSubscription) }, revision);
+          return true;
+        }, (moved) => moved);
+      }
+    } catch (error) {
+      logger.warn('SubscriptionManager: sign-in tokens could not be moved into the secret store yet; they stay in the subscriptions file until the next start', {
+        error: summarizeError(error),
+      });
+    }
   }
 
   /**
@@ -392,10 +560,11 @@ export class SubscriptionManager {
     return (
       readJsonFileOrQuarantine<SubscriptionStore>(this.path, {
         label: 'config/subscriptions',
-        // The sign-in tokens are kept in this file, so the note must say they are gone from use and still on disk.
+        // The records are gone from use; the tokens are in the secret store, except in a file written before it held them.
         recovery:
-          'Every provider subscription sign-in was kept in this file, so each provider is signed out until you sign in again '
-          + '(/subscription login <provider> start). The copy moved aside still holds those sign-in tokens; delete it once you no longer need it.',
+          'Every provider subscription sign-in record was kept in this file, so each provider shows as signed out until you sign in again '
+          + '(/subscription login <provider> start). Their tokens are kept in the secret store (GOODVIBES_SUBSCRIPTION_TOKENS_<PROVIDER>), not here; '
+          + 'a file written before that may still hold them, so delete the moved-aside copy once you no longer need it.',
         validate: (parsed) => {
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
             throw new Error('subscription store is not a JSON object');
@@ -427,7 +596,10 @@ export class SubscriptionManager {
   }
 
   public list(): ProviderSubscription[] {
-    return Object.values(this.read().subscriptions).sort((a, b) => a.provider.localeCompare(b.provider));
+    return Object.values(this.read().subscriptions)
+      .map((record) => this.withTokens(record))
+      .filter((record): record is ProviderSubscription => record !== null)
+      .sort((a, b) => a.provider.localeCompare(b.provider));
   }
 
   public listPending(): PendingSubscriptionLogin[] {
@@ -437,7 +609,7 @@ export class SubscriptionManager {
   }
 
   public get(provider: string): ProviderSubscription | null {
-    return this.read().subscriptions[provider] ?? null;
+    return this.withTokens(this.read().subscriptions[provider]);
   }
 
   public getAccessToken(provider: string): string | null {
@@ -533,12 +705,13 @@ export class SubscriptionManager {
       createdAt: this.read().subscriptions[provider]?.createdAt ?? now,
       updatedAt: now,
     };
+    const stored = await this.storable(subscription, this.read().subscriptions[provider]?.tokenRevision);
     // Merge only this provider into the store as it is now, after the await.
     this.mutate((store) => {
-      store.subscriptions[provider] = subscription;
+      store.subscriptions[provider] = stored;
       if (store.pending[provider]?.state === pending.state) delete store.pending[provider];
     });
-    return subscription;
+    return { ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) };
   }
 
   /**
@@ -594,14 +767,15 @@ export class SubscriptionManager {
   private claimRefresh(provider: string, held: string | undefined): RefreshClaim {
     const now = Date.now();
     return this.mutate((store): RefreshClaim => {
-      const current = store.subscriptions[provider];
-      if (!current) throw new Error(`No stored OAuth subscription for ${provider}.`);
+      const stored = store.subscriptions[provider];
+      const current = this.withTokens(stored);
+      if (!stored || !current) throw new Error(`No stored OAuth subscription for ${provider}.`);
       if (current.revokedAt !== undefined) throw new SubscriptionSessionEndedError(provider);
       if (!current.refreshToken || (held !== undefined && current.accessToken !== held)) return { kind: 'settled', record: current };
       if (current.refreshingUntil !== undefined && current.refreshingUntil > now) {
         return { kind: 'leased', record: current, until: current.refreshingUntil };
       }
-      store.subscriptions[provider] = { ...current, refreshingUntil: now + REFRESH_LEASE_MS };
+      store.subscriptions[provider] = { ...stored, refreshingUntil: now + REFRESH_LEASE_MS };
       return { kind: 'claimed', record: current };
     }, (claim) => claim.kind === 'claimed');
   }
@@ -634,14 +808,18 @@ export class SubscriptionManager {
     }
     let outcome: RefreshWrite;
     try {
+      const answered = this.refreshedRecord(claimed, claimed, tokenResponse);
+      // The new tokens are stored first; the record that names them follows.
+      const revision = this.secrets ? await this.storeTokens(answered, claimed.tokenRevision) : undefined;
       outcome = this.mutate((store): RefreshWrite => {
-        const current = store.subscriptions[provider];
-        if (!current) return { kind: 'gone' };
+        const stored = store.subscriptions[provider];
+        const current = this.withTokens(stored);
+        if (!stored || !current) return { kind: 'gone' };
         // A sign-in made while the request ran is newer than this answer.
         if (!sameGrant(current, claimed)) return { kind: 'newer', record: current };
         const refreshed = this.refreshedRecord(current, claimed, tokenResponse);
-        store.subscriptions[provider] = refreshed;
-        return { kind: 'saved', record: refreshed };
+        store.subscriptions[provider] = revision === undefined ? refreshed : storedForm(refreshed, revision);
+        return { kind: 'saved', record: revision === undefined ? refreshed : { ...refreshed, tokenRevision: revision } };
       }, (result) => result.kind === 'saved');
     } catch (error) {
       // The provider has already rotated the old refresh token away, so
@@ -666,11 +844,12 @@ export class SubscriptionManager {
     let settled: FailedRefreshSettlement;
     try {
       settled = this.mutate((store): FailedRefreshSettlement => {
-        const current = store.subscriptions[provider];
-        if (!current) return { kind: 'gone' };
+        const stored = store.subscriptions[provider];
+        const current = this.withTokens(stored);
+        if (!stored || !current) return { kind: 'gone' };
         if (!sameGrant(current, claimed)) return { kind: 'newer', record: current };
         const now = Date.now();
-        const { refreshingUntil: _lease, ...rest } = current;
+        const { refreshingUntil: _lease, ...rest } = stored;
         store.subscriptions[provider] = refused ? { ...rest, revokedAt: now, updatedAt: now } : rest;
         return { kind: 'released' };
       }, (result) => result.kind === 'released');
@@ -707,13 +886,20 @@ export class SubscriptionManager {
     return refreshed;
   }
 
-  public logout(provider: string): boolean {
-    return this.mutate((store) => {
-      const existed = provider in store.subscriptions || provider in store.pending;
+  /** Sign out of `provider`: its record and pending login leave the file and its tokens leave the secret store. */
+  public async logout(provider: string): Promise<boolean> {
+    const existed = this.mutate((store) => {
+      const had = provider in store.subscriptions || provider in store.pending;
       delete store.subscriptions[provider];
       delete store.pending[provider];
-      return existed;
+      return had;
     });
+    if (this.secrets && this.readTokenSecret(provider) !== null) {
+      await this.secrets.delete(subscriptionTokensKey(provider));
+      this.tokenSecrets.delete(provider);
+      return true;
+    }
+    return existed;
   }
 
   public getPending(provider: string): PendingSubscriptionLogin | null {
@@ -728,11 +914,12 @@ export class SubscriptionManager {
     this.mutate((store) => { delete store.pending[provider]; });
   }
 
-  public saveSubscription(subscription: ProviderSubscription): ProviderSubscription {
+  public async saveSubscription(subscription: ProviderSubscription): Promise<ProviderSubscription> {
+    const stored = await this.storable(subscription, this.read().subscriptions[subscription.provider]?.tokenRevision);
     this.mutate((store) => {
-      store.subscriptions[subscription.provider] = subscription;
+      store.subscriptions[subscription.provider] = stored;
       delete store.pending[subscription.provider];
     });
-    return subscription;
+    return { ...subscription, ...(stored.tokenRevision !== undefined ? { tokenRevision: stored.tokenRevision } : {}) };
   }
 }

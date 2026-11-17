@@ -516,7 +516,7 @@ function composeClientRuntimeServices(
   // daemon hosts every conversational turn, and a login completed on another
   // surface (the TUI, the agent) must be visible to it.
   const judgment = options.judgment ?? composeJudgment({ config: configManager, secrets: secretsManager, env: process.env, stateRoot: shellPaths.resolveProjectPath(surfaceRoot), disposal: disposalScope.registry });
-  const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths));
+  const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths), { secrets: secretsManager });
   const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(surfaceRoot, 'services.json'), project: shellPaths.resolveProjectPath(surfaceRoot, 'services.json') }, {
     secretsManager,
     subscriptionManager,

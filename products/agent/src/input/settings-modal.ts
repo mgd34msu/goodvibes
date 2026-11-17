@@ -412,7 +412,11 @@ export class SettingsModal extends TerminalSettingsModalState<
           this.subscriptionLogoutConfirmationTarget = entry.provider;
           return;
         }
-        this.subscriptionManager?.logout(entry.provider);
+        // The record leaves the file at once; the tokens leave the secret store when its write finishes.
+        const provider = entry.provider;
+        void this.subscriptionManager?.logout(provider).catch((error: unknown) => {
+          logger.warn('Signed out, but the sign-in tokens could not be removed from the secret store', { provider, error: summarizeError(error) });
+        }).finally(() => { this._loadSubscriptionEntries(); this.requestHostSettingRender?.(); });
         this._loadSubscriptionEntries();
         this.subscriptionLogoutConfirmationTarget = null;
       }

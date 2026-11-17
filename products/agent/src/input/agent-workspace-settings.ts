@@ -980,7 +980,7 @@ export async function applyAgentWorkspaceTuiSettingsImport(
   for (const entry of plan.subscriptionValues) {
     if (!manager) break;
     if (entry.kind === 'active') {
-      manager.saveSubscription(entry.value);
+      await manager.saveSubscription(entry.value);
       importedActive.push(entry.value.provider);
     } else {
       manager.savePending(entry.value);

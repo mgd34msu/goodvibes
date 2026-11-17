@@ -60,12 +60,16 @@ const edges: KnowledgeRowTableSpec<KnowledgeEdgeRecord> = {
 
 const extractions: KnowledgeRowTableSpec<KnowledgeExtractionRecord> = {
   table: 'knowledge_extractions', key: ID, revisionColumn: REVISION, decode: mapExtractionRow,
-  lookup: { keyOf: (record) => extractionSourceKey(record.sourceId), where: 'source_id = ?', params: (key) => [key] },
+  lookup: { keyOf: (record) => extractionSourceKey(record.sourceId), where: 'source_id = ?', params: (key) => [key], uniqueColumn: 'source_id' },
 };
 
 const scopeVerdicts: KnowledgeRowTableSpec<KnowledgeScopeVerdict> = {
   table: 'knowledge_scope_verdicts',
-  key: { select: "record_kind || ':' || record_id", where: 'record_kind = ? AND record_id = ?', params: (key) => [...splitScopeVerdictKey(key)] },
+  key: {
+    select: "record_kind || ':' || record_id", where: 'record_kind = ? AND record_id = ?', params: (key) => [...splitScopeVerdictKey(key)],
+    // Split at the first ':' as splitScopeVerdictKey does, so the primary key serves the read.
+    whereIn: "(record_kind, record_id) IN (SELECT substr(value, 1, instr(value, ':') - 1), substr(value, instr(value, ':') + 1) FROM json_each(?))",
+  },
   decode: mapScopeVerdictRow,
 };
 

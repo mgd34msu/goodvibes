@@ -31,6 +31,11 @@ export interface KnowledgeRowKey {
   /** WHERE clause selecting one row by key. */
   readonly where: string;
   readonly params: (key: string) => SqlParam[];
+  /**
+   * WHERE clause selecting the rows whose keys are in one JSON array parameter,
+   * when `select` is an expression an index cannot serve.
+   */
+  readonly whereIn?: string | undefined;
 }
 
 /** The key of a table whose rows are keyed by one column. */
@@ -44,6 +49,12 @@ export interface KnowledgeRowLookup<T> {
   /** WHERE clause selecting the rows with one secondary key. */
   readonly where: string;
   readonly params: (key: string) => SqlParam[];
+  /**
+   * The column holding the secondary key, when the key is that column's value
+   * as `where` compares it and a unique index allows at most one row per key;
+   * lets many keys be answered in one statement.
+   */
+  readonly uniqueColumn?: string | undefined;
 }
 
 export interface KnowledgeRowTableSpec<T> {
@@ -93,6 +104,9 @@ export class KnowledgeRowTable<T extends object> implements Map<string, T> {
   #lookupEpoch = -1;
   #scan: Map<string, T> | undefined;
   #scanEpoch = -1;
+  /** The scan's records by secondary key, built when primeLookups() reads every row. */
+  #scanLookups: Map<string, T> | undefined;
+  #scanLookupsEpoch = -1;
   #size = 0;
   #sizeEpoch = -1;
 
@@ -123,6 +137,8 @@ export class KnowledgeRowTable<T extends object> implements Map<string, T> {
     const epoch = sqlite.readEpoch();
     const entry = this.#memo.get(key);
     if (entry && entry.epoch === epoch) return entry.record;
+    // A whole-table read at this epoch knows every row: a key it lacks is not stored.
+    if (this.#scanEpoch === epoch) return this.#scan?.get(key);
     if (this.#absentEpoch === epoch && this.#absent.has(key)) return undefined;
     const { table, key: rowKey, revisionColumn } = this.#spec;
     if (revisionColumn && entry) {
@@ -201,6 +217,7 @@ export class KnowledgeRowTable<T extends object> implements Map<string, T> {
     const sqlite = this.#open();
     if (!lookup || !sqlite) return undefined;
     const epoch = sqlite.readEpoch();
+    if (this.#scanLookupsEpoch === epoch && this.#scanEpoch === epoch) return this.#scanLookups?.get(key);
     if (this.#lookupEpoch !== epoch) { this.#lookups.clear(); this.#lookupEpoch = epoch; }
     let id = this.#lookups.get(key);
     if (id === undefined) {
@@ -209,6 +226,79 @@ export class KnowledgeRowTable<T extends object> implements Map<string, T> {
       if (this.#lookups.size < ANSWER_BOUND) this.#lookups.set(key, id);
     }
     return id === null ? undefined : this.get(id);
+  }
+
+  /**
+   * Reads ahead so that each later get() is a map lookup until something is
+   * written. Without `keys` every row is read (one statement, two for a table
+   * with a revision column; nothing while the last whole read is current).
+   * With `keys`, the rows of those not yet read since the last change are read
+   * in one statement (two with a revision column).
+   */
+  prime(keys?: Iterable<string>): void {
+    const sqlite = this.#open();
+    if (!sqlite) return;
+    if (!keys) { this.#all(); return; }
+    const epoch = sqlite.readEpoch();
+    if (this.#scanEpoch === epoch) return;
+    if (this.#absentEpoch !== epoch) { this.#absent.clear(); this.#absentEpoch = epoch; }
+    const pending: string[] = [];
+    for (const key of keys) {
+      if (typeof key !== 'string' || this.#memo.get(key)?.epoch === epoch || this.#absent.has(key)) continue;
+      pending.push(key);
+    }
+    if (pending.length === 0) return;
+    const found = this.#select(sqlite, epoch, this.#spec.key.whereIn ?? `${this.#spec.key.select} IN (SELECT value FROM json_each(?))`,
+      [JSON.stringify(pending)], '', 0);
+    for (const key of pending) if (!found.has(key)) this.#missing(key, epoch);
+  }
+
+  /**
+   * Reads ahead so that each later lookup() is a map lookup until something is
+   * written, for a table whose lookup has a unique key column (otherwise
+   * nothing is read ahead and lookup() answers one key at a time). Without
+   * `keys` every row is read, as prime() does; with `keys`, those not yet
+   * answered since the last change are answered in one statement and the rows
+   * found are primed.
+   */
+  primeLookups(keys?: Iterable<string>): void {
+    const lookup = this.#spec.lookup;
+    const sqlite = this.#open();
+    if (!lookup?.uniqueColumn || !sqlite) return;
+    const epoch = sqlite.readEpoch();
+    if (this.#scanLookupsEpoch === epoch && this.#scanEpoch === epoch) return;
+    if (!keys) {
+      const scan = this.#all();
+      const index = new Map<string, T>();
+      for (const record of scan.values()) {
+        const key = lookup.keyOf(record);
+        if (key !== undefined && !index.has(key)) index.set(key, record);
+      }
+      this.#scanLookups = index;
+      this.#scanLookupsEpoch = this.#scanEpoch;
+      return;
+    }
+    if (this.#lookupEpoch !== epoch) { this.#lookups.clear(); this.#lookupEpoch = epoch; }
+    const wanted: string[] = [];
+    const pending: string[] = [];
+    for (const key of keys) {
+      if (typeof key !== 'string') continue;
+      wanted.push(key);
+      if (!this.#lookups.has(key)) pending.push(key);
+    }
+    if (pending.length > 0) {
+      const rows = sqlite.exec(`SELECT ${lookup.uniqueColumn}, ${this.#spec.key.select} FROM ${this.#spec.table}
+        WHERE ${lookup.uniqueColumn} IN (SELECT value FROM json_each(?))`, [JSON.stringify(pending)])[0]?.values ?? [];
+      const answers = new Map<string, string>();
+      for (const [lookupKey, id] of rows) answers.set(String(lookupKey), String(id));
+      for (const key of pending) {
+        if (this.#lookups.size >= ANSWER_BOUND) break;
+        this.#lookups.set(key, answers.get(key) ?? null);
+      }
+    }
+    const ids: string[] = [];
+    for (const key of wanted) { const id = this.#lookups.get(key); if (typeof id === 'string') ids.push(id); }
+    if (ids.length > 0) this.prime(ids);
   }
 
   /** A staging copy with the same secondary index, for a change built before it is written. */
@@ -284,7 +374,8 @@ export class KnowledgeRowTable<T extends object> implements Map<string, T> {
     return scan;
   }
 
-  #select(sqlite: SQLiteStore, epoch: number, where: string, params: SqlParam[], suffix: string): Map<string, T> {
+  #select(sqlite: SQLiteStore, epoch: number, where: string, params: SqlParam[], suffix: string,
+    singleFetchLimit = SINGLE_FETCH_LIMIT): Map<string, T> {
     const { table, key, revisionColumn } = this.#spec;
     const clause = where ? ` WHERE ${where}` : '';
     const out = new Map<string, T>();
@@ -308,7 +399,7 @@ export class KnowledgeRowTable<T extends object> implements Map<string, T> {
       if (entry && entry.stamp === stamp) entry.epoch = epoch;
       else changed.add(id);
     }
-    if (changed.size > SINGLE_FETCH_LIMIT) {
+    if (changed.size > singleFetchLimit) {
       const rows = sqlite.exec(`SELECT *, ${key.select} AS ${KEY_COLUMN} FROM ${table}${clause}${suffix}`, params)[0];
       if (rows) {
         const length = rows.columns.length - 1;

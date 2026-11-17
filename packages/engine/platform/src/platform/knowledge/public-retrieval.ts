@@ -173,6 +173,8 @@ async function readPublicKnowledgeUnderPolicy(store: KnowledgeStore, input: Publ
         : requestQuery;
       assertJudgmentInput({ query });
       const terms = knowledgeTerms([requestQuery, ...(writeScope ?? [])]);
+      // Every extraction in one read, not one per source (free when the selection already read them).
+      store.readAheadExtractions();
       type Entry = { readonly kind: 'source'; readonly source: KnowledgeSourceRecord; readonly text: string }
         | { readonly kind: 'node'; readonly node: KnowledgeNodeRecord; readonly text: string };
       const entries: Entry[] = [
@@ -226,6 +228,7 @@ async function readPublicKnowledgeUnderPolicy(store: KnowledgeStore, input: Publ
         let spans = new Map<string, readonly LocalAnswerExcerptSpan[]>();
         const quoted = accepted.filter((row) => row.source).slice(0, quoteLimit);
         if (mode === 'packet' && quoted.length) {
+          store.readAheadExtractions(quoted.map((row) => row.id));
           if (classicRetrieval || isClassicOperation()) {
             spans = new Map(quoted.map((row) => [row.id, localKnowledgeSourceSpans(row.source!, store.getExtractionBySourceId(row.id))] as const));
           } else {

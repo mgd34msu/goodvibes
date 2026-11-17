@@ -105,6 +105,7 @@ async function preparePacket(context: KnowledgePacketContext, task: string, writ
   assertCurrent();
   const { detail, budgetLimit } = captured;
   const usageCounts = buildUsageCounts(context);
+  context.store.readAheadExtractions(selection.accepted.flatMap((row) => row.source ? [row.id] : []));
   const candidates: KnowledgePacketItem[] = selection.accepted.map((row) => {
     const related = selection.relatedLabels(row.kind, row.id);
     let summary: string | undefined;

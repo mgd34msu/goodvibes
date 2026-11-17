@@ -165,6 +165,16 @@ function needsReading(store: KnowledgeStore, edgeIndex: ReadonlyMap<string, read
     && (value.kind !== 'node' || getExplicitKnowledgeSpaceId(value.record) !== null || membership(store, edgeIndex, value, {}));
 }
 
+/**
+ * Reads the stored readings and the sources' extractions in a few statements,
+ * not one per record; the per-record reads below then use them. Without
+ * `records` every stored one is read (nothing while that read is current).
+ */
+function readAhead(store: KnowledgeStore, records?: readonly ScopeRecord[]): void {
+  store.readAheadScopeVerdicts(records?.map(keyFor));
+  store.readAheadExtractions(records?.flatMap((value) => value.kind === 'source' ? [value.record.id] : []));
+}
+
 /** A stored reading that still matches the record's content, or undefined. */
 function currentVerdict(store: KnowledgeStore, value: ScopeRecord): KnowledgeScopeVerdict | undefined {
   const stored = store.getScopeVerdict(keyFor(value));
@@ -196,6 +206,8 @@ export async function prepareKnowledgeScopeSelection(
   };
   const records: ScopeRecord[] = [...sources.map(record => ({ kind: 'source' as const, record })),
     ...nodes.map(record => ({ kind: 'node' as const, record })), ...issues.map(record => ({ kind: 'issue' as const, record }))];
+  // A view of named records reads only theirs; any other view lists every record anyway.
+  readAhead(store, options.sourceIds || options.nodeIds || options.issueIds ? records.filter(inBounds) : undefined);
   const view = resolveKnowledgeSpaceScope(scope);
   const accepted = new Set<string>();
   const unread: ScopeRecord[] = [];
@@ -265,6 +277,7 @@ async function runScopeReadingPass(store: KnowledgeStore): Promise<boolean> {
     ...store.listNodes(Number.MAX_SAFE_INTEGER).map(record => ({ kind: 'node' as const, record })),
     ...store.listIssues(Number.MAX_SAFE_INTEGER).map(record => ({ kind: 'issue' as const, record })),
   ];
+  readAhead(store);
   for (const value of all) {
     if (needsReading(store, edgeIndex, value) && !currentVerdict(store, value)) waiting.push(value);
   }

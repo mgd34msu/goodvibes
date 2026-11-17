@@ -31,6 +31,7 @@ import { countWorkPlanTasksInSpace, listWorkPlanTaskRecordIds, readWorkPlanStatu
 import { applyKnowledgeImport, assertKnowledgeImportRecordSizes, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
 import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } from './store-edge-writes.js';
 import { createKnowledgeTables } from './store-table-specs.js';
+import { extractionSourceKey } from './store-indexed-map.js';
 import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, trimKnowledgeEdgeChanges, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
 import {
   ensureKnowledgeScopeVerdictTable,
@@ -1487,6 +1488,28 @@ export class KnowledgeStore {
     return this.scopeVerdicts.get(key);
   }
 
+  /**
+   * Reads stored readings ahead in one statement, so getScopeVerdict is a map
+   * lookup until the next write: every reading, or only those of `keys`.
+   * Reads nothing that was already read since the last write.
+   */
+  readAheadScopeVerdicts(keys?: Iterable<string>): void {
+    this.scopeVerdicts.prime(keys);
+  }
+
+  /**
+   * Reads extractions ahead in at most three statements, so
+   * getExtractionBySourceId is a map lookup until the next write: every
+   * extraction, or only those of `sourceIds`. Reads nothing that was already
+   * read since the last write.
+   */
+  readAheadExtractions(sourceIds?: Iterable<string>): void {
+    if (!sourceIds) { this.extractions.primeLookups(); return; }
+    const keys: string[] = [];
+    for (const id of sourceIds) keys.push(extractionSourceKey(id));
+    this.extractions.primeLookups(keys);
+  }
+
   /** Stores ordinary-view readings in one save; a reading of a record that is gone is dropped. */
   async recordScopeVerdicts(verdicts: readonly KnowledgeScopeVerdict[]): Promise<void> {
     await this.init();
@@ -1495,8 +1518,9 @@ export class KnowledgeStore {
       return kind === 'source' ? this.sources.has(id) : kind === 'node' ? this.nodes.has(id) : kind === 'issue' ? this.issues.has(id) : false;
     });
     if (live.length === 0) return;
+    // Each write moves the read epoch, so a later read takes the row as stored;
+    // binding each written reading would cost one read per row for nothing.
     for (const verdict of live) writeKnowledgeScopeVerdict(this.sqlite, verdict);
-    for (const verdict of live) this.scopeVerdicts.set(verdict.key, verdict);
     await this.save();
   }
 

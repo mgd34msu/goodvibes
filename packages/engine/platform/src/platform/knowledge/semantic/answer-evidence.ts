@@ -214,6 +214,8 @@ export async function readAnswerEvidence(
     .filter((node) => node.metadata.semanticKind !== 'fact' || factHasUsableSource(node, usableSourceIds))
     .filter((node) => candidateWindow ? candidateWindow.nodeIds.has(node.id) : !strictCandidates || candidateNodeIds.has(node.id) || linkedObjectIds.has(node.id)
       || (typeof node.sourceId === 'string' && candidateSourceIds.has(node.sourceId)));
+  // Every extraction in one read, not one per source (free when the selection already read them).
+  store.readAheadExtractions();
   const extractionText = (source: KnowledgeSourceRecord) => sourceSemanticText({ ...source, ...knowledgeSourceJudgmentUris(source) },
     store.getExtractionBySourceId(source.id));
   type Entry = { readonly source?: KnowledgeSourceRecord; readonly node?: KnowledgeNodeRecord };
@@ -265,6 +267,7 @@ export async function readAnswerEvidence(
   // Internal evidence includes accepted backing references even when a fact wins
   // the display window. Never revive a source whose relevance reading said no.
   const included = uniqueEvidenceItems([...primary, ...selected.filter((item) => item.source && neededSources.has(item.source.id))]);
+  store.readAheadExtractions(included.flatMap((item) => item.source ? [item.source.id] : []));
   const spans = await readAnswerSourceExcerpts(query, included.flatMap((item) => item.source ? [{
     source: item.source, extraction: store.getExtractionBySourceId(item.source.id), hints: terms,
     context: JSON.stringify({ facts: candidateFacts.get(`source:${item.source.id}`) ?? [] }),
@@ -408,6 +411,7 @@ export async function readOfficialLinkedEvidence(
   const prior = new Map(pass.items.flatMap((item) => item.source ? [[item.source.id, item] as const] : []));
   const toRead = candidates.filter((item) => !alreadyRead.has(item.id));
   const terms = knowledgeTerms([query, ...scopedObjects.map((node) => [node.title, ...node.aliases])]);
+  store.readAheadExtractions(toRead.map((item) => item.id));
   const spans = await readAnswerSourceExcerpts(query, toRead.map((item) => ({
     source: item.source!, extraction: store.getExtractionBySourceId(item.id), hints: terms,
     context: JSON.stringify({ facts: item.facts.filter((fact) => selectedFactIds.has(fact.id)).map(renderFactForPrompt),

@@ -121,7 +121,9 @@ try {
     const changed = await begin('rt-purchase-changed', '5.00', '9.00');
     await Bun.sleep(3_000);
     journey.check('a total that changed at checkout is not submitted', 'payments.checkout.begin (lines 5.00, stated total 9.00)',
-      `begin ${changed.status} ${short(changed.text, 300)}; submissions ${submissions.length - changedBefore}`, submissions.length === changedBefore);
+      `begin ${changed.status} ${short(changed.text, 300)}; submissions ${submissions.length - changedBefore}`,
+      // Not submitted BECAUSE the total differs, not because the purchase never reached the page.
+      submissions.length === changedBefore && /total|differ|changed|match/i.test(changed.text) && !/page connection is unavailable/.test(changed.text));
   }
 } catch (error) {
   journey.check('journey ran to the end', 'j5', error instanceof Error ? error.stack ?? error.message : String(error), false);

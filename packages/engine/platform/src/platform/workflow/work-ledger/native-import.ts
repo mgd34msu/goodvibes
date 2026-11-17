@@ -60,7 +60,7 @@ class NativeImportPrecommitError extends JudgmentError {
 const refusal = (code: WorkLedgerRejection, reason: string, revision: number | null = null): WorkLedgerResult => ({ kind: 'rejected', code, reason, revision });
 function paired(authority: NativePairedExecutionAuthority): NativePairedExecutionSnapshot {
   const current = authority.current();
-  if (!holdsNativeOwnership(current, NATIVE_IMPORT_SCOPES)) throw new NativeImportPrecommitError('forbidden', 'Native import needs the owner's own machine or a current paired device holding the import scopes; this caller holds neither.');
+  if (!holdsNativeOwnership(current, NATIVE_IMPORT_SCOPES)) throw new NativeImportPrecommitError('forbidden', 'Native import needs the owner\'s own machine or a current paired device holding the import scopes; this caller holds neither.');
   return Object.freeze({ ...current, scopes: Object.freeze([...current.scopes].sort()) });
 }
 

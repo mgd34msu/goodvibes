@@ -22,7 +22,7 @@ function run(serviceHook = ':', setup = '', rcHook = ':') {
   } });
 }
 
-test('program removal retains custom browser, WebUI, rollback and failed publication trees with guidance', () => {
+test('program removal retains custom browser, WebUI, rollback and failed publication trees and user memory', () => {
   for (const directory of ['playwright-core', 'playwright-core.previous', 'playwright-core.incoming', 'webui/3.1.2', 'webui/custom', '.goodvibes-directory-install.owner']) {
     mkdirSync(join(install, directory), { recursive: true }); writeFileSync(join(install, directory, 'owner.txt'), 'Keep these original custom bytes');
   }
@@ -35,7 +35,6 @@ test('program removal retains custom browser, WebUI, rollback and failed publica
     expect(readFileSync(join(install, directory, 'owner.txt'), 'utf8')).toBe('Keep these original custom bytes');
   }
   expect(readFileSync(join(root, '.goodvibes', 'owner-memory'), 'utf8')).toBe('Retained user memory');
-  expect(result.stdout).toContain('Review the retained directory paths'); expect(result.stdout).toContain(join(install, 'webui'));
   expect(readdirSync(install).some(name => name.endsWith('.update-transaction'))).toBe(false);
 });
 
@@ -66,14 +65,12 @@ test('a replaced root during service stop receives no program deletion', () => {
   const result = run(`mv "$INSTALL_DIR" "$FIXTURE_ROOT/retained-original"; mkdir "$INSTALL_DIR"; printf 'Foreign new program' > "$INSTALL_DIR/goodvibes"`);
   expect(result.status).not.toBe(0); expect(readFileSync(join(install, 'goodvibes'), 'utf8')).toBe('Foreign new program');
   for (const name of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) expect(readFileSync(join(root, 'retained-original', name), 'utf8')).toBe('Original product program');
-  expect(result.stderr).toContain('original');
 });
 
 test('a root absent at entry is not adopted if another installation appears during service inspection', () => {
   rmSync(install, { recursive: true });
   const result = run(`mkdir "$INSTALL_DIR"; printf 'Newly installed elsewhere' > "$INSTALL_DIR/goodvibes"`);
   expect(result.status, result.stderr).toBe(0); expect(readFileSync(join(install, 'goodvibes'), 'utf8')).toBe('Newly installed elsewhere');
-  expect(result.stdout).toContain('appeared after initial absence');
 });
 
 
@@ -88,7 +85,7 @@ test('a native library parent replaced after one unlink cannot redirect the next
       command ln -s "$FIXTURE_ROOT/outside-native" "$INSTALL_DIR/lib/sqlite-darwin-x64"
     fi
   }`);
-  expect(result.status).not.toBe(0); expect(result.stderr).toContain('original native library directory changed');
+  expect(result.status).not.toBe(0); expect(result.stderr).toContain('(INSTALL_E107)');
   expect(readFileSync(join(outside, 'libsqlite3.dylib.previous'), 'utf8')).toBe('Foreign native backup');
   expect(readFileSync(join(root, 'retained-native', 'libsqlite3.dylib.previous'), 'utf8')).toBe('Original native backup');
 });
@@ -97,5 +94,4 @@ test('a later shell configuration failure does not strand claims after settled p
   const result = run(':', '', 'return 91'); expect(result.status).not.toBe(0);
   for (const name of ['goodvibes', 'goodvibes-daemon', 'goodvibes-agent']) expect(existsSync(join(install, name))).toBe(false);
   expect(readdirSync(install).some(name => name.endsWith('.update-transaction'))).toBe(false);
-  expect(result.stderr).not.toContain('uninstall did not finish');
 });

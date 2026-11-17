@@ -54,7 +54,8 @@ export type ExtraRoute = (request: JudgmentRequest<Questions>) => JudgmentPort |
 export function readingsPort(options: { readonly gate?: GateReadingTable; readonly extra?: ExtraRoute } = {}): JudgmentPort {
   const intake = fakePort((name, question) => name === 'route' ? choiceAnswer(question, 'converse', 0.97) : neutral(question));
   const admission = fakePort((name, question) => name === 'disposition' ? choiceAnswer(question, 'act', 0.97) : neutral(question));
-  const completion = fakePort(() => noulAnswer(0.01));
+  // The completion request also carries the routing question when the evidence is small; the measured turns are tasks.
+  const completion = fakePort((name) => noulAnswer(name === 'completion_required' ? 0.99 : 0.01));
   const applicability = fakePort((name, question) => name === 'completion_required' ? noulAnswer(0.99) : neutral(question));
   const compaction = compactionQualityPort();
   const core = coreReadingsPort({ intent: 'chat', needsPlan: false, strategy: 'single' });

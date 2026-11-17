@@ -659,24 +659,36 @@ export class ResponseCompletionGuard {
       };
       return null;
     };
-    const initialState = preparedState.initial as { readonly request?: unknown; readonly transcript?: readonly unknown[] } | null;
-    const instructions = boundedInstructions([
-      ...(typeof initialState?.request === 'string' && initialState.request ? [initialState.request] : []),
-      ...userInstructionTexts(initialState?.transcript ?? []),
-      ...userInstructionTexts(preparedState.transcript),
-    ]);
-    const routing = await completionApplicability.run(port, { request: preparedState.request, instructions,
-      requirements: preparedState.requirements } as never, { ...readingOptions, site: completionApplicability.name });
-    const completionRequired = routing.readings.completion_required;
-    owner.assertCurrent(); current();
-    if (completionRequired.verdict === 'no' && completionRequired.outcome === 'act') {
-      routing.recordAction('No task-fulfillment objective applies to this conversational reply. Preserve any earlier pending work; do not create completion-repair work.');
-      return acceptCheckedResponse();
-    }
-    this.onCompletionRequired?.();
-    routing.recordAction('The request requires task fulfillment, or applicability is unsettled. Retain the original completion checks.');
     // The evidence does not change between passes: its size is measured once.
     const largeEvidence = JSON.stringify(fullState).length > 100_000;
+    const NOT_REQUIRED_ACTION = 'No task-fulfillment objective applies to this conversational reply. Preserve any earlier pending work; do not create completion-repair work.';
+    const REQUIRED_ACTION = 'The request requires task fulfillment, or applicability is unsettled. Retain the original completion checks.';
+    const executionEvidence = this.hasToolEvidence || source.snapshot.transcript.some(message => message.role === 'tool')
+      || source.snapshot.delegated.length > 0 || source.snapshot.completedWork.length > 0;
+    // A turn that worked (tools or delegated results) over small evidence goes
+    // straight to the completion checks, so whether they apply is asked in
+    // that same request: one round trip, not two in a row. A conversational
+    // turn asks it alone (one short question), and so does large evidence, so
+    // neither pays for checks or a verification pass a reply may not need.
+    let routeInCompletionRequest = !largeEvidence && (executionEvidence || hasDelegatedEvidence);
+    if (!routeInCompletionRequest) {
+      const initialState = preparedState.initial as { readonly request?: unknown; readonly transcript?: readonly unknown[] } | null;
+      const instructions = boundedInstructions([
+        ...(typeof initialState?.request === 'string' && initialState.request ? [initialState.request] : []),
+        ...userInstructionTexts(initialState?.transcript ?? []),
+        ...userInstructionTexts(preparedState.transcript),
+      ]);
+      const routing = await completionApplicability.run(port, { request: preparedState.request, instructions,
+        requirements: preparedState.requirements } as never, { ...readingOptions, site: completionApplicability.name });
+      const completionRequired = routing.readings.completion_required;
+      owner.assertCurrent(); current();
+      if (completionRequired.verdict === 'no' && completionRequired.outcome === 'act') {
+        routing.recordAction(NOT_REQUIRED_ACTION);
+        return acceptCheckedResponse();
+      }
+      this.onCompletionRequired?.();
+      routing.recordAction(REQUIRED_ACTION);
+    }
     for (;;) {
     let state: unknown = fullState;
     let checkpoint = !withoutCheckpoint && largeEvidence
@@ -719,11 +731,15 @@ export class ResponseCompletionGuard {
       }
     }
     let failure: { readonly error: unknown } | undefined;
+    // Only the first pass over small evidence carries the routing question; that pass reads the full state.
+    const routeHere = routeInCompletionRequest && state === fullState;
+    routeInCompletionRequest = false;
     const checks = await Promise.allSettled([
-      responseCompletion.run(port, state as never, { ...readingOptions, only: RESPONSE_COMPLETION_CHECKS, site: responseCompletion.name }),
+      responseCompletion.run(port, state as never, { ...readingOptions,
+        only: routeHere ? ['completion_required', ...RESPONSE_COMPLETION_CHECKS] as const : RESPONSE_COMPLETION_CHECKS, site: responseCompletion.name }),
       hasDelegatedEvidence ? delegationConsolidation.run(port, state as never,
         { ...readingOptions, site: delegationConsolidation.name }) : Promise.resolve(null),
-      this.hasToolEvidence || source.snapshot.transcript.some(message => message.role === 'tool') || source.snapshot.delegated.length || source.snapshot.completedWork.length
+      executionEvidence
         ? executionAssurance.run(port, state as never,
           { ...readingOptions, site: executionAssurance.name }) : Promise.resolve(null),
     ].map(async work => {
@@ -739,8 +755,20 @@ export class ResponseCompletionGuard {
     const run = (checks[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof responseCompletion.run>>>).value;
     const consolidation = (checks[1] as PromiseFulfilledResult<Awaited<ReturnType<typeof delegationConsolidation.run>> | null>).value;
     const execution = (checks[2] as PromiseFulfilledResult<Awaited<ReturnType<typeof executionAssurance.run>> | null>).value;
+    if (routeHere) {
+      const completionRequired = run.readings.completion_required;
+      owner.assertCurrent(); current();
+      if (completionRequired.verdict === 'no' && completionRequired.outcome === 'act') {
+        // The checks read alongside it do not apply to this reply.
+        run.recordAction(NOT_REQUIRED_ACTION);
+        return acceptCheckedResponse();
+      }
+      this.onCompletionRequired?.();
+      run.recordAction(REQUIRED_ACTION);
+    }
     // Only the yes/no checks were asked; every loop, lookup and summary below reads them as yes/no.
-    const completionReadings: CompletionCheckReadings = run.readings;
+    const completionReadings: CompletionCheckReadings = Object.fromEntries(
+      RESPONSE_COMPLETION_CHECKS.map(aspect => [aspect, run.readings[aspect]])) as unknown as CompletionCheckReadings;
     if ([...Object.values(completionReadings), ...Object.values(consolidation?.readings ?? {})]
       .some(reading => reading.verdict === 'yes' && reading.outcome === 'act')) this.hasSemanticRefusal = true;
     owner.assertCurrent(); current();

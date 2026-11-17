@@ -363,7 +363,7 @@ export async function runCapturedCommand(
         && await executePolicyCheck(() => filter(join(root, rel)), current),
     operationSignal, { skip: new Set(dependencies.mounts.map((mount) => relative(root, mount.target))) });
     const script = observer.script;
-    if (script && !/^\.goodvibes-repl-[a-f0-9-]+\.ts$/.test(script.name)) throw new Error('Invalid captured script name');
+    if (script && !/^\.goodvibes-repl-[a-f0-9-]+\.(ts|py)$/.test(script.name)) throw new Error('Invalid captured script name');
     if (script) {
       await writeFile(join(temporary, 'repl-source.ts'), script.content, { flag: 'wx', mode: 0o400 });
       // The source is mounted over an empty file of its own name, removed after the run.

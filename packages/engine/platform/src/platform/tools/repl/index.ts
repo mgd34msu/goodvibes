@@ -3,14 +3,16 @@ import { runResolvedCommand, type ValidatorRunner } from '../shared/validators.j
 import { capturedReplScript } from './captured-script.js';
 import { resolveEvalTimeoutMs } from './captured.js';
 import { REPL_HISTORY_PAGE, REPL_TOOL_SCHEMA, type ReplToolInput } from './schema.js';
+import { evaluateGraphql, isReplRuntime, pythonReplScript, sqlReplScript, type ReplRuntime } from './runtimes.js';
 
 /**
  * The `repl` tool of an ordinary session. It is registered only where the
  * per-command exec sandbox is available (tools/index.ts), and each eval is one
- * `bun -e` command through the exec tool's own path, so the sandbox plan, the
+ * command through the exec tool's own path (`bun -e` for JavaScript,
+ * TypeScript and SQL, `python3 -I -c` for Python), so the sandbox plan, the
  * containment decision and the credential scrub apply exactly as to a command
- * the model runs with exec. Each eval is stateless; the history is this
- * session's attempts, held in memory.
+ * the model runs with exec. GraphQL is parsed in process and never executed.
+ * Each eval is stateless; the history is this session's attempts, held in memory.
  */
 
 /** Attempts the history keeps, newest last. */
@@ -20,7 +22,7 @@ const MAX_SCRIPT_BYTES = 120_000;
 
 interface ReplHistoryEntry {
   readonly ts: number;
-  readonly runtime: 'javascript' | 'typescript';
+  readonly runtime: ReplRuntime;
   readonly expression: string;
   readonly result?: string | undefined;
   readonly error?: string | undefined;
@@ -67,20 +69,32 @@ export function createReplTool(runner: ValidatorRunner, options: ReplToolOptions
       if (input.mode !== 'eval') return { success: false, error: `Unknown mode: ${String(input.mode)}. Use eval or history.` };
       if (typeof input.expression !== 'string' || input.expression.length === 0) return { success: false, error: 'eval requires expression.' };
       const runtime = input.runtime ?? 'javascript';
-      if (runtime !== 'javascript' && runtime !== 'typescript') {
-        return { success: false, error: `runtime ${String(runtime)} is not available; repl evaluates javascript and typescript.` };
+      if (!isReplRuntime(runtime)) {
+        return { success: false, error: `runtime ${String(runtime)} is not available; repl evaluates javascript, typescript, python, sql and graphql.` };
       }
       if (input.bindings !== undefined && (input.bindings === null || typeof input.bindings !== 'object' || Array.isArray(input.bindings))) {
         return { success: false, error: 'bindings must be an object of JSON values.' };
       }
+      if (runtime === 'graphql') {
+        const answer = await evaluateGraphql(input.expression, input.bindings ?? {});
+        remember({ ts: Date.now(), runtime, expression: input.expression, ...(answer.result ? { result: answer.result } : {}), ...(answer.error ? { error: answer.error } : {}) });
+        return {
+          success: answer.success,
+          ...(answer.error ? { error: answer.error } : {}),
+          output: JSON.stringify({ runtime, result: answer.result, ...(answer.error ? { error: answer.error } : {}), stateless: true }),
+        };
+      }
       const timeoutMs = resolveEvalTimeoutMs(input.timeout_ms);
       if (timeoutMs === undefined) return { success: false, error: 'timeout_ms must be a nonnegative integer.' };
-      const script = await capturedReplScript(input.expression, JSON.stringify(input.bindings ?? {}));
+      const bindings = JSON.stringify(input.bindings ?? {});
+      const script = runtime === 'python' ? pythonReplScript(input.expression, bindings)
+        : runtime === 'sql' ? sqlReplScript(input.expression, bindings)
+          : await capturedReplScript(input.expression, bindings);
       if (Buffer.byteLength(script) > MAX_SCRIPT_BYTES) {
         return { success: false, error: `The snippet is too long to evaluate here (over ${MAX_SCRIPT_BYTES} bytes). Write it to a file and run it with exec.` };
       }
       const signal = executeOptions?.signal;
-      const command = ['bun', '--no-env-file', '-e', script];
+      const command = runtime === 'python' ? ['python3', '-I', '-c', script] : ['bun', '--no-env-file', '-e', script];
       const result = await runResolvedCommand(runner, command, options.workingDirectory, {
         assertCurrent: () => signal?.throwIfAborted(),
         ...(signal ? { signal } : {}),

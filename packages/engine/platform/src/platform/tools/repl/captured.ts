@@ -18,6 +18,7 @@ import { probeCapturedExecAvailability, runCapturedCommand, type CapturedExecAut
 import { createCapturedExecBunRuntimeAdmission } from '../exec/captured-bun-runtime-input.js';
 import { REPL_HISTORY_PAGE, REPL_TOOL_SCHEMA } from './schema.js';
 import { capturedReplScript } from './captured-script.js';
+import { evaluateGraphql, isReplRuntime, pythonReplScript, sqlReplScript, type ReplRuntime } from './runtimes.js';
 
 const tools = new WeakMap<Tool, ContractInputAuthority>();
 const HELD = 'Captured REPL held: original-owner/view authority is unavailable, changed or restricted. Output withheld.';
@@ -30,7 +31,7 @@ export function resolveEvalTimeoutMs(requested: unknown): number | undefined {
   const timeoutMs = requested ?? DEFAULT_EVAL_TIMEOUT_MS;
   return typeof timeoutMs === 'number' && Number.isSafeInteger(timeoutMs) && timeoutMs >= 0 ? timeoutMs : undefined;
 }
-type Runtime = 'javascript' | 'typescript';
+type Runtime = ReplRuntime;
 interface HistoryEntry {
   readonly ts: number;
   readonly runtime: Runtime;
@@ -135,7 +136,7 @@ export function createCapturedReplTool(
   const tool: Tool = {
     definition: {
       ...REPL_TOOL_SCHEMA,
-      description: 'Evaluate one JavaScript or TypeScript snippet in a fresh contained captured workspace. Bindings are JSON values exposed as globals. Returns printed completion and console output. Each eval is stateless (no shared variables or VM); authorized file changes persist only in a mutable member view. History retains all authorized attempts in a private per-run journal with optional pagination. History is not inherited by another run or resumed/rebound authority. Network, ambient host environment and other runtimes are unavailable.',
+      description: 'Evaluate one snippet in a fresh contained captured workspace: javascript or typescript (Bun), python (the contained python3), sql (a fresh in-memory SQLite database; prints the last result rows as JSON; bindings are named parameters $name) or graphql (parsed, printed in normal form and, with a schema binding of SDL text, validated; nothing is executed). Bindings are JSON values exposed as globals. Returns printed completion and console output. Each eval is stateless (no shared variables or VM); authorized file changes persist only in a mutable member view. History retains all authorized attempts in a private per-run journal with optional pagination. History is not inherited by another run or resumed/rebound authority. Network and the ambient host environment are unavailable.',
       sideEffects: ['exec', 'read_fs', 'write_fs', 'state'],
       concurrency: 'serial',
     },
@@ -179,8 +180,8 @@ export function createCapturedReplTool(
         if (args.mode !== 'eval' || typeof args.expression !== 'string' || args.expression.length === 0)
           return { success: false, error: 'Captured REPL requires mode eval and a nonempty expression.' };
         const runtime = args.runtime ?? 'javascript';
-        if (runtime !== 'javascript' && runtime !== 'typescript')
-          return { success: false, error: `runtime ${String(runtime)} is not available; repl evaluates javascript and typescript.` };
+        if (!isReplRuntime(runtime))
+          return { success: false, error: `runtime ${String(runtime)} is not available; repl evaluates javascript, typescript, python, sql and graphql.` };
         const timeoutMs = resolveEvalTimeoutMs(args.timeout_ms);
         if (timeoutMs === undefined) return { success: false, error: 'timeout_ms must be a nonnegative integer.' };
         const attempt = { ts: Date.now(), runtime: runtime as Runtime, expression: args.expression, sessionId: `captured_repl_${randomUUID()}` };
@@ -194,9 +195,23 @@ export function createCapturedReplTool(
           return await finish({ success: false, error: 'Captured REPL requires the trusted Bun runtime. Host evaluation is unavailable as a fallback.' });
         if (args.bindings !== undefined && (args.bindings === null || typeof args.bindings !== 'object' || Array.isArray(args.bindings)))
           return { success: false, error: 'Captured REPL bindings must be an object of JSON values.' };
-        const script = await capturedReplScript(args.expression, JSON.stringify(args.bindings ?? {}));
-        const scriptName = `.goodvibes-repl-${randomUUID()}.ts`;
-        const command = `bun --no-env-file ./${scriptName}`;
+        if (runtime === 'graphql') {
+          // Parsed and validated in process: a GraphQL document is never executed.
+          const answer = await evaluateGraphql(args.expression, (args.bindings ?? {}) as Record<string, unknown>);
+          return await finish({
+            success: answer.success,
+            ...(answer.error ? { error: answer.error } : {}),
+            output: JSON.stringify({ runtime, result: answer.result, error: answer.error, executed: false, stateless: true,
+              workspace_changes_persist: false }),
+          }, { result: answer.result || undefined, error: answer.error });
+        }
+        const bindings = JSON.stringify(args.bindings ?? {});
+        const python = runtime === 'python';
+        const script = python ? pythonReplScript(args.expression, bindings)
+          : runtime === 'sql' ? sqlReplScript(args.expression, bindings)
+            : await capturedReplScript(args.expression, bindings);
+        const scriptName = `.goodvibes-repl-${randomUUID()}.${python ? 'py' : 'ts'}`;
+        const command = python ? `python3 -I ./${scriptName}` : `bun --no-env-file ./${scriptName}`;
         const guard = await guardExecCommand(command, featureFlags, signal);
         if (!guard.allowed) return await finish({ success: false, error: guard.denialMessage ?? 'Captured REPL command denied by policy.' });
         const availability = await probeCapturedExecAvailability();
@@ -208,7 +223,7 @@ export function createCapturedReplTool(
             captured_exec_availability: availability }),
         });
         let bunRuntimeInput = binding.bunRuntimeInput;
-        if (!bunRuntimeInput) {
+        if (!bunRuntimeInput && !python) {
           try { bunRuntimeInput = await admitRuntime(signal); }
           catch {
             return await finish({ success: false, error: 'Captured REPL ordinary Bun runtime is unavailable, changed or access-restricted. Host evaluation is unavailable as a fallback.' });
@@ -216,7 +231,7 @@ export function createCapturedReplTool(
         }
         // The view is proved once more just before the command runs, and again when the result is kept (finish).
         await check(signal);
-        const result = await runCapturedCommand({ ...binding, bunRuntimeInput }, command, {}, binding.root, timeoutMs, signal, 'disabled', {}, { script: { name: scriptName, content: script } });
+        const result = await runCapturedCommand({ ...binding, ...(bunRuntimeInput ? { bunRuntimeInput } : {}) }, command, {}, binding.root, timeoutMs, signal, 'disabled', {}, { script: { name: scriptName, content: script } });
         const error = result.timed_out ? `Captured REPL evaluation timed out after ${timeoutMs}ms.`
           : result.stderr || (!result.success && !result.denied && result.exit_code !== null
             ? `Captured REPL evaluation exited with code ${result.exit_code} and printed no error output.` : '');

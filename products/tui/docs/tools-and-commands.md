@@ -61,7 +61,14 @@ Deeper detail on the built-in tool families introduced above.
 
 ### REPL and eval runtimes
 
-The `repl` tool evaluates one JavaScript or TypeScript snippet with Bun and returns its printed value and console output. Each evaluation is one command through the same path as `exec`, so the command sandbox, its containment and the credential scrub apply to it unchanged. It is offered only where that path is contained: the per-command sandbox is on (`sandbox.enabled` and the `exec-sandbox` feature) and the host has bubblewrap. Elsewhere the tool is not in the model's tool list.
+The `repl` tool evaluates one snippet and returns its printed value and output. `runtime` picks the language:
+
+- `javascript` (the default) or `typescript`: run with Bun; the value of the last expression is printed
+- `python`: run by the system `python3` in isolated mode (`-I`); the `repr` of the last expression is printed, as the interactive interpreter does
+- `sql`: run on a fresh in-memory SQLite database; the rows of the last statement that returns rows are printed as JSON (or, when it returns none, the changes and last inserted row id). A binding is passed to each statement that names it as `$name`, `:name` or `@name`
+- `graphql`: the document is parsed and printed in normal form with its operations and fragments; with a `schema` binding (the schema as SDL text) it is also validated and every error is listed. Nothing is executed, so this runtime does not use the sandbox
+
+Each JavaScript, TypeScript, Python or SQL evaluation is one command through the same path as `exec`, so the command sandbox, its containment and the credential scrub apply to it unchanged. It is offered only where that path is contained: the per-command sandbox is on (`sandbox.enabled` and the `exec-sandbox` feature) and the host has bubblewrap. Elsewhere the tool is not in the model's tool list.
 
 - Each evaluation is stateless: no variables carry over between calls; `bindings` passes JSON values in as globals
 - `timeout_ms` bounds an evaluation (default 120000; 0 waits for it to finish or be cancelled)

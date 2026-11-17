@@ -19,7 +19,7 @@ Review the current state with `/sandbox review` and the live session with `/sand
 
 ## REPL and MCP isolation
 
-The `repl` tool is registered only where the exec sandbox is available, and each evaluation is one fresh `bun -e` command through the exec path, so it runs inside the same boundary as any command.
+The `repl` tool is registered only where the exec sandbox is available, and each evaluation is one fresh command through the exec path (`bun -e` for JavaScript, TypeScript and SQL, `python3 -I -c` for Python), so it runs inside the same boundary as any command. A GraphQL evaluation only parses and validates, in process; nothing is executed.
 
 `sandbox.mcpIsolation` decides how stdio MCP servers start. `disabled` (the default) runs each as a host process. `contained` runs each inside its own bubblewrap boundary: the workspace and `sandbox.workspaceWritable` paths writable, system files and the server's own install (the directory its executable lives in, and any absolute path in its arguments) read-only, `$HOME` and `/tmp` private, its own process namespace, and the host network shared, since most servers call out. On a host without bubblewrap a contained server is not started, and `/mcp` shows why. A change applies when a server next connects (`/mcp reload`). `/sandbox set-mcp <disabled|contained>` and `/sandbox apply-preset <contained|host-mcp>` set it.
 

@@ -184,7 +184,7 @@ export type {
 export { createDurabilityServices } from './durability-services.js';
 export type { DurabilityServices, DurabilityServicesInput } from './durability-services.js';
 
-export { resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from './operator-token-cleanup.js';
+export { readDaemonOperatorBearer, resolveDaemonCompanionToken, workspaceOperatorTokenCandidates } from './operator-token-cleanup.js';
 
 export { bindWriteLastSessionPointerToSurface } from './session-pointer-surface.js';
 

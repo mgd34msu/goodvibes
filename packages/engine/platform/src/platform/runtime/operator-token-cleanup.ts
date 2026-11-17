@@ -10,11 +10,13 @@
  *
  * `resolveDaemonCompanionToken` is the read side: which token this process
  * authenticates to its daemon with, honoring a per-process override.
+ * `readDaemonOperatorBearer` is the same rule without creating anything.
  */
 
 import { join } from 'node:path';
-import { getOrCreateCompanionToken } from '../pairing/companion-token.js';
+import { getOrCreateCompanionToken, readCompanionTokenValue } from '../pairing/companion-token.js';
 import type { CompanionPairingResult } from '../pairing/companion-token.js';
+import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
 
 /**
  * The absolute operator-tokens.json paths a workspace may hold from an older
@@ -59,4 +61,21 @@ export function resolveDaemonCompanionToken(
   const own = getOrCreateCompanionToken(peerName, { daemonHomeDir });
   const override = process.env.GOODVIBES_DAEMON_TOKEN?.trim();
   return override ? { ...own, token: override } : own;
+}
+
+/**
+ * The bearer the daemon on this machine serves with, read without creating
+ * anything: `GOODVIBES_DAEMON_TOKEN` when set (the daemon honors the same
+ * variable), otherwise the token in the home's operator-tokens.json. Null when
+ * neither holds one. A status question runs this, so it never mints, moves or
+ * repairs a credential. The one rule both terminal products read it with.
+ */
+export function readDaemonOperatorBearer(homeDirectory: string): string | null {
+  const override = process.env.GOODVIBES_DAEMON_TOKEN?.trim();
+  if (override) return override;
+  try {
+    return readCompanionTokenValue(resolveGoodVibesDaemonHome(homeDirectory));
+  } catch {
+    return null; // an unreadable record is no token here; the daemon's own boot repairs it
+  }
 }

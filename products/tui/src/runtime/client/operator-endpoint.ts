@@ -32,7 +32,7 @@
  * `GOODVIBES_DAEMON_TOKEN`, when set, wins here, once, for every caller, as it
  * does for the daemon itself (`resolveDaemonEndpoint`).
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { createGoodVibesPlatform, getOperatorMethod, isOperatorMethodId } from '@goodvibes-jev/engine/platform';
 import type { GoodVibesPlatform } from '@goodvibes-jev/engine/platform';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
@@ -43,6 +43,7 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platf
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { connectedDaemonCredentialsPath, connectedDaemonCredentialsRevision, readConnectedDaemonToken, readDaemonSessionToken } from './connected-daemon-credentials.ts';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
+import { readDaemonOperatorBearer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 /** Re-exported so this repo's importers keep one import site for the shape
@@ -125,18 +126,11 @@ export function daemonTokenOverride(): string | null {
  * Throws only in `mint` mode, when the record cannot be created.
  */
 export function resolveDaemonBearer(homeDirectory: string, mode: DaemonTokenMode): string | null {
+  // Read-only is the engine's one reader, shared with the Agent.
+  if (mode !== 'mint') return readDaemonOperatorBearer(homeDirectory);
   const override = daemonTokenOverride();
   if (override) return override;
-  const daemonHomeDir = resolveDaemonStateDirectory(homeDirectory);
-  if (mode === 'mint') return getOrCreateCompanionToken('tui', { daemonHomeDir }).token;
-  const path = operatorTokenPath(daemonHomeDir);
-  if (!existsSync(path)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { token?: unknown } | null;
-    return typeof parsed?.token === 'string' && parsed.token.trim() ? parsed.token : null;
-  } catch {
-    return null;
-  }
+  return getOrCreateCompanionToken('tui', { daemonHomeDir: resolveDaemonStateDirectory(homeDirectory) }).token;
 }
 
 /**

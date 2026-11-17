@@ -240,9 +240,10 @@ CORS policy should be configured at the network edge (reverse proxy) or in the d
 
 ### Rate Limiting {#rate-limiting}
 
-The daemon ships two built-in rate limiters:
+The daemon ships three built-in rate limiters:
 
-- **Login rate limiter.** 5 sign-in attempts per minute per client address, on `POST /login` of both the control-plane port and the optional HTTP listener (`loginRateLimit` option on the listener). It is checked before the body is read or any password work runs; past it the daemon answers `429` with `Retry-After`.
+- **Login rate limiter.** 5 sign-in attempts per minute per client address, on `POST /login` of both the control-plane port and the optional HTTP listener (`loginRateLimit` option on the listener). It is checked before the body is read or any password work runs; past it the daemon answers `429` with `Retry-After`. A sign-in body must be sent as `application/json`; any other content type is answered `415` (`SIGN_IN_NOT_JSON`) without a password check, so a cross-site form post from a page the owner visits cannot spend sign-in attempts.
+- **Pair request limiter.** 10 unauthenticated `POST /api/remote/pair/request` calls per minute per client address on the control-plane port; each accepted request is stored and announced, so past the limit the daemon answers `429` with `Retry-After` and stores nothing.
 - **General rate limiter.** 60 requests per minute per client address on the optional HTTP listener (configurable via `rateLimit` option). Applied to all of its routes except login.
 
 The client address is the socket peer, or the forwarded address when `controlPlane.trustProxy` (or `httpListener.trustProxy`) says a trusted reverse proxy is in front. Every failed sign-in event and audit entry carries that address. Limits survive a restart of the listener.
@@ -462,7 +463,7 @@ This file is an **output**, not an authentication input. The runtime reads it on
 
 #### A file that fell behind
 
-No password is derived at start to compare the file with the store. When a sign-in fails with exactly the username and password the file holds, the file has fallen behind (edited by hand, or left from an earlier store), and a `warn`-level log says so once, at that failed sign-in.
+No password is derived at start to compare the file with the store. When a sign-in fails with exactly the username and password the file holds, the file has fallen behind (edited by hand, or left from an earlier store): `/login` answers 401 with code `BOOTSTRAP_CREDENTIAL_STALE` and the next step, and a `warn`-level log says so once. Only someone who read that private file can send its exact pair, so the answer tells a stranger nothing.
 
 #### Recommended lifecycle after first login
 
@@ -496,7 +497,7 @@ No password is derived at start to compare the file with the store. When a sign-
 | Bootstrap file deleted before first login | Re-bootstrap by deleting both `auth-bootstrap.txt` **and** `auth-users.json`; both files are regenerated on next start |
 | `auth-users.json` deleted while `auth-bootstrap.txt` still exists | Daemon re-bootstraps with a new password and writes it to a new bootstrap file |
 | Both files deleted | Clean re-bootstrap: a new admin account and new bootstrap file are created. All existing sessions are invalidated (sessions are in-memory) |
-| Bootstrap file manually edited | Password mismatch; `/login` rejects the edited password and the failed sign-in logs that the file fell behind. Set a password with `rotatePassword()`, which deletes the file |
+| Bootstrap file manually edited | Password mismatch; `/login` answers a sign-in with the file's exact username and password with 401 `BOOTSTRAP_CREDENTIAL_STALE` (the file fell behind the user store; nothing is derived at start to find this out) and logs it once. Set a password with `goodvibes auth rotate-password <username>` (`rotatePassword()`), which deletes the file |
 
 There is no recovery path for a forgotten admin password beyond deleting both files to trigger a re-bootstrap.
 

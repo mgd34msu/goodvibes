@@ -232,6 +232,9 @@ interface DaemonHttpRouterContext {
   ) => import('../../tools/agent/index.js').AgentRecord | Response;
 }
 
+/** Unauthenticated pair requests one client address may make in a minute; a person asks once and waits for approval. */
+const PAIR_REQUESTS_PER_MINUTE = 10;
+
 /** The id (never the secret value) of the token a successful pair verification issued. */
 async function pairedTokenId(response: Response): Promise<string> {
   try {
@@ -265,6 +268,8 @@ export class DaemonHttpRouter {
   private readonly authFailures: AuthFailureAudit;
   /** Per-address sign-in attempts; kept for the router's life, so a listener rebind does not reset it. */
   private readonly signInLimiter = new AddressRateLimiter(SIGN_IN_ATTEMPTS_PER_MINUTE);
+  /** Per-address unauthenticated pair requests: each one is stored and announced, so a stranger may not make them at line rate. */
+  private readonly pairRequestLimiter = new AddressRateLimiter(PAIR_REQUESTS_PER_MINUTE);
   private servingPostureCache: { readonly revision: number; readonly posture: WebuiServingPosture } | null = null;
   /** The request path: who is calling and what is served, see request-router.ts. */
   private readonly requests: DaemonRequestRouter;
@@ -419,6 +424,14 @@ export class DaemonHttpRouter {
     }
 
     if (url.pathname === '/api/remote/pair/request' && req.method === 'POST') {
+      if (!this.pairRequestLimiter.allow(this.clientIpOf(req))) {
+        const refused = jsonErrorResponse({
+          error: 'Too many requests', code: 'RATE_LIMITED', state: 'this address used its pair requests for the minute',
+          next: ['Wait a minute, then ask to pair again'],
+        }, { status: 429 });
+        refused.headers.set('Retry-After', '60');
+        return refused;
+      }
       const response = await handleRemotePairRequest({
         parseJsonBody: (request) => this.parseJsonBody(request),
         distributedRuntime: this.context.distributedRuntime,

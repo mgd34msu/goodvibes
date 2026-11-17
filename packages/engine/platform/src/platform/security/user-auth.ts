@@ -127,6 +127,13 @@ export type AuthenticateResult =
     readonly ok: false; readonly user?: undefined; readonly usedBootstrapCredential?: undefined; readonly lockedUntilMs?: number;
     /** The sign-in queue was full, so the password was not checked; the caller answers "try again shortly". */
     readonly busy?: true;
+    /**
+     * The username and password tried are exactly the bootstrap credential
+     * file's, and the user store no longer accepts them: the file fell behind
+     * (edited by hand, or left from an earlier store). Only someone who read
+     * that private file can trigger this, so the caller may say so.
+     */
+    readonly staleBootstrapCredential?: true;
   };
 
 /**
@@ -532,7 +539,7 @@ export class UserAuthManager {
     const attempt = this.beginAttempt(username, clientAddress);
     if ('result' in attempt) return attempt.result;
     const settled = this.settleAttempt(attempt, verifyPassword(password, attempt.hashToCheck));
-    if ('ok' in settled) { this.noteStaleBootstrapCredential(username, password); return settled; }
+    if ('ok' in settled) return this.explainFailure(settled, username, password);
     const user = settled.upgrade ? this.saveUpgradedHash(username, settled.user, hashPassword(password, settled.upgrade)) : settled.user;
     return this.completeAttempt(attempt, password, user);
   }
@@ -554,7 +561,7 @@ export class UserAuthManager {
       const attempt = this.beginAttempt(username, clientAddress);
       if ('result' in attempt) return attempt.result;
       const settled = this.settleAttempt(attempt, await verifyPasswordAsync(password, attempt.hashToCheck));
-      if ('ok' in settled) { this.noteStaleBootstrapCredential(username, password); return settled; }
+      if ('ok' in settled) return this.explainFailure(settled, username, password);
       let user = settled.user;
       if (settled.upgrade) {
         try { user = this.saveUpgradedHash(username, user, await hashPasswordAsync(password, settled.upgrade)); }
@@ -622,22 +629,27 @@ export class UserAuthManager {
   }
 
   /**
-   * A sign-in failed with exactly the username and password the bootstrap
+   * A sign-in that failed with exactly the username and password the bootstrap
    * credential file holds: the file fell behind the user store (edited by hand,
-   * or left from an earlier store). Said here, where the failure is, instead of
-   * deriving a password at every start to find out.
+   * or left from an earlier store). Said here, where the failure is and the
+   * password check is already paid for, instead of deriving a password at every
+   * start to find out: the result carries it for the sign-in answer, and the
+   * log says it once per process. Costs one small file read per failed sign-in.
    */
-  private noteStaleBootstrapCredential(username: string, password: string): void {
-    if (!this.persistUsers || this.staleBootstrapNoted) return;
+  private explainFailure(failed: AuthenticateResult, username: string, password: string): AuthenticateResult {
+    if (!this.persistUsers || failed.ok || failed.busy) return failed;
     const credential = readBootstrapCredentialFile(this.bootstrapCredentialPath);
-    if (!credential || credential.username !== username || credential.password !== password) return;
-    this.staleBootstrapNoted = true;
-    logger.warn('The bootstrap credential file does not match the user store, so its password does not sign in', {
-      credentialPath: this.bootstrapCredentialPath,
-      userStorePath: this.userStorePath,
-      username,
-      hint: 'Edits to the bootstrap file do not change a password. Set one with the auth rotate command, or delete both files to generate a new admin.',
-    });
+    if (!credential || credential.username !== username || credential.password !== password) return failed;
+    if (!this.staleBootstrapNoted) {
+      this.staleBootstrapNoted = true;
+      logger.warn('The bootstrap credential file does not match the user store, so its password does not sign in', {
+        credentialPath: this.bootstrapCredentialPath,
+        userStorePath: this.userStorePath,
+        username,
+        hint: 'Edits to the bootstrap file do not change a password. Set one with goodvibes auth rotate-password <username>, or delete both files to generate a new admin.',
+      });
+    }
+    return { ...failed, staleBootstrapCredential: true };
   }
 
   private completeAttempt(attempt: { readonly username: string; readonly lockKey: string }, password: string, user: AuthUser): AuthenticateResult {

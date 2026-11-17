@@ -51,6 +51,16 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
     }, { status: 429 }), 60);
   }
 
+  // A cross-site form or text/plain POST needs no browser preflight; requiring
+  // the JSON media type keeps a page the owner visits from spending sign-in
+  // attempts (and the owner's lock budget) on its behalf. Every client sends it.
+  if (!isJsonMediaType(req.headers.get('content-type'))) {
+    return jsonErrorResponse({
+      error: 'Unsupported media type', code: 'SIGN_IN_NOT_JSON', state: 'the sign-in body was not sent as application/json',
+      next: ['Send the username and password as a JSON object with Content-Type: application/json'],
+    }, { status: 415 });
+  }
+
   const body = await parseDaemonJsonBody(req);
   if (body instanceof Response) return body;
   const username = typeof body.username === 'string' ? body.username : '';
@@ -112,6 +122,10 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
       'Set-Cookie': buildOperatorSessionCookie(session.token, { req, expiresAt: session.expiresAt, trustProxy: deps.trustProxy }),
     },
   });
+}
+
+function isJsonMediaType(contentType: string | null): boolean {
+  return contentType?.split(';', 1)[0]!.trim().toLowerCase() === 'application/json';
 }
 
 function retryAfter(response: Response, seconds: number): Response {

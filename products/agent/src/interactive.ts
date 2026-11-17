@@ -80,7 +80,7 @@ import { wireSpokenTurnRuntime } from './audio/spoken-turn-wiring.ts';
 import { installVoiceCapture } from './shell/voice-capture-shell.ts';
 import { createProcessFaultHandlers } from './runtime/process-fault-capture.ts';
 import { attachSpokenTurnModelRouting, createSpokenTurnInputOptions } from './audio/spoken-turn-model-routing.ts';
-import { bindOwnerInput } from './runtime/owner-input.ts';
+import { bindOwnerInput } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
 import { allowTerminalWrite, createShellLayout, installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell';
 import { buildCommandArgsHint } from './input/command-args-hint.ts';
@@ -678,7 +678,10 @@ async function main(prepared: PreparedShellCliRuntime) {
     const expandedReferences = options.source?.unsupportedSources.some((part) => part.kind === 'file' || part.kind === 'context') === true;
     const resendable = (unsent: string): string => !expandedReferences ? unsent
       : marker.kind === 'memory-pin' ? draft.replace(/^\s*!#\s*/, '') : draft;
-    sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined, (unsent) => restoreDraft(resendable(unsent)), true);
+    void sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined, {
+      notSent: (unsent) => restoreDraft(resendable(unsent)),
+      attachShellOutput: true,
+    });
   };
 
   /**
@@ -689,7 +692,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
     prepareSubmission();
     if (refuseUnsendable(text, options.source, content)) return;
-    sendTurn(text, options, undefined, restoreDraft, true);
+    void sendTurn(text, options, undefined, { attachShellOutput: true });
   };
 
   /** The reason last shown for running turns in this process; cleared once the host takes a message. */
@@ -701,24 +704,32 @@ async function main(prepared: PreparedShellCliRuntime) {
    * was refused before admission (the composer puts it back in the draft).
    * With `attachShellOutput`, the output of `!` commands run since the last
    * message goes in front of this one (as in the TUI); a refused message gives
-   * that output back, so the resend still carries it.
+   * that output back, so the resend still carries it. With `quiet`, the
+   * intake's lines go to the activity feed (a held message sent again).
+   * Resolves true once the message was taken (its turn ran or the host has
+   * it), false when it was refused and handed to `notSent`.
    */
   function sendTurn(
     text: string,
     options: ProductInputContext,
     turnOptions?: OrchestratorUserInputOptions,
-    notSent: (text: string) => void = restoreDraft,
-    attachShellOutput = false,
-  ): void {
+    how: {
+      readonly notSent?: ((text: string) => void) | undefined;
+      readonly attachShellOutput?: boolean | undefined;
+      readonly quiet?: boolean | undefined;
+    } = {},
+  ): Promise<boolean> {
     if (!text) {
       render();
-      return;
+      return Promise.resolve(false);
     }
-    const shell = attachShellOutput ? shellContextHold.take() : null;
+    const notSent = how.notSent ?? restoreDraft;
+    const shell = how.attachShellOutput ? shellContextHold.take() : null;
     const source: NativeConversationInput = { text: shell ? withShellContext(shell.blocks, text) : text, unsupportedSources: [] };
-    const refused = (): void => {
+    const refused = (): false => {
       shell?.restore();
       notSent(text);
+      return false;
     };
     // The host cannot take this message and nothing was sent for it: the turn runs here (the
     // documented behaviour of hostedSessions.routeConversationTurns). The reason is shown once
@@ -734,23 +745,24 @@ async function main(prepared: PreparedShellCliRuntime) {
       return orchestrator.handleUserInput(source.text, undefined,
         options.spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions);
     };
-    void (async () => {
+    const taken = (async (): Promise<boolean> => {
       try {
         const routed = await remoteConversation.routeNativeOrExplain(source, commandContext.nativeConversationIntake);
         if (routed && 'local' in routed) {
           await runLocal(routed.reason);
-          return;
+          return true;
         }
         if (routed) {
           shell?.release();
           localTurnReason = undefined;
-          return;
+          return true;
         }
         const state = await routeNativeConversationInput({
           intake: commandContext.nativeConversationIntake,
           source,
           notify: (message) => {
-            systemMessageRouter.userAction(message);
+            if (how.quiet) systemMessageRouter.activity(message);
+            else systemMessageRouter.userAction(message);
             render();
           },
           record: (message) => systemMessageRouter.activity(message),
@@ -760,15 +772,22 @@ async function main(prepared: PreparedShellCliRuntime) {
         // The host answered for this message: a later fallback states its reason again.
         if (state?.result) localTurnReason = undefined;
         // Refused (another input still being admitted or unresolved, input not acceptable): nothing was sent.
-        if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') refused();
-        else shell?.release();
+        if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') return refused();
+        shell?.release();
+        return true;
       } catch (error) {
         // Routing failed before the input was admitted: give back the draft.
         refused();
-        systemMessageRouter.high(`Your message was not sent: ${summarizeError(error)}`, 'error');
+        const line = `Your message was not sent: ${summarizeError(error)}`;
+        if (how.quiet) systemMessageRouter.activity(line);
+        else systemMessageRouter.high(line, 'error');
         render();
+        return false;
       }
     })();
+    // A message taken and settled has cleared the way for one held from the phone or a plan.
+    void taken.then((ok) => { if (ok && !how.quiet) sendHeldOwnerInput(); });
+    return taken;
   }
 
   const cancelGeneration = () => {
@@ -800,11 +819,65 @@ async function main(prepared: PreparedShellCliRuntime) {
     ),
   );
   // Companion messages and an activated plan take the composer's path as sent (no
-  // composer grammar), carrying their origin; refused text is shown, not put in the draft.
-  bindOwnerInput(orchestrator, (text, turnOptions) => sendTurn(text, {}, turnOptions, (unsent) => {
-    systemMessageRouter.high(`Not sent: "${unsent.length > 120 ? `${unsent.slice(0, 117)}...` : unsent}". Send it again once the current message is taken.`, 'warning');
-    render();
-  }));
+  // composer grammar), carrying their origin. One the intake refuses (another
+  // message is still being taken) is held, in order, and sent on its own once
+  // the way clears: when a message here settles, and every few seconds while
+  // something is held. Nothing from the phone or a plan's first turn is dropped,
+  // and the draft is never touched.
+  const heldOwnerInput: Array<{ readonly text: string; readonly turnOptions: OrchestratorUserInputOptions | undefined }> = [];
+  let heldOwnerTimer: ReturnType<typeof setTimeout> | null = null;
+  let heldOwnerSending = false;
+  const HELD_OWNER_INPUT_LIMIT = 16;
+  const HELD_OWNER_RETRY_MS = 5_000;
+  const describeOwnerInput = (text: string, turnOptions: OrchestratorUserInputOptions | undefined): string => {
+    const quoted = `"${text.length > 120 ? `${text.slice(0, 117)}...` : text}"`;
+    const from = turnOptions?.origin?.source;
+    return from ? `the ${from} message ${quoted}` : quoted;
+  };
+  function scheduleHeldOwnerInput(): void {
+    if (heldOwnerTimer || heldOwnerInput.length === 0) return;
+    heldOwnerTimer = setTimeout(() => {
+      heldOwnerTimer = null;
+      sendHeldOwnerInput();
+    }, HELD_OWNER_RETRY_MS);
+    (heldOwnerTimer as { unref?: () => void }).unref?.();
+  }
+  function sendHeldOwnerInput(): void {
+    if (heldOwnerSending || heldOwnerInput.length === 0) return;
+    heldOwnerSending = true;
+    void (async () => {
+      try {
+        while (heldOwnerInput.length > 0 && !orchestrator.isBusy) {
+          const next = heldOwnerInput[0]!;
+          if (!await sendTurn(next.text, {}, next.turnOptions, { notSent: () => {}, quiet: true })) break;
+          heldOwnerInput.shift();
+          systemMessageRouter.activity(`Sent ${describeOwnerInput(next.text, next.turnOptions)}, held until the previous message was taken.`);
+        }
+      } finally {
+        heldOwnerSending = false;
+        scheduleHeldOwnerInput();
+      }
+    })();
+  }
+  unsubs.push(() => {
+    if (heldOwnerTimer) clearTimeout(heldOwnerTimer);
+    heldOwnerTimer = null;
+  });
+  bindOwnerInput(orchestrator, (text, turnOptions) => {
+    const hold = (): void => {
+      if (heldOwnerInput.length >= HELD_OWNER_INPUT_LIMIT) {
+        systemMessageRouter.high(`Not sent: ${describeOwnerInput(text, turnOptions)}. ${HELD_OWNER_INPUT_LIMIT} messages are already waiting; send it again once they are taken.`, 'warning');
+      } else {
+        heldOwnerInput.push({ text, turnOptions });
+        systemMessageRouter.high(`Held ${describeOwnerInput(text, turnOptions)}: the current message is still being taken. It is sent on its own once that clears.`, 'warning');
+        scheduleHeldOwnerInput();
+      }
+      render();
+    };
+    // Behind a held message, a new one waits its turn so the order is kept.
+    if (heldOwnerInput.length > 0) hold();
+    else void sendTurn(text, {}, turnOptions, { notSent: hold });
+  });
   // Composer line prompts: masked for card material, echoed for addresses (see input/handler-line-prompts.ts).
   commandContext.beginConcealedInput = (request) => input.beginConcealedInput(request);
   commandContext.beginPlainInput = (request) => input.beginPlainInput(request);

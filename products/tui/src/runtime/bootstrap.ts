@@ -8,7 +8,7 @@ import {
 import { createTerminalOrchestrator, terminalCompanionInputHandler } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
 import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
-import { ownerInputFor } from './owner-input.ts';
+import { ownerInputFor } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 /**
  * Bootstrap composition root for goodvibes-tui.
  *

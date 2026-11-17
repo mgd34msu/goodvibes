@@ -5,7 +5,7 @@ import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './n
 import { registerTuiLegacyImportCommands } from '../input/commands/legacy-work-ledger-import-runtime.ts';
 import 'node:path';
 import { refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
-import { ownerInputFor } from './owner-input.ts';
+import { ownerInputFor } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import type { ConversationManager } from '../core/conversation';
 import { hydrateConversationUsage } from '../core/conversation-usage.ts';
 import type { Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';

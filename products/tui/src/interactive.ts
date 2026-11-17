@@ -26,7 +26,7 @@ import { InputHandler } from './input/handler.ts';
 import '@goodvibes-jev/engine/terminal-shell';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { OrchestratorUserInputOptions } from '@goodvibes-jev/engine/platform/platform/core';
-import { bindOwnerInput } from './runtime/owner-input.ts';
+import { bindOwnerInput } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import '@goodvibes-jev/engine/platform/platform/state';

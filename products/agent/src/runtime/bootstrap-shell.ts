@@ -21,7 +21,7 @@ import { createSystemMessageRouter, type SystemMessageRouter } from '../core/sys
 import { getConfigSnapshot } from '../config/index.ts';
 import { createBootstrapCommandContext } from './bootstrap-command-context.ts';
 import { startPlanActivationTurn } from './plan-activation.ts';
-import { ownerInputFor } from './owner-input.ts';
+import { ownerInputFor } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
 import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';

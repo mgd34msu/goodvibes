@@ -9,7 +9,7 @@ import {
   projectOrchestratorCoreServices,
 } from '@goodvibes-jev/engine/terminal-shell/bootstrap-orchestrator';
 import { buildPluginStartupContext } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
-import { ownerInputFor } from './owner-input.ts';
+import { ownerInputFor } from '@goodvibes-jev/engine/terminal-shell/companion-input';
 import { createPluginStartupTask } from '@goodvibes-jev/engine/terminal-shell/plugin-startup';
 import { readTierPromptSupplement } from '@goodvibes-jev/engine/platform/platform/providers';
 import { factsFor } from '@goodvibes-jev/engine/platform/platform/routing';

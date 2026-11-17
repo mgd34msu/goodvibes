@@ -103,7 +103,8 @@ export function httpStatusOf(error: unknown): number | undefined {
  * refusal, a wire body), or a `recoverable` boolean its creator set. A
  * GoodVibesError's `recoverable` counts only when it was passed in.
  */
-function statedRetryable(error: object): boolean | undefined {
+export function statedRetryable(error: unknown): boolean | undefined {
+  if (!error || typeof error !== 'object') return undefined;
   const record = error as Record<PropertyKey, unknown>;
   if (typeof record.retryable === 'boolean') return record.retryable;
   if (typeof record.recoverable !== 'boolean') return undefined;

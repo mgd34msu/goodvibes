@@ -775,6 +775,7 @@ export {
   classifyFailure,
   httpStatusOf,
   readFailureTransience,
+  statedRetryable,
   structuredTransience,
   transienceFromReading,
   TRANSIENT_STATUS_CODES,

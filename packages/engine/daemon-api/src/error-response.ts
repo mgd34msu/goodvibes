@@ -11,6 +11,8 @@ import {
   readFailure,
   readNextSteps,
   settleCategory,
+  statedRetryable,
+  structuredTransience,
   type StructuredDaemonErrorBody,
 } from '@goodvibes-jev/engine/errors';
 import { missingScopes } from './route-helpers.js';
@@ -408,6 +410,13 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
       providerCode,
       phase,
     });
+    // The answer may carry the route's status rather than the error's own, so a
+    // recoverable the error did not state is read from what the body says (its
+    // status, retry wait, code and category), the same reading a client makes.
+    const recoverable = statedRetryable(error)
+      ?? (error instanceof GoodVibesError
+        ? structuredTransience({ status, retryAfterMs: error.retryAfterMs, code: error.code, category })?.failureClass === 'retryable'
+        : undefined);
     return {
       error: summary,
       ...refused,
@@ -415,7 +424,7 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
       ...(error.code ? { code: error.code } : {}),
       category,
       ...(normalizeSource(error.source) ? { source: normalizeSource(error.source) } : {}),
-      ...(error.recoverable !== undefined ? { recoverable: error.recoverable } : {}),
+      ...(recoverable !== undefined ? { recoverable } : {}),
       ...(status !== undefined ? { status } : {}),
       // strip pipeline-internal fields for unprivileged callers.
       ...(isPrivileged && provider ? { provider } : {}),

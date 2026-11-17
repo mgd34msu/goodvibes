@@ -35,6 +35,12 @@ export interface RuntimeFeatureFlagOptions {
   readonly configManager: ConfigManager;
   /** The caller's manager. Present ⇒ used as-is (the caller already loaded and bridged it). */
   readonly featureFlags?: FeatureFlagManager | undefined;
+  /**
+   * Record spans in-process while `telemetry.otelMode` is left at its default:
+   * a daemon serves the telemetry traces routes, which list nothing unless the
+   * process records spans. A mode set in any settings file wins, `off` included.
+   */
+  readonly recordTracesUnlessSet?: boolean | undefined;
 }
 
 /**
@@ -46,7 +52,11 @@ export function resolveRuntimeFeatureFlags(options: RuntimeFeatureFlagOptions): 
   if (options.featureFlags === undefined) {
     // Gate states derive from domain settings keys; the bridge keeps live
     // config.set changes flowing. Wired only for a manager this call owns.
-    featureFlags.loadFromConfig({ flags: deriveFeatureStates(options.configManager) });
+    const flags = deriveFeatureStates(options.configManager);
+    if (options.recordTracesUnlessSet === true && !options.configManager.isExplicitlySet('telemetry.otelMode')) {
+      flags['otel-foundation'] = 'enabled';
+    }
+    featureFlags.loadFromConfig({ flags });
     bridgeTeardowns.set(featureFlags, bindFeatureSettingsBridge(options.configManager, featureFlags));
   }
   installComposedTelemetry(featureFlags); // telemetry.otelMode -> the process tracer

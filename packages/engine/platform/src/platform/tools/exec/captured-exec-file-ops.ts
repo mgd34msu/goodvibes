@@ -14,9 +14,10 @@ function within(root: string, path: string): boolean {
 /**
  * Run the existing file-operation implementation in a member's own captured
  * view (its worktree, written in place like any captured command's writes).
- * Every path an operation touches, each directory on the way included, passes
- * the owner's read authority once per call; reserved directories, links and
- * special files are refused with the path named.
+ * Every path an operation touches, each directory on the way and every entry
+ * inside a tree it moves, copies or deletes included, passes the owner's read
+ * authority once per call; reserved directories, links and special files are
+ * refused with the path named.
  */
 export async function executeCapturedFileOperations(
   capturedRoot: string,
@@ -75,16 +76,26 @@ export async function executeCapturedFileOperations(
     }
     return stat;
   };
-  // A moved or copied tree is checked entry by entry, with its destination.
+  // A moved, copied or deleted tree is checked entry by entry (with its
+  // destination when there is one): every file a recursive delete removes, or a
+  // dry run lists, must be one the owner admits, and a reserved directory or
+  // link anywhere inside it refuses the whole operation, naming that entry.
   const checkTree = async (path: string, destination?: string): Promise<void> => {
     const stat = await checkPath(path);
     if (destination !== undefined) await checkPath(destination);
-    if (!stat?.isDirectory() || destination === undefined) return;
-    for (const entry of await readdir(path)) await checkTree(join(path, entry), join(destination, entry));
+    if (!stat?.isDirectory()) return;
+    for (const entry of await readdir(path))
+      await checkTree(join(path, entry), destination === undefined ? undefined : join(destination, entry));
   };
   return executeFileOperations(operations, root, {
     beforeOperation: async (op) => {
-      await checkTree(op.source, op.op === 'delete' ? undefined : op.destination);
+      if (op.op === 'delete') {
+        // A plain delete removes one path; only a recursive delete or a dry run reaches inside a directory.
+        if (op.recursive || op.dry_run) await checkTree(op.source);
+        else await checkPath(op.source);
+      } else {
+        await checkTree(op.source, op.destination);
+      }
       if (!(op.op === 'delete' && op.dry_run)) onApply?.();
     },
     beforeImportUpdates: async () => {},

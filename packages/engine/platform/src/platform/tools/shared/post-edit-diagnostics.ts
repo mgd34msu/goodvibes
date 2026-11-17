@@ -16,9 +16,13 @@ import { CodeIntelligence as CodeIntelligenceImpl } from '../../intelligence/ind
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 
-/** A single error-level diagnostic for a touched file. */
+/**
+ * A single error-level diagnostic for a touched file, or a `notice` that a
+ * check did not finish, so an empty list is never read as "no errors" when the
+ * type check never answered.
+ */
 export interface PostEditDiagnostic {
-  readonly severity: 'error';
+  readonly severity: 'error' | 'notice';
   /** 1-based line. */
   readonly line: number;
   /** 0-based column. */
@@ -116,6 +120,8 @@ export class CodeDiagnosticsProvider implements DiagnosticsProvider {
       const result = await this.intel.lookupDiagnostics(filePath, { content, onlyRunning: true, waitMs: this.typeCheckWaitMs });
       if (result.status !== 'ok') {
         if (result.status !== 'no-server') logger.debug('CodeDiagnosticsProvider: no type check for this edit', { filePath, reason: result.reason });
+        // A running server that did not answer or failed: say so, so no errors listed is not read as clean.
+        if (result.status === 'timeout' || result.status === 'failed') return [typeCheckUnfinished(result.status, result.reason)];
         return [];
       }
       return result.items
@@ -129,9 +135,22 @@ export class CodeDiagnosticsProvider implements DiagnosticsProvider {
         }));
     } catch (err) {
       logger.warn('CodeDiagnosticsProvider: type check failed', { filePath, error: summarizeError(err) });
-      return [];
+      return [typeCheckUnfinished('failed', summarizeError(err))];
     }
   }
+}
+
+/** The notice for a type check a running language server did not finish for this text. */
+function typeCheckUnfinished(status: 'timeout' | 'failed', reason: string | undefined): PostEditDiagnostic {
+  const why = status === 'timeout' ? 'the language server did not answer in time' : 'the language server lookup failed';
+  return {
+    severity: 'notice',
+    line: 1,
+    column: 0,
+    message: `Type check did not finish (${why}${reason ? `: ${reason.replace(/\.+$/, '')}` : ''}), so type errors in this file are not known. `
+      + 'Check it with validate typecheck on the next write or edit, or run the project\'s typecheck with the exec tool.',
+    source: 'types',
+  };
 }
 
 /**
@@ -140,10 +159,12 @@ export class CodeDiagnosticsProvider implements DiagnosticsProvider {
  * Returns '' for an empty list so callers can append unconditionally.
  */
 export function formatDiagnosticsBlock(diagnostics: readonly PostEditFileDiagnostic[]): string {
-  if (diagnostics.length === 0) return '';
-  const typed = diagnostics.some((d) => d.source === 'types');
-  const lines = diagnostics.map((d) => `  ${d.file}:${d.line}:${d.column}${typed && d.source ? ` [${d.source}]` : ''} ${d.message}`);
-  return `\n⚠ ${typed ? 'Diagnostics' : 'Syntax diagnostics'} (${diagnostics.length}, errors only):\n${lines.join('\n')}`;
+  const errors = diagnostics.filter((d) => d.severity === 'error');
+  const notices = diagnostics.filter((d) => d.severity === 'notice').map((d) => `\nNote: ${d.file}: ${d.message}`).join('');
+  if (errors.length === 0) return notices;
+  const typed = errors.some((d) => d.source === 'types');
+  const lines = errors.map((d) => `  ${d.file}:${d.line}:${d.column}${typed && d.source ? ` [${d.source}]` : ''} ${d.message}`);
+  return `\n⚠ ${typed ? 'Diagnostics' : 'Syntax diagnostics'} (${errors.length}, errors only):\n${lines.join('\n')}${notices}`;
 }
 
 /**

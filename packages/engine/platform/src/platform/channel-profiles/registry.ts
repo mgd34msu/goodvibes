@@ -189,8 +189,15 @@ function resolveFrom(bindings: readonly ChannelProfileBinding[], surface: string
   if (!specific && !wide) return null;
   const profile: { model?: string; provider?: string; permissionMode?: ChannelPermissionMode } = {};
   const sources: Partial<Record<ChannelProfileField, string>> = {};
+  const nearest = (field: ChannelProfileField) => specific?.[field] !== undefined ? specific : wide?.[field] !== undefined ? wide : undefined;
+  // A model and its provider are one choice: the provider comes from the
+  // binding that chose the model, so a channel's model never runs on the
+  // provider a surface-wide binding chose for another model. A provider only
+  // stands alone when no binding chooses a model.
+  const modelFrom = nearest('model');
+  const providerFrom = modelFrom ? (modelFrom.provider !== undefined ? modelFrom : undefined) : nearest('provider');
   for (const field of PROFILE_FIELDS) {
-    const from = specific?.[field] !== undefined ? specific : wide?.[field] !== undefined ? wide : undefined;
+    const from = field === 'model' ? modelFrom : field === 'provider' ? providerFrom : nearest(field);
     if (!from) continue;
     sources[field] = from.id;
     if (field === 'permissionMode') profile.permissionMode = from.permissionMode!;

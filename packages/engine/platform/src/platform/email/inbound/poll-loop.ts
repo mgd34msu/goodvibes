@@ -311,7 +311,10 @@ export async function drainMailboxDelta(
       covered = uid;
     }
 
-    const outcome = await deliverBatch(deps.sink, messages);
+    const outcome = await deliverBatch(deps.sink, messages, deps.signal);
+    // Retired part-way through: nothing more is handed on and the cursor stays
+    // where it was, so the next reader hands the batch over again.
+    if (deps.signal.aborted) return finish('aborted', uids.length);
     delivered += outcome.done;
     // Only now, and only past what every consumer settled. Everything about
     // "no message is lost" is in this ordering.
@@ -372,10 +375,12 @@ export class MailboxReadFailures {
 async function deliverBatch(
   sink: InboundMailSink,
   messages: readonly InboundMailboxMessage[],
+  signal: AbortSignal,
 ): Promise<MailboxBatchOutcome> {
   if (messages.length === 0) return { done: 0, failed: false, error: null };
-  if (sink.deliverBatch) return sink.deliverBatch(messages);
+  if (sink.deliverBatch) return sink.deliverBatch(messages, signal);
   for (let index = 0; index < messages.length; index += 1) {
+    if (signal.aborted) return { done: index, failed: true, error: signal.reason };
     try {
       await sink.deliver(messages[index]!);
     } catch (error) {

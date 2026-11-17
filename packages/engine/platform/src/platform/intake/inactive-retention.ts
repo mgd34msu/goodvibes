@@ -59,8 +59,10 @@ function scalar(db: SqlDatabase, sql: string, params?: (string | number)[]): num
 }
 function knownSchema(db: SqlDatabase): void {
   const tables = db.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")[0]?.values.map(row => row[0]);
-  if (!tables || !['items', 'cursors', 'imap_checkpoints'].every(table => tables.includes(table))
-    || tables.some(table => !['items', 'cursors', 'imap_checkpoints', 'inbox_retention_policy', 'inbox_source_revision_policy', 'triage_receipts'].includes(String(table)))
+  // A mirror from before the mailbox reader fed it kept `imap_checkpoints`; a current one keeps `mail_generations`.
+  if (!tables || !['items', 'cursors'].every(table => tables.includes(table))
+    || !(tables.includes('imap_checkpoints') || tables.includes('mail_generations'))
+    || tables.some(table => !['items', 'cursors', 'imap_checkpoints', 'mail_generations', 'inbox_retention_policy', 'inbox_source_revision_policy', 'triage_receipts'].includes(String(table)))
     || scalar(db, "SELECT COUNT(*) FROM sqlite_master WHERE type IN ('trigger', 'view')") !== 0) throw unavailable();
   const itemColumns = db.exec('PRAGMA table_info(items)')[0]?.values;
   const columns = itemColumns?.map(row => row[1]);

@@ -538,7 +538,7 @@ export interface InboundMailSink {
    * settled. The reader moves its cursor past exactly those. A sink without it
    * is fed one message at a time.
    */
-  deliverBatch?(messages: readonly InboundMailboxMessage[]): Promise<MailboxBatchOutcome>;
+  deliverBatch?(messages: readonly InboundMailboxMessage[], signal?: AbortSignal): Promise<MailboxBatchOutcome>;
   /** The mailbox generation, told at every connection before any of its messages. */
   generation?(uidValidity: number): Promise<void>;
   /** Whether a consumer wants the history window kept on first run. */

@@ -517,8 +517,8 @@ export class GmailMailSource implements InboundMailSource {
     const start = this.position;
     // Every consumer of this mailbox gets the delta as one batch; the history
     // position passes only the messages they all settled.
-    const outcome = signal.aborted ? null : await deliverToSink(this.deps.sink, messages);
-    if (outcome === null) return this.verdict;
+    const outcome = signal.aborted ? null : await deliverToSink(this.deps.sink, messages, signal);
+    if (outcome === null || signal.aborted) return this.verdict;
     const refused = outcome.failed ? messages[outcome.done] : undefined;
     if (refused !== undefined) {
       const error = outcome.error;
@@ -924,10 +924,12 @@ export class GmailMailSource implements InboundMailSource {
 async function deliverToSink(
   sink: InboundMailSink,
   messages: readonly GmailInboundMessage[],
+  signal: AbortSignal,
 ): Promise<MailboxBatchOutcome> {
   if (messages.length === 0) return { done: 0, failed: false, error: null };
-  if (sink.deliverBatch) return sink.deliverBatch(messages);
+  if (sink.deliverBatch) return sink.deliverBatch(messages, signal);
   for (const [index, message] of messages.entries()) {
+    if (signal.aborted) return { done: index, failed: true, error: signal.reason };
     try {
       await sink.deliver(message);
     } catch (error) {

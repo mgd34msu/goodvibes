@@ -108,7 +108,7 @@ export class MailboxFanOut implements InboundMailSink {
     if (outcome.failed) throw outcome.error;
   }
 
-  async deliverBatch(messages: readonly InboundMailboxMessage[]): Promise<MailboxBatchOutcome> {
+  async deliverBatch(messages: readonly InboundMailboxMessage[], signal?: AbortSignal): Promise<MailboxBatchOutcome> {
     let done = messages.length;
     let failed = false;
     let error: unknown = null;
@@ -119,6 +119,8 @@ export class MailboxFanOut implements InboundMailSink {
     const consumers = this.consumers();
     for (const consumer of consumers) {
       for (let index = 0; index < messages.length; index += 1) {
+        // A reader retired part-way through hands nothing more on.
+        if (signal?.aborted) { fail(index, signal.reason); break; }
         try {
           await consumer.deliver(messages[index]!);
         } catch (cause) {

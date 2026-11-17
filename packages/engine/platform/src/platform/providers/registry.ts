@@ -363,11 +363,29 @@ export class ProviderRegistry {
     if (replaced && replaced !== provider) void disposeProvider(replaced);
   }
 
+  private readonly liveDiscoveryParticipants = new Set<() => void>();
+
+  /**
+   * Run `participant`, without waiting for it, at each live re-check: the
+   * moment a picker opens or a model list is read. A host adds its scan for
+   * model servers on its own computer here, so one started after the host is
+   * listed without a restart. Returns its removal.
+   */
+  addLiveDiscoveryParticipant(participant: () => void): () => void {
+    this.liveDiscoveryParticipants.add(participant);
+    return () => { this.liveDiscoveryParticipants.delete(participant); };
+  }
+
   /** The picker-open re-check hook (see registry-live-model-discovery.ts): force bypasses each provider's TTL cache. */
   async refreshLiveModelDiscovery(
     providerId?: string,
     options: { force?: boolean } = {},
   ): Promise<Array<{ providerId: string } & LiveModelDiscoveryResult>> {
+    for (const participant of [...this.liveDiscoveryParticipants]) {
+      try { participant(); } catch (error) {
+        logger.warn('ProviderRegistry: a live discovery participant failed', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     // Sweeps run one after another so two overlapping calls cannot finish out of
     // order and leave the older answer in place.
     const run = async () => {

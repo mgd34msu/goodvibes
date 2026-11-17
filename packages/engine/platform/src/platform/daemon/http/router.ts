@@ -729,7 +729,14 @@ export class DaemonHttpRouter {
         memoryConsolidation: this.context.memoryConsolidation ?? null,
         parseJsonBody: (request) => this.parseJsonBody(request),
         providerRuntime: {
-          listSnapshots: () => listProviderRuntimeSnapshots(this.context.providerRegistry),
+          listSnapshots: () => {
+            // The same TTL-respecting re-check GET /api/models runs, without waiting for it:
+            // a list read is when a provider or local model server that appeared since is wanted.
+            void this.context.providerRegistry.refreshLiveModelDiscovery().catch((error: unknown) => {
+              logger.warn('[providers] live-discovery refresh on list failed', { error: summarizeError(error) });
+            });
+            return listProviderRuntimeSnapshots(this.context.providerRegistry);
+          },
           getSnapshot: (providerId) => getProviderRuntimeSnapshot(this.context.providerRegistry, providerId),
           getUsageSnapshot: (providerId) => getProviderUsageSnapshot(this.context.providerRegistry, providerId),
         },

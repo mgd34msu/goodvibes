@@ -13,6 +13,9 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import { defineLifecycle, logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 
+/** The fewest milliseconds between two local model server scans that a model list read starts. */
+const LOCAL_SCAN_FLOOR_MS = 45_000;
+
 export interface DaemonHostBinding {
   readonly host?: string;
   readonly port?: number;
@@ -257,9 +260,19 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       );
       discovery.start();
       // A local model server started after the daemon, or still loading at
-      // start, is found by the scan that runs on wake from sleep.
+      // start, is found by the scan that runs on wake from sleep, and by one
+      // when a model list is read (a picker opens, providers.list, models.list).
+      // Those reads scan at most once per LOCAL_SCAN_FLOOR_MS: one localhost
+      // probe round, off the request path.
       const scanOnWake = runtime.powerManager.onSleepEdge({ onWake: () => { discovery?.start(); } });
       scope.registry.add('provider discovery on wake', scanOnWake);
+      let lastListScanAt = Date.now();
+      scope.registry.add('provider discovery on list read', runtime.providerRegistry.addLiveDiscoveryParticipant(() => {
+        const now = Date.now();
+        if (now - lastListScanAt < LOCAL_SCAN_FLOOR_MS) return;
+        lastListScanAt = now;
+        discovery?.start();
+      }));
 
       phase = 'server construction';
       observeNativeStartupPhase('listener-construction');

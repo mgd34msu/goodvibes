@@ -25,7 +25,7 @@ import { SteerComposer } from '../sessions/SteerComposer';
 import { SessionChanges } from '../sessions/SessionChanges';
 import { SessionRewind } from '../sessions/SessionRewind';
 import { CheckpointsPanel } from './CheckpointsPanel';
-import type { HostedAttachment } from './HostedSessionDetail';
+import { HostedTurnStop, type HostedAttachment } from './HostedSessionDetail';
 import type { SessionTab } from './SessionDetail';
 import { sentenceCase } from './work-items';
 
@@ -158,6 +158,7 @@ export function HostedSessionWorkDetail({ sessionId, attachment, record, fallbac
             </ul>
           )}
           <DetailSection title="Continue session">
+            {!ended && session.status === 'running' && <HostedTurnStop sessionId={sessionId} attachment={attachment} />}
             <SteerComposer sessionId={sessionId} canSteer={!ended} closed={ended} streamPaused={streamPaused} />
           </DetailSection>
         </>

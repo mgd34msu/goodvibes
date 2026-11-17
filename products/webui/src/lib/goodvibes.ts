@@ -1636,6 +1636,13 @@ export const client = {
       create: (input: OperatorMethodInput<'sessions.create'>) => invokeOperator('sessions.create', input),
       close: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.close', { sessionId }, signal),
       reopen: (sessionId: string, signal?: AbortSignal) => invokeOperator('sessions.reopen', { sessionId }, signal),
+      // Stop the turn the caller saw running: compare-and-cancel on expectedTurnId. The
+      // answer is one of cancellation-requested, already-ended, stale-turn (with the
+      // activeTurnId now running) or turn-not-found; the turn's terminal event settles it.
+      turns: {
+        cancel: (sessionId: string, expectedTurnId: string, signal?: AbortSignal) =>
+          invokeOperator('sessions.turns.cancel', { sessionId, expectedTurnId }, signal),
+      },
       // delete: requires the session to already be closed (409 SESSION_ACTIVE otherwise),
       // callers close first. `deleted: true` means the record and its messages are gone.
       delete: (sessionId: string, signal?: AbortSignal): Promise<SessionDeleteResult> =>

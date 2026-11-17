@@ -108,6 +108,20 @@ function endsTurn(frame: HostedStreamFrame): boolean {
   return frame.payload.stopReason === 'context_overflow';
 }
 
+/** The id of the turn a frame shows running (any turn or tool frame stamped with a
+ * turnId, except the terminal ones and a PREFLIGHT_FAIL, which can name a rejected
+ * duplicate under a fresh id), or null. What a Stop sends as its expected turn. */
+export function liveTurnIdFromFrame(frame: HostedStreamFrame): string | null {
+  if (frame.type === 'PREFLIGHT_FAIL' || isTerminalTurnFrame(frame)) return null;
+  const turnId = firstString(frame.payload, ['turnId']);
+  return turnId || null;
+}
+
+/** The turn a terminal frame ended ('' when the frame names none), or null for any other frame. */
+export function endedTurnIdFromFrame(frame: HostedStreamFrame): string | null {
+  return isTerminalTurnFrame(frame) ? firstString(frame.payload, ['turnId']) : null;
+}
+
 /** True for a frame that means the turn is no longer in flight, the local
  * "streaming" indicator drops and any live-text buffer clears. */
 export function isTerminalTurnFrame(frame: HostedStreamFrame): boolean {

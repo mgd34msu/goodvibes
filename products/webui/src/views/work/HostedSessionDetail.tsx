@@ -16,7 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { LogOut, OctagonX } from 'lucide-react';
+import { LogOut, OctagonX, Square } from 'lucide-react';
 import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lifetime';
 import { hostedSessionDetachBeacon, client as platformClient } from '../../lib/goodvibes';
 import type { HostedSessionHistoryMessage, HostedSessionRecord } from '../../lib/goodvibes';
@@ -31,9 +31,11 @@ import {
   hostedTerminationLabel,
 } from '../../lib/hosted-sessions';
 import {
+  endedTurnIdFromFrame,
   hostedLiveMessageFromTurnFrame,
   hostedToolCallFromFrame,
   isTerminalTurnFrame,
+  liveTurnIdFromFrame,
   streamDeltaAccumulated,
   type HostedActiveToolCall,
   type HostedLiveMessage,
@@ -57,6 +59,10 @@ export interface HostedAttachment {
   readonly liveMessages: readonly HostedLiveMessage[];
   readonly liveText: string;
   readonly activeToolCalls: readonly HostedActiveToolCall[];
+  /** The turn the stream last showed running, or null when none is known. */
+  readonly activeTurnId: string | null;
+  /** Take the turn the daemon named as running (a stale-turn answer) as the one to stop. */
+  readonly adoptActiveTurn: (turnId: string) => void;
   readonly attaching: boolean;
   readonly attachError: string | null;
   readonly killPending: boolean;
@@ -95,10 +101,15 @@ export function useHostedAttachment(
   const [liveMessages, setLiveMessages] = useState<HostedLiveMessage[]>([]);
   const [liveText, setLiveText] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<HostedActiveToolCall[]>([]);
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
 
   const onStreamFrame = useCallback((frame: HostedStreamFrame) => {
     streamRevision.current++;
+    const runningTurnId = liveTurnIdFromFrame(frame);
+    if (runningTurnId) setActiveTurnId(runningTurnId);
+    const endedTurnId = endedTurnIdFromFrame(frame);
+    if (endedTurnId !== null) setActiveTurnId((current) => (!endedTurnId || current === endedTurnId ? null : current));
     const delta = streamDeltaAccumulated(frame);
     if (delta !== null) {
       setLiveText(delta);
@@ -189,6 +200,7 @@ export function useHostedAttachment(
     setLiveMessages([]);
     setLiveText('');
     setActiveToolCalls([]);
+    setActiveTurnId(null);
     setAttachError(null);
     setAttaching(Boolean(selectedId));
     if (!selectedId) return;
@@ -223,6 +235,7 @@ export function useHostedAttachment(
           if (session.status !== 'running') {
             setLiveText('');
             setActiveToolCalls([]);
+            setActiveTurnId(null);
           }
         } else refreshAgain = true;
       } catch (error) {
@@ -297,6 +310,8 @@ export function useHostedAttachment(
     liveMessages,
     liveText,
     activeToolCalls,
+    activeTurnId,
+    adoptActiveTurn: setActiveTurnId,
     attaching,
     attachError,
     killPending: killMutation.isPending,
@@ -304,6 +319,53 @@ export function useHostedAttachment(
     kill: () => void kill(),
     confirmElement: confirm.element,
   };
+}
+
+/**
+ * Stop the running turn of a hosted session: compare-and-cancel on the turn the
+ * stream showed, so a Stop never lands on a newer turn the person has not seen.
+ * Each of the verb's answers is said as what happened.
+ */
+export function HostedTurnStop({ sessionId, attachment }: { sessionId: string; attachment: HostedAttachment }) {
+  const { toast } = useToast();
+  const stop = useMutation({
+    mutationFn: (turnId: string) => platformClient.operator.sessions.turns.cancel(sessionId, turnId),
+    onSuccess: (result) => {
+      switch (result.status) {
+        case 'cancellation-requested':
+          toast({ title: 'Stopping the turn', description: 'The turn stops at its next safe point; the transcript shows when it has.', tone: 'info' });
+          break;
+        case 'already-ended':
+          toast({ title: 'That turn had already ended', tone: 'info' });
+          break;
+        case 'stale-turn':
+          if (result.activeTurnId) attachment.adoptActiveTurn(result.activeTurnId);
+          toast({ title: 'A newer turn is running', description: 'Nothing was stopped. Press Stop turn again to stop the turn running now.', tone: 'warning' });
+          break;
+        case 'turn-not-found':
+          toast({ title: 'No turn is running', description: 'Nothing was stopped.', tone: 'info' });
+          break;
+      }
+    },
+    onError: (error: unknown) => {
+      toast({ title: 'Could not stop the turn', description: formatError(error), tone: 'danger' });
+    },
+  });
+  const turnId = attachment.activeTurnId;
+  return (
+    <div>
+      <Button
+        size="sm"
+        variant="danger"
+        icon={<Square aria-hidden="true" />}
+        disabled={!turnId || stop.isPending}
+        title={turnId ? undefined : 'Waiting for the running turn to report itself'}
+        onClick={() => { if (turnId) stop.mutate(turnId); }}
+      >
+        {stop.isPending ? 'Stopping…' : 'Stop turn'}
+      </Button>
+    </div>
+  );
 }
 
 export function HostedSessionDetail({
@@ -395,6 +457,7 @@ export function HostedSessionDetail({
             </ul>
           )}
           <DetailSection title="Continue session">
+            {!closed && session.status === 'running' && <HostedTurnStop sessionId={session.id} attachment={attachment} />}
             <SteerComposer sessionId={session.id} canSteer={!closed} closed={closed} />
           </DetailSection>
         </>

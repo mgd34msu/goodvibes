@@ -12,13 +12,10 @@
  *   delivery state, a superseded mark) is appended again and the latest line
  *   wins. The transcript is read when the chat is opened, not at start-up.
  *
- * Chats saved by earlier versions as one `<id>.json` file are converted on
- * first start-up and the old file is kept beside them as `<id>.json.migrated`.
- *
  * Default storage root: ~/.goodvibes/companion-chat/sessions/
  */
 
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { CompanionChatMessage, CompanionChatSession } from './companion-chat-types.js';
@@ -89,7 +86,6 @@ export function defaultSessionsDir(homeDirectory?: string): string {
 
 const META_SUFFIX = '.meta.json';
 const LOG_SUFFIX = '.jsonl';
-const LEGACY_SUFFIX = '.json';
 /** Rewrite a transcript whose superseded lines outnumber its messages by this much, when it is opened. */
 const COMPACT_SLACK = 64;
 
@@ -131,9 +127,8 @@ export class CompanionChatPersistence {
   }
 
   /**
-   * The summary of every saved chat, for start-up. Converts chats saved in the
-   * single-file format first. An unreadable summary is moved aside by the
-   * document reader and reported in {@link rejectedOnLoad}.
+   * The summary of every saved chat, for start-up. An unreadable summary is
+   * moved aside by the document reader and reported in {@link rejectedOnLoad}.
    */
   loadIndex(): CompanionChatSession[] {
     this.#rejected = [];
@@ -145,15 +140,8 @@ export class CompanionChatPersistence {
       logger.warn('CompanionChatPersistence: failed to read sessions directory', { dir: this.sessionsDir, error: summarizeError(err) });
       return [];
     }
-    const present = new Set(names);
-    for (const name of names) {
-      if (!name.endsWith(LEGACY_SUFFIX) || name.endsWith(META_SUFFIX)) continue;
-      const id = name.slice(0, -LEGACY_SUFFIX.length);
-      if (present.has(`${id}${META_SUFFIX}`)) continue;
-      if (this.migrateLegacy(name)) present.add(`${id}${META_SUFFIX}`);
-    }
     const metas: CompanionChatSession[] = [];
-    for (const name of present) {
+    for (const name of names) {
       if (!name.endsWith(META_SUFFIX)) continue;
       const id = name.slice(0, -META_SUFFIX.length);
       if (!safeSessionId(id)) continue;
@@ -166,44 +154,6 @@ export class CompanionChatPersistence {
       else if (existsSync(join(this.sessionsDir, name)) === false) this.#rejected.push({ file: name, reason: 'summary could not be read and was set aside' });
     }
     return metas;
-  }
-
-  /** Convert one single-file chat. True when the chat now has a summary file. */
-  private migrateLegacy(name: string): boolean {
-    const file = join(this.sessionsDir, name);
-    const id = name.slice(0, -LEGACY_SUFFIX.length);
-    let mismatch = false;
-    const chat = readDocument(file, {
-      label: 'companion-chat/legacy',
-      validate: (parsed) => {
-        if (!isPersistedChatSession(parsed)) throw new Error('content is not a saved chat this version understands');
-        if (parsed.meta.id !== id || !safeSessionId(id)) { mismatch = true; return null; }
-        return parsed;
-      },
-      recovery: 'The chat no longer appears in the chat list.',
-    });
-    if (mismatch) {
-      // A well-formed chat under another name is not ours to rename: reported and left where it is.
-      this.#rejected.push({ file: name, reason: 'file name does not match the chat id inside it' });
-      return false;
-    }
-    if (!chat) {
-      if (!existsSync(file)) this.#rejected.push({ file: name, reason: 'content is not a saved chat this version understands; set aside' });
-      return false;
-    }
-    try {
-      const log = this.open(id);
-      for (const message of chat.messages) log.append({ m: storedMessage(message) });
-      log.close();
-      this.logs.delete(id);
-      writeDocument(this.path(id, META_SUFFIX), chat.meta, { mode: 0o600 });
-      renameSync(file, `${file}.migrated`);
-      return true;
-    } catch (err) {
-      logger.warn('CompanionChatPersistence: could not convert a saved chat; it stays in its old file', { file: name, error: summarizeError(err) });
-      this.#rejected.push({ file: name, reason: 'could not be converted to the current format' });
-      return false;
-    }
   }
 
   private open(sessionId: string): RecordLog<ChatRecord> {
@@ -273,7 +223,7 @@ export class CompanionChatPersistence {
   /** Delete a chat's files. Rejects when a file could not be removed. */
   async delete(sessionId: string): Promise<void> {
     this.release(sessionId);
-    for (const suffix of [META_SUFFIX, LOG_SUFFIX, LEGACY_SUFFIX, `${LEGACY_SUFFIX}.migrated`]) {
+    for (const suffix of [META_SUFFIX, LOG_SUFFIX]) {
       try {
         unlinkSync(this.path(sessionId, suffix));
       } catch (err) {
@@ -307,11 +257,6 @@ export class CompanionChatPersistence {
           const meta = readMeta(JSON.parse(readFileSync(join(this.sessionsDir, name), 'utf-8')) as unknown, id);
           const lines = present.has(`${id}${LOG_SUFFIX}`) ? readFileSync(join(this.sessionsDir, `${id}${LOG_SUFFIX}`), 'utf-8') : '';
           results.push({ meta, messages: readRecords(parseLines(lines)).messages });
-        } else if (name.endsWith(LEGACY_SUFFIX) && !present.has(`${name.slice(0, -LEGACY_SUFFIX.length)}${META_SUFFIX}`)) {
-          const parsed = JSON.parse(readFileSync(join(this.sessionsDir, name), 'utf-8')) as unknown;
-          if (!isPersistedChatSession(parsed)) rejected.push({ file: name, reason: 'content is not a saved chat this version understands' });
-          else if (`${parsed.meta.id}${LEGACY_SUFFIX}` !== name) rejected.push({ file: name, reason: 'file name does not match the chat id inside it' });
-          else results.push(parsed);
         }
       } catch (err) {
         rejected.push({ file: name, reason: `could not be read (${summarizeError(err)})` });
@@ -363,17 +308,6 @@ function isMessage(value: unknown): value is CompanionChatMessage {
   if (typeof value !== 'object' || value === null) return false;
   const m = value as Record<string, unknown>;
   return typeof m['id'] === 'string' && (m['role'] === 'user' || m['role'] === 'assistant') && typeof m['content'] === 'string';
-}
-
-function isPersistedChatSession(value: unknown): value is PersistedChatSession {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v['meta'] === 'object' &&
-    v['meta'] !== null &&
-    typeof (v['meta'] as Record<string, unknown>)['id'] === 'string' &&
-    Array.isArray(v['messages'])
-  );
 }
 
 function isNodeErrorCode(value: unknown, code: string): boolean {

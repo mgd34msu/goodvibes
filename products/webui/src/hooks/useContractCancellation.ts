@@ -29,24 +29,28 @@ function isNotRunning(error: unknown): boolean {
 
 const RESPONSE_DEADLINE_MS = 30_000;
 
-/** Cancels already in flight, per account revision and contract: reopening the pane does not send a second one. */
-const inFlight = new Set<string>();
+interface Outcome {
+  readonly phase: Exclude<Phase, 'idle' | 'confirming' | 'pending'>;
+  readonly detail?: string;
+}
+
+/**
+ * Cancels already in flight, per account revision and contract, each with the
+ * answer it will settle to: reopening the pane does not send a second one, and
+ * a pane opened while one is in flight shows its answer when it comes.
+ */
+const inFlight = new Map<string, Promise<Outcome>>();
 
 export function useContractCancellation(lifetime: ClientLifetime, id: string) {
   const client = useQueryClient();
   const flightKey = `${lifetime.revision}:${id}`;
-  const [phase, setPhase] = useState<Phase>(() => inFlight.has(flightKey) ? 'pending' : 'idle');
+  // Read at render, so a flight that settles before the effect below runs is still joined.
+  const flightAtRender = inFlight.get(flightKey);
+  const [phase, setPhase] = useState<Phase>(() => flightAtRender ? 'pending' : 'idle');
   const [detail, setDetail] = useState<string | undefined>(undefined);
   const mounted = useRef(true);
   const abortRef = useRef<AbortController | undefined>(undefined);
   const current = () => isClientLifetimeCurrent(lifetime) && hasStoredTokenSync();
-
-  useEffect(() => {
-    mounted.current = true;
-    // A new account must not adopt this one's answer; leaving the pane lets a sent cancel finish.
-    const unsubscribe = subscribeClientLifetime(() => abortRef.current?.abort());
-    return () => { mounted.current = false; unsubscribe(); };
-  }, [lifetime, id]);
 
   const show = (next: Phase, text?: string) => {
     if (!mounted.current || !current()) return;
@@ -54,29 +58,47 @@ export function useContractCancellation(lifetime: ClientLifetime, id: string) {
     setDetail(text);
   };
 
-  async function send(): Promise<void> {
-    if (!current() || inFlight.has(flightKey)) return;
-    inFlight.add(flightKey);
-    const abort = new AbortController();
-    abortRef.current = abort;
-    show('pending');
+  useEffect(() => {
+    mounted.current = true;
+    // A new account must not adopt this one's answer; leaving the pane lets a sent cancel finish.
+    const unsubscribe = subscribeClientLifetime(() => abortRef.current?.abort());
+    // A pane opened while this contract's cancel is in flight (sent from an
+    // earlier pane) starts as pending and shows that cancel's answer when it comes.
+    const flight = flightAtRender ?? inFlight.get(flightKey);
+    if (flight) void flight.then((outcome) => show(outcome.phase, outcome.detail));
+    return () => { mounted.current = false; unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the flight is keyed by lifetime.revision and id
+  }, [lifetime, id]);
+
+  async function request(abort: AbortController): Promise<Outcome> {
     const timer = setTimeout(() => abort.abort(), RESPONSE_DEADLINE_MS);
     try {
       const result = await platformClient.operator.contracts.cancel(id, abort.signal);
-      show(result.cancelled ? 'acknowledged' : 'not-cancelled');
+      return { phase: result.cancelled ? 'acknowledged' : 'not-cancelled' };
     } catch (error) {
-      if (isNotRunning(error)) show('not-cancelled');
-      else if (!abort.signal.aborted && isDefiniteRefusal(error)) show('refused', `The daemon refused the cancel: ${formatError(error)}`);
-      else show('no-answer', `No answer from the daemon (${abort.signal.aborted ? `nothing within ${RESPONSE_DEADLINE_MS / 1000}s` : formatError(error)}). Retry sends the cancel again; a contract that already stopped is reported as such.`);
+      if (isNotRunning(error)) return { phase: 'not-cancelled' };
+      if (!abort.signal.aborted && isDefiniteRefusal(error)) return { phase: 'refused', detail: `The daemon refused the cancel: ${formatError(error)}` };
+      return { phase: 'no-answer', detail: `No answer from the daemon (${abort.signal.aborted ? `nothing within ${RESPONSE_DEADLINE_MS / 1000}s` : formatError(error)}). Retry sends the cancel again; a contract that already stopped is reported as such.` };
     } finally {
       clearTimeout(timer);
-      inFlight.delete(flightKey);
-      if (abortRef.current === abort) abortRef.current = undefined;
-      if (current()) {
-        void client.invalidateQueries({ queryKey: [...queryKeys.contracts, lifetime.revision] });
-        void client.invalidateQueries({ queryKey: queryKeys.fleet });
-      }
     }
+  }
+
+  async function send(): Promise<void> {
+    if (!current() || inFlight.has(flightKey)) return;
+    const abort = new AbortController();
+    abortRef.current = abort;
+    show('pending');
+    const flight = request(abort);
+    inFlight.set(flightKey, flight);
+    const outcome = await flight;
+    inFlight.delete(flightKey);
+    if (abortRef.current === abort) abortRef.current = undefined;
+    if (current()) {
+      void client.invalidateQueries({ queryKey: [...queryKeys.contracts, lifetime.revision] });
+      void client.invalidateQueries({ queryKey: queryKeys.fleet });
+    }
+    show(outcome.phase, outcome.detail);
   }
 
   const ask = useCallback(() => {

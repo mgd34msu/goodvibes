@@ -269,7 +269,7 @@ const TURN_COUNTER_PREFIX = /^turn\s+\d+\s*(?:[·:•\-–—]\s*)?/i;
  * identical-body check suppresses the repeat instead of shipping it.
  *
  * Callers must still pass a STATUS ("what is happening now"), never content:
- * `AgentRecord.progress` is exactly that, and `streamingContent` is not.
+ * `AgentRecord.progress` is exactly that; the agent's output is not.
  *
  * Whether a line is a placeholder is the producer's fact, not a reading: the
  * orchestrator stamps "Turn N · Thinking…" and its other machine lines

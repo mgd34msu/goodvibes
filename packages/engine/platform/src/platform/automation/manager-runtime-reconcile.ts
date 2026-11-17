@@ -238,7 +238,7 @@ export function reconcileAutomationActiveRuns(context: AutomationReconcileContex
     const endedAt = agent.completedAt ?? now;
     const telemetry = buildRunTelemetryFromAgent(agent, run);
     settleAutomationRun(context, run, terminalStatus === 'completed'
-      ? { status: 'completed', endedAt, result: agent.fullOutput ?? agent.streamingContent ?? agent.progress ?? null, telemetry }
+      ? { status: 'completed', endedAt, result: agent.fullOutput ?? agent.progress ?? null, telemetry }
       : terminalStatus === 'failed'
         ? { status: 'failed', endedAt, error: agent.error ?? 'Agent failed', failure: { error: agent.error ?? '' }, telemetry }
         : { status: 'cancelled', endedAt, reason: agent.error ?? 'Agent cancelled', telemetry }, 'automation.reconcile');

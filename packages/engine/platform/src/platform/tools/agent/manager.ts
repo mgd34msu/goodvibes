@@ -1165,7 +1165,7 @@ export class AgentManager {
 
   exportState(): AgentRecord[] {
     return [...this.agents.values()].map((agent) => {
-      const { streamingContent, fullOutput, ...rest } = agent;
+      const { fullOutput, ...rest } = agent;
       return {
         ...rest,
         ...(agent.status === 'running' || agent.status === 'pending'

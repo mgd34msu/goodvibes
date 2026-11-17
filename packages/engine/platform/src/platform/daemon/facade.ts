@@ -1565,7 +1565,7 @@ export class DaemonServer {
         : 'cancelled';
     this.runtimeDispatch?.transitionRuntimeTask(record.id, status, {
       endedAt: record.completedAt ?? Date.now(),
-      result: record.fullOutput ?? record.streamingContent,
+      result: record.fullOutput,
       error: record.error,
     }, 'daemon.server.agent-finish');
   }

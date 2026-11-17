@@ -63,7 +63,6 @@ export interface AgentRecord extends ProgressBearingRecord {
   /** Machine-readable failure reason set at the source (e.g. 'max_turns'), not derived from prose. */
   failureReason?: string | undefined;
   fullOutput?: string | undefined;
-  streamingContent?: string | undefined;
   /**
    * The conversation session that started this agent (AgentInput.sessionId), or
    * that started its contract or its parent. Absent for work no session started

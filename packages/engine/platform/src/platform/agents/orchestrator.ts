@@ -49,7 +49,6 @@ import {
   emitAgentFailed,
   emitAgentProgress,
   emitAgentRunning,
-  emitAgentStreamDelta,
 } from '../runtime/emitters/index.js';
 import { findModelDefinition, findModelDefinitionForProvider } from '../providers/registry-models.js';
 import { CATALOG_PROVIDER_NAME_ALIASES, sameProviderCatalog } from '../providers/provider-aliases.js';
@@ -447,15 +446,6 @@ export class AgentOrchestrator {
       output,
       toolCallsMade,
       usage,
-    });
-  }
-
-  private emitStreamDelta(recordId: string, content: string, accumulated: string): void {
-    if (!this.runtimeBus || !content) return;
-    emitAgentStreamDelta(this.runtimeBus, this.emitterContext(recordId), {
-      agentId: recordId,
-      content,
-      accumulated,
     });
   }
 
@@ -999,7 +989,6 @@ export class AgentOrchestrator {
         emitAgentFailedEvent: (recordId, error, durationMs) => this.emitAgentFailedEvent(recordId, error, durationMs),
         emitAgentCompletedEvent: (recordId, durationMs, output, toolCallsMade, usage) =>
           this.emitAgentCompletedEvent(recordId, durationMs, output, toolCallsMade, usage),
-        emitStreamDelta: (recordId, content, accumulated) => this.emitStreamDelta(recordId, content, accumulated),
         registerConversationSource: this.conversationSink
           ? (agentId, source) => this.conversationSink!.register(agentId, source)
           : undefined,

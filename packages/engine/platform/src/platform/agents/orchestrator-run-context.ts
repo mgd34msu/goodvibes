@@ -48,7 +48,6 @@ export interface AgentOrchestratorRunContext {
     toolCallsMade: number,
     usage: AgentRecord['usage'] | undefined,
   ) => void;
-  readonly emitStreamDelta: (recordId: string, content: string, accumulated: string) => void;
   /**
    * Conversation-snapshot bridge: register the running
    * agent's live snapshot accessor with AgentManager so

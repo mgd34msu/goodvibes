@@ -2,7 +2,7 @@
 import { lstatSync } from 'node:fs';
 import type { ConfigWriteRoute } from '../../config/daemon-config-route.js';
 import { preparedReceiptWrites, type ConfigManager, type PreparedConfigMutationFacts, type PreparedConfigMutationReceipt } from '../../config/manager.js';
-import { isValidConfigKey } from '../../config/schema.js';
+import type { ConfigKey } from '../../config/schema.js';
 import { admitSettingValue } from '../../config/write-admission.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { configKeyScope, describeConfigOwnership } from '../../config/config-ownership.js';
@@ -30,7 +30,7 @@ interface ClientStoreCapture {
 
 interface Capture {
   readonly argsJson: string;
-  readonly key: string;
+  readonly key: ConfigKey;
   readonly operation: 'set' | 'reset';
   readonly local?: ToolPreparedSettingsMutation | undefined;
   readonly localFacts?: PreparedConfigMutationFacts | undefined;
@@ -68,8 +68,7 @@ function clientStoreStamp(path: string): string {
  * back there. One attempt: a write whose read-back fails may or may not have
  * landed, so it is reported as unknown, never retried.
  */
-async function applyClientStoreCapture(key: string, client: ClientStoreCapture): Promise<PreparedConfigMutationReceipt & { readonly verifiedInOwningStore: boolean }> {
-  if (!isValidConfigKey(key)) throw new ToolInputProjectionError('invalid');
+async function applyClientStoreCapture(key: ConfigKey, client: ClientStoreCapture): Promise<PreparedConfigMutationReceipt & { readonly verifiedInOwningStore: boolean }> {
   try {
     const applied = await applyRoutedConfigWrite(client.configManager, key, client.value, client.routing);
     return Object.freeze({ status: 'committed' as const, completedPaths: Object.freeze([applied.persistedTo]), verifiedInOwningStore: true });
@@ -87,12 +86,13 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
       request.assertCurrent(); request.signal?.throwIfAborted();
       const args = request.args;
       if ((args.mode !== 'set' && args.mode !== 'reset') || typeof args.key !== 'string') throw new ToolInputProjectionError('invalid');
-      const key = args.key.trim();
+      const requestedKey = args.key.trim();
       // The one admission of a settings write (unknown key, a refused value, a
       // project overlay that would undo it), before any local or remote write is prepared.
-      const refusal = settingsWriteRefusal(configManager, { mode: args.mode, key, value: args.value }, routing);
+      const refusal = settingsWriteRefusal(configManager, { mode: args.mode, key: requestedKey, value: args.value }, routing);
       if (refusal) throw new ToolInputProjectionError(refusal.code === 'unknown-key' ? 'invalid' : 'held', refusal.message);
-      if (!isValidConfigKey(key)) throw new ToolInputProjectionError('invalid');
+      // Admitted above: an unknown key is refused there.
+      const key = requestedKey as ConfigKey;
       // A key the surface a hosted session was created for keeps in its own
       // file (a client-owned key, or its own provider.model override) belongs
       // to that file, never to the hosting manager's store: it is prepared

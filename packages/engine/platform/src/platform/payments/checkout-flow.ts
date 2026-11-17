@@ -220,6 +220,11 @@ export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
   readonly notifier: PaymentNotifier;
   /** Where the owner's typed security code arrives under `payments.cvvHandling: 'prompt'`. */
   readonly securityCodes?: SecurityCodeRequests | undefined;
+  /**
+   * Host-only. Told the limit each priced purchase did not fit (undefined when
+   * it fit), so the host can offer the owner, once, to set a limit met unset.
+   */
+  readonly limitOffers?: { observe(exceeded: ExceededLimit | undefined): void } | undefined;
   readonly untrusted: UntrustedContentLedger;
   /** Host-only original source facts, never read from PurchaseRequest. */
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
@@ -587,6 +592,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     cardLimitMinorUnits: metadata?.issuerCapMinorUnits ?? null,
   });
   if (decision.kind === 'refuse') return refused(decision.code, decision.reason, decision.exceeded);
+  deps.limitOffers?.observe(decision.kind === 'needs-approval' ? decision.exceeded : undefined);
 
   const draw: BudgetDraw = decision.draw;
   const shipping = decision.shipping;

@@ -750,6 +750,20 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     return { created, item: projected };
   }
 
+  /**
+   * The newest item ever posted under `key`, open or closed: for a producer
+   * that asks once per key, not once per open item. Reads the cached rows (a
+   * store read only when the store moved).
+   */
+  latestByKey(kind: StoredOwnerItemKind, key: string): OwnerItem | undefined {
+    let latest: StoredOwnerEntry | undefined;
+    for (const entry of this.#questions.entries()) {
+      if (entry.item.kind !== kind || entry.item.key !== key) continue;
+      if (latest === undefined || entry.item.createdAt >= latest.item.createdAt) latest = entry;
+    }
+    return latest === undefined ? undefined : this.#project(latest, this.#now());
+  }
+
   /** Who posted an item over the wire, for the route that lets only that principal withdraw it. */
   postedBy(id: string): string | undefined {
     return this.#questions.get(id)?.item.postedBy;

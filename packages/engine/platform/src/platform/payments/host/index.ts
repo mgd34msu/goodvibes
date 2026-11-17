@@ -49,6 +49,8 @@ export { configBackedAddressStore } from './address-store.js';
 export { channelBackedPaymentNotifier, withOwnerInbox } from './notifier.js';
 export type { PaymentOwnerInbox } from './notifier.js';
 export type { RestoredInboxWindow } from './restored-reply-window.js';
+export { createLimitOffers, limitOfferKey } from './limit-offer.js';
+export type { LimitOfferInbox, LimitOfferSettings, LimitOffers, OfferableLimitSetting } from './limit-offer.js';
 
 export {
   HandlerError,

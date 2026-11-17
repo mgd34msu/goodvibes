@@ -208,8 +208,11 @@ defaults in this domain: each one takes the safest available value, and only an
 affirmative change by the user moves it.
 
 Zero is the safest number here. The capability can be fully configured and still
-buys nothing until an amount is set affirmatively, and a refusal against a zero
-budget reads "the daily item budget is 0, set one" rather than failing obscurely.
+buys nothing without the owner's yes until an amount is set affirmatively: while
+the daily item budget or the per-purchase ceiling is 0, every purchase asks the
+owner first. The first time a purchase meets one of them at 0, the owner inbox
+offers, once per limit, to set it (§8.2); a purchase he does not approve is
+refused naming the limit, the setting and the amount.
 
 **Note on the billing address.** It sits in config rather than in the secret
 store because surfaces must display and edit it, and it is not card material.
@@ -436,7 +439,8 @@ document exists so they cannot again without someone noticing.
     (§9.7.2)
 
 4.  DECIDE, on our own parsed integers (`decide.ts`)
-    a currency mismatch or a zero daily-item budget refuse immediately (§9.7.1);
+    a currency mismatch refuses immediately (§9.7.1); a zero daily-item
+    budget or per-purchase ceiling makes the purchase ask the owner (4a, 4b'');
     otherwise:
 
 4a. ITEM PRICE vs DAILY ITEM BUDGET
@@ -725,6 +729,17 @@ deadline is the window's silence, and a window still open keeps waiting on the
 same item. A store without the item, or a daemon composed without the inbox,
 cannot prove what was answered, so that purchase ends unbought and the owner is
 told.
+
+The first time a purchase meets the daily item budget or the per-purchase
+ceiling at 0, the daemon also posts one inbox question for that limit (key
+`payments-limit-offer:<setting>`, `payments/host/limit-offer.ts`), answered
+with the amount: the daemon writes it to the setting, so purchases within it go
+ahead without asking. `0` or `no` keeps the limit unset; an answer that is not
+an amount, or that the setting refuses, is followed by the question again with
+the reason. It is asked once per limit: the question is never posted again once
+it exists, and an open one is withdrawn when the limit is set some other way.
+An answer given from a terminal app while the daemon is down is applied when it
+starts.
 
 ### 8.2.2 Answering is not entering, and these must never be merged
 

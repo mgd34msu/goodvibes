@@ -107,6 +107,8 @@ export interface PaymentsServiceDeps {
   readonly merchantJudge: MerchantJudgePort;
   /** Where a purchase under `payments.cvvHandling: 'prompt'` waits for the owner's code. */
   readonly securityCodes?: SecurityCodeRequests | undefined;
+  /** See CheckoutFlowDeps.limitOffers. */
+  readonly limitOffers?: CheckoutFlowDeps['limitOffers'];
   /** Resolves the driver for an open browser session and page. */
   readonly driverFor: (sessionId: string, pageId: string) => CheckoutPageDriver;
   /** The gate inputs the daemon alone can answer, leadership most of all. */
@@ -345,6 +347,7 @@ export class PaymentsGatewayServiceImpl {
       purchases: this.deps.purchases,
       notifier: this.deps.notifier,
       ...(this.deps.securityCodes ? { securityCodes: this.deps.securityCodes } : {}),
+      ...(this.deps.limitOffers ? { limitOffers: this.deps.limitOffers } : {}),
       untrusted: this.deps.untrusted,
       taintEvidence,
       merchantJudge: this.deps.merchantJudge,

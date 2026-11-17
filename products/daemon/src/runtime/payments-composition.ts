@@ -43,8 +43,10 @@ import {
   readNotifyChannels,
   readPaymentsServiceConfig,
   withOwnerInbox,
+  createLimitOffers,
   registerPaymentsMethods,
   type CheckoutComposition,
+  type LimitOfferInbox,
   type PaymentNotifier,
   type RestoredInboxWindow,
   type PaymentsSecretStore,
@@ -56,7 +58,8 @@ import type { OwnerMailHandler, OwnerMailRelay } from './owner-mail-relay.js';
 export interface PaymentsCompositionOptions {
   readonly paymentContinuationOwner?: Pick<import('@goodvibes-jev/engine/platform/platform/payments').NativeCheckoutWindowRestorationOptions, 'pairing' | 'scopes'> | undefined;
   readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
-  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'preparePostalAddress' | 'resolveForConsumer'>>;
+  /** `set` writes the owner's answer to a spending-limit offer; absent, no offer is made. */
+  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'preparePostalAddress' | 'resolveForConsumer' | 'set'>>;
   readonly shellPaths: ShellPathService;
   readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'>;
   /** Binding the catalog is what turns the family from a 501 facade into handlers. */
@@ -78,9 +81,11 @@ export interface PaymentsCompositionOptions {
    * The owner inbox: every purchase notice is also posted there and can be
    * answered there, so a window always reaches the owner (terminal apps and web
    * UI) whatever payments.notifyChannels names. A window that reached it is
-   * resumed after a restart from the item's recorded answer.
+   * resumed after a restart from the item's recorded answer. With the
+   * key lookup, feed and claim of the daemon's inbox, the owner is also offered,
+   * once per limit, to set a spending limit a purchase met unset.
    */
-  readonly ownerInbox?: RestoredInboxWindow['port'] | undefined;
+  readonly ownerInbox?: (RestoredInboxWindow['port'] & Partial<Pick<LimitOfferInbox, 'latestByKey' | 'subscribe' | 'claim'>>) | undefined;
 }
 
 /** Most messages remembered so a poll that offers one again is not reported twice. */
@@ -276,12 +281,27 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
       return kind === 'approval' ? windows.approvalMinutes : windows.vetoMinutes;
     });
   const detachOwnerMail = options.ownerMail?.attach(createOrderMailObserver({ purchases, notifier, operations }));
+  const inbox = options.ownerInbox;
+  const setConfig = options.configManager.set?.bind(options.configManager);
+  const limitOffers = inbox?.latestByKey && inbox.subscribe && inbox.claim && setConfig
+    ? createLimitOffers({
+      postNow: (item) => inbox.postNow(item),
+      latestByKey: inbox.latestByKey.bind(inbox),
+      subscribe: inbox.subscribe.bind(inbox),
+      claim: inbox.claim.bind(inbox),
+      withdraw: (id, reason) => inbox.withdraw(id, reason),
+    }, {
+      get: (key) => options.configManager.get(key),
+      set: (key, value) => setConfig(key, value),
+    }, () => readPaymentsServiceConfig(config).budgetCurrency)
+    : undefined;
   const checkout: CheckoutComposition = {
     seam: options.checkoutSeam,
     addresses: configBackedAddressStore(config, options.configManager.preparePostalAddress?.bind(options.configManager)),
     notifier,
     replies: paymentReplies,
     securityCodes,
+    ...(limitOffers ? { limitOffers } : {}),
     ...(options.paymentContinuationOwner ? { restoreWindow: createNativeCheckoutWindowRestorer({
       ...options.paymentContinuationOwner, catalog: options.gatewayMethods, config,
       seam: options.checkoutSeam, replies: paymentReplies, router: options.channelDeliveryRouter,
@@ -331,6 +351,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     const errors: unknown[] = [], jobs: Promise<void>[] = [];
     detachOwnerMail?.();
+    limitOffers?.close();
     securityCodes.close();
     // Retire both owners synchronously. Attempt both even if one close fails.
     try { jobs.push(registration.close()); } catch (error) { errors.push(error); }

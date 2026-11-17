@@ -14,9 +14,11 @@
  *   "default to most safe, the user can change affirmatively"
  *
  * Zero is the most safe number. The capability can be fully configured, card
- * entered, addresses set, channels chosen, and still buy nothing at all until
- * the owner affirmatively names an amount. A refusal against a zero budget reads
- * "the daily item budget is 0, set one" rather than failing somewhere obscure.
+ * entered, addresses set, channels chosen, and still buy nothing without the
+ * owner's yes until he affirmatively names an amount: while a limit is 0 every
+ * purchase asks him first, and the first time a purchase meets it the owner
+ * inbox offers to set it (payments/host/limit-offer.ts). A purchase he does not
+ * approve is refused naming the limit, the setting and the amount.
  *
  * Design rule: the two toggles below keep the owner's values directly, the
  * per-purchase ceiling defaults ON, overage tolerance defaults OFF.
@@ -109,7 +111,7 @@ export const paymentsConfigSettings: ConfigSetting[] = [
     type: 'number',
     default: 0,
     description:
-      "Most that may be spent on ITEM PRICES in one calendar day, written the way you would say it: 100 is a hundred, 19.99 is nineteen ninety-nine, in whatever payments.currency is set to. The item price alone is checked against this; tax, mandatory fees and delivery draw on the separate overage budget below. Resets at midnight in daemon.timezone (UTC when unset), the boundary is real, so 100 at 23:59 and 100 at 00:00 both go through. Default 0: nothing is bought until you set this.",
+      "Most that may be spent on ITEM PRICES in one calendar day, written the way you would say it: 100 is a hundred, 19.99 is nineteen ninety-nine, in whatever payments.currency is set to. The item price alone is checked against this; tax, mandatory fees and delivery draw on the separate overage budget below. Resets at midnight in daemon.timezone (UTC when unset), the boundary is real, so 100 at 23:59 and 100 at 00:00 both go through. Default 0: until you set it every purchase asks you first, and the first time one does, your inbox offers to set it.",
     ...moneyAmount(),
   },
   {

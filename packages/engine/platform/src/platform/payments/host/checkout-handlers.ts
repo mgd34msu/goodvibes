@@ -52,6 +52,7 @@ import { readPurchaseOutcome } from '../operation-view.js';
 import { paymentHostStop, PaymentHostStoppedError, type PaymentStoreHealth, type PaymentStoreStop } from '../payment-host-health.js';
 import type { CurrencyCode } from '../types.js';
 import type { SecurityCodeRequests } from '../security-code-requests.js';
+import type { LimitOffers } from './limit-offer.js';
 import { SHIPPING_TIERS } from '../types.js';
 import type { ShippingTier } from '../types.js';
 import type { UntrustedContentLedger } from '../../security/untrusted-content.js';
@@ -92,6 +93,11 @@ export interface CheckoutComposition {
    * refuses purchases on this host and says why.
    */
   readonly securityCodes?: SecurityCodeRequests | undefined;
+  /**
+   * Offers the owner, once per limit, to set a spending limit a purchase met
+   * unset (limit-offer.ts). Absent, the refusal still names the setting.
+   */
+  readonly limitOffers?: Pick<LimitOffers, 'observe'> | undefined;
   readonly merchantJudge: MerchantJudgePort;
   /** The process-wide ledger; see routes/browser-composition.ts's header for why it must be shared, not private. */
   readonly untrusted: UntrustedContentLedger;
@@ -345,6 +351,7 @@ function buildCheckoutService(
     journal,
     merchantJudge: deps.checkout.merchantJudge,
     ...(deps.checkout.securityCodes ? { securityCodes: deps.checkout.securityCodes } : {}),
+    ...(deps.checkout.limitOffers ? { limitOffers: deps.checkout.limitOffers } : {}),
     driverFor: seam.driverFor,
     cardFieldGuard: seam.cardFieldGuard,
     gates: () => ({

@@ -2,7 +2,7 @@ import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platfor
 import { randomUUID } from 'node:crypto';
 import type { AgentModelCompareArtifactStore, AgentModelCompareModelCatalog, AgentModelCompareRouteUpdateResult, AgentModelCompareToolArgs, CompareCandidateResult, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './model-compare-types.js';
 import { MODEL_REASON_THEME_LABELS } from './model-compare-types.js';
-import { currentStoredThemes, parseStoredReasonThemes, readComparisonReasonThemes, type ComparisonThemeReading, type JudgmentWithThemes, type StoredReasonThemes } from './model-compare-themes.js';
+import { currentStoredThemes, parseStoredReasonThemes, readComparisonReasonThemes, type ComparisonThemeReading, type JudgmentWithThemes } from './model-compare-themes.js';
 import type { ModelReadingOptions } from './model-reading.js';
 import { isModelCompareJudgmentArtifact, listSelectableModels, toSavedComparisonArtifact } from './model-compare-run.js';
 import { listAllArtifacts, readComparisonTag, readRecord, readString, previewText } from './model-compare-utils.js';
@@ -39,7 +39,6 @@ export function judgmentArtifactText(input: {
   readonly reasons: string;
   readonly notes: string;
   readonly reveal: boolean;
-  readonly reasonThemes?: StoredReasonThemes | undefined;
 }): string {
   return `${JSON.stringify({
     schema: 'goodvibes.agent.model_compare_judgment.v1',
@@ -64,7 +63,6 @@ export function judgmentArtifactText(input: {
     } : {}),
     reasons: input.reasons,
     notes: input.notes,
-    ...(input.reasonThemes ? { reasonThemes: input.reasonThemes } : {}),
     revealIncludedInJudgment: input.reveal,
     routeHandoff: modelRouteHandoff(input.winner, input.reveal),
     candidates: input.comparison.candidates.map((candidate) => ({
@@ -89,14 +87,11 @@ export async function saveComparisonJudgmentArtifact(input: {
   readonly reasons: string;
   readonly notes: string;
   readonly reveal: boolean;
-  /** When given, the reason themes are read once now and stored on the judgment, so a synthesis only counts them. */
-  readonly readingOptions?: ModelReadingOptions | undefined;
 }): Promise<SavedComparisonArtifact> {
+  // Saving asks no model: a synthesis reads the reason themes of a judgment
+  // that carries none on first use and remembers the settled reading.
   if (!input.artifactStore) throw new Error('Cannot save judgment because the artifact store is unavailable.');
   const judgmentId = `jdg_${randomUUID()}`;
-  const themes = input.readingOptions
-    ? await readComparisonReasonThemes({ winnerBlindId: input.winner.blindId, reasons: input.reasons, notes: input.notes }, input.readingOptions)
-    : undefined;
   const descriptor = await input.artifactStore.create({
     kind: 'data',
     mimeType: 'application/json',
@@ -108,7 +103,6 @@ export async function saveComparisonJudgmentArtifact(input: {
       reasons: input.reasons,
       notes: input.notes,
       reveal: input.reveal,
-      ...(themes?.status === 'settled' ? { reasonThemes: themes.stored } : {}),
     }),
     metadata: {
       purpose: 'agent-model-compare-judgment',

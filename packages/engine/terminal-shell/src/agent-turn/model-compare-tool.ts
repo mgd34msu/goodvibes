@@ -338,7 +338,6 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
             reasons,
             notes: readString(args.notes),
             reveal: readFlag(args.reveal, 'reveal', false),
-            readingOptions: { signal: options?.signal, assertCurrent: operation.assertCurrent, sourceOwner: operation.sourceOwner },
           });
           rememberComparison(comparisons, comparison);
           return output(formatJudgmentResult({

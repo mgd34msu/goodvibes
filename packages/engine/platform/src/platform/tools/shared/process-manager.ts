@@ -51,6 +51,8 @@ export interface BackgroundProcess {
 }
 
 const MAX_PROCESS_OUTPUT_BYTES = 256 * 1024;
+/** The most of each stream a managed process keeps in memory; a longer stream's tail starts with a note and is not the whole output. */
+export const MANAGED_OUTPUT_WINDOW_BYTES = MAX_PROCESS_OUTPUT_BYTES;
 /** A spill file stops growing here; the process keeps running and its output is still drained, but no more is kept. */
 const MAX_PROCESS_SPILL_BYTES = 64 * 1024 * 1024;
 /**
@@ -240,7 +242,9 @@ export interface ManagedProcessLifetime {
   readonly completion: Promise<void>;
   stop(): Promise<void>;
   readStatus(): { readonly running: boolean; readonly exitCode: number | null; readonly signal: string | null;
-    readonly timedOut: boolean; readonly stdoutTail: string; readonly stderrTail: string; readonly completedAt?: number | undefined };
+    readonly timedOut: boolean; readonly stdoutTail: string; readonly stderrTail: string; readonly completedAt?: number | undefined;
+    /** The stream passed the in-memory window ({@link MANAGED_OUTPUT_WINDOW_BYTES}): its tail is not the whole output. */
+    readonly stdoutOverflowed: boolean; readonly stderrOverflowed: boolean };
 }
 
 interface ManagedProcessShutdown {
@@ -549,11 +553,13 @@ export class ProcessManager {
     };
     const spills: string[] = [];
     this._spills.set(id, spills);
+    // A stream spills to a file exactly when it passes the in-memory window.
+    let stdoutOverflowed = false, stderrOverflowed = false;
     const streams = Promise.allSettled([
       readProcessStream(proc.stdout as ReadableStream<Uint8Array>, entry.stdout, drain.signal, publishOutput('stdout'), spills, undefined,
-        (path) => { this._spillFiles.set(id, { ...this._spillFiles.get(id), stdout: path }); }),
+        (path) => { stdoutOverflowed = true; this._spillFiles.set(id, { ...this._spillFiles.get(id), stdout: path }); }),
       readProcessStream(proc.stderr as ReadableStream<Uint8Array>, entry.stderr, drain.signal, publishOutput('stderr'), spills, undefined,
-        (path) => { this._spillFiles.set(id, { ...this._spillFiles.get(id), stderr: path }); }),
+        (path) => { stderrOverflowed = true; this._spillFiles.set(id, { ...this._spillFiles.get(id), stderr: path }); }),
     ]).then((results) => {
       for (const result of results) if (result.status === 'rejected') {
         logger.debug('Background process output collection ended early', {
@@ -695,7 +701,8 @@ export class ProcessManager {
     this._nativeLifetimes.set(result, Object.freeze({ processId: id, pid: proc.pid, startedAt: entry.startTime,
       completion: collectionPromise, stop: () => owner.stop(), readStatus: () => Object.freeze({ running: collectedStatus === undefined,
         exitCode: collectedStatus?.exitCode ?? null, signal: collectedStatus?.signal ?? null, timedOut: collectedStatus?.timedOut ?? timedOut,
-        stdoutTail: entry.stdout.join(''), stderrTail: entry.stderr.join(''), ...(collectedStatus === undefined ? {} : { completedAt: collectedStatus.completedAt }) }) }));
+        stdoutTail: entry.stdout.join(''), stderrTail: entry.stderr.join(''), stdoutOverflowed, stderrOverflowed,
+        ...(collectedStatus === undefined ? {} : { completedAt: collectedStatus.completedAt }) }) }));
     return result;
   }
 

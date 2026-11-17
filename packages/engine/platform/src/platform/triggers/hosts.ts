@@ -16,7 +16,7 @@
 
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { TriggerChildProcesses } from './host-processes.js';
-import type { ProcessManager } from '../tools/shared/process-manager.js';
+import { MANAGED_OUTPUT_WINDOW_BYTES, type ProcessManager } from '../tools/shared/process-manager.js';
 import type { LaunchedProcess, ObservedTermination, TriggerProcessHost } from './process-triggers.js';
 import type { TriggerActionExecutor, TriggerStreamHost } from './manager-types.js';
 import type { TriggerActionGrant } from './types.js';
@@ -120,7 +120,8 @@ export function createBunStreamHost(processManager: ProcessManager): TriggerStre
  * Command probes through the same process manager: credential scrub, a
  * private process group killed whole at the deadline, and bounded output.
  * A probe whose command outlives its budget is a failed check, never its
- * partial output.
+ * partial output; so is one whose stdout passes the managed output window,
+ * whose kept tail is not the output an extract or change rule must read.
  */
 export function createProcessManagerCommandRunner(processManager: ProcessManager): ProbeIo['runCommand'] {
   return async (command, args, options) => {
@@ -130,6 +131,10 @@ export function createProcessManagerCommandRunner(processManager: ProcessManager
     await child.completion;
     const status = child.readStatus();
     if (status.timedOut) throw new ProbeTimeoutError('command', options.timeoutMs);
+    if (status.stdoutOverflowed) {
+      throw new Error(`The probe command printed more than ${MANAGED_OUTPUT_WINDOW_BYTES} bytes on stdout, so its output was not read: `
+        + 'an extract or change rule would see only the end of it. Make the command print less (filter it, or select the field it needs).');
+    }
     return { exitCode: status.exitCode, stdout: status.stdoutTail, stderr: status.stderrTail };
   };
 }

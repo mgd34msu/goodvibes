@@ -37,16 +37,31 @@ try {
   s.model.script('RTJ1TRUSTNONE', [{ calls: [{ name: 'exec', args: { commands: [{ cmd: 'echo x > untrusted.txt' }] } }] }, { text: 'Could not run it.' }]);
   const untrusted = await turn(TUI_ENTRY, 'RTJ1TRUSTNONE run a command');
   const refusal = s.model.toolResults('RTJ1TRUSTNONE')[0]?.content ?? '';
-  journey.check('tui: a command in an undecided workspace with nobody to ask is refused, the turn goes on', 'goodvibes run "RTJ1TRUSTNONE ..." (no --answer-permissions)',
-    `exit ${untrusted.code}; tool result ${short(refusal, 220)}; trust rows ${trustRows()}`,
-    untrusted.code === 0 && /undecided/.test(refusal) && !existsSync(join(ws, 'untrusted.txt')) && trustRows() === '[]');
+  // With a working decision model (the run's policy is not No Decision Model and the scripted model is set),
+  // Jev judges each action in an undecided workspace itself: nobody is asked and no workspace grant is kept.
+  const modelInUse = (process.env.RUNTHROUGH_POLICY ?? 'No Decision Model') !== 'No Decision Model' && Boolean(process.env.RUNTHROUGH_DECISION_URL);
+  if (modelInUse) {
+    journey.check('tui: with a decision model a command in an undecided workspace is judged by Jev, nobody is asked, nothing is kept', 'goodvibes run "RTJ1TRUSTNONE ..." (no --answer-permissions)',
+      `exit ${untrusted.code}; tool result ${short(refusal, 220)}; untrusted.txt ${existsSync(join(ws, 'untrusted.txt'))}; trust rows ${trustRows()}`,
+      untrusted.code === 0 && existsSync(join(ws, 'untrusted.txt')) && trustRows() === '[]');
+  } else {
+    journey.check('tui: a command in an undecided workspace with nobody to ask is refused, the turn goes on', 'goodvibes run "RTJ1TRUSTNONE ..." (no --answer-permissions)',
+      `exit ${untrusted.code}; tool result ${short(refusal, 220)}; trust rows ${trustRows()}`,
+      untrusted.code === 0 && /undecided/.test(refusal) && !existsSync(join(ws, 'untrusted.txt')) && trustRows() === '[]');
+  }
   const prompts: Array<Record<string, unknown>> = [];
   s.model.script('RTJ1TRUST', [{ calls: [{ name: 'exec', args: { commands: [{ cmd: 'echo x > trusted.txt' }] } }] }, { text: 'Ran it.' }]);
   const trusted = await runProduct(s.home, TUI_ENTRY, ['run', '--output', 'stream-json', '--answer-permissions', 'RTJ1TRUST run a command'],
     { onLine: permissionAnswerer(() => true, prompts) });
-  journey.check('tui: answering the workspace-trust prompt trusts the workspace and the command that asked runs', 'goodvibes run --answer-permissions "RTJ1TRUST ..." answering the workspace-trust prompt',
-    `exit ${trusted.code}; prompts ${JSON.stringify(prompts.map((frame) => frame.tool))}; trusted.txt ${existsSync(join(ws, 'trusted.txt'))}; trust rows ${trustRows()}`,
-    trusted.code === 0 && prompts.some((frame) => frame.tool === 'workspace-trust') && existsSync(join(ws, 'trusted.txt')) && trustRows().includes('"trusted"'));
+  if (modelInUse) {
+    journey.check('tui: with a decision model and the owner present, the command runs on Jev\'s judgment', 'goodvibes run --answer-permissions "RTJ1TRUST ..."',
+      `exit ${trusted.code}; prompts ${JSON.stringify(prompts.map((frame) => frame.tool))}; trusted.txt ${existsSync(join(ws, 'trusted.txt'))}; trust rows ${trustRows()}`,
+      trusted.code === 0 && existsSync(join(ws, 'trusted.txt')));
+  } else {
+    journey.check('tui: answering the workspace-trust prompt trusts the workspace and the command that asked runs', 'goodvibes run --answer-permissions "RTJ1TRUST ..." answering the workspace-trust prompt',
+      `exit ${trusted.code}; prompts ${JSON.stringify(prompts.map((frame) => frame.tool))}; trusted.txt ${existsSync(join(ws, 'trusted.txt'))}; trust rows ${trustRows()}`,
+      trusted.code === 0 && prompts.some((frame) => frame.tool === 'workspace-trust') && existsSync(join(ws, 'trusted.txt')) && trustRows().includes('"trusted"'));
+  }
 
   for (const [product, entry] of [['tui', TUI_ENTRY], ['agent', AGENT_ENTRY]] as const) {
     const tag = product.toUpperCase();

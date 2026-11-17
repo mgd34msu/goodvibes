@@ -70,7 +70,11 @@ process.on('exit', () => { for (const link of shortLinks) { try { unlinkSync(lin
 export interface HomeOptions {
   readonly modelBaseURL: string;
   readonly permissionsMode?: string;
-  /** Default: decision models off ("No Decision Model"). A URL points Jev at that loopback endpoint. */
+  /**
+   * 'off': no decision model ("No Decision Model"). A URL points Jev at that loopback endpoint.
+   * Unset: the run's choice, RUNTHROUGH_POLICY (default "No Decision Model") with, when
+   * RUNTHROUGH_DECISION_URL names one, the scripted decision model (fake-decision.ts).
+   */
   readonly judgment?: 'off' | { endpoint: string; policy?: string };
   readonly extraSettings?: Record<string, unknown>;
   /** Share another home's ports (a second app attached to the same daemon). */
@@ -91,6 +95,8 @@ export function makeHome(base: string, name: string, options: HomeOptions): Home
   const tmp = shortTempLink(join(root, 'tmp'));
   const ports = options.ports ?? { controlPlane: freePort(), http: freePort(), web: freePort() };
   const allowed = new Set<number>([ports.controlPlane, ports.http, ports.web, Number(new URL(options.modelBaseURL).port)]);
+  const runDecisionUrl = options.judgment === undefined ? process.env.RUNTHROUGH_DECISION_URL : undefined;
+  if (runDecisionUrl) allowed.add(Number(new URL(runDecisionUrl).port));
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '/usr/bin:/bin',
     LANG: 'C.UTF-8', TERM: 'dumb', TZ: 'UTC', NO_COLOR: '1',
@@ -111,7 +117,9 @@ export function makeHome(base: string, name: string, options: HomeOptions): Home
     models: [{ id: MODEL_ID, displayName: MODEL_ID, description: 'scripted', contextWindow: 200000,
       capabilities: { toolCalling: true, codeEditing: true, reasoning: false, multimodal: false } }],
   };
-  const judgment = options.judgment === undefined || options.judgment === 'off'
+  const judgment = options.judgment === undefined
+    ? { policy: process.env.RUNTHROUGH_POLICY || 'No Decision Model', ...(runDecisionUrl ? { endpoint: runDecisionUrl, keySource: 'none', model: 'rt-jev' } : {}) }
+    : options.judgment === 'off'
     ? { policy: 'No Decision Model' }
     // No policy: the default, which is what a person who set a decision model has.
     : { ...(options.judgment.policy ? { policy: options.judgment.policy } : {}), endpoint: options.judgment.endpoint, keySource: 'none', model: 'rt-jev' };
@@ -318,7 +326,7 @@ export class Journey {
   readonly steps: Step[] = [];
   constructor(readonly name: string) {}
   check(step: string, ran: string, got: string, pass: boolean, reason?: string): boolean {
-    const entry: Step = { journey: this.name, step, ran, got: got.length > 600 ? `${got.slice(0, 600)}...` : got, pass, ...(reason ? { reason } : {}) };
+    const entry: Step = { journey: this.name, step, ran, got: got.length > 2000 ? `${got.slice(0, 2000)}...` : got, pass, ...(reason ? { reason } : {}) };
     this.steps.push(entry);
     process.stdout.write(`${pass ? 'PASS' : 'FAIL'} [${this.name}] ${step}${pass ? '' : ` -- ${reason ?? got.slice(0, 300)}`}\n`);
     return pass;
@@ -350,7 +358,8 @@ export interface Stage {
   readonly model: import('./fake-model.ts').FakeModel;
   /** Register the workspace for native work, as `goodvibes-agent workspaces register --yes` does. */
   registerWorkspace(): Promise<RunResult>;
-  restartDaemon(): Promise<Daemon>;
+  /** Stop and start the daemon; `crash` kills it (SIGKILL) instead of stopping it. */
+  restartDaemon(options?: { readonly crash?: boolean }): Promise<Daemon>;
   close(): Promise<void>;
 }
 
@@ -366,8 +375,8 @@ export async function stage(name: string, options: Omit<HomeOptions, 'modelBaseU
     base, home, model,
     get daemon() { return daemon; },
     registerWorkspace: () => runProduct(home, AGENT_ENTRY, ['workspaces', 'register', '--yes']),
-    async restartDaemon() {
-      await daemon.stop();
+    async restartDaemon(options) {
+      if (options?.crash) await daemon.kill(); else await daemon.stop();
       daemon = await startDaemon(home);
       return daemon;
     },

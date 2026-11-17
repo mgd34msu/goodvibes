@@ -17,6 +17,8 @@ export interface ScriptedReply {
   readonly calls?: readonly ScriptedCall[];
   /** Hold the response this long before the first byte (to cancel or kill mid-turn). */
   readonly delayMs?: number;
+  /** Answer with this HTTP error status instead of a completion (a provider that refuses the request). */
+  readonly errorStatus?: number;
 }
 export interface ChatMessage {
   readonly role: string;
@@ -132,6 +134,9 @@ export function startFakeModel(modelId = 'rt-1'): FakeModel {
           request.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(true); }, { once: true });
         });
         if (aborted) return new Response('aborted', { status: 499 });
+      }
+      if (reply.errorStatus) {
+        return Response.json({ error: { message: `scripted provider error ${reply.errorStatus}`, type: 'invalid_request_error', code: 'scripted_refusal' } }, { status: reply.errorStatus });
       }
       const payload = streamReply(reply, body.model ?? modelId);
       if (body.stream === false) {

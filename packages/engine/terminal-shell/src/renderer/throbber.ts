@@ -14,6 +14,7 @@
  *   - a permission prompt waiting on you:  Waiting for your approval · Running a command · npm test · 12s
  *   - a compaction:                       Compacting the conversation · 4s
  *   - a running tool (its display words): Running a command · npm test · 3s
+ *     (several at once: the oldest, then how many more run: ... · +2 more · 3s)
  *   - the model (the honest waiting phrase from the platform): Thinking... · 12s · first token 1.2s · 40 tok/s
  *
  * Inside an agent or process view the row keeps main in sight the same way,
@@ -61,6 +62,8 @@ export type ThrobberActivity = {
     readonly tool: string;
     readonly argument: string;
     readonly elapsedMs?: number | undefined;
+    /** Other calls running at the same time as the one named. */
+    readonly alsoRunning?: number | undefined;
 } | {
     readonly kind: 'agents';
     readonly count: number;
@@ -118,9 +121,13 @@ export interface ThrobberActivityInput {
     readonly compactingSinceMs?: number | undefined;
     /** The permission prompt the turn is blocked on. */
     readonly pendingApproval?: (ThrobberToolCall | null) | undefined;
-    /** The tool the turn is executing now, and when it started (epoch ms). */
+    /**
+     * The tool the turn is executing now (the oldest, when several run), when
+     * it started (epoch ms), and how many other calls run at the same time.
+     */
     readonly activeTool?: ((ThrobberToolCall & {
         readonly startedAtMs?: number | undefined;
+        readonly alsoRunning?: number | undefined;
     }) | null) | undefined;
     /** The model's honest waiting phrase (UIFactory.busyPhrase). */
     readonly modelPhrase: string;
@@ -169,7 +176,9 @@ export function resolveThrobberActivity(input: ThrobberActivityInput): ThrobberA
     if (!input.turnActive)
         return delegatedActivity();
     if (input.activeTool) {
-        return { kind: 'tool', ...describeToolCall(input.activeTool), elapsedMs: since(input.activeTool.startedAtMs) ?? turnElapsed };
+        const alsoRunning = input.activeTool.alsoRunning ?? 0;
+        return { kind: 'tool', ...describeToolCall(input.activeTool), elapsedMs: since(input.activeTool.startedAtMs) ?? turnElapsed,
+            ...(alsoRunning > 0 ? { alsoRunning } : {}) };
     }
     if (input.completionActivity)
         return { kind: 'completion', phase: input.completionActivity.phase, elapsedMs: since(input.completionActivity.startedAtMs) };
@@ -205,7 +214,8 @@ function textOf(activity: ThrobberActivity): ThrobberText {
         case 'compacting':
             return { label: 'Compacting the conversation', subject: '', tail: elapsed };
         case 'tool':
-            return { label: activity.tool, subject: activity.argument, tail: elapsed };
+            return { label: activity.tool, subject: activity.argument,
+                tail: activity.alsoRunning !== undefined && activity.alsoRunning > 0 ? [`+${activity.alsoRunning} more`, ...elapsed] : elapsed };
         case 'model': {
             const tail = [...elapsed];
             if (activity.ttftMs !== undefined)

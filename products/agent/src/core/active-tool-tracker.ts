@@ -3,7 +3,7 @@
  * throbber (renderer/throbber.ts): its name, its arguments (from
  * TOOL_RECEIVED) and when it started (TOOL_EXECUTING). A call leaves when it
  * succeeds, fails or is cancelled. With several calls running at once the
- * most recently started one is named.
+ * oldest is named and the others are counted, the same as the TUI.
  *
  * Bounded: the argument map keeps at most 64 entries, oldest dropped first,
  * so a turn whose calls never report back cannot grow it without limit.
@@ -17,10 +17,12 @@ export interface ActiveToolCall {
   readonly name: string;
   readonly args?: Record<string, unknown>;
   readonly startedAtMs?: number;
+  /** Other calls running at the same time as this one. */
+  readonly alsoRunning?: number;
 }
 
 export interface ActiveToolTracker {
-  /** The running call to name, or null when none runs. */
+  /** The running call to name (the oldest), with how many others run, or null when none runs. */
   current(): ActiveToolCall | null;
   /** Forget every call (a turn ended). */
   clear(): void;
@@ -40,7 +42,7 @@ export function trackActiveTool(tools: Pick<UiRuntimeEvents['tools'], 'on'>): Ac
   const unsubs = [
     tools.on('TOOL_RECEIVED', (ev) => { args.set(ev.callId, ev.args ?? {}); bound(args); }),
     tools.on('TOOL_EXECUTING', (ev) => {
-      running.delete(ev.callId); // re-inserted last: the newest start is named
+      running.delete(ev.callId); // re-inserted last: the map stays in start order
       running.set(ev.callId, { name: ev.tool, args: args.get(ev.callId), startedAtMs: ev.startedAt });
       bound(running);
     }),
@@ -50,9 +52,8 @@ export function trackActiveTool(tools: Pick<UiRuntimeEvents['tools'], 'on'>): Ac
   ];
   return {
     current: () => {
-      let last: ActiveToolCall | null = null;
-      for (const call of running.values()) last = call;
-      return last;
+      for (const call of running.values()) return running.size > 1 ? { ...call, alsoRunning: running.size - 1 } : call;
+      return null;
     },
     clear: () => { args.clear(); running.clear(); },
     unsubs,

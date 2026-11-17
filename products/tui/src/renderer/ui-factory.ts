@@ -9,7 +9,7 @@ export class UIFactory extends createUiFactory({ secondaryQueue: false, previewE
 public static createHeader(width: number, model: string, title?: string, gitInfo?: GitHeaderInfo, version: string = VERSION, modelNote?: string): Line[] {
     return renderHeaderLine(width, model, title, gitInfo, version, modelNote);
   }
-public static computeRenderStallInfo(metrics: Pick<StreamMetrics, 'activeToolName' | 'lastDeltaAtMs' | 'reconnectAttempt' | 'reconnectMaxAttempts'>, nowMs: number): ThinkingStallInfo | undefined {
-  return this.computeFrameStall({ toolActive: metrics.activeToolName !== undefined, lastDeltaAtMs: metrics.lastDeltaAtMs, reconnectAttempt: metrics.reconnectAttempt, reconnectMaxAttempts: metrics.reconnectMaxAttempts, nowMs });
+public static computeRenderStallInfo(metrics: Pick<StreamMetrics, 'runningTools' | 'lastDeltaAtMs' | 'reconnectAttempt' | 'reconnectMaxAttempts'>, nowMs: number): ThinkingStallInfo | undefined {
+  return this.computeFrameStall({ toolActive: metrics.runningTools.size > 0, lastDeltaAtMs: metrics.lastDeltaAtMs, reconnectAttempt: metrics.reconnectAttempt, reconnectMaxAttempts: metrics.reconnectMaxAttempts, nowMs });
 }
 }

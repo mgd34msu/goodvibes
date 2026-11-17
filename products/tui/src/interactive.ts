@@ -101,7 +101,7 @@ import { contractIsWorking, summarizeRunningAgents } from './renderer/process-su
 import { footerFleetCost } from './views/fleet-read-model.ts';
 import { footerTargetRows } from './renderer/footer-targets.ts';
 import { wireStreamEventMetrics, type WireStreamEventMetricsResult } from './core/stream-event-wiring.ts';
-import { createStreamMetrics, type StreamMetrics } from './core/stream-metrics.ts';
+import { createStreamMetrics, oldestRunningTool, type StreamMetrics } from './core/stream-metrics.ts';
 import { wireTurnEventHandlers } from './core/turn-event-wiring.ts';
 import { createUserTurnOwner, type FailoverRetry } from './core/user-turn.ts';
 import { resolveContextStatusHint } from './renderer/context-status-hint.ts';
@@ -730,7 +730,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     readPowerSurface: () => powerChipSource.get(),
     render: () => render(),
     notify: (m) => systemMessageRouter.high(m),
-    getActiveToolCallId: () => streamMetrics.activeToolCallId,
+    getActiveToolCallId: () => oldestRunningTool(streamMetrics)?.callId,
     toggleMemoryProvenance: () => memoryProvenanceUi.toggle(),
   });
   commandContext.isGenerating = () => orchestrator.isBusy;
@@ -1032,7 +1032,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (compacting && compactingSinceMs === undefined) compactingSinceMs = Date.now();
     else if (!compacting) compactingSinceMs = undefined;
     const throbberNow = Date.now();
-    const activeToolCallId = streamMetrics.activeToolCallId;
+    const runningTool = oldestRunningTool(streamMetrics);
     // An ask brokered for a background agent carries an attribution; only main's own ask is main's activity.
     const mainApproval = pendingPermission && pendingPermission.attribution === undefined ? pendingPermission : null;
     const turnActive = orchestrator.isThinking || orchestrator.isTurnInFlight;
@@ -1046,11 +1046,12 @@ async function main(prepared: PreparedShellCliRuntime) {
       compactingSinceMs,
       pendingApproval: mainApproval ? { name: mainApproval.tool, args: mainApproval.args } : null,
       activeTool:
-        streamMetrics.activeToolName !== undefined
+        runningTool !== undefined
           ? {
-              name: streamMetrics.activeToolName,
-              args: activeToolCallId !== undefined ? streamMetrics.toolArgsByCallId.get(activeToolCallId) : undefined,
-              startedAtMs: streamMetrics.activeToolStartedAtMs,
+              name: runningTool.name,
+              args: streamMetrics.toolArgsByCallId.get(runningTool.callId),
+              startedAtMs: runningTool.startedAtMs,
+              alsoRunning: streamMetrics.runningTools.size - 1,
             }
           : null,
       modelPhrase: UIFactory.busyPhrase(

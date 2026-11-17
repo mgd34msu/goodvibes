@@ -24,17 +24,15 @@ export interface StreamMetrics {
   ttftMs: number | undefined;
   /** Whether TTFT has been recorded for the current turn. */
   ttftRecorded: boolean;
-  /** Epoch ms when the most recent TOOL_EXECUTING event fired; undefined when idle. */
-  activeToolStartedAtMs: number | undefined;
-  /** Name of the currently executing tool; cleared when execution completes. */
-  activeToolName: string | undefined;
   /**
-   * callId of the currently executing tool call; cleared when execution
-   * completes. This is the real orchestrator callId (from TOOL_EXECUTING),
-   * so a per-tool cancel affordance targets exactly the running call, never
-   * the synthetic 'live' render id.
+   * The tool calls executing now, by callId (the orchestrator's real callId,
+   * from TOOL_EXECUTING), in the order they started. A call leaves when it
+   * succeeds, fails or is cancelled, and every call leaves when the user turn
+   * ends. Several run at once: the throbber names the oldest and counts the
+   * rest, a per-tool cancel targets that oldest call, and stall detection is
+   * suppressed while any runs. At most 64 are held, oldest dropped first.
    */
-  activeToolCallId: string | undefined;
+  runningTools: Map<string, RunningToolCall>;
   /**
    * Arguments of the tool calls received this turn, by callId (from
    * TOOL_RECEIVED), so the throbber can name the running call's key argument.
@@ -66,12 +64,25 @@ export interface StreamMetrics {
   reconnectMaxAttempts: number | undefined;
 }
 
+/** One tool call executing now. */
+export interface RunningToolCall {
+  readonly name: string;
+  /** Epoch ms of its TOOL_EXECUTING. */
+  readonly startedAtMs: number;
+}
+
+/** The running call the throbber names and a per-tool cancel targets (the oldest), or undefined when none runs. */
+export function oldestRunningTool(metrics: Pick<StreamMetrics, 'runningTools'>): (RunningToolCall & { readonly callId: string }) | undefined {
+  for (const [callId, call] of metrics.runningTools) return { callId, ...call };
+  return undefined;
+}
+
 /** The idle initial StreamMetrics, mutated in place by wireStreamEventMetrics handlers. */
 export function createStreamMetrics(): StreamMetrics {
   return {
     modelActive: false,
     startTime: 0, deltaCount: 0, tokenSpeed: 0, ttftMs: undefined, ttftRecorded: false,
-    activeToolStartedAtMs: undefined, activeToolName: undefined, activeToolCallId: undefined,
+    runningTools: new Map(),
     toolArgsByCallId: new Map(),
     lastDeltaAtMs: undefined, stallEpisode: 0,
     reconnectAttempt: undefined, reconnectMaxAttempts: undefined,

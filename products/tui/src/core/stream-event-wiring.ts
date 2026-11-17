@@ -520,6 +520,8 @@ export function wireStreamEventMetrics(
   // registry ends with it.
   unsubs.push(userTurn.onEnd(() => {
     metrics.modelActive = false;
+    // No call of an ended turn is still main's running work.
+    metrics.runningTools.clear();
     failoverVisited.clear();
     restoreConfiguredSelection();
   }));
@@ -749,9 +751,10 @@ export function wireStreamEventMetrics(
   }));
   unsubs.push(events.tools.on('TOOL_EXECUTING', (ev) => {
     toolStartedInTurn = true;
-    metrics.activeToolStartedAtMs = ev.startedAt;
-    metrics.activeToolName = ev.tool;
-    metrics.activeToolCallId = ev.callId;
+    // Re-inserted last, so the map stays in start order; bounded like the arguments.
+    metrics.runningTools.delete(ev.callId);
+    metrics.runningTools.set(ev.callId, { name: ev.tool, startedAtMs: ev.startedAt });
+    if (metrics.runningTools.size > 64) metrics.runningTools.delete(metrics.runningTools.keys().next().value!);
     render();
   }));
   // On every tool-completion path, reset lastDeltaAtMs to "now" so the
@@ -764,23 +767,17 @@ export function wireStreamEventMetrics(
   // model hasn't had a chance to resume producing tokens yet.
   unsubs.push(events.tools.on('TOOL_SUCCEEDED', (ev) => {
     metrics.toolArgsByCallId.delete(ev.callId);
-    metrics.activeToolStartedAtMs = undefined;
-    metrics.activeToolName = undefined;
-    metrics.activeToolCallId = undefined;
+    metrics.runningTools.delete(ev.callId);
     metrics.lastDeltaAtMs = Date.now();
   }));
   unsubs.push(events.tools.on('TOOL_FAILED', (ev) => {
     metrics.toolArgsByCallId.delete(ev.callId);
-    metrics.activeToolStartedAtMs = undefined;
-    metrics.activeToolName = undefined;
-    metrics.activeToolCallId = undefined;
+    metrics.runningTools.delete(ev.callId);
     metrics.lastDeltaAtMs = Date.now();
   }));
   unsubs.push(events.tools.on('TOOL_CANCELLED', (ev) => {
     metrics.toolArgsByCallId.delete(ev.callId);
-    metrics.activeToolStartedAtMs = undefined;
-    metrics.activeToolName = undefined;
-    metrics.activeToolCallId = undefined;
+    metrics.runningTools.delete(ev.callId);
     metrics.lastDeltaAtMs = Date.now();
   }));
 

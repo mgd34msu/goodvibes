@@ -223,21 +223,12 @@ export function builtinCredentialFacts(account: BuiltinCredentialAccount): Built
   return { declared, resolves, unresolved };
 }
 
-/** The account's posture, read off the one health answer rather than decided again. */
+/**
+ * The account's posture is the one health answer, unchanged: a surface whose
+ * connection is not observed reads `unknown`, a dead one `dead`, never `healthy`.
+ */
 export function accountStateForHealth(state: ChannelHealthState): ChannelAccountState {
-  switch (state) {
-    case 'healthy':
-    case 'unknown':
-      return 'healthy';
-    case 'degraded':
-    case 'dead':
-    case 'unresolved':
-      return 'degraded';
-    case 'unconfigured':
-      return 'unconfigured';
-    case 'disabled':
-      return 'disabled';
-  }
+  return state;
 }
 
 /** The credential posture, from the same facts the health answer used. */

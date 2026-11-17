@@ -37,7 +37,11 @@ export type ChannelDirectoryKind = 'self' | 'user' | 'channel' | 'group' | 'thre
 export type ChannelDirectoryScope = 'all' | 'self' | 'users' | 'peers' | 'groups' | 'channels' | 'threads' | 'services' | 'members';
 export type ChannelPolicyMatchScope = 'surface' | 'group';
 export type ChannelConversationPolicy = 'allow' | 'deny' | 'inherit';
-export type ChannelAccountState = 'healthy' | 'degraded' | 'disabled' | 'unconfigured';
+/**
+ * An account's state is its surface's health answer, the same states with the
+ * same meaning (`unknown`: configured, but no live connection is observed).
+ */
+export type ChannelAccountState = ChannelHealthState;
 export type ChannelAuthState = 'linked' | 'configured' | 'not-configured' | 'degraded';
 /**
  * Where a channel secret came from. `unresolved` is the case config alone

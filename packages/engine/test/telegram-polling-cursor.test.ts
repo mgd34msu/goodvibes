@@ -28,6 +28,7 @@ import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { ServiceRegistry } from '../platform/src/platform/config/service-registry.ts';
+import { SubscriptionManager } from '../platform/src/platform/config/subscriptions.ts';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
 
 const TOKEN = '7000001:fixture-token';
@@ -90,7 +91,8 @@ async function botApi() {
 async function daemon(root: string, apiUrl: string, runtime: { starts: string[]; refuseFirst: string; refused: boolean }) {
   const configManager = new ConfigManager({ configDir: join(root, 'config'), daemonTierPath: join(root, 'daemon', 'settings.json'), ownsDaemonTier: true });
   const secretsManager = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: join(root, 'home'), projectRoot: join(root, 'project') });
-  const serviceRegistry = new ServiceRegistry({ user: join(root, 'home', 'services.json'), project: join(root, 'project', 'services.json') }, { secretsManager });
+  const subscriptionManager = new SubscriptionManager(join(root, 'home', 'subscriptions.json'), { secrets: secretsManager });
+  const serviceRegistry = new ServiceRegistry({ user: join(root, 'home', 'services.json'), project: join(root, 'project', 'services.json') }, { secretsManager, subscriptionManager });
   const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
   const sessionBroker = new SharedSessionBroker({
     storePath: join(root, 'sessions.json'), routeBindings,

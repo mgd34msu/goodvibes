@@ -87,10 +87,13 @@ test('an owner alert is offered only to the owner\'s own private chat, never to 
   const receipts: string[] = [];
   // Every conversation refuses, so every candidate is tried and shows here.
   const delivery: OwnerAlertDelivery = {
-    deliverSurfaceNotice: async (binding) => { tried.push(binding); return { delivered: false, reason: 'refused-by-fixture' }; },
+    deliverSurfaceNotice: async (binding) => {
+      if (binding) tried.push(binding);
+      return { delivered: false, reason: 'delivery-failed', error: 'refused by the fixture' };
+    },
     channelOwner: (surface) => policy.getPolicy(surface as ChannelSurface).ownerId,
     recordOwnerReceipt: (text) => { receipts.push(text); },
-  } as OwnerAlertDelivery;
+  };
 
   for (const preferred of ['telegram', 'slack', null] as const) {
     tried.length = 0;

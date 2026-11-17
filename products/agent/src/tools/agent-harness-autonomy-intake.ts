@@ -1,6 +1,4 @@
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
-import { readAutonomyIntake, type AutonomyIntakeOptions, type AutonomyIntakeSchedule, type AutonomyIntents } from '@goodvibes-jev/engine/platform/platform/routing';
+import type { AutonomyIntakeOptions, AutonomyIntakeSchedule, AutonomyIntents } from '@goodvibes-jev/engine/platform/platform/routing';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -556,7 +554,7 @@ function buildCandidates(request: string, schedule: ScheduleDetection, intents: 
     });
   }
 
-  if (asksForAutonomousSchedule && !asksForRoutine) {
+  if (asksForAutonomousSchedule) {
     const missingFields = [
       ...schedule.missing,
       'successCriteria',
@@ -590,7 +588,7 @@ function buildCandidates(request: string, schedule: ScheduleDetection, intents: 
     });
   }
 
-  if (asksForResearch && !asksForAutonomousSchedule) {
+  if (asksForResearch) {
     candidates.push({
       id: 'visible-research-run',
       label: 'Start a visible research run',
@@ -649,65 +647,52 @@ function buildCandidates(request: string, schedule: ScheduleDetection, intents: 
   return candidates;
 }
 
+/** Every intake route; the calling model picks the one its request needs. */
+const ALL_INTENTS: AutonomyIntents = {
+  eventTrigger: true, reminder: true, routine: true, research: true, autonomousSchedule: true,
+  delegation: true, approval: true, automationControl: true, mailOrCalendar: true,
+};
+
+/**
+ * The autonomy routes, answered from code. No reading selects among them: the
+ * model that asked already knows what it wants, so it gets the whole fixed
+ * table (each row says when it fits and what it still needs) and fills the
+ * schedule fields itself.
+ */
 export async function autonomyIntakeSummary(context: CommandContext, args: AgentHarnessAutonomyIntakeArgs, options: AutonomyIntakeOptions = {}): Promise<Record<string, unknown>> {
-  options.signal?.throwIfAborted();
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
   const request = readString(args.query) || readString(args.target);
   const publishedMethods = operatorMethodIds();
-  const publication = JSON.stringify([...publishedMethods].sort());
-  const originalCurrent = options.assertCurrent;
-  const originalRetain = options.retainCurrent;
-  const sourceOwner = options.sourceOwner;
-  const signal = options.signal;
-  const assertOperatorCurrent = () => {
-    signal?.throwIfAborted();
-    if (options.signal !== signal || options.sourceOwner !== sourceOwner || options.assertCurrent !== originalCurrent || options.retainCurrent !== originalRetain
-      || JSON.stringify([...operatorMethodIds()].sort()) !== publication) throw new ToolInputProjectionError('stale');
-  };
-  originalRetain?.(assertOperatorCurrent, 'agent.autonomy-intake.operator-contract');
-  const assertCurrent = () => { signal?.throwIfAborted();
-    assertSynchronousJudgmentGuard(originalCurrent, () => new ToolInputProjectionError('held'));
-    assertOperatorCurrent();
-  };
-  const readingOptions = { ...options, assertCurrent };
-  assertCurrent();
   const published = watcherReadModelPublication(context);
   const watcherContract = watcherEvidenceContract(publishedMethods, published);
+  const schedule: ScheduleDetection = { missing: [], notes: [] };
+  const workflows = buildTriggerWorkflows(request, schedule, publishedMethods, published);
   if (!request) {
-    const workflows = buildTriggerWorkflows('', { missing: [], notes: [] }, publishedMethods, published);
     return {
       status: 'missing_request',
-      usage: 'Use autonomy action:"intake" with query:"<ongoing work request>". This action is read-only and returns the safest confirmed route.',
+      usage: 'Use autonomy action:"intake" with query:"<ongoing work request>". This action is read-only and lists the confirmed routes for ongoing work.',
       examples: [
         'Remind me every 2h to check the deploy.',
         'Run the weekly operator report as a reviewed routine.',
         'Cancel the running automation job.',
       ],
+      candidates: buildCandidates('', schedule, ALL_INTENTS).map(({ id, label, why, modelRoute }) => ({ id, label, why, modelRoute })),
       queueRoute: 'autonomy action:"queue"',
       triggerWorkflowSummary: triggerWorkflowSummary(workflows),
       watcherEvidenceContract: compactWatcherEvidenceContract(watcherContract),
     };
   }
-  const reading = await readAutonomyIntake(request, readingOptions);
-  assertCurrent();
-  if (reading.status === 'held') return {
-    status: 'held', reason: reading.reason, unresolvedReadings: reading.unsettled, judgment: reading.judgment,
-    candidates: [], queueRoute: 'autonomy action:"queue"',
-    policy: 'Autonomy intake is read-only. Unsettled or unavailable readings hold route publication.',
-  };
-  const schedule = reading.schedule;
-  const candidates = buildCandidates(request, schedule, reading.intents);
-  const preferred = candidates[0];
-  const workflows = buildTriggerWorkflows(request, schedule, publishedMethods, published);
+  const candidates = buildCandidates(request, schedule, ALL_INTENTS);
   return {
     status: 'ready',
-    judgment: reading.judgment,
     request: previewHarnessText(request, args.includeParameters === true ? 220 : 120),
-    preferred,
-    candidates: candidates.slice(0, args.includeParameters === true ? 8 : 4),
+    candidates: args.includeParameters === true ? candidates
+      : candidates.map(({ id, label, why, modelRoute, missingFields }) => ({ id, label, why, modelRoute, ...(missingFields ? { missingFields } : {}) })),
+    choose: 'Pick the candidate whose "why" fits the request; fill scheduleKind (at|every|cron) and scheduleValue from the request yourself.',
     triggerWorkflowSummary: triggerWorkflowSummary(workflows),
     triggerWorkflows: workflows.map((workflow) => describeTriggerWorkflow(workflow, args.includeParameters === true)),
     watcherEvidenceContract: args.includeParameters === true ? watcherContract : compactWatcherEvidenceContract(watcherContract),
     queueRoute: 'autonomy action:"queue"',
-    policy: 'Autonomy intake is read-only. It selects visible routes and missing fields; creation, approval, run control, delegation, and delivery still require the returned confirmed route plus explicit user request.',
+    policy: 'Autonomy intake is read-only. It lists visible routes and their missing fields; creation, approval, run control, delegation, and delivery still require the returned confirmed route plus explicit user request.',
   };
 }

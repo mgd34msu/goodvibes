@@ -1,17 +1,14 @@
-import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
+import { classicPersonalOpsReceiptStatus } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { isDeepStrictEqual } from 'node:util';
-import { lstatSync, readFileSync } from 'node:fs';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { redactSensitiveData } from '@goodvibes-jev/engine/platform/platform/utils';
 import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '../agent/research-run-registry.ts';
 import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
-import { captureCatalogData, captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { captureModelArtifactClockSource, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import { capturePersonalOpsData, assertPersonalOpsDataCurrent, protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
-import { readPersonalOpsReceiptStatus } from './agent-harness-personal-ops-readings.ts';
-import { captureAgentExportPath } from './agent-artifact-effect.ts';
+import { captureCatalogMethods, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
+import { capturePersonalOpsData } from './agent-harness-personal-ops-source.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { researchCheckpointRoute, researchRouteString } from './agent-harness-research-catalog-source.ts';
 import type { UiAutomationSnapshot, UiTasksSnapshot, UiControlPlaneSnapshot } from '../runtime/ui-read-models.ts';
@@ -25,6 +22,8 @@ export interface AutonomyLiveRecordBundle {
   readonly researchRuns: readonly AutonomyQueueLiveRecord[];
   /** Records the source holds beyond what each list shows, so a count can say "N of M". */
   readonly omitted?: Readonly<Record<'tasks' | 'approvals' | 'automationRuns' | 'watcherReceipts' | 'schedules' | 'researchRuns', number>>;
+  /** Sources that could not be read this time; their lanes are missing, not empty. */
+  readonly unavailable?: readonly string[];
 }
 
 const LIVE_RECORD_LIMIT = 20;
@@ -84,201 +83,100 @@ export function captureNativeReadModelObservation(model: object): () => void {
   observation.assertCurrent(); return observation.captureEpoch();
 }
 
-/** Only the acquired native DTOs and their actual producers belong to this readset. */
-function captureLiveSources(context: CommandContext, observe = false) {
-  const guards: Array<() => void> = [];
-  const path = (keys: readonly string[]): unknown => {
-    let value: unknown = context;
-    for (const key of keys) {
-      if (value === undefined || value === null) return undefined;
-      if (typeof value !== 'object') throw new ToolInputProjectionError('invalid');
-      guards.push(captureCatalogMethods(value, [key]));
-      value = modelReadingServicePath(value, [key]);
-    }
-    return value;
-  };
-  path(['platform', 'readModels', 'tasks']);
-  path(['platform', 'readModels', 'controlPlane']);
-  path(['platform', 'readModels', 'automation']);
-  path(['platform', 'artifactStore']);
-  path(['workspace', 'shellPaths']);
-  const readModel = <T>(model: SnapshotReader<T> | undefined): T | null => {
-    if (!model) return null;
-    const methods = captureCatalogMethods(model, ['getSnapshot']); guards.push(methods);
-    if (observe) guards.push(captureNativeReadModelObservation(model));
-    const read = model.getSnapshot;
-    if (typeof read !== 'function') throw new ToolInputProjectionError('unavailable');
-    const acquire = (): T => {
-      methods();
-      let value: T;
-      try { value = read.call(model); } catch { throw new ToolInputProjectionError('unavailable'); }
-      methods(); return value;
-    };
-    const original = acquire();
-    const captured = captureCatalogData(original), complete = capturePersonalOpsData(original);
-    guards.push(() => {
-      assertPersonalOpsDataCurrent(original, complete);
-      const refreshed = acquire();
-      assertPersonalOpsDataCurrent(refreshed, complete);
-      methods();
-    });
-    return captured;
-  };
-  const tasks = readModel(context.platform.readModels?.tasks);
-  const approvals = readModel(context.platform.readModels?.controlPlane);
-  const automation = readModel(context.platform.readModels?.automation);
-  const store = context.platform.artifactStore;
-  let artifacts: readonly ArtifactDescriptor[] = [];
-  if (store) {
-    const methods = captureCatalogMethods(store, ['list']); guards.push(methods);
-    const list = store.list;
-    if (list !== undefined) {
-      if (typeof list !== 'function') throw new ToolInputProjectionError('unavailable');
-      const acquire = () => {
-        methods();
-        let value: readonly ArtifactDescriptor[];
-        try { value = list.call(store, Number.MAX_SAFE_INTEGER); } catch { throw new ToolInputProjectionError('unavailable'); }
-        methods(); return value;
-      };
-      const original = acquire(), complete = capturePersonalOpsData(original);
-      artifacts = captureCatalogData(original);
-      guards.push(() => { assertPersonalOpsDataCurrent(original, complete); assertPersonalOpsDataCurrent(acquire(), complete); methods(); });
-    }
-  }
-  let researchRuns: readonly AgentResearchRunRecord[] = [], researchFile: unknown = null;
-  const paths = modelReadingServicePath(context, ['workspace', 'shellPaths']);
-  if (paths !== undefined && paths !== null) {
-    if (typeof paths !== 'object') throw new ToolInputProjectionError('invalid');
-    const methods = captureCatalogMethods(paths, ['resolveProjectPath', 'workingDirectory']); guards.push(methods);
-    const shellPaths = context.workspace.shellPaths;
-    if (!shellPaths) throw new ToolInputProjectionError('held');
-    const file = researchRunStorePath(shellPaths), physical = captureAgentExportPath(shellPaths.workingDirectory, file);
-    const revision = () => {
-      physical.assertCurrent(); methods();
-      const stat = lstatSync(file, { bigint: true, throwIfNoEntry: false });
-      if (!stat) return null;
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw new ToolInputProjectionError('held');
-      const stamp = (entry: typeof stat) => `${entry.dev}:${entry.ino}:${entry.mode}:${entry.nlink}:${entry.size}:${entry.mtimeNs}:${entry.ctimeNs}`;
-      const bytes = readFileSync(file), after = lstatSync(file, { bigint: true });
-      if (stamp(after) !== stamp(stat)) throw new ToolInputProjectionError('held');
-      return { stamp: stamp(after), bytes };
-    };
-    const before = revision();
-    if (before !== null) {
-      try { researchFile = JSON.parse(before.bytes.toString('utf8')); } catch { throw new ToolInputProjectionError('unavailable'); }
-      capturePersonalOpsData(researchFile);
-    }
-    researchRuns = captureCatalogData(new AgentResearchRunRegistry(file).snapshot().runs);
-    const assertResearch = () => { if (!isDeepStrictEqual(revision(), before) || researchRunStorePath(shellPaths) !== file) throw new ToolInputProjectionError('held'); };
-    assertResearch(); guards.push(assertResearch);
-  }
-  const data = { tasks, approvals, automation, artifacts, researchRuns, researchFile };
-  const assertCurrent = () => { for (const guard of guards) guard(); };
-  assertCurrent(); return { data, assertCurrent };
-}
+/** How many of the newest artifacts are looked through for watcher receipts. */
+const RECEIPT_SCAN_LIMIT = 500;
 
-/** Domain display strings may change; native identities and status grammar stay exact. */
-function projectProtectedLiveSource(original: ReturnType<typeof captureLiveSources>['data'], protectedData: unknown): ReturnType<typeof captureLiveSources>['data'] {
-  const complete = capturePersonalOpsData(original), safe = capturePersonalOpsData(protectedData);
-  const display = (path: readonly string[]): boolean => {
-    const [source, collection, , field, nested] = path;
-    if (source === 'researchFile') return true; // Complete raw file is screened but never rendered.
-    if (source === 'artifacts') return path[2] === 'metadata' && path[3] !== 'purpose'; // Native artifact identity remains exact.
-    if (source === 'researchRuns') {
-      const key = path[2];
-      return key !== undefined && ['title', 'question', 'goal', 'plan', 'nextSteps', 'note', 'error'].includes(key)
-        || key === 'checkpoints' && path[4] !== undefined && ['note', 'nextSteps'].includes(path[4]);
-    }
-    if (source === 'tasks' && collection === 'tasks') return field !== undefined && ['title', 'description', 'result', 'error'].includes(field);
-    if (source === 'approvals' && collection === 'approvals') return field === 'request' && (nested === 'args' || nested === 'analysis' && path[5] === 'summary')
-      || field === 'audit' && path[5] === 'note';
-    if (source === 'automation' && collection === 'jobs') return field !== undefined && ['name', 'description', 'pausedReason'].includes(field);
-    if (source === 'automation' && collection === 'runs') return field !== undefined && ['result', 'error', 'cancelledReason'].includes(field)
-      || field === 'route' && nested === 'title';
-    return false;
+type LiveSourceName = 'tasks' | 'approvals' | 'automation' | 'artifacts' | 'researchRuns';
+
+/**
+ * One read of each source. A listing is correct for the moment it was taken;
+ * each row carries its own `updatedAt`, so nothing re-reads to prove it.
+ * A source that cannot be read is named in `unavailable`, not shown as empty.
+ */
+function readLiveSources(context: CommandContext) {
+  const unavailable: LiveSourceName[] = [];
+  const read = <T>(name: LiveSourceName, model: SnapshotReader<T> | undefined): T | null => {
+    if (!model) return null;
+    try { return model.getSnapshot(); } catch { unavailable.push(name); return null; }
   };
-  const validate = (native: unknown, value: unknown, path: readonly string[]): void => {
-    if (typeof native === 'string') {
-      if (typeof value !== 'string' || native !== value && !display(path)) throw new ToolInputProjectionError('held');
-      return;
-    }
-    if (native === null || typeof native !== 'object') {
-      if (!Object.is(native, value)) throw new ToolInputProjectionError('held');
-      return;
-    }
-    if (value === null || typeof value !== 'object' || Array.isArray(native) !== Array.isArray(value)) throw new ToolInputProjectionError('held');
-    const nativeSlots = Object.getOwnPropertyDescriptors(native), safeSlots = Object.getOwnPropertyDescriptors(value);
-    if (Reflect.ownKeys(nativeSlots).length !== Reflect.ownKeys(safeSlots).length) throw new ToolInputProjectionError('held');
-    for (const [key, descriptor] of Object.entries(nativeSlots)) {
-      const replacement = safeSlots[key];
-      if (!replacement || !('value' in replacement)) throw new ToolInputProjectionError('held');
-      validate(descriptor.value, replacement.value, [...path, key]);
-    }
-  };
-  validate(complete, safe, []);
-  // Native cloning preserves the producer type. All replacement slots passed the
-  // complete structural check and explicit domain string rules above.
-  const result = structuredClone(original);
-  if (!safe || typeof safe !== 'object' || Array.isArray(safe)) throw new ToolInputProjectionError('held');
-  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(safe))) Object.defineProperty(result, key, descriptor);
-  return captureCatalogData(result);
+  const models = context.platform.readModels;
+  const tasks = read<UiTasksSnapshot>('tasks', models?.tasks);
+  const approvals = read<UiControlPlaneSnapshot>('approvals', models?.controlPlane);
+  const automation = read<UiAutomationSnapshot>('automation', models?.automation);
+  let artifacts: readonly ArtifactDescriptor[] = [];
+  const store = context.platform.artifactStore;
+  if (store) {
+    try { artifacts = store.list(RECEIPT_SCAN_LIMIT).filter(artifact => WATCHER_RECEIPT_PURPOSES.has(artifactMetadataString(artifact, 'purpose'))); }
+    catch { unavailable.push('artifacts'); }
+  }
+  let researchRuns: readonly AgentResearchRunRecord[] = [];
+  const shellPaths = context.workspace.shellPaths;
+  if (shellPaths) {
+    try { researchRuns = new AgentResearchRunRegistry(researchRunStorePath(shellPaths)).snapshot().runs; }
+    catch { unavailable.push('researchRuns'); }
+  }
+  return { tasks, approvals, automation, artifacts, researchRuns, unavailable };
 }
 
 /** Startup observes only literal native statuses and cancellation flags. */
 export function autonomyLiveNativeFacts(context: CommandContext): AutonomyLiveNativeFacts {
-  const source = captureLiveSources(context), { tasks, approvals, automation, artifacts, researchRuns } = source.data;
-  const facts = {
+  const { tasks, approvals, automation, artifacts, researchRuns } = readLiveSources(context);
+  return {
     tasks: (tasks?.tasks ?? []).map(task => ({ status: task.status, cancellable: task.cancellable && ['queued', 'running', 'blocked'].includes(task.status) })),
     approvals: (approvals?.approvals ?? []).map(approval => ({ status: approval.status, cancellable: approval.status === 'pending' || approval.status === 'claimed' })),
-    automationRuns: (automation?.runs ?? []).map(run => ({ status: run.status, cancellable: run.status === 'queued' || run.status === 'running' })),
-    watcherReceipts: watcherReceiptArtifacts(artifacts).map(() => ({ status: 'unknown', cancellable: false })),
+    automationRuns: nonWatcherRuns(automation).map(run => ({ status: run.status, cancellable: run.status === 'queued' || run.status === 'running' })),
+    watcherReceipts: watcherReceiptArtifacts(artifacts).map(artifact => ({ status: receiptStatus(artifact), cancellable: false })),
     schedules: (automation?.jobs ?? []).map(job => ({ status: job.status, cancellable: job.enabled && job.status === 'enabled' })),
     researchRuns: researchRuns.map(run => ({ status: run.status, cancellable: !['cancelled', 'completed', 'failed'].includes(run.status) })),
   };
-  source.assertCurrent(); return facts;
 }
 
-/** Protect every original source field before sorting, previews, tails or record limits. */
-export function captureAutonomyLiveRecords(...args: Parameters<typeof ownedCaptureAutonomyLiveRecords>): ReturnType<typeof ownedCaptureAutonomyLiveRecords> {
-  return withConfiguredDecisionModelPolicy(() => ownedCaptureAutonomyLiveRecords(...args));
+/** A receipt's status as its producer wrote it; anything else is `unknown`, never a reading. */
+function receiptStatus(artifact: ArtifactDescriptor): string {
+  const status = classicPersonalOpsReceiptStatus(artifact);
+  return status === 'unassessed' ? 'unknown' : status;
 }
 
-async function ownedCaptureAutonomyLiveRecords(context: CommandContext, options: CatalogRankingOptions = {}): Promise<AutonomyLiveRecordBundle> {
-  const optionsCurrent = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent']);
-  const signal = options.signal;
-  const source = captureLiveSources(context, true);
-  const assertSource = () => { optionsCurrent(); signal?.throwIfAborted(); source.assertCurrent(); };
-  const assertCurrent = () => {
-    assertSource();
-    assertSynchronousJudgmentGuard(() => options.assertCurrent?.(), () => new ToolInputProjectionError('held'));
-    assertSource();
+/** Mask the prose of one row that will be returned: titles, summaries, previews, tails and notes. */
+function maskRecord(record: AutonomyQueueLiveRecord): AutonomyQueueLiveRecord {
+  const mask = (text: string): string => redactSensitiveData(text);
+  return {
+    ...record,
+    label: mask(record.label),
+    summary: mask(record.summary),
+    ...(record.logTail ? { logTail: record.logTail.map(mask) } : {}),
+    ...(record.diagnostics ? { diagnostics: record.diagnostics.map(mask) } : {}),
+    ...(record.output?.preview ? { output: { ...record.output, preview: mask(record.output.preview) } } : {}),
   };
-  assertCurrent();
-  const current: CatalogRankingOptions = { ...options, assertCurrent };
-  const protectedData = await protectPersonalOpsData(source.data, current);
-  const data = projectProtectedLiveSource(source.data, protectedData);
-  assertCurrent();
-  const statuses = new Map<string, string>();
-  for (const artifact of watcherReceiptArtifacts(data.artifacts)) {
-    statuses.set(artifact.id, await readPersonalOpsReceiptStatus(captureModelArtifactClockSource(artifact).reading, current)); assertCurrent();
-  }
-  const result = {
-    tasks: taskLiveRecords(data.tasks),
-    approvals: approvalLiveRecords(data.approvals),
-    automationRuns: automationRunLiveRecords(data.automation),
-    watcherReceipts: watcherReceiptLiveRecords(data.artifacts, statuses),
-    schedules: scheduleLiveRecords(data.automation),
-    researchRuns: researchRunLiveRecords(data.researchRuns),
+}
+
+/**
+ * Select first, mask second, read once: each source is read once, each lane is
+ * sorted and cut to its limit, and only the prose of the rows returned is
+ * masked locally. Cost: one read per source and no model request, whatever
+ * the stores hold.
+ */
+export async function captureAutonomyLiveRecords(context: CommandContext, options: CatalogRankingOptions = {}): Promise<AutonomyLiveRecordBundle> {
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const data = readLiveSources(context);
+  const mask = (records: readonly AutonomyQueueLiveRecord[]) => records.map(maskRecord);
+  return {
+    tasks: mask(taskLiveRecords(data.tasks)),
+    approvals: mask(approvalLiveRecords(data.approvals)),
+    automationRuns: mask(automationRunLiveRecords(data.automation)),
+    watcherReceipts: mask(watcherReceiptLiveRecords(data.artifacts)),
+    schedules: mask(scheduleLiveRecords(data.automation)),
+    researchRuns: mask(researchRunLiveRecords(data.researchRuns)),
     omitted: {
       tasks: omittedFrom(data.tasks?.tasks.length ?? 0, LIVE_RECORD_LIMIT),
       approvals: omittedFrom(data.approvals?.approvals.length ?? 0, LIVE_RECORD_LIMIT),
-      automationRuns: omittedFrom(data.automation?.runs.length ?? 0, LIVE_RECORD_LIMIT),
+      automationRuns: omittedFrom(nonWatcherRuns(data.automation).length, LIVE_RECORD_LIMIT),
       watcherReceipts: omittedFrom(allWatcherReceiptArtifacts(data.artifacts).length, LIVE_RECORD_LIMIT),
       schedules: omittedFrom(data.automation?.jobs.length ?? 0, LIVE_RECORD_LIMIT),
       researchRuns: omittedFrom(data.researchRuns.length, RESEARCH_RECORD_LIMIT),
     },
+    ...(data.unavailable.length > 0 ? { unavailable: data.unavailable } : {}),
   };
-  assertCurrent(); options.retainCurrent?.(assertSource, 'agent.autonomy-live-records.source'); assertCurrent(); return captureCatalogData(result);
 }
 
 function formatEpochMs(value: number | undefined): string | undefined {
@@ -709,8 +607,13 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null): readonly 
     });
 }
 
+/** Runs a watcher triggered are listed with their watcher (agent-harness-autonomy-watcher-read-models.ts), not twice. */
+function nonWatcherRuns(snapshot: UiAutomationSnapshot | null): UiAutomationSnapshot['runs'] {
+  return (snapshot?.runs ?? []).filter(run => run.triggeredBy.kind !== 'watcher');
+}
+
 function automationRunLiveRecords(snapshot: UiAutomationSnapshot | null): readonly AutonomyQueueLiveRecord[] {
-  return [...(snapshot?.runs ?? [])]
+  return [...nonWatcherRuns(snapshot)]
     .sort((left, right) => {
       const activeDelta = Number(right.status === 'queued' || right.status === 'running') - Number(left.status === 'queued' || left.status === 'running');
       if (activeDelta !== 0) return activeDelta;
@@ -782,15 +685,14 @@ function automationRunLiveRecords(snapshot: UiAutomationSnapshot | null): readon
     });
 }
 
-function watcherReceiptLiveRecords(artifacts: readonly ArtifactDescriptor[], statuses: ReadonlyMap<string, string>): readonly AutonomyQueueLiveRecord[] {
+function watcherReceiptLiveRecords(artifacts: readonly ArtifactDescriptor[]): readonly AutonomyQueueLiveRecord[] {
   return watcherReceiptArtifacts(artifacts).map((artifact) => {
     const purpose = artifactMetadataString(artifact, 'purpose');
     const operation = artifactMetadataString(artifact, 'operation')
       || artifactMetadataString(artifact, 'action')
       || artifactMetadataString(artifact, 'event')
       || 'watcher-run';
-    const status = statuses.get(artifact.id);
-    if (status === undefined) throw new ToolInputProjectionError('held');
+    const status = receiptStatus(artifact);
     const watcherId = artifactMetadataString(artifact, 'watcherId')
       || artifactMetadataString(artifact, 'sourceId')
       || artifactMetadataString(artifact, 'providerSourceId');

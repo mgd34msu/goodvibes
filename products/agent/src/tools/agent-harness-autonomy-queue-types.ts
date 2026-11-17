@@ -28,7 +28,14 @@ export interface AutonomyQueueItem {
   readonly kind: 'work-plan' | 'research-run' | 'host-task' | 'approval' | 'automation-run' | 'schedule' | 'reminder' | 'routine-schedule' | 'delegated-agent' | 'background-process' | 'delivery';
   readonly visible: true;
   readonly cancellable: boolean;
-  readonly count: number;
+  /** Rows that exist in this lane's source (shown or not); absent when the lane has no record source. */
+  readonly records?: number;
+  /** Of those, how many are running or queued now. */
+  readonly active?: number;
+  /** Of those, how many wait on the owner (pending approvals, failed or blocked work). */
+  readonly needsOwner?: number;
+  /** Connected-host methods published for this lane; never a count of work. */
+  readonly methodsAvailable?: number;
   readonly current: string;
   readonly next: string;
   readonly inspectRoute: string;

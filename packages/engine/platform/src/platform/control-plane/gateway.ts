@@ -402,7 +402,11 @@ export class ControlPlaneGateway {
     });
   }
 
-  setServerState(patch: Partial<ControlPlaneServerConfig>): void {
+  /**
+   * `listening` is whether the host's listener is bound right now, which only
+   * the host knows; omitted (a settings-only patch) leaves isRunning as it is.
+   */
+  setServerState(patch: Partial<ControlPlaneServerConfig>, listening?: boolean): void {
     if (!this.isEnabled()) {
       Object.assign(this.serverConfig, { ...patch, enabled: false });
       this.dispatch?.syncControlPlaneState({
@@ -410,6 +414,7 @@ export class ControlPlaneGateway {
         host: this.serverConfig.host,
         port: this.serverConfig.port,
         connectionState: 'disabled',
+        isRunning: false,
       }, 'control-plane.gateway.state.disabled');
       return;
     }
@@ -419,6 +424,7 @@ export class ControlPlaneGateway {
       enabled: this.serverConfig.enabled,
       host: this.serverConfig.host,
       port: this.serverConfig.port,
+      ...(listening !== undefined ? { isRunning: listening && this.serverConfig.enabled } : {}),
       connectionState: this.serverConfig.enabled ? (hasActiveClient ? 'connected' : 'disconnected') : 'disabled',
       requestCount: this.requestCount,
       errorCount: this.errorCount,

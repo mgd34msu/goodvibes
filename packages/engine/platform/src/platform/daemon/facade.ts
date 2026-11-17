@@ -461,7 +461,7 @@ export class DaemonServer {
     this.settingsLifetime = this.settingsLifetime === null || this.server === null || this.tornDown ? null : {};
     this.enabled = true;
     this.authToken = token ?? null;
-    this.controlPlaneGateway.setServerState({ enabled: true, host: this.host, port: this.port });
+    this.controlPlaneGateway.setServerState({ enabled: true, host: this.host, port: this.port }, this.server !== null);
     return true;
   }
 
@@ -749,7 +749,7 @@ export class DaemonServer {
         if (binding === null) return;
       }
       if (this.listenerTransition !== transition || this.tornDown) return;
-      this.controlPlaneGateway.setServerState({ enabled: true, host: this.host, port: this.port });
+      this.controlPlaneGateway.setServerState({ enabled: true, host: this.host, port: this.port }, this.server !== null);
       this._attachControlPlaneConfigWatcher();
       this.transportEventsHelper.emitTransportConnected();
       // Outbound relay reachability (default OFF; gated by relay.enabled + the
@@ -793,7 +793,7 @@ export class DaemonServer {
       this.relayReachability = null;
       await this.detachControlPlaneListener();
       this.tlsState = null;
-      this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
+      this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port }, this.server !== null);
       this.transportEventsHelper.emitTransportTerminalFailure(message);
       this.acceptedTransportBinding = null;
       const rollbackDrain = this.workProposals.flush();
@@ -1012,7 +1012,7 @@ export class DaemonServer {
       }
       if (!current()) return;
       if (this.configManager.getConfigurationIncarnation() !== incarnation) continue;
-      this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
+      this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port }, this.server !== null);
       this.transportEventsHelper.emitTransportConnected();
       if (!this.restartCycle.dirty) return;
     }
@@ -1041,7 +1041,7 @@ export class DaemonServer {
           logger.error('DaemonServer: the new control-plane binding could not be bound; still serving on the previous address', {
             wanted, serving: `${this.host}:${this.boundPort}`, error: reason,
           });
-          this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
+          this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port }, this.server !== null);
           this.transportEventsHelper.emitTransportConnected();
           return;
         }
@@ -1055,7 +1055,7 @@ export class DaemonServer {
     logger.error('DaemonServer: no control-plane listener is bound after a binding change; correct controlPlane.host/port/hostMode to rebind', {
       wanted, error: reason,
     });
-    this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
+    this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port }, this.server !== null);
     this.transportEventsHelper.emitTransportTerminalFailure(`control-plane listener could not bind ${wanted}: ${reason}`);
   }
 
@@ -1217,7 +1217,7 @@ export class DaemonServer {
     await close(() => this.workProposals.flush());
 
     this.tlsState = null;
-    this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port });
+    this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port }, this.server !== null);
     // A daemon that never listened has no disconnect to announce and no "stopped" to claim; everything above was released either way.
     await close(async () => { await this.restartCycle.pending; });
     const hadListener = this.acceptedTransportBinding !== null || this.server !== null || this.listenerDrain !== null;

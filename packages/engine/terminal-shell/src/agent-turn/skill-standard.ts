@@ -1,6 +1,6 @@
 import { parseMarkdownFrontmatter } from '@goodvibes-jev/engine/terminal-shell/markdown-frontmatter';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { assertNoSecretLikeText } from './persona-registry.js';
 import type { AgentSkillRecord } from './skill-registry-types.js';
 
@@ -61,6 +61,21 @@ export function renderSkillStandardMarkdown(skill: Pick<AgentSkillRecord, 'name'
 }
 
 /**
+ * Where a skill named `name` is exported under `destDir`: `<destDir>/<slug>/SKILL.md`.
+ * Throws when the name has no letters or digits to make a folder name from.
+ */
+export function skillStandardFilePath(name: string, destDir: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (!slug) {
+    throw new Error('skill name produces an empty folder name');
+  }
+  return join(destDir, slug, 'SKILL.md');
+}
+
+/**
  * Write a skill record as a SKILL.md inside `<destDir>/<slug>/SKILL.md`.
  * Throws if the file already exists and `overwrite` is not true.
  * Returns the path that was written.
@@ -70,15 +85,8 @@ export function writeSkillStandardFile(
   destDir: string,
   overwrite = false,
 ): string {
-  const slug = skill.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-  if (!slug) {
-    throw new Error('skill name produces an empty folder name');
-  }
-  const dir = join(destDir, slug);
-  const filePath = join(dir, 'SKILL.md');
+  const filePath = skillStandardFilePath(skill.name, destDir);
+  const dir = dirname(filePath);
 
   if (!overwrite && existsSync(filePath)) {
     throw new Error(`Skill file already exists at ${filePath}. Pass --overwrite to replace it.`);

@@ -1,9 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { RefusalError, readRefusal } from '@goodvibes-jev/engine/errors';
 import { AgentSkillRegistry, buildAgentSkillRequirements, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
 import { type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry-types';
 import { discoverSkills, type SkillRecord } from '../../agent/skill-discovery.ts';
-import { parseSkillStandardMarkdown } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-standard';
+import { parseSkillStandardMarkdown, skillStandardFilePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-standard';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { parseAgentLocalLibraryArgs, resolveCommandFilePath, type ParsedAgentLocalLibraryArgs } from './agent-local-library-args.ts';
@@ -368,19 +368,13 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
       await importDiscoveredSkill(args.slice(1), ctx, skillRegistry);
       return;
     }
+    // Import adds a new skill, disabled and awaiting review (/skills delete removes
+    // it), so it runs at once; a typed --yes is accepted and dropped.
     if (sub === 'import-standard') {
       const parsed = parseSkillArgs(args.slice(1));
       const filePath = parsed.rest[0];
       if (!filePath) {
-        throw commandRefusal('Usage: /skills import-standard <path/to/SKILL.md> --yes');
-      }
-      if (!parsed.yes) {
-        ctx.print([
-          'Agent skill standard import preview',
-          `  path ${filePath}`,
-          '  next rerun with --yes to import into the Agent-local skill registry',
-        ].join('\n'));
-        return;
+        throw commandRefusal('Usage: /skills import-standard <path/to/SKILL.md>');
       }
       const sourcePath = resolveCommandFilePath(ctx, filePath, 'read');
       if (sourcePath === null) return;
@@ -391,33 +385,32 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
         return;
       }
       const skill = skillRegistry.importFromStandard(content);
-      ctx.print(formatSkillReceipt('Imported shared skill', skill, [`  source ${sourcePath}`, `  review-state ${skill.reviewState}`]));
+      ctx.print(formatSkillReceipt('Imported shared skill', skill, [
+        `  source ${sourcePath}`,
+        `  review-state ${skill.reviewState}`,
+        `  disabled until you review it (/skills show ${skill.id}) and enable it (/skills enable ${skill.id}); /skills delete ${skill.id} removes it`,
+      ]));
       return;
     }
+    // Export writes a new SKILL.md and refuses an existing one; with --overwrite
+    // over an existing file the registry asks once (confirm below).
     if (sub === 'export-standard') {
       const parsed = parseSkillArgs(args.slice(1));
       const skillId = parsed.rest[0];
       const destDir = parsed.rest[1];
       if (!skillId || !destDir) {
-        throw commandRefusal('Usage: /skills export-standard <id> <dest-directory> [--overwrite] --yes');
+        throw commandRefusal('Usage: /skills export-standard <id> <dest-directory> [--overwrite]');
       }
-      if (!parsed.yes) {
-        const skill = skillRegistry.get(skillId);
-        if (!skill) {
-          throw commandRefusal(`Unknown Agent skill ${skillId}`);
-        }
-        ctx.print([
-          'Agent skill standard export preview',
-          `  skill ${skill.id} (${skill.name})`,
-          `  dest ${destDir}/${skill.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}/SKILL.md`,
-          '  next rerun with --yes to write the file',
-        ].join('\n'));
-        return;
+      const skill = skillRegistry.get(skillId);
+      if (!skill) {
+        throw commandRefusal(`Unknown Agent skill ${skillId}\nRun /skills list to see the Agent-local skills.`);
       }
       const targetDir = resolveCommandFilePath(ctx, destDir, 'write');
       if (targetDir === null) return;
-      const written = skillRegistry.exportToStandard(skillId, targetDir, parsed.flags.get('overwrite') === 'true');
-      ctx.print(`Exported skill to ${written}`);
+      const overwrite = parsed.flags.get('overwrite') === 'true';
+      const replaced = overwrite && existsSync(skillStandardFilePath(skill.name, targetDir));
+      const written = skillRegistry.exportToStandard(skill.id, targetDir, overwrite);
+      ctx.print(formatSkillReceipt('Exported Agent skill', skill, [`  file ${written}${replaced ? ' (replaced the file that was there)' : ''}`]));
       return;
     }
     if (sub === 'list' || sub === 'open') {
@@ -534,7 +527,7 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
       ctx.print(formatSkillReceipt('Deleted Agent skill', removed));
       return;
     }
-    throw commandRefusal('Usage: /skills [list|enabled|attention|discover|import-discovered|search|show|create|update|enable|disable|review|stale|delete|bundle]');
+    throw commandRefusal('Usage: /skills [list|enabled|attention|discover|import-discovered|import-standard|export-standard|search|show|create|update|enable|disable|review|stale|delete|bundle]');
   } catch (error) {
     // A refusal is the command's result (state, reason, next step), not a printed error.
     if (error instanceof RefusalError) throw error;
@@ -542,16 +535,35 @@ export async function runAgentSkillsRuntimeCommand(args: readonly string[], ctx:
   }
 }
 
+/** The ask for `/skills export-standard <id> <dest> --overwrite` when the SKILL.md it would replace exists. */
+function exportOverwriteConfirmation(args: readonly string[], ctx: CommandContext): { title: string; detail: string; confirmLabel: string } | undefined {
+  const parsed = parseSkillArgs(args);
+  const [skillId, destDir] = parsed.rest;
+  if (parsed.flags.get('overwrite') !== 'true' || !skillId || !destDir) return undefined;
+  const skill = registryFromContext(ctx).get(skillId);
+  if (!skill) return undefined;
+  let target: string;
+  try {
+    target = skillStandardFilePath(skill.name, requireShellPaths(ctx).resolveWorkspacePath(destDir));
+  } catch {
+    return undefined;
+  }
+  if (!existsSync(target)) return undefined;
+  return { title: `Replace ${target}?`, detail: `${target} already exists; the exported skill ${skill.id} replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
+}
+
 export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'skills',
-    // Deleting a skill or bundle cannot be undone: the registry asks once (command-confirmation.ts).
-    confirm(args) {
+    // Deleting a skill or bundle cannot be undone, and an export with --overwrite
+    // replaces an existing SKILL.md: the registry asks once (command-confirmation.ts).
+    confirm(args, ctx) {
       let at = 0;
       while (['local', 'agent'].includes((args[at] ?? '').toLowerCase())) at += 1;
       const bundle = ['bundle', 'bundles'].includes((args[at] ?? '').toLowerCase());
       if (bundle) at += 1;
       const sub = (args[at] ?? '').toLowerCase();
+      if (!bundle && sub === 'export-standard') return exportOverwriteConfirmation(args.slice(at + 1), ctx);
       const id = args.slice(at + 1).find((word) => !word.startsWith('--'));
       if ((sub !== 'delete' && sub !== 'remove') || !id) return undefined;
       return bundle
@@ -562,7 +574,7 @@ export function registerAgentSkillsRuntimeCommands(registry: CommandRegistry): v
     aliases: ['skill', 'agent-skills', 'askills', 'local-skills'],
     description: 'Manage Agent-local skills',
     hidden: true,
-    usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled]|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id>|bundle ...]',
+    usage: '[list|enabled|attention|discover|import-discovered <name> [--enabled]|import-standard <path/to/SKILL.md>|export-standard <id> <dest-directory> [--overwrite]|search <query>|show <id>|create --name <name> --description <summary> --procedure <steps> [--requires-env A,B] [--requires-command gh,jq]|update <id> [--name ...] [--description ...] [--procedure ...]|enable <id>|disable <id>|review <id>|stale <id> <reason...>|delete <id>|bundle ...]',
     handler: runAgentSkillsRuntimeCommand,
   });
 }

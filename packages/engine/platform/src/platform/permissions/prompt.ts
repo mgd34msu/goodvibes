@@ -117,6 +117,13 @@ export interface PermissionPromptRequest {
    * item, as the gate matches it; a remembered deny answers it like any ask.
    */
   ownerOnly?: OwnerOnlyKind | undefined;
+  /**
+   * Set by the gate when the owner would be asked only about where the call
+   * could reach, which a real containment boundary answers: a layer that runs
+   * the call inside such a boundary may settle it (`settledBy`). Absent: only
+   * the owner answers. In-process only; approvals.raise does not carry it.
+   */
+  containable?: true | undefined;
 }
 
 export interface PermissionPromptDecision {
@@ -142,6 +149,13 @@ export interface PermissionPromptDecision {
    * cache), only the user-prompt path can set this.
    */
   modifiedArgs?: Record<string, unknown> | undefined;
+  /**
+   * Set when a layer between the gate and the owner settled the ask itself
+   * (`sandbox`: the exec sandbox runs the command inside its boundary). The
+   * gate records it as that layer's decision, never as the owner's, and only
+   * for an ask it marked `containable`.
+   */
+  settledBy?: 'sandbox' | undefined;
 }
 
 /** In-process lifetime only; never stored in a prompt or sent over the wire. */

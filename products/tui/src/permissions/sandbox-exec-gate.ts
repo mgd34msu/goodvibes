@@ -27,7 +27,11 @@
  * This runs INSIDE the permission machinery's ask layer (like trustGatedAsk), so
  * it composes with the real layer chain and is only ever consulted for execs the
  * base policy already resolved to "ask", it can never turn a deny into an allow,
- * and the frozen catastrophic block is untouched.
+ * and the frozen catastrophic block is untouched. It settles only an ask the gate
+ * marked `containable` (asked only for where the call could reach); an ask the
+ * gate routed to the owner (an owner-only item, an irreversible or
+ * security-loosening call) always reaches him. An approval made here carries
+ * `settledBy: 'sandbox'`, so it is recorded as this layer's, never as the owner's.
  */
 import { decideSandboxedExec, readCommandNeeds, type SandboxPolicyDecision } from '@goodvibes-jev/engine/platform/platform/runtime/permissions/sandbox-policy';
 import { execCommandText, hostSandboxAvailability, type SandboxAvailability } from '@goodvibes-jev/engine/platform/platform/tools/exec/sandbox';
@@ -175,24 +179,30 @@ function isExecRequest(request: PermissionPromptRequest): boolean {
 
 /**
  * Wrap the permission machinery's ask callback with the sandbox-aware exec
- * policy. Only exec asks are considered; everything else delegates unchanged.
+ * policy. Only exec asks the gate marked `containable` are considered;
+ * everything else delegates unchanged.
  */
 export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRequestHandler): PermissionRequestHandler {
   return async (request, options) => {
+    // The offer is for this layer only; the owner's prompt and the daemon never see it.
+    const toOwner = withoutOffer(request);
+    // Only an ask the gate offered as containable is this layer's to settle: one the gate routed
+    // to the owner (an owner-only item, an irreversible or security-loosening call) is his alone.
+    if (request.containable !== true || request.ownerOnly !== undefined) return ask(toOwner, options);
     // Without a decision model, this keeps actual OS containment but asks the owner instead of semantically inferring host-access needs.
-    if (decisionModelPolicyState().operation === 'no-decision-model') return ask(request, options);
-    if (!isExecRequest(request)) return ask(request, options);
+    if (decisionModelPolicyState().operation === 'no-decision-model') return ask(toOwner, options);
+    if (!isExecRequest(request)) return ask(toOwner, options);
     // The exec runner's own escalation ask comes back through the same raiser; it is the
     // one place that question is put to the owner, so it is never relaxed here.
-    if (request.attribution?.kind === 'sandbox-escalation') return ask(request, options);
+    if (request.attribution?.kind === 'sandbox-escalation') return ask(toOwner, options);
     const commands = extractExecCommands(request);
-    if (commands.length === 0 || execArgsNeedOwner(request)) return ask(request, options);
+    if (commands.length === 0 || execArgsNeedOwner(request)) return ask(toOwner, options);
 
     // The sandbox is genuinely active only when the feature flag AND the config
     // switch are on AND the host can actually provide a boundary.
     const featureAndConfig = deps.isSandboxFeatureEnabled() && deps.isSandboxConfigEnabled();
     const sandboxActive = featureAndConfig && deps.availability().available;
-    if (!sandboxActive) return ask(request, options);
+    if (!sandboxActive) return ask(toOwner, options);
 
     const egressAllowlist = [...deps.readEgressAllowlist()];
     const workspace = request.workingDirectory;
@@ -216,9 +226,10 @@ export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRe
     // each is boundary-safe, or its one escalation is the allowlisted network the
     // runner asks inside its own call. Otherwise the whole ask surfaces with the
     // union of the escalations this card decides.
-    if (!decisions.some(asksHere)) return { approved: true };
+    // Recorded by the gate as this layer's decision, never as the owner's answer.
+    if (!decisions.some(asksHere)) return { approved: true, settledBy: 'sandbox' };
     const escalations = dedupe(decisions.flatMap(escalationsAskedHere));
-    return ask(annotateExecAsk(request, { sandboxed: true, sandboxEscalations: escalations }), options);
+    return ask(annotateExecAsk(toOwner, { sandboxed: true, sandboxEscalations: escalations }), options);
   };
 }
 
@@ -242,6 +253,13 @@ export function sandboxAwareApprovalRaiser(deps: SandboxExecAskDeps, raise: Appr
     createSandboxExecAsk(deps, (annotated, execution) =>
       raise({ ...extras, request: annotated, ...(execution?.signal ? { signal: execution.signal } : {}) }),
     )(request, extras.signal ? { signal: extras.signal } : undefined);
+}
+
+/** The request as the owner is asked it: the containment offer stays with this layer. */
+function withoutOffer(request: PermissionPromptRequest): PermissionPromptRequest {
+  if (request.containable === undefined) return request;
+  const { containable: _offer, ...rest } = request;
+  return rest;
 }
 
 function dedupe(values: readonly string[]): string[] {

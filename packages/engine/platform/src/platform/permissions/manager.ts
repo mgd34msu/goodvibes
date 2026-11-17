@@ -283,6 +283,21 @@ function sourceFingerprint(value: unknown): SourceFingerprint {
 }
 
 /**
+ * What a call's reading puts on the owner's own list, in every mode but yolo:
+ * a confident reading that it loosens a security boundary, or that it
+ * destroys something that cannot be brought back (a destructive command, or a
+ * hard-to-undo change that stays on this machine). An uncertain fact stays a
+ * judgment; Jev is shown it as uncertain.
+ */
+function ownerOnlyFromReading(reading: Pick<Awaited<ReturnType<typeof readToolCall>>,
+  'weakensSecurity' | 'irreversible' | 'mutates' | 'outward' | 'family' | 'uncertain'>): OwnerOnlyKind | undefined {
+  if (reading.weakensSecurity && !reading.uncertain.includes('weakensSecurity')) return 'loosen-security';
+  if (reading.irreversible && !reading.uncertain.includes('irreversible')
+    && (reading.family === 'shell-destructive' || (reading.mutates && !reading.outward))) return 'unrecoverable-delete';
+  return undefined;
+}
+
+/**
  * Whether the host source now is the one a decision was made for: a field
  * compare against the captured fingerprint, never a copy or a schema parse of
  * the transcript, and no serialisation while the host keeps its objects.
@@ -1207,6 +1222,28 @@ export class PermissionManager {
   }
 
   /**
+   * An ask a layer below the gate settled without the owner (the exec sandbox
+   * ran the command inside its boundary): recorded as that layer's decision,
+   * never as the owner's, and only for an ask the gate offered it. Nothing is
+   * remembered from it.
+   */
+  private settledBelow(input: SafetyInput, analysis: PermissionRequestAnalysis, reply: PermissionPromptDecision,
+    offered: boolean, boundary: GateBoundaryRecord | undefined): PermissionCheckResult {
+    const extra = boundary ? { boundary } : {};
+    if (!offered) {
+      return this.result(false, false, 'safety_check', 'safety_guardrail', analysis, { ...extra,
+        detail: `The ${reply.settledBy} layer answered an ask only the owner answers, so nothing ran; ask again for the owner's answer.` });
+    }
+    if (!reply.approved) {
+      return this.result(false, false, 'stakes_preset', 'preset_deny', analysis, { ...extra, preset: { preset: input.mode, action: 'deny' },
+        detail: reply.reason ?? `The ${reply.settledBy} layer refused this call.` });
+    }
+    return this.result(true, false, 'stakes_preset', 'preset_allow', analysis, { ...extra, preset: { preset: input.mode, action: 'allow' },
+      detail: 'Not asked: the command runs inside the exec sandbox (workspace writable, no network, no host privilege), '
+        + 'which contains what this call would otherwise be asked about. The owner did not answer it.' });
+  }
+
+  /**
    * Ask the owner about one call and keep what he asked to be remembered. An
    * answer to an owner-only item is remembered as covering that item, so he is
    * asked once. Revised arguments become a revision the caller prepares again.
@@ -1217,6 +1254,8 @@ export class PermissionManager {
     readonly boundary?: GateBoundaryRecord | undefined;
     readonly preset?: GatePresetRecord | undefined;
     readonly revisedDetail: string;
+    /** Asked only for what a real containment boundary answers: a layer running the call inside one may settle it. */
+    readonly containable?: boolean | undefined;
     /** The answer covers this one call only: nothing is offered to remember. */
     readonly single?: boolean | undefined;
   }): Promise<SafetyOutcome> {
@@ -1228,8 +1267,10 @@ export class PermissionManager {
       // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
       rememberOptions: o.ownerOnly === 'channel-request' || o.single === true ? [] : buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere()),
       ...(o.ownerOnly ? { ownerOnly: o.ownerOnly } : {}),
+      ...(o.containable === true && o.ownerOnly === undefined ? { containable: true as const } : {}),
     }, { signal: input.signal }), input.signal);
     input.assertCurrent();
+    if (reply.settledBy !== undefined) return { result: this.settledBelow(input, analysis, reply, o.containable === true && o.ownerOnly === undefined, o.boundary) };
     const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
     const notSaved = await this.rememberReply(input.toolName, input.args, reply, modified, o.ownerOnly);
     input.assertCurrent();
@@ -1365,6 +1406,21 @@ export class PermissionManager {
         preset: { preset: input.mode, action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
       });
     }
+    // What the reading puts on the owner's own list goes to him as an item code recognizes does:
+    // asked in ask-me and jev-decides, held for the end of the run in just-vibes; Jev is not asked.
+    const readingItem = reading ? ownerOnlyFromReading(reading) : undefined;
+    if (readingItem !== undefined) {
+      const answered = this.sessionApprovals.get(ownerOnlySessionKey(readingItem, this.getApprovalKey(input.toolName, input.args), input.args));
+      if (answered !== undefined) {
+        return { result: this.result(answered, false, 'session_override', answered ? 'session_cached_allow' : 'session_cached_deny', analysis,
+          { boundary: boundaryResult, detail: `Your answer earlier in this session: ${ownerOnlyReason(readingItem)}.` }) };
+      }
+      if (input.mode === 'just-vibes') return this.queuedForOwner(input, analysis, `held for you: ${ownerOnlyReason(readingItem)}`, readingItem);
+      return this.askOwner(input, analysis, {
+        reasons: [`Only you decide this: ${ownerOnlyReason(readingItem)}.`], ownerOnly: readingItem, boundary: boundaryResult,
+        preset: { preset: input.mode, action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
+      });
+    }
     if (input.mode === 'ask-me') {
       if (boundary.passed && reading?.stakes !== 'critical' && reading?.irreversible !== true && reading?.weakensSecurity !== true) {
         return { result: this.result(true, false, 'stakes_preset', 'preset_allow', analysis,
@@ -1373,6 +1429,9 @@ export class PermissionManager {
       return this.askOwner(input, analysis, {
         reasons: !boundary.passed ? [boundary.reason] : [], boundary: boundaryResult,
         preset: { preset: 'ask-me', action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
+        // Asked only for where the call could reach (secrets sent out): a real boundary answers that.
+        containable: boundary.passed && reading !== undefined && !reading.irreversible && !reading.weakensSecurity
+          && !reading.obfuscated && reading.catastrophicUncertain !== true,
       });
     }
     if (!privacy.passed) {

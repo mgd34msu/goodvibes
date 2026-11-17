@@ -295,24 +295,28 @@ export class McpHttpConnection {
     }
   }
 
-  /** Best-effort session termination (legacy sessions only). */
+  /**
+   * Best-effort session termination (legacy sessions only). The DELETE is sent
+   * but not awaited: its answer changes nothing here, so a reconnect, reload or
+   * shutdown never waits on a slow server. It is still bounded so a server that
+   * never answers does not hold the request open.
+   */
   async close(): Promise<void> {
     this.closed = true;
     this.lifetime.abort();
     this.sessionEpoch++;
-    if (this.sessionId) {
-      try {
-        // Bounded: a server that never answers must not stall a reload or shutdown.
-        await this.fetchImpl(this.options.url, {
-          method: 'DELETE',
-          headers: this.withConfiguredHeaders({ 'Mcp-Session-Id': this.sessionId }),
-          signal: AbortSignal.timeout(SESSION_CLOSE_TIMEOUT_MS),
-        });
-      } catch {
-        // Session termination is best-effort; the server may not support DELETE.
-      }
-      this.sessionId = null;
-    }
+    const sessionId = this.sessionId;
+    if (!sessionId) return;
+    this.sessionId = null;
+    void Promise.resolve().then(() => this.fetchImpl(this.options.url, {
+      method: 'DELETE',
+      headers: this.withConfiguredHeaders({ 'Mcp-Session-Id': sessionId }),
+      signal: AbortSignal.timeout(SESSION_CLOSE_TIMEOUT_MS),
+    })).then(
+      (response) => response.body?.cancel().catch(() => undefined),
+      // The server may not support DELETE, or may not answer in time.
+      () => undefined,
+    );
   }
 
   // ---------------------------------------------------------------------------

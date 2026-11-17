@@ -3,7 +3,7 @@ import { VERSION } from '../../version.js';
 import { getCorrelationContext } from '../correlation.js';
 import type { PlatformErrorSource } from '../../types/errors.js';
 import type { NormalizedError } from '../../utils/error-display.js';
-import { projectSafeTelemetryValue, safeTelemetryText } from './event-content.js';
+import { projectSafeTelemetryEventPayload, projectSafeTelemetryValue, safeTelemetryText } from './event-content.js';
 import { RUNTIME_EVENT_DOMAINS } from '@goodvibes-jev/engine/contracts';
 import type {
   AnyRuntimeEvent,
@@ -286,7 +286,8 @@ export function clampLimit(limit: number | undefined, fallback: number): number 
 
 /**
  * The safe view (see event-content.ts): content fields (prompts, chunks, tool
- * arguments and output, bodies) are withheld; tool, provider, model, ids,
+ * arguments and output, bodies, goals, plan titles), as each event type
+ * declares them, are withheld; tool, provider, model, ids,
  * statuses, counts and error text are shown with credential-shaped text
  * masked. The raw view (an explicit opt-in) carries everything.
  */
@@ -295,7 +296,7 @@ export function sanitizeRecord(record: TelemetryRecord, view: TelemetryViewMode)
   return {
     ...record,
     message: safeTelemetryText(record.message),
-    payload: projectSafeTelemetryValue(record.payload),
+    payload: projectSafeTelemetryEventPayload(record.type, record.payload),
     attributes: projectSafeTelemetryValue(record.attributes) as Record<string, unknown>,
     ...(record.error ? { error: {
       ...record.error,

@@ -11,8 +11,9 @@
  *
  * - Egress boundary: `listEvents({view: 'safe'})` (the default) runs records
  *   and spans through `sanitizeRecord` / `sanitizeSpan`, which apply the
- *   field table in `event-content.ts`: content fields (prompts, streamed
- *   chunks, tool arguments and output, bodies) are withheld, credential and
+ *   field classes in `event-content.ts`, declared for every event field:
+ *   content fields (prompts, streamed chunks, tool arguments and output,
+ *   bodies, goals, plan titles, progress prose) are withheld, credential and
  *   owner-profile fields are withheld whole, and everything else (tool,
  *   provider, model, ids, statuses, counts, error text) is shown with
  *   credential-shaped text masked.

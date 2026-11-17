@@ -74,7 +74,7 @@ The same filter shape works across the sibling list methods. `platformClient.ope
 
 Every telemetry read needs the `read:telemetry` scope (or an admin session). `view: 'raw'` additionally needs the `read:telemetry-sensitive` scope or an admin session, and the daemon setting `telemetry.includeRawPrompts` turned on; without them it answers `403`.
 
-The default `safe` view withholds content: prompts, streamed text, tool arguments and output, and message bodies read `[REDACTED_TEXT]`, and credential or owner-profile fields read `[REDACTED]` / `[REDACTED_PROFILE]`. Everything needed to see what happened and why stays readable: the tool, provider and model, ids, statuses, counts, durations, span names, and error text with credential-shaped parts masked. The `raw` view carries everything.
+The default `safe` view withholds content: prompts, streamed text, tool arguments and output, message bodies, the owner's request and goal, plan and task titles and notes, agent progress prose, and the gate's description of a call read `[REDACTED_TEXT]` (each event field is declared as content or not, so a new field is classified before it ships), and credential or owner-profile fields read `[REDACTED]` / `[REDACTED_PROFILE]`. Everything needed to see what happened and why stays readable: the tool, provider and model, ids, statuses, counts, durations, span names, and error text with credential-shaped parts masked. The `raw` view carries everything.
 
 Streamed chunks (`STREAM_DELTA`, `AGENT_STREAM_DELTA`) are counted in `aggregates.byEventType` but not kept in the event history or sent on the stream, so the history (500 records) covers what happened rather than the last answer's chunks.
 

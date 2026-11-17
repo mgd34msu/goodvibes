@@ -54,6 +54,7 @@ const HOSTED_ACP_AGENT_SCHEMA = objectSchema({
   completedAt: NUMBER_SCHEMA,
   sessionId: STRING_SCHEMA,
   progress: STRING_SCHEMA,
+  progressAt: NUMBER_SCHEMA,
   error: ACP_HOST_ERROR_SCHEMA,
   lastRefusal: ACP_HOST_REFUSAL_SCHEMA,
   promptCount: NUMBER_SCHEMA,

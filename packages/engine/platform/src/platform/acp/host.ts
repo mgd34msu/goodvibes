@@ -159,6 +159,8 @@ export interface HostedAcpAgent {
   readonly sessionId?: string | undefined;
   /** Latest streamed output tail (bounded), for the row's activity line. */
   readonly progress?: string | undefined;
+  /** When the output tail last grew. */
+  readonly progressAt?: number | undefined;
   /** Present when state === 'failed'. */
   readonly error?: AcpHostError | undefined;
   /** The last permission ask or prompt that was refused without a decision on its merits, and why. */
@@ -176,7 +178,7 @@ interface HostedRecord {
   info: {
     id: string; agentId: string; title: string; binaryPath: string; cwd: string;
     state: HostedAcpState; startedAt: number; completedAt?: number | undefined;
-    sessionId?: string | undefined; progress?: string | undefined;
+    sessionId?: string | undefined; progress?: string | undefined; progressAt?: number | undefined;
     error?: AcpHostError | undefined; lastRefusal?: AcpHostRefusal | undefined; promptCount: number;
   };
   child: ReturnType<typeof Bun.spawn> | null;
@@ -326,7 +328,7 @@ export class AcpHostService {
           operation.lifetime.signal.throwIfAborted();
         };
         return { assertCurrent, close: () => {} };
-      });
+      }, (reason) => { if (!record.lifetime.signal.aborted) this.noteRefusal(record, reason); });
       const stdout = readNdJsonMessages(record.child.stdout as unknown as ReadableStream<Uint8Array>);
       type WireMessage = typeof stdout extends ReadableStream<infer Message> ? Message : never;
       const readable = stdout.pipeThrough(new TransformStream<WireMessage, WireMessage>({ transform(message, controller) {
@@ -566,6 +568,7 @@ export class AcpHostService {
         const text = messageChunkText(params.update as { sessionUpdate?: unknown; content?: unknown });
         if (text) {
           record.info.progress = ((record.info.progress ?? '') + text).slice(-PROGRESS_TAIL_CHARS);
+          record.info.progressAt = this.now();
         }
       },
     };

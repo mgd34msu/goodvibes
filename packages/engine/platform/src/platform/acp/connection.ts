@@ -192,7 +192,7 @@ export class AcpConnection {
           this.lifetime.signal.throwIfAborted();
           if (!sessionId || this.sessionId !== sessionId || this.childProcess !== ownedChild) throw new Error('the subagent session that raised this ask has ended');
         }, close: () => {} };
-      });
+      }, (reason) => { if (!this.lifetime.signal.aborted) this.refuse(reason); });
       const wire = this.permissionWire;
       type WireMessage = typeof stdout extends ReadableStream<infer Message> ? Message : never;
       const readable = stdout.pipeThrough(new TransformStream<WireMessage, WireMessage>({ transform(message, controller) {

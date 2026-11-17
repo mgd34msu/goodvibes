@@ -26,6 +26,16 @@ function hostedState(hosted: HostedAcpAgent): ProcessState {
   }
 }
 
+/** A failure first; then whichever came last of a refusal and the output tail. */
+function activity(hosted: HostedAcpAgent, now: number): ProcessNode['currentActivity'] {
+  if (hosted.error) return { kind: 'output-line', text: `${hosted.error.stage} failed: ${hosted.error.message}`, at: hosted.completedAt ?? now };
+  const refusal = hosted.lastRefusal;
+  if (refusal && (!hosted.progress || refusal.at >= (hosted.progressAt ?? 0))) {
+    return { kind: 'output-line', text: `refused: ${refusal.reason}`.slice(0, 200), at: refusal.at };
+  }
+  return hosted.progress ? { kind: 'output-line', text: hosted.progress.slice(-200), at: hosted.progressAt ?? now } : undefined;
+}
+
 /** HostedAcpAgent -> ProcessNode. */
 export function adaptHostedAcpAgent(hosted: HostedAcpAgent, now: number): ProcessNode {
   const state = hostedState(hosted);
@@ -44,11 +54,7 @@ export function adaptHostedAcpAgent(hosted: HostedAcpAgent, now: number): Proces
     usage: undefined,
     costUsd: null,
     costState: 'unpriced',
-    currentActivity: hosted.error
-      ? { kind: 'output-line', text: `${hosted.error.stage} failed: ${hosted.error.message}`, at: hosted.completedAt ?? now }
-      : hosted.progress
-        ? { kind: 'output-line', text: hosted.progress.slice(-200), at: now }
-        : undefined,
+    currentActivity: activity(hosted, now),
     capabilities: {
       interruptible: live,
       killable: live,

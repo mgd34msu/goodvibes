@@ -29,7 +29,8 @@ export class AcpPermissionWire {
   private readonly byTool = new Map<string, PendingPermission>();
   private readonly pending = new Set<PendingPermission>();
   private readonly responses = new WeakMap<object, PendingPermission>();
-  constructor(private readonly captureScope: () => WireScope) {}
+  /** `onRefused` hears a decided answer that was replaced by `cancelled` at the final check, and why. */
+  constructor(private readonly captureScope: () => WireScope, private readonly onRefused?: (reason: string) => void) {}
 
   /** Already parsed JSON transport input, before the SDK projects its schema. */
   observe(message: unknown): void {
@@ -86,8 +87,13 @@ export class AcpPermissionWire {
       bytes = new TextEncoder().encode(JSON.stringify(message) + '\n');
       if (pending.claim) pending.admission!.claim();
       pending.scope.assertCurrent();
-    } catch {
+    } catch (error) {
       bytes = new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: cancelled() }) + '\n');
+      // An answer the side never decided was already refused with its own reason.
+      if (pending.response) {
+        const why = error instanceof Error ? error.message : String(error);
+        try { this.onRefused?.(`the decided answer was not sent: ${why}`); } catch { /* reporting never blocks the write */ }
+      }
     }
     // A throwing/partially writing sink is never retried with a second response.
     try { send(bytes); } finally { this.finish(pending); }

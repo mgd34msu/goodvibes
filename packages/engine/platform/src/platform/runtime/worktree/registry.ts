@@ -151,62 +151,16 @@ export interface WorktreeAttachmentReview {
 
 export interface WorktreeRegistryPaths {
   readonly workingDirectory: string;
-  readonly surfaceRoot?: string | undefined;
 }
 
 /**
  * The one register file for a working directory. Every surface, the daemon,
  * the gateway and orchestration read and write this same file; a register
  * per surface let `/worktree keep` and `/worktree inspect` disagree about the
- * same worktree. A surface-scoped file left by an earlier version is merged
- * into it once (see {@link mergeSurfaceScopedStoreOnce}).
+ * same worktree.
  */
-function getStorePath(workingDirectory: string, surfaceRoot?: string): string {
-  if (surfaceRoot) mergeSurfaceScopedStoreOnce(workingDirectory, surfaceRoot);
+function getStorePath(workingDirectory: string): string {
   return resolveScopedDirectory(workingDirectory, undefined, 'worktrees.json');
-}
-
-const mergedSurfaceStores = new Set<string>();
-
-/**
- * Fold a surface-scoped register written by an earlier version into the
- * shared one, keeping the newer copy of a record both hold, so no `kept`
- * tombstone or attachment is lost. The scoped file is then renamed aside
- * (never deleted), and a failure leaves it in place to be retried.
- */
-function mergeSurfaceScopedStoreOnce(workingDirectory: string, surfaceRoot: string): void {
-  const scopedPath = resolveScopedDirectory(workingDirectory, surfaceRoot, 'worktrees.json');
-  if (mergedSurfaceStores.has(scopedPath)) return;
-  const sharedPath = resolveScopedDirectory(workingDirectory, undefined, 'worktrees.json');
-  try {
-    statSync(scopedPath);
-  } catch {
-    mergedSurfaceStores.add(scopedPath);
-    return;
-  }
-  try {
-    withRegistryWriteLock(sharedPath, () => {
-      const scoped = readStore(scopedPath, true, true);
-      const shared = readStore(sharedPath, true, true);
-      for (const [path, record] of Object.entries(scoped.records)) {
-        const existing = shared.records[path];
-        if (!existing || record.updatedAt > existing.updatedAt) shared.records[path] = record;
-      }
-      writeStore(shared, sharedPath);
-      try {
-        renameSync(scopedPath, `${scopedPath}.merged-${Date.now()}`);
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'ENOENT') throw error;
-      }
-    });
-    mergedSurfaceStores.add(scopedPath);
-    logger.info('worktree registry: merged a surface-scoped register into the shared one', { scopedPath, sharedPath });
-  } catch (error) {
-    logger.warn('worktree registry: could not merge the surface-scoped register yet; will retry', {
-      scopedPath,
-      error: summarizeError(error),
-    });
-  }
 }
 
 /** How long a register write waits for another writer before refusing. */
@@ -469,13 +423,13 @@ function readStore(storePath: string, preserveUnreadable = true, forWrite = fals
 }
 
 export function listPersistedWorktreeMeta(options: WorktreeRegistryPaths): ManagedWorktreeMeta[] {
-  return Object.values(readStore(getStorePath(options.workingDirectory, options.surfaceRoot)).records)
+  return Object.values(readStore(getStorePath(options.workingDirectory)).records)
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
 export function getPersistedWorktreeMeta(path: string, options: WorktreeRegistryPaths): ManagedWorktreeMeta | null {
   const normalized = normalizePath(path, options.workingDirectory);
-  return readStore(getStorePath(options.workingDirectory, options.surfaceRoot)).records[normalized] ?? null;
+  return readStore(getStorePath(options.workingDirectory)).records[normalized] ?? null;
 }
 
 export function reviewWorktreeAttachments(
@@ -556,11 +510,9 @@ function classifyWorktreePath(path: string, workingDirectory: string): Pick<Mana
 export class WorktreeRegistry {
   private readonly git: GitService;
   private readonly workingDirectory: string;
-  private readonly surfaceRoot?: string | undefined;
 
-  public constructor(workingDirectory: string, options?: { readonly surfaceRoot?: string }) {
+  public constructor(workingDirectory: string) {
     this.workingDirectory = workingDirectory;
-    this.surfaceRoot = options?.surfaceRoot;
     this.git = new GitService(workingDirectory);
   }
 
@@ -572,7 +524,7 @@ export class WorktreeRegistry {
    */
   public async list(): Promise<WorktreeStatusRecord[]> {
     const listed = await this.git.worktreeList();
-    const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), false);
+    const store = readStore(getStorePath(this.workingDirectory), false);
     return this.joinListing(listed, store).sort((a, b) => a.path.localeCompare(b.path));
   }
 
@@ -604,10 +556,10 @@ export class WorktreeRegistry {
    * sweeps expired preserved-aside register files, disclosing every count.
    */
   public async reconcile(): Promise<WorktreeStatusRecord[]> {
-    const beforeScan = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), false);
+    const beforeScan = readStore(getStorePath(this.workingDirectory), false);
     const listed = await this.git.worktreeList();
-    return withProcessLock(registerLockPath(getStorePath(this.workingDirectory, this.surfaceRoot)), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
+    return withProcessLock(registerLockPath(getStorePath(this.workingDirectory)), () => {
+      const store = readStore(getStorePath(this.workingDirectory), true, true);
       const present = new Set(listed.map((entry) => normalizePath(entry.path, this.workingDirectory)));
       const records = this.joinListing(listed, store);
       const nextRecords: Record<string, ManagedWorktreeMeta> = {};
@@ -656,7 +608,7 @@ export class WorktreeRegistry {
       }
       for (const meta of retainedTombstones) nextRecords[meta.path] = meta;
 
-      writeStore({ version: 1, records: nextRecords }, getStorePath(this.workingDirectory, this.surfaceRoot));
+      writeStore({ version: 1, records: nextRecords }, getStorePath(this.workingDirectory));
 
       const reclaimed = vanished + tombstonesExpired + tombstonesOverCap;
       if (reclaimed > 0) {
@@ -668,7 +620,7 @@ export class WorktreeRegistry {
           total: reclaimed,
         });
       }
-      reapPreservedStores(getStorePath(this.workingDirectory, this.surfaceRoot), now);
+      reapPreservedStores(getStorePath(this.workingDirectory), now);
       return records.sort((a, b) => a.path.localeCompare(b.path));
     });
   }
@@ -705,7 +657,7 @@ export class WorktreeRegistry {
       logger.warn('worktree retention: the register could not be read; nothing was removed', { error: summarizeError(error) });
       return report;
     }
-    const storePath = getStorePath(this.workingDirectory, this.surfaceRoot);
+    const storePath = getStorePath(this.workingDirectory);
     for (const row of rows) {
       if (row.kind === 'manual' || !isProductWorktreePath(row.path, this.workingDirectory)) continue;
       if (onlyPaths && !onlyPaths.has(row.path)) continue;
@@ -896,8 +848,8 @@ export class WorktreeRegistry {
     const normalized = normalizePath(path, this.workingDirectory);
     // Git is asked before the register lock is taken, so a slow `git` never holds other writers up.
     const gitKnows = this.gitListsWorktreeSync(normalized);
-    withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
+    withRegistryWriteLock(getStorePath(this.workingDirectory), () => {
+      const store = readStore(getStorePath(this.workingDirectory), true, true);
       const existing = store.records[normalized];
       // A typo must not mint an active record that sessions, sweeps and review would then have to carry.
       if (!existing && !gitKnows) {
@@ -914,7 +866,7 @@ export class WorktreeRegistry {
         ...(existing?.setup ? { setup: existing.setup } : {}),
         updatedAt: Date.now(),
       };
-      writeStore(store, getStorePath(this.workingDirectory, this.surfaceRoot));
+      writeStore(store, getStorePath(this.workingDirectory));
     });
   }
 
@@ -931,9 +883,9 @@ export class WorktreeRegistry {
     const normalized = normalizePath(path, this.workingDirectory);
     // Listing records nothing, so a worktree git knows may not be registered yet; git is asked before the lock is taken.
     let gitKnows: boolean | undefined;
-    if (!readStore(getStorePath(this.workingDirectory, this.surfaceRoot), false).records[normalized]) gitKnows = this.gitListsWorktreeSync(normalized);
-    withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
+    if (!readStore(getStorePath(this.workingDirectory), false).records[normalized]) gitKnows = this.gitListsWorktreeSync(normalized);
+    withRegistryWriteLock(getStorePath(this.workingDirectory), () => {
+      const store = readStore(getStorePath(this.workingDirectory), true, true);
       const classified = classifyWorktreePath(normalized, this.workingDirectory);
       // A typo must not create a record (a `kept` one would linger as a
       // tombstone for months): only a path git lists as a worktree is added.
@@ -953,7 +905,7 @@ export class WorktreeRegistry {
         ...(existing?.setup ? { setup: existing.setup } : {}),
         updatedAt: Date.now(),
       };
-      writeStore(store, getStorePath(this.workingDirectory, this.surfaceRoot));
+      writeStore(store, getStorePath(this.workingDirectory));
     });
   }
 
@@ -964,8 +916,8 @@ export class WorktreeRegistry {
    * worktree was otherwise registered.
    */
   public recordSetup(path: string, setup: WorktreeSetupResult): void {
-    withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
+    withRegistryWriteLock(getStorePath(this.workingDirectory), () => {
+      const store = readStore(getStorePath(this.workingDirectory), true, true);
       const normalized = normalizePath(path, this.workingDirectory);
       const existing = store.records[normalized];
       const classified = classifyWorktreePath(normalized, this.workingDirectory);
@@ -979,17 +931,17 @@ export class WorktreeRegistry {
         setup,
         updatedAt: Date.now(),
       };
-      writeStore(store, getStorePath(this.workingDirectory, this.surfaceRoot));
+      writeStore(store, getStorePath(this.workingDirectory));
     });
   }
 
   public async cleanup(path: string): Promise<void> {
     const normalized = isAbsolute(path) ? path : normalizePath(path, this.workingDirectory);
     await this.git.worktreeRemove(normalized);
-    withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-      const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
+    withRegistryWriteLock(getStorePath(this.workingDirectory), () => {
+      const store = readStore(getStorePath(this.workingDirectory), true, true);
       delete store.records[normalized];
-      writeStore(store, getStorePath(this.workingDirectory, this.surfaceRoot));
+      writeStore(store, getStorePath(this.workingDirectory));
     });
   }
 
@@ -1086,10 +1038,10 @@ export class WorktreeRegistry {
     // next list() reaps the record, since its worktree is no longer on disk.
     let registerNote = '';
     try {
-      withRegistryWriteLock(getStorePath(this.workingDirectory, this.surfaceRoot), () => {
-        const store = readStore(getStorePath(this.workingDirectory, this.surfaceRoot), true, true);
+      withRegistryWriteLock(getStorePath(this.workingDirectory), () => {
+        const store = readStore(getStorePath(this.workingDirectory), true, true);
         delete store.records[normalized];
-        writeStore(store, getStorePath(this.workingDirectory, this.surfaceRoot));
+        writeStore(store, getStorePath(this.workingDirectory));
       });
     } catch (error) {
       registerNote = `; the register entry could not be removed yet (${summarizeError(error)}) and is reclaimed by the next list`;

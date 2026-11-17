@@ -1,5 +1,7 @@
 // Proves: Two apps editing one work plan lose an edit.
 // Red when: Either app writes whole tasks from its own copy: a status or a note is missing from the final plan.
+// Proves: Finishing a task also removes tasks that are not finished.
+// Red when: The delete that reclaims old finished tasks loses its status clause or misaligns a parameter, so open tasks are removed as finished.
 /**
  * The one work plan: every app (terminal, Agent, daemon) keeps a project's
  * plan as rows in one shared file. Edits two apps make to the same tasks at
@@ -14,6 +16,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ProjectPlanningService } from '../platform/src/platform/knowledge/index.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { WorkPlanRows } from '../platform/src/platform/knowledge/project-planning/work-plan-rows.js';
 
 let previousPort: JudgmentPort | undefined;
 const roots: string[] = [];
@@ -97,5 +100,29 @@ test('two apps editing the same tasks at the same time lose no edit', async () =
     out.releaseLock();
     if (other.exitCode === null) other.kill();
     await other.exited;
+  }
+});
+
+test('finishing a task removes only old finished tasks; older open tasks stay whole', () => {
+  const root = mkdtempSync(join(tmpdir(), 'goodvibes-work-plan-reclaim-'));
+  roots.push(root);
+  const rows = new WorkPlanRows(join(root, 'work-plans.sqlite'));
+  const task = (taskId: string, status: string, order: number) => ({ taskId, status, order, task: { taskId, title: `Task ${taskId}`, status } });
+  const T0 = 1_000_000;
+  try {
+    rows.commit('project:alpha', 'plan', () => ({
+      value: undefined, at: T0, remove: [],
+      put: [task('open-1', 'pending', 1), task('open-2', 'in_progress', 2), task('open-3', 'blocked', 3), task('done-1', 'done', 4), task('done-2', 'done', 5), task('gone-1', 'cancelled', 6)],
+    }));
+    const finishing = rows.commit('project:alpha', 'plan', () => ({
+      value: undefined, at: T0 + 40 * 24 * 60 * 60 * 1000, remove: [], reclaimFinished: true, put: [task('new-done', 'done', 7)],
+    }));
+    expect(finishing.reclaimed?.map((entry) => entry.taskId).sort()).toEqual(['done-1', 'done-2', 'gone-1']);
+    const left = rows.read('project:alpha', 'plan', (view) => view.tasks());
+    expect(left.map((entry) => [entry.taskId, entry.task['status']]).sort()).toEqual([
+      ['new-done', 'done'], ['open-1', 'pending'], ['open-2', 'in_progress'], ['open-3', 'blocked'],
+    ]);
+  } finally {
+    rows.close();
   }
 });

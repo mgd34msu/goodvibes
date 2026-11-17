@@ -5,7 +5,6 @@ import type { HookWorkbench } from '../hooks/workbench.js';
 import type { KnowledgeService } from '../knowledge/index.js';
 import type { PluginManager } from '../plugins/manager.js';
 import type { PolicyRuntimeState } from './permissions/policy-runtime.js';
-import type { ComponentHealthMonitor } from './perf/component-health-monitor.js';
 import type { ShellPathService } from './shell-paths.js';
 import type { WorktreeRegistry } from './worktree/registry.js';
 import type { SandboxSessionRegistry } from './sandbox/session-registry.js';
@@ -44,7 +43,6 @@ export interface CreateBootstrapCommandShellServicesOptions {
   readonly adaptivePlanner?: AdaptivePlanner | undefined;
   readonly sessionOrchestration?: import('./shell-command-ops.js').ShellSessionOrchestrationService | undefined;
   readonly shellPaths: ShellPathService;
-  readonly componentHealthMonitor: ComponentHealthMonitor;
   readonly worktreeRegistry: WorktreeRegistry;
   readonly sandboxSessionRegistry: SandboxSessionRegistry;
   readonly readModels: import('./ui-read-models.js').UiReadModels;
@@ -78,7 +76,6 @@ export function createBootstrapCommandShellServices(
     adaptivePlanner,
     sessionOrchestration,
     shellPaths,
-    componentHealthMonitor,
     worktreeRegistry,
     sandboxSessionRegistry,
     readModels,
@@ -103,7 +100,6 @@ export function createBootstrapCommandShellServices(
   return {
     workspace: createShellWorkspaceServices({
       shellPaths,
-      componentHealthMonitor,
       worktreeRegistry,
       sandboxSessionRegistry,
     }),

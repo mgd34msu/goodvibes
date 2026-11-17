@@ -132,7 +132,6 @@ export type CreateBootstrapCommandContextOptions = {
   activatePlan: (planId: string, task: string) => void;
   completeModelSelectionSideEffect?: () => void;
   sessionLineageTracker?: import('@goodvibes-jev/engine/platform/platform/core').SessionLineageTracker;
-  componentHealthMonitor: import('@/runtime/index.ts').ComponentHealthMonitor;
   writeLastSessionPointer?: (sessionId: string) => void;
   announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
   announceSessionRecoveryFailed?: (sessionId: string, reason: string) => void;
@@ -218,7 +217,6 @@ export function createBootstrapCommandContext(options: CreateBootstrapCommandCon
       'loadSystemPrompt',
       'activatePlan',
       'completeModelSelectionSideEffect',
-      'componentHealthMonitor',
       'memoryConsolidationScheduler',
       'writeLastSessionPointer',
       'announceSessionResumed',

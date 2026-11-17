@@ -276,17 +276,6 @@ Token counts arrive on the `turn` domain's `LLM_RESPONSE_RECEIVED` events; the c
 
 ## Health monitoring
 
-### ComponentHealthMonitor
-
-See [Performance and tuning: resource monitoring](./performance.md#resource-monitoring) for full usage. Summary:
-
-- Register components with `monitor.register(id, category)`
-- Gate renders with `monitor.canRender(id)`: returns false when throttled or degraded
-- Report render cost with `monitor.recordRender(id, durationMs)`
-- Read health state with `monitor.getHealth(id)` or `monitor.getAllHealth()`
-
-Health states: `healthy` → `warning` (throttled) → `overloaded` (degraded).
-
 ### System health selectors
 
 ```ts

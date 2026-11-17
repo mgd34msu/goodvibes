@@ -80,7 +80,6 @@ import type { AdaptivePlanner } from '../core/adaptive-planner.js';
 import type { IdempotencyStore } from './idempotency/index.js';
 import type { OverflowHandler } from '../tools/shared/overflow.js';
 import type { ToolLLM } from '../config/tool-llm.js';
-import type { ComponentHealthMonitor } from './perf/component-health-monitor.js';
 import type { RuntimeHealthAggregator } from './health/aggregator.js';
 import type { WorktreeRegistry } from './worktree/registry.js';
 import type { SandboxSessionRegistry } from './sandbox/session-registry.js';
@@ -368,7 +367,6 @@ export interface RuntimeServices {
   readonly channelPolicy: ChannelPolicyManager;
   readonly mcpRegistry: McpRegistry;
   readonly tokenAuditor: ApiTokenAuditor;
-  readonly componentHealthMonitor: ComponentHealthMonitor;
   /** Per-domain runtime health, kept current from the runtime event bus; pass it to a diagnostics provider. */
   readonly healthAggregator: RuntimeHealthAggregator;
   readonly worktreeRegistry: WorktreeRegistry;

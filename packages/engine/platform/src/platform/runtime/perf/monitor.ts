@@ -144,8 +144,9 @@ export class PerfMonitor {
       }
 
       const actual = metric.value;
+      const outside = budget.direction === 'min' ? actual < budget.threshold : actual > budget.threshold;
 
-      if (actual > budget.threshold) {
+      if (outside) {
         const prev = this.streaks.get(budget.metric) ?? 0;
         const consecutiveViolations = prev + 1;
         this.streaks.set(budget.metric, consecutiveViolations);
@@ -154,7 +155,7 @@ export class PerfMonitor {
           violations.push({
             budget,
             actual,
-            exceededBy: actual - budget.threshold,
+            exceededBy: Math.abs(actual - budget.threshold),
             consecutiveViolations,
           });
         }
@@ -169,6 +170,7 @@ export class PerfMonitor {
       metrics,
       violations,
       missing,
+      budgets: this.budgets,
       passed: violations.length === 0,
     };
   }

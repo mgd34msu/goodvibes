@@ -24,8 +24,6 @@ export type {
   RuntimeStateSnapshot,
   DomainHealthSummary,
   HealthDashboardData,
-  ComponentResourceEntry,
-  ComponentResourceSnapshot,
 } from './types.js';
 export { DEFAULT_BUFFER_LIMIT, DEFAULT_COMPONENT_CONFIG, applyFilter, appendBounded } from './types.js';
 

@@ -395,76 +395,9 @@ const models = createObservabilityReadModels(runtimeServices);
 
 ---
 
-## Resource monitoring
+## Latency budgets
 
-### ComponentHealthMonitor
-
-The `ComponentHealthMonitor` enforces per-component resource contracts at render time. It is surface-agnostic, so a TUI panel, a web widget, or any other renderable unit can register.
-
-**Registration and render gating:**
-
-```ts
-import { ComponentHealthMonitor } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
-
-const monitor = new ComponentHealthMonitor();
-
-// Register with a category, inherits category defaults
-monitor.register('agent-logs', 'agent');
-
-// Before rendering
-if (!monitor.canRender('agent-logs')) return; // skip
-
-// After rendering
-monitor.recordRender('agent-logs', actualDurationMs);
-```
-
-### Resource contracts
-
-Each category has a default contract. Components can override individual fields:
-
-| Category | Max Updates/s | Max Render (p95) | Throttle Interval | Degrade After |
-|---|---|---|---|---|
-| `development` | 10 | 20 ms | 100 ms | 5 violations |
-| `agent` | 5 | 30 ms | 200 ms | 5 violations |
-| `ai` | 8 | 20 ms | 125 ms | 5 violations |
-| `session` | 4 | 25 ms | 250 ms | 5 violations |
-| `monitoring` | 2 | 50 ms | 500 ms | 3 violations |
-| `default` | 5 | 30 ms | 200 ms | 5 violations |
-
-Override contract fields for a specific component:
-
-```ts
-monitor.register('latency-graph', 'monitoring', {
-  maxUpdatesPerSecond: 4,
-  maxRenderMs: 40,
-});
-```
-
-### Throttle and degrade lifecycle
-
-Components progress through three health states based on contract compliance:
-
-```
-normal → throttled (rate or render cost exceeded)
-throttled → degraded (consecutiveViolations >= degradeAfterViolations)
-throttled → normal (3 consecutive clean observations)
-degraded → normal (3 consecutive clean observations)
-```
-
-When `throttled`, `canRender` returns false until `throttleIntervalMs` has elapsed. When `degraded`, the component renders at `degradedIntervalMs` regardless of update rate. Recovery to `normal` requires 3 consecutive clean observations, either measurement windows without violations or renders that stayed within their budget, so three cheap renders in a row also recover a component. It applies the same way whether the component was throttled or degraded; a throttled component does not have to pass through degraded to recover.
-
-```ts
-const health = monitor.getHealth('agent-logs');
-// health.throttleStatus: 'normal' | 'throttled' | 'degraded'
-// health.healthStatus: 'healthy' | 'warning' | 'overloaded'
-// health.renderP95Ms: number
-// health.consecutiveViolations: number
-// health.totalSuppressed: number
-// health.totalPermitted: number
-
-// Force reset (operator intervention or tests)
-monitor.resetHealth('agent-logs');
-```
+`DEFAULT_BUDGETS` (`runtime/perf/budgets.ts`) states the latency each critical path should keep, as p95: time to first output after a turn is submitted, time to stop after a cancel, and time from a call reaching the gate to its decision. Each process that answers `/doctor` (both terminal apps) or `ops.doctor` (the daemon) keeps one `SloCollector` on its runtime event bus and compares the measured p95 with the budget in the stuck-turn and permission-deadlock runbooks. The measurement harness (`bun packages/engine/scripts/measure/run.ts`) reports the same p95 values (`turnStartP95Ms`, `permissionDecisionP95Ms`) for the tool and turn scenarios. A budget is an upper bound unless it says `direction: 'min'` (a success rate).
 
 ---
 

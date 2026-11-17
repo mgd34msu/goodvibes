@@ -17,7 +17,6 @@ import type { RuntimeStore, RuntimeEventBus, FeatureFlagManager } from '@goodvib
 import type { MutableRuntimeState, WorktreeRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { SessionSnapshot } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { SandboxSessionRegistry } from '@goodvibes-jev/engine/platform/platform/runtime/sandbox';
-import type { ComponentHealthMonitor } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 /**
  * Options accepted by bootstrapRuntime().
  */
@@ -86,8 +85,6 @@ export interface TerminalRuntimeContext<Services, Conversation extends TerminalC
   // ── Provider ────────────────────────────────────────────────────────
   /** Shared provider registry owned by the runtime services graph. */
   providerRegistry: ProviderRegistry;
-  /** Shared component-health monitor owned by the runtime services graph. */
-  componentHealthMonitor: ComponentHealthMonitor;
   /** Shared worktree registry owned by the runtime services graph. */
   worktreeRegistry: WorktreeRegistry;
   /** Shared sandbox session registry owned by the runtime services graph. */

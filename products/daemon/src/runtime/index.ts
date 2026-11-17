@@ -53,7 +53,6 @@ export { synchronizeConfiguredServices as syncConfiguredServices } from '@goodvi
 // Observability.
 export {
   TelemetryApiService,
-  ComponentHealthMonitor,
   IdempotencyStore,
 } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 

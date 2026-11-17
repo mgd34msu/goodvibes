@@ -699,7 +699,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     permissions: permissionManager,
     toolRegistry,
     providerRegistry,
-    componentHealthMonitor: services.componentHealthMonitor,
     worktreeRegistry: services.worktreeRegistry,
     sandboxSessionRegistry: services.sandboxSessionRegistry,
     hookDispatcher,

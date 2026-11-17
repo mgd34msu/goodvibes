@@ -201,7 +201,6 @@ export function projectBootstrapShellCommandOptions<
       readonly sessionOrchestration: unknown;
       readonly worktreeRegistry: unknown;
       readonly sandboxSessionRegistry: unknown;
-      readonly componentHealthMonitor: unknown;
     };
     readonly conversation: unknown;
     readonly runtime: unknown;
@@ -280,7 +279,6 @@ export function projectBootstrapShellCommandOptions<
     worktreeRegistry: input.services.worktreeRegistry,
     sandboxSessionRegistry: input.services.sandboxSessionRegistry,
     completeModelSelectionSideEffect: input.completeModelSelectionSideEffect,
-    componentHealthMonitor: input.services.componentHealthMonitor,
     hydrateSessionUsage: input.hydrateSessionUsage,
   } as {
     configManager: Input['configManager'];
@@ -341,7 +339,6 @@ export function projectBootstrapShellCommandOptions<
     worktreeRegistry: Input['services']['worktreeRegistry'];
     sandboxSessionRegistry: Input['services']['sandboxSessionRegistry'];
     completeModelSelectionSideEffect: Input['completeModelSelectionSideEffect'];
-    componentHealthMonitor: Input['services']['componentHealthMonitor'];
     hydrateSessionUsage: Input['hydrateSessionUsage'];
   };
 }

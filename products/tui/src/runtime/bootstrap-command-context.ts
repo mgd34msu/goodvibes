@@ -132,7 +132,6 @@ export type CreateBootstrapCommandContextOptions = {
   completeModelSelectionSideEffect?: () => void;
   sessionLineageTracker?: import('@goodvibes-jev/engine/platform/platform/core').SessionLineageTracker;
   contractRunner?: import('@goodvibes-jev/engine/platform/platform/contract').ContractRunner;
-  componentHealthMonitor: import('@/runtime/index.ts').ComponentHealthMonitor;
   hydrateSessionUsage?: () => void;
   contractOperator?: import('@goodvibes-jev/engine/platform/platform/contract').ContractOperatorService;
   workstreamDrafts?: import('@goodvibes-jev/engine/platform/platform/orchestration').WorkstreamDraftService;

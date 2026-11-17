@@ -83,7 +83,6 @@ import {
   RemoteSupervisor,
   IntegrationHelperService,
   IdempotencyStore,
-  ComponentHealthMonitor,
   WorktreeRegistry,
   createFeatureFlagManager,
   createShellPathService,
@@ -528,7 +527,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // security domain, and the Security screen reads the last audit of record.
   const tokenAuditor = createConfiguredTokenAuditor({ configManager, featureFlags, runtimeBus: options.runtimeBus });
   disposalScope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens, tokenAuditor));
-  const componentHealthMonitor = new ComponentHealthMonitor();
   const healthSystem = createWiredHealthSystem(options.runtimeBus);
   disposalScope.registry.add('runtime health event bridge', bindHealthDomainEvents(options.runtimeBus, healthSystem.wiring));
   const worktreeRegistry = new WorktreeRegistry(workingDirectory);
@@ -844,7 +842,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     channelPolicy,
     mcpRegistry,
     tokenAuditor,
-    componentHealthMonitor,
     healthAggregator: healthSystem.aggregator,
     worktreeRegistry,
     sandboxSessionRegistry,

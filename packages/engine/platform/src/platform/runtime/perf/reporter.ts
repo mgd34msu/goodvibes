@@ -34,15 +34,16 @@ function formatValue(value: number, unit: string): string {
  */
 function metricRow(
   metric: PerfMetric,
-  threshold: number,
+  threshold: number | undefined,
   unit: string,
   violated: boolean,
+  direction: 'max' | 'min' | undefined,
 ): string {
   const status = violated ? 'FAIL' : 'ok';
   return [
     pad(metric.name, COL.metric),
     pad(formatValue(metric.value, unit), COL.value),
-    pad(formatValue(threshold, unit), COL.threshold),
+    pad(threshold === undefined ? 'none' : `${direction === 'min' ? '>=' : '<='} ${formatValue(threshold, unit)}`, COL.threshold),
     pad(status, COL.status),
   ].join(' | ');
 }
@@ -75,16 +76,12 @@ export function formatReport(report: PerfReport): string {
   );
 
   for (const metric of report.metrics) {
-    // Prefer violation budget info; fall back to DEFAULT_BUDGETS for passing metrics
-    const violation = report.violations.find(
-      (v: BudgetViolation) => v.budget.metric === metric.name,
-    );
+    // The bound the monitor evaluated this metric against.
     const knownBudget: PerfBudget | undefined =
-      violation?.budget ??
-      report.violations.find((v: BudgetViolation) => v.budget.metric === metric.name)?.budget;
-    const threshold = knownBudget?.threshold ?? Infinity;
+      report.budgets?.find((budget) => budget.metric === metric.name)
+      ?? report.violations.find((v: BudgetViolation) => v.budget.metric === metric.name)?.budget;
     const unit = knownBudget?.unit ?? metric.unit;
-    lines.push(metricRow(metric, threshold, unit, violatedMetrics.has(metric.name)));
+    lines.push(metricRow(metric, knownBudget?.threshold, unit, violatedMetrics.has(metric.name), knownBudget?.direction));
   }
 
   lines.push(hr);

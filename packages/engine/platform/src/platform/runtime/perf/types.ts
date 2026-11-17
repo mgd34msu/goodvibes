@@ -18,8 +18,10 @@ export interface PerfBudget {
   name: string;
   /** The metric key this budget applies to. */
   metric: string;
-  /** Acceptable upper bound for the metric value. */
+  /** Acceptable bound for the metric value: the upper bound, or the lower bound when `direction` is `min`. */
   threshold: number;
+  /** `max` (default): the value must stay at or below the threshold. `min`: at or above it (a success rate). */
+  direction?: 'max' | 'min' | undefined;
   /** Unit of the threshold value. */
   unit: PerfUnit;
   /** Number of consecutive violations that triggers failure (e.g., 3 means fail on 3rd consecutive violation). */
@@ -70,6 +72,8 @@ export interface PerfReport {
   violations: BudgetViolation[];
   /** Budget metrics the snapshot did not supply. They were not measured, so they are neither violations nor passes. */
   missing?: string[] | undefined;
+  /** The budgets this report was evaluated against, so a reader prints each metric's own bound. */
+  budgets?: readonly PerfBudget[] | undefined;
   /** True if all budgets passed (no active violations). */
   passed: boolean;
 }

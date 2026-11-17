@@ -52,7 +52,7 @@ import type { createDurabilityServices } from '@goodvibes-jev/engine/platform/pl
 import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { DomainDispatch, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import type { RuntimeEventBus, DistributedRuntimeManager, RemoteRunnerRegistry, RemoteSupervisor, IntegrationHelperService, IdempotencyStore, ComponentHealthMonitor, WorktreeRegistry, SandboxSessionRegistry, ShellPathService, FeatureFlagManager, PolicyRuntimeState, SessionSurface } from '@/runtime/index.ts';
+import type { RuntimeEventBus, DistributedRuntimeManager, RemoteRunnerRegistry, RemoteSupervisor, IntegrationHelperService, IdempotencyStore, WorktreeRegistry, SandboxSessionRegistry, ShellPathService, FeatureFlagManager, PolicyRuntimeState, SessionSurface } from '@/runtime/index.ts';
 import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { CacheRegistry, PauseController, MemoryGovernor } from '@goodvibes-jev/engine/platform/platform/runtime/memory';
 import type { WebSearchProviderRegistry, WebSearchService } from '@goodvibes-jev/engine/platform/platform/web-search';
@@ -231,7 +231,6 @@ export interface RuntimeServices {
   readonly channelPolicy: ChannelPolicyManager;
   readonly mcpRegistry: McpRegistry;
   readonly tokenAuditor: ApiTokenAuditor;
-  readonly componentHealthMonitor: ComponentHealthMonitor;
   /** Per-domain runtime health, kept current from the runtime event bus. */
   readonly healthAggregator: RuntimeHealthAggregator;
   readonly worktreeRegistry: WorktreeRegistry;

@@ -26,24 +26,6 @@ export { PerfMonitor } from './monitor.js';
 export type { PerfSnapshot } from './monitor.js';
 export { formatReport, exitCode } from './reporter.js';
 export { SloCollector, SLO_METRICS } from './slo-collector.js';
-// Generic Component* names (canonical, prefer these in new code)
-export type {
-  ComponentResourceContract,
-  ComponentHealthState,
-  ComponentThrottleStatus,
-  ComponentHealthStatus,
-  PanelResourceContract,
-  PanelHealthState,
-  PanelThrottleStatus,
-  PanelHealthStatus,
-} from './component-contracts.js';
-export {
-  CATEGORY_CONTRACTS,
-  buildContract,
-  createInitialComponentHealthState,
-  createInitialPanelHealthState,
-} from './component-contracts.js';
-export { ComponentHealthMonitor } from './component-health-monitor.js';
 
 import { PerfMonitor } from './monitor.js';
 import type { PerfBudget } from './types.js';

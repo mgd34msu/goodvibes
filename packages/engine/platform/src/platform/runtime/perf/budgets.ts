@@ -9,11 +9,10 @@
 import type { PerfBudget } from './types.js';
 
 /**
- * The default set of performance budgets applied in CI.
- *
- * These represent acceptable operational thresholds. Any metric that
- * consistently exceeds its budget beyond the tolerance window will
- * cause CI to fail.
+ * The default performance budgets. `/doctor` and `ops.doctor` compare the
+ * measured turn-start, cancel and permission-decision p95 with them; the eval
+ * suites evaluate them through PerfMonitor. A metric outside its bound for
+ * `tolerance` consecutive evaluations is a violation.
  */
 export const DEFAULT_BUDGETS: PerfBudget[] = [
   {
@@ -103,6 +102,7 @@ export const DEFAULT_BUDGETS: PerfBudget[] = [
     name: 'SLO: Integration Delivery Success Rate',
     metric: 'slo.integration.delivery_success_rate',
     threshold: 95,
+    direction: 'min',
     unit: 'percent',
     tolerance: 3,
     description:

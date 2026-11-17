@@ -211,7 +211,6 @@ import { IdempotencyStore } from '@/runtime/index.ts';
 import { OverflowHandler } from '@goodvibes-jev/engine/platform/platform/tools';
 
 import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
-import { ComponentHealthMonitor } from '@/runtime/index.ts';
 import { attachComposedInstrumentation, bindHealthDomainEvents, createWiredHealthSystem, installComposedTelemetry, releaseComposedTelemetry } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 import { SandboxSessionRegistry } from '@/runtime/index.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -684,7 +683,6 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   readonly memoryEmbeddingRegistry: MemoryEmbeddingProviderRegistry;
   readonly mcpRegistry: McpRegistry;
   readonly tokenAuditor: ApiTokenAuditor;
-  readonly componentHealthMonitor: ComponentHealthMonitor;
   readonly worktreeRegistry: WorktreeRegistry;
   readonly sandboxSessionRegistry: SandboxSessionRegistry;
   readonly webhookNotifier: WebhookNotifier;
@@ -1533,7 +1531,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   // security.tokenAudit settings, findings on the security domain. The paired devices
   // are the daemon's and are audited there; this one audits what is registered here.
   const tokenAuditor = createConfiguredTokenAuditor({ configManager, featureFlags, runtimeBus: options.runtimeBus });
-  const componentHealthMonitor = new ComponentHealthMonitor();
   const healthSystem = createWiredHealthSystem(options.runtimeBus);
   disposalScope.registry.add('runtime health event bridge', bindHealthDomainEvents(options.runtimeBus, healthSystem.wiring));
   const worktreeRegistry = createDisabledAgentWorktreeRegistry(workingDirectory);
@@ -2303,7 +2300,6 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
     memoryEmbeddingRegistry,
     mcpRegistry: lazyMcp.registry,
     tokenAuditor,
-    componentHealthMonitor,
     healthAggregator: healthSystem.aggregator,
     worktreeRegistry,
     sandboxSessionRegistry,

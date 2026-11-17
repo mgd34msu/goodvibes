@@ -17,8 +17,6 @@ export type {
   RuntimeStateSnapshot,
   DomainHealthSummary,
   HealthDashboardData,
-  ComponentResourceEntry,
-  ComponentResourceSnapshot,
 } from './diagnostics/index.js';
 export {
   DEFAULT_BUFFER_LIMIT,
@@ -107,14 +105,6 @@ export type {
   PerfReport,
   PerfUnit,
   PerfSnapshot,
-  ComponentResourceContract,
-  ComponentHealthState,
-  ComponentThrottleStatus,
-  ComponentHealthStatus,
-  PanelResourceContract,
-  PanelHealthState,
-  PanelThrottleStatus,
-  PanelHealthStatus,
 } from './perf/index.js';
 export {
   DEFAULT_BUDGETS,
@@ -123,11 +113,6 @@ export {
   exitCode,
   SloCollector,
   SLO_METRICS,
-  CATEGORY_CONTRACTS,
-  buildContract,
-  createInitialComponentHealthState,
-  createInitialPanelHealthState,
-  ComponentHealthMonitor,
 } from './perf/index.js';
 // DiagnosticsProviderConfig and DiagnosticPanelName are included via the diagnostics block above.
 export {

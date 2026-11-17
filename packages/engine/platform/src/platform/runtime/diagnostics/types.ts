@@ -515,60 +515,6 @@ export interface IntegrationDeliveryDiagnostics {
   readonly capturedAt: number;
 }
 
-// ── Panel resource diagnostics ───────────────────────────────────────────────
-
-import type { ComponentThrottleStatus, ComponentHealthStatus } from '../perf/component-contracts.js';
-
-/**
- * Diagnostic snapshot for a single component's resource usage and health.
- */
-export interface ComponentResourceEntry {
-  /** Component id. */
-  readonly componentId: string;
-  /** Current throttle status. */
-  readonly throttleStatus: ComponentThrottleStatus;
-  /** Current health status. */
-  readonly healthStatus: ComponentHealthStatus;
-  /** p95 render duration in ms over the last measurement window. */
-  readonly renderP95Ms: number;
-  /** Maximum contract render budget in ms. */
-  readonly maxRenderMs: number;
-  /** Renders observed in the current measurement window. */
-  readonly rendersInWindow: number;
-  /** Contracted max updates per second. */
-  readonly maxUpdatesPerSecond: number;
-  /** Number of consecutive budget violations. */
-  readonly consecutiveViolations: number;
-  /** Total renders suppressed since monitor start. */
-  readonly totalSuppressed: number;
-  /** Total renders permitted since monitor start. */
-  readonly totalPermitted: number;
-  /** Epoch ms of the last permitted render. */
-  readonly lastRenderAt: number;
-  /** Epoch ms when next render is permitted (0 = unrestricted). */
-  readonly nextAllowedAt: number;
-}
-
-/**
- * Full snapshot of component resource health for the diagnostics panel.
- */
-export interface ComponentResourceSnapshot {
-  /** All tracked component entries, sorted: overloaded > warning > healthy. */
-  readonly panels: readonly ComponentResourceEntry[];
-  /** Count of panels currently in 'overloaded' health status. */
-  readonly overloadedCount: number;
-  /** Count of panels currently in 'warning' health status. */
-  readonly warningCount: number;
-  /** Count of panels currently in 'healthy' health status. */
-  readonly healthyCount: number;
-  /** Total renders suppressed across all panels since monitor start. */
-  readonly totalSuppressed: number;
-  /** Epoch ms when this snapshot was captured. */
-  readonly capturedAt: number;
-  /** Panel-level warnings/errors for degraded resource collection. */
-  readonly issues?: readonly DiagnosticPanelIssue[] | undefined;
-}
-
 // ── Token audit diagnostics ──────────────────────────────────────────────────
 
 /**

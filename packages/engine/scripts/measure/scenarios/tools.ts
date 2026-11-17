@@ -84,7 +84,7 @@ function toolScenario(name: string, drives: string, call: (run: number) => ToolC
       return {
         async op(run) {
           const results = await runToolCall(s, call(run));
-          return { toolSucceeded: results.every((result) => result.success) ? 1 : 0, outputChars: results.reduce((n, r) => n + String(r.output ?? r.error ?? '').length, 0) };
+          return { toolSucceeded: results.every((result) => result.success) ? 1 : 0, outputChars: results.reduce((n, r) => n + String(r.output ?? r.error ?? '').length, 0), ...s.floor.latency() };
         },
         dispose: () => closeSession(s),
       };
@@ -129,7 +129,7 @@ function turnScenario(name: string, drives: string, calls: (run: number) => Tool
           await s.session.orchestrator.handleUserInput(`measurement turn ${run}`);
           const messages = s.session.conversation.getMessageSnapshot();
           const refused = messages.slice(before).filter((m) => m.role === 'tool' && typeof m.content === 'string' && m.content.startsWith('Error:')).length;
-          return { toolsExecuted: executed, toolErrorsInTranscript: refused, transcriptMessages: messages.length };
+          return { toolsExecuted: executed, toolErrorsInTranscript: refused, transcriptMessages: messages.length, ...s.floor.latency() };
         },
         dispose: () => closeSession(s),
       };

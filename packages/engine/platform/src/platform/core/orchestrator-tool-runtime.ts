@@ -536,30 +536,42 @@ async function executeToolCallsInMode(
           callId: call.id, tool: call.name, args: call.arguments, category: requestedCategory,
         });
       }
-      // Event observers and every awaited admission boundary can cancel the turn.
-      assertTurnActive();
       let checkResult: import('../permissions/types.js').PermissionCheckResult;
-      if (prepared && owner) {
-        const consumedRevisions: string[] = [];
-        let permittedRevisionIds: readonly string[] | undefined;
-        while (true) {
-          const currentPrepared = prepared;
-          admission = await owner.admit(sourceId, currentPrepared.name, currentPrepared.args, { sourceOf: sourceOf!, decoratePort: deps.autonomousPort, signal: admissionSignal, hookOwner: deps.hookOwner, consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}), ...(choiceProjection ? { choiceProjection } : {}), schemaRevision: currentPrepared.schemaRevision, preparationDecisionIds: currentPrepared.judgmentDecisionIds, preparedCall: { registry: deps.toolRegistry, call: currentPrepared }, assertPrepared: () => deps.toolRegistry.assertPrepared(currentPrepared) });
-          assertTurnActive();
-          permittedRevisionIds ??= admission.revisionIds;
-          checkResult = admission.result;
-          if (!admission.revision) break;
-          const revision = admission.revision;
-          if (consumedRevisions.includes(revision.ref.id)) throw new Error('Autonomous revision was already consumed');
-          consumedRevisions.push(revision.ref.id);
-          const preparation = owner.preparation(sourceId, sourceOf!, admissionSignal, deps.autonomousPort, choiceProjection);
-          prepared = await deps.toolRegistry.prepareCall(call.id, revision.toolName, revision.args, { signal: admissionSignal, port: preparation.port, assertCurrent: () => { assertTurnActive(); preparation.assertCurrent(); } });
-          preparation.assertCurrent();
-          call = { id: prepared.callId, name: prepared.name, arguments: prepared.args };
+      try {
+        // Event observers and every awaited admission boundary can cancel the turn.
+        assertTurnActive();
+        if (prepared && owner) {
+          const consumedRevisions: string[] = [];
+          let permittedRevisionIds: readonly string[] | undefined;
+          while (true) {
+            const currentPrepared = prepared;
+            admission = await owner.admit(sourceId, currentPrepared.name, currentPrepared.args, { sourceOf: sourceOf!, decoratePort: deps.autonomousPort, signal: admissionSignal, hookOwner: deps.hookOwner, consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}), ...(choiceProjection ? { choiceProjection } : {}), schemaRevision: currentPrepared.schemaRevision, preparationDecisionIds: currentPrepared.judgmentDecisionIds, preparedCall: { registry: deps.toolRegistry, call: currentPrepared }, assertPrepared: () => deps.toolRegistry.assertPrepared(currentPrepared) });
+            assertTurnActive();
+            permittedRevisionIds ??= admission.revisionIds;
+            checkResult = admission.result;
+            if (!admission.revision) break;
+            const revision = admission.revision;
+            if (consumedRevisions.includes(revision.ref.id)) throw new Error('Autonomous revision was already consumed');
+            consumedRevisions.push(revision.ref.id);
+            const preparation = owner.preparation(sourceId, sourceOf!, admissionSignal, deps.autonomousPort, choiceProjection);
+            prepared = await deps.toolRegistry.prepareCall(call.id, revision.toolName, revision.args, { signal: admissionSignal, port: preparation.port, assertCurrent: () => { assertTurnActive(); preparation.assertCurrent(); } });
+            preparation.assertCurrent();
+            call = { id: prepared.callId, name: prepared.name, arguments: prepared.args };
+          }
+        } else {
+          checkResult = await resolvePermissionCheck(deps.permissionManager, call.name, call.arguments, turnSignal, deps.hookOwner,
+            typeof deps.toolRegistry.definitionOf === 'function' ? deps.toolRegistry.definitionOf(call.name) : undefined);
         }
-      } else {
-        checkResult = await resolvePermissionCheck(deps.permissionManager, call.name, call.arguments, turnSignal, deps.hookOwner,
-          typeof deps.toolRegistry.definitionOf === 'function' ? deps.toolRegistry.definitionOf(call.name) : undefined);
+      } catch (error) {
+        // A requested call whose admission threw still gets its decision event, so no reader
+        // (the gate latency figure, forensics, telemetry spans) is left with an open request.
+        if (deps.runtimeBus) {
+          emitGateDecision(deps.runtimeBus, deps.emitterContext(turnId), {
+            callId: call.id, tool: call.name, category: requestedCategory, approved: false,
+            source: 'admission_failed', summary: `Admission did not finish: ${summarizeError(error)}`,
+          });
+        }
+        throw error;
       }
       if (deps.runtimeBus) {
         emitGateDecision(deps.runtimeBus, deps.emitterContext(turnId), {

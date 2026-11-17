@@ -40,6 +40,8 @@ interface Authority {
   readonly mutable: boolean;
   /** Exact construction-selected generation membership, read from its tree on first use; never a read grant. */
   readonly inputFiles: () => readonly string[];
+  /** The git tree id of the input this view was built from; a mutable member starts from it and may move on. */
+  readonly inputTree: string;
   readonly signal?: AbortSignal | undefined;
   readonly assertView: () => Promise<void>;
   readonly assertInputPath: ((path: string, signal?: AbortSignal) => Promise<void>) | undefined;
@@ -162,6 +164,7 @@ export async function createContractInputAuthority(
     identity: identity(stat),
     mutable: options.mutable === true,
     inputFiles: () => contractInputFiles(snapshot),
+    inputTree: snapshot.inputTree,
     assertView,
     assertInputPath: immutableView?.assertPath,
     batchable: options.assertView === undefined,
@@ -327,6 +330,14 @@ export function contractInputAuthoritySourceRoot(token: ContractInputAuthority):
 }
 export function contractInputAuthorityMutable(token: ContractInputAuthority): boolean {
   return stateOf(token).mutable;
+}
+
+/**
+ * The git tree id of the input the view holds (immutable) or started from
+ * (mutable): a content identity, never a read grant.
+ */
+export function contractInputAuthorityTree(token: ContractInputAuthority): string {
+  return stateOf(token).inputTree;
 }
 
 /** Immutable consumers may discover only the selected receipt's files. Mutable members enumerate their own authorized current files. */

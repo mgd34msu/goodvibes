@@ -65,6 +65,7 @@ import {
   finalizeAgentSessionInputs,
   retireAbandonedSurfaceInputs,
   refreshPendingInputCount,
+  settleChannelReplyInputs,
   touchSharedSession,
   updateSharedSessionInput,
 } from './session-broker-inputs.js';
@@ -959,7 +960,18 @@ export class SharedSessionBroker {
     });
   }
 
-  async completeAgent(sessionId: string, agentId: string, body: string, metadata: Record<string, unknown> = {}): Promise<SharedSessionCompletion | null> {
+  /**
+   * Store an agent's answer and settle the inputs it answered. With
+   * `channelReplyOwed`, the caller sends the answer to the channel next: the
+   * settled channel rows say the answer is owed until `settleChannelReply`.
+   */
+  async completeAgent(
+    sessionId: string,
+    agentId: string,
+    body: string,
+    metadata: Record<string, unknown> = {},
+    options: { readonly channelReplyOwed?: boolean } = {},
+  ): Promise<SharedSessionCompletion | null> {
     await this.start();
     const session = this.sessions.get(sessionId);
     if (!session) return null;
@@ -998,6 +1010,7 @@ export class SharedSessionBroker {
       agentId,
       metadata.status === 'failed' ? 'failed' : metadata.status === 'cancelled' ? 'cancelled' : 'completed',
       metadata.status === 'failed' ? body : undefined,
+      options,
     );
     await this.persist();
     this.publishUpdate('session-agent-completed', {
@@ -1016,6 +1029,16 @@ export class SharedSessionBroker {
       ...(continuation?.input ? { continuedInput: continuation.input } : {}),
       ...(continuation?.agentId ? { continuedAgentId: continuation.agentId } : {}),
     };
+  }
+
+  /**
+   * The answer an agent owed a channel was handed to it (accepted or not): its
+   * channel rows say so on disk, so a report of the same answer repeated after
+   * a restart does not send it again. Writes only when a row changed.
+   */
+  async settleChannelReply(sessionId: string, agentId: string): Promise<void> {
+    await this.start();
+    if (settleChannelReplyInputs(this.sessionInputStore(), sessionId, agentId)) await this.persist();
   }
 
   /**

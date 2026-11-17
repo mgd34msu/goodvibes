@@ -11,6 +11,7 @@ import { deliverOwnerAlert } from './owner-alert.js';
 import type { DeliveredChannelReply, UndeliveredChannelReply } from '../channels/reply-pipeline.js';
 import type { SharedSessionSurfaceReplyBinding } from '../control-plane/session-intents.js';
 import { BOOT_RECONCILE_CANCEL_REASON } from '../control-plane/session-broker-state.js';
+import { CHANNEL_REPLY_METADATA_KEY } from '../control-plane/session-broker-inputs.js';
 import { logger } from '../utils/logger.js';
 import { webAppLink } from './web-app-link.js';
 import type { SharedApprovalRecord } from '../control-plane/index.js';
@@ -174,7 +175,7 @@ function truncateUndeliveredBody(body: string): string {
 export class DaemonSurfaceDeliveryHelper {
   /** Agents whose final answer a surface is reporting right now; a retried report waits its turn. */
   private readonly finalizingReplies = new Set<string>();
-  /** Agents whose reply route was recovered from the session after a restart; see `recoverPendingReply`. */
+  /** Agents whose answer this process handed to its channel or recovered from the session; see `recoverPendingReply`. */
   private readonly recoveredReplies = new Set<string>();
 
   constructor(
@@ -493,7 +494,9 @@ export class DaemonSurfaceDeliveryHelper {
    * process ran, so the report is that event: write the answer into the shared
    * session, push it down the reply pipeline, drop the pending entry. When the
    * daemon restarted since the reply was queued, the route is read back from
-   * the session input the agent was started for.
+   * the session input the agent was started for. The stored answer marks its
+   * channel rows owed and the send marks them sent, so a restart between the
+   * two still sends it, and a restart after the send does not send it again.
    *
    * Returns whether a channel delivery was attempted. `false` is the ordinary
    * outcome for a session with no channel behind it (a local terminal), and is
@@ -533,7 +536,7 @@ export class DaemonSurfaceDeliveryHelper {
         await this.context.sessionBroker.completeAgent(sessionId, input.agentId, input.body, {
           status,
           ...(pending?.routeId ? { routeId: pending.routeId } : {}),
-        });
+        }, { channelReplyOwed: pending !== null && pending !== undefined });
       } catch (error) {
         // Nothing was delivered: hand the entry back so a retried report still can.
         if (held) this.context.pendingSurfaceReplies.set(input.agentId, held);
@@ -567,6 +570,16 @@ export class DaemonSurfaceDeliveryHelper {
         body: input.body,
         reason: summarizeError(error),
       }, { sessionCopyKept: sessionId !== undefined });
+    }
+    // Handed to the channel, accepted or not (a final is sent once): a repeated report finds it settled.
+    this.recoveredReplies.add(input.agentId);
+    while (this.recoveredReplies.size > MAX_RECOVERED_REPLIES) this.recoveredReplies.delete(this.recoveredReplies.values().next().value!);
+    if (sessionId) {
+      await this.context.sessionBroker.settleChannelReply(sessionId, input.agentId).catch((error: unknown) => {
+        logger.warn('A sent channel answer could not be marked sent; a report repeated after a restart may send it again', {
+          agentId: input.agentId, sessionId, error: summarizeError(error),
+        });
+      });
     }
     return true;
   }
@@ -672,9 +685,10 @@ export class DaemonSurfaceDeliveryHelper {
    * The reply route of an agent whose pending entry this process does not hold
    * (it was queued before a daemon restart): read from the session input the
    * agent was started for, which the session broker persists with its route.
-   * Only while that input still waits for this answer (running, or cancelled by
-   * the restart's own reconcile, which a completion report revives): once an
-   * earlier report settled the agent's answer, that report took up its delivery,
+   * Only while that input still waits for this answer: running, cancelled by
+   * the restart's own reconcile (which a completion report revives), or with
+   * the answer stored and its send not yet made (a daemon that stopped between
+   * the two). Once the answer was handed to the channel the rows say `sent`,
    * and a report repeated after a restart (the surface never heard back) must
    * not send it again. Once per agent per process, so a repeated report cannot
    * send it twice.
@@ -682,8 +696,10 @@ export class DaemonSurfaceDeliveryHelper {
   private recoverPendingReply(agentId: string, sessionId: string | undefined): PendingSurfaceReply | null {
     if (!sessionId || this.recoveredReplies.has(agentId)) return null;
     const row = this.context.sessionBroker.getInputs(sessionId, 1_000).find((entry) => entry.activeAgentId === agentId && entry.routeId
+      && entry.metadata?.[CHANNEL_REPLY_METADATA_KEY] !== 'sent'
       && (entry.state === 'delivered' || entry.state === 'spawned'
-        || (entry.state === 'cancelled' && entry.error === BOOT_RECONCILE_CANCEL_REASON)));
+        || (entry.state === 'cancelled' && entry.error === BOOT_RECONCILE_CANCEL_REASON)
+        || entry.metadata?.[CHANNEL_REPLY_METADATA_KEY] === 'owed'));
     const binding = row?.routeId ? this.context.routeBindings.getBinding(row.routeId) : undefined;
     if (!row || !binding || this.describeRefusal(binding)) return null;
     const pending = this.buildPendingSurfaceReply(binding, { agentId, task: row.body, sessionId });

@@ -116,7 +116,7 @@ export function moveSharedSessionInput(
   sessionId: string,
   inputId: string,
   to: SharedSessionInputState,
-  patch: Partial<Pick<SharedSessionInputRecord, 'activeAgentId' | 'error'>> = {},
+  patch: Partial<Pick<SharedSessionInputRecord, 'activeAgentId' | 'error' | 'metadata'>> = {},
 ): SessionInputMove | null {
   const current = store.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
   if (!current) return null;
@@ -380,12 +380,23 @@ export function applySurfaceInputDelivery(
   return record;
 }
 
+/**
+ * Input metadata key saying where the agent's answer to a channel message
+ * stands: `owed` once the answer is stored and its channel send has not yet
+ * been made, `sent` once it was handed to the channel (accepted or not). It is
+ * written with the stored answer and after the send, so a daemon that stops
+ * between the two still owes the answer after its restart, and one that stops
+ * after the send does not send it again.
+ */
+export const CHANNEL_REPLY_METADATA_KEY = 'channelReply';
+
 export function finalizeAgentSessionInputs(
   store: SharedSessionInputStore,
   sessionId: string,
   agentId: string,
   nextState: Extract<SharedSessionInputRecord['state'], 'completed' | 'failed' | 'cancelled'>,
   error?: string,
+  options: { readonly channelReplyOwed?: boolean } = {},
 ): SharedSessionInputRecord[] {
   const bucket = store.inputs.get(sessionId);
   if (!bucket) return [];
@@ -394,9 +405,32 @@ export function finalizeAgentSessionInputs(
   const owned = bucket.filter((entry) => !isDelegatedSessionInput(entry)
     && entry.activeAgentId === agentId && (entry.state === 'delivered' || entry.state === 'spawned'));
   for (const entry of owned) {
-    const moved = moveSharedSessionInput(store, sessionId, entry.id, nextState, error ? { error } : {});
+    const owed = options.channelReplyOwed === true && entry.routeId !== undefined;
+    const moved = moveSharedSessionInput(store, sessionId, entry.id, nextState, {
+      ...(error ? { error } : {}),
+      ...(owed ? { metadata: { ...entry.metadata, [CHANNEL_REPLY_METADATA_KEY]: 'owed' } } : {}),
+    });
     if (moved?.ok) updatedInputs.push(moved.input);
     else if (moved) logger.warn('A session input kept its state', { sessionId, inputId: entry.id, reason: moved.reason });
   }
   return updatedInputs;
+}
+
+/**
+ * Record that an agent's answer was handed to the channel its message came
+ * from: every channel row of the agent says `sent`, so a report of the same
+ * answer repeated after a restart is not sent again. Returns whether a row
+ * changed (and so needs writing).
+ */
+export function settleChannelReplyInputs(store: SharedSessionInputStore, sessionId: string, agentId: string): boolean {
+  let changed = false;
+  for (const entry of store.inputs.get(sessionId) ?? []) {
+    if (entry.activeAgentId !== agentId || entry.routeId === undefined || isDelegatedSessionInput(entry)) continue;
+    if (entry.metadata?.[CHANNEL_REPLY_METADATA_KEY] === 'sent') continue;
+    updateSharedSessionInput(store, sessionId, entry.id, (row) => ({
+      ...row, metadata: { ...row.metadata, [CHANNEL_REPLY_METADATA_KEY]: 'sent' },
+    }));
+    changed = true;
+  }
+  return changed;
 }

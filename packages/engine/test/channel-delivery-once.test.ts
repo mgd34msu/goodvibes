@@ -2,7 +2,8 @@
  * An agent's answer to a channel message reaches the channel once, also when
  * the daemon restarts after sending it and the surface that ran the agent
  * reports the same answer again because it never heard back. An answer whose
- * report first arrives after the restart is still delivered.
+ * report first arrives after the restart is still delivered, and so is one the
+ * daemon had stored but not yet sent when it stopped.
  *
  * Real pieces: the session broker and route bindings over their files, the
  * settings manager, the reply pipeline, the daemon's surface-delivery helper
@@ -51,8 +52,12 @@ async function ntfyServer(): Promise<{ readonly url: string; readonly received: 
   return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, received };
 }
 
-/** One daemon's delivery pieces over the home's files. */
-async function daemon(root: string) {
+/**
+ * One daemon's delivery pieces over the home's files. With `dies`, the process
+ * stops inside its first channel send: the send never reaches the server and
+ * never returns, as when the daemon is killed there.
+ */
+async function daemon(root: string, options: { readonly dies?: { sending: boolean } } = {}) {
   const configManager = new ConfigManager({ configDir: join(root, 'config'), daemonTierPath: join(root, 'daemon', 'settings.json'), ownsDaemonTier: true });
   const routeBindings = new RouteBindingManager({ store: new AutomationRouteStore(join(root, 'bindings.json')) });
   const sessionBroker = new SharedSessionBroker({
@@ -75,7 +80,10 @@ async function daemon(root: string) {
   // As the built-in ntfy plugin is registered: its reply goes to the helper's ntfy sender.
   channelPlugins.register({
     id: 'surface:ntfy', surface: 'ntfy', displayName: 'ntfy', capabilities: ['egress'],
-    deliverReply: (pending, message) => helper.deliverNtfyAgentReply(pending as PendingSurfaceReply, message),
+    deliverReply: (pending, message) => {
+      if (options.dies) { options.dies.sending = true; return new Promise<void>(() => {}); }
+      return helper.deliverNtfyAgentReply(pending as PendingSurfaceReply, message);
+    },
   } as Parameters<ChannelPluginRegistry['register']>[0]);
   return {
     configManager, routeBindings, sessionBroker, helper,
@@ -128,4 +136,41 @@ test('an answer is sent once across a restart, and one first reported after the 
   await second.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-later', sessionId: later, body: 'the later answer' });
   await second.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-later', sessionId: later, body: 'the later answer' });
   expect(ntfy.received.filter((entry) => entry.topic === 'topic-later').map((entry) => entry.body)).toEqual(['the later answer']);
+});
+
+test('an answer stored but not yet sent when the daemon stopped is sent after the restart, once', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gv-delivery-owed-'));
+  cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const ntfy = await ntfyServer();
+  const dies = { sending: false };
+  const first = await daemon(root, { dies });
+  let firstRunning = true;
+  cleanups.push(async () => { if (firstRunning) await first.stop(); });
+  first.configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], { kind: 'owner', surface: 'fixture' });
+  const session = await conversation(first, 'topic-owed', 'agent-owed');
+
+  // The answer is stored, then the daemon stops inside the send.
+  void first.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-owed', sessionId: session, body: 'the owed answer' });
+  for (let turn = 0; turn < 1_000 && !dies.sending; turn += 1) await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(dies.sending).toBe(true);
+  expect(ntfy.received).toHaveLength(0);
+  await first.stop();
+  firstRunning = false;
+  ntfyOutboundDedup.reset();
+
+  const second = await daemon(root);
+  cleanups.push(() => second.stop());
+  // The surface never heard back and reports again: the answer reaches the channel, once.
+  await second.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-owed', sessionId: session, body: 'the owed answer' });
+  await second.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-owed', sessionId: session, body: 'the owed answer' });
+  expect(ntfy.received.map((entry) => entry.body)).toEqual(['the owed answer']);
+  expect(second.sessionBroker.getMessages(session, 1_000).filter((message) => message.body === 'the owed answer')).toHaveLength(1);
+  await second.stop();
+
+  // A third start after the send: a repeated report sends nothing.
+  ntfyOutboundDedup.reset();
+  const third = await daemon(root);
+  cleanups.push(() => third.stop());
+  await third.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-owed', sessionId: session, body: 'the owed answer' });
+  expect(ntfy.received).toHaveLength(1);
 });

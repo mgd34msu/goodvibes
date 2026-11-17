@@ -1141,6 +1141,7 @@ export class Orchestrator {
       cacheHitTracker: getCacheHitTracker(this.coreServices, this.ownedCacheHitTracker),
       helperModel: this.helperModel,
       sessionId: this.currentSessionId,
+      sessionOrchestration: this.coreServices.sessionOrchestration,
       planManager: isNativeConversationTurn() ? null : this.coreServices.planManager ?? null,
       text,
       content,

@@ -40,7 +40,7 @@ export function projectOrchestratorCoreServices(input: {
   readonly providerRegistry: ProviderRegistry;
   readonly services: Pick<
     OrchestratorCoreServices,
-    'planManager' | 'adaptivePlanner' | 'sessionMemoryStore' | 'sessionLineageTracker' | 'idempotencyStore'
+    'planManager' | 'adaptivePlanner' | 'sessionMemoryStore' | 'sessionLineageTracker' | 'idempotencyStore' | 'sessionOrchestration'
   >;
 }): {
   configManager: ConfigManager;
@@ -50,6 +50,7 @@ export function projectOrchestratorCoreServices(input: {
   sessionMemoryStore: OrchestratorCoreServices['sessionMemoryStore'];
   sessionLineageTracker: OrchestratorCoreServices['sessionLineageTracker'];
   idempotencyStore: OrchestratorCoreServices['idempotencyStore'];
+  sessionOrchestration: OrchestratorCoreServices['sessionOrchestration'];
 } {
   const { configManager, providerRegistry, services } = input;
   return {
@@ -60,5 +61,7 @@ export function projectOrchestratorCoreServices(input: {
     sessionMemoryStore: services.sessionMemoryStore,
     sessionLineageTracker: services.sessionLineageTracker,
     idempotencyStore: services.idempotencyStore,
+    // Tasks another session handed to this one are said at the start of each turn until accepted.
+    sessionOrchestration: services.sessionOrchestration,
   };
 }

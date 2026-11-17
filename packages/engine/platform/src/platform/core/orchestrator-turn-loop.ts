@@ -51,6 +51,7 @@ import { resolveReasoningEffortSpec } from '../providers/reasoning-effort-famili
 
 import type { FavoritesStore } from '../providers/favorites.js';
 import { logger } from '../utils/logger.js';
+import { summarizeError } from '../utils/error-display.js';
 import type { AgentManager } from '../tools/agent/index.js';
 import type { ExecutionPlanManager } from './execution-plan.js';
 import {
@@ -80,6 +81,7 @@ import {
   type TurnCodeIndexSource,
 } from '../agents/turn-knowledge-injection.js';
 import type { HostKey } from './host-instructions.js';
+import { describeAwaitingHandoffs, type CrossSessionTaskRegistry } from '../sessions/orchestration/registry.js';
 import type { OrchestratorUsageTotals } from './orchestrator-usage.js';
 
 /** Host-channel keys only this loop writes, each about the turn that wrote it. */
@@ -162,6 +164,8 @@ export interface OrchestratorTurnLoopContext {
   readonly cacheHitTracker: Pick<CacheHitTracker, 'getMetrics'>;
   readonly helperModel: HelperModel;
   readonly sessionId: string;
+  /** The task graph; tasks handed to this session and not yet accepted are said at the start of the turn. */
+  readonly sessionOrchestration?: Pick<CrossSessionTaskRegistry, 'handoffsAwaiting'> | undefined;
   readonly planManager: Pick<ExecutionPlanManager, 'getActive'> | null;
   readonly text: string;
   readonly content?: ContentPart[] | undefined;
@@ -345,6 +349,16 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   // These keys belong to this turn; whatever an earlier, failed turn left in them is not about this one.
   const hostInstructions = context.conversation.hostInstructions;
   for (const key of TURN_HOST_KEYS) hostInstructions.clear(key);
+  // Work another session (another terminal, an agent) handed to this one: said on every turn until it is
+  // accepted, so the session learns of it without the model asking and the source task is not left blocked.
+  let awaitingHandoffs: string | undefined;
+  try {
+    awaitingHandoffs = context.sessionOrchestration ? describeAwaitingHandoffs(context.sessionOrchestration.handoffsAwaiting(context.sessionId)) : undefined;
+  } catch (error) {
+    logger.debug('Turn start: waiting handoffs could not be read', { error: summarizeError(error) });
+  }
+  if (awaitingHandoffs) hostInstructions.set('handoffs', awaitingHandoffs);
+  else hostInstructions.clear('handoffs');
   // A draft's revision request rides every request until a draft is accepted, after the history, never in the system prompt.
   const requestRevision = (text: string) => hostInstructions.set('correction', text);
   if (resumedRepair) requestRevision(resumedRepair);

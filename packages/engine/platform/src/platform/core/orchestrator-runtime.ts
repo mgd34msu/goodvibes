@@ -15,6 +15,12 @@ import type { ContractSessionHooks } from './orchestrator-turn-helpers.js';
 import type { HelperModel } from '../config/helper-model.js';
 
 export type OrchestratorCoreServices = {
+  /**
+   * The task graph: at the start of each turn the session is told of tasks other
+   * sessions handed to it that wait for it to accept (one read of the graph file's
+   * identity per turn when nothing changed). Absent: no such notice.
+   */
+  sessionOrchestration?: Pick<import('../sessions/orchestration/registry.js').CrossSessionTaskRegistry, 'handoffsAwaiting'> | undefined;
   /** The contract runner's hooks: a session-mode contract's unit is worked by this session's turns (contract runner design 6.6). */
   contractHooks?: ContractSessionHooks | undefined;
   configManager?: Pick<ConfigManager, 'get' | 'getCategory' | 'getWorkingDirectory'> | undefined;

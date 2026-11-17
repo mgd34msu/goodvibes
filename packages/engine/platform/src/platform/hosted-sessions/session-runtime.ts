@@ -406,6 +406,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     providerRegistry,
     // A session-mode contract's unit is this session's own turns.
     contractHooks: options.floor.contractRunner.hooks(),
+    // Tasks another session handed to this one are said at the start of each turn until accepted.
+    sessionOrchestration: services.sessionOrchestration,
   });
 
   // context_accounting answers for this session: its injections, token use and compaction.

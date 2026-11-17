@@ -1,4 +1,4 @@
-import type { CrossSessionTaskRef, CrossSessionTaskRegistry, TaskHandoffRecord } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { CrossSessionTaskRef, TaskHandoffRecord } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { ShellSessionOrchestrationService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { statusBadge } from './task-presentation.js';
 export function flagValue(args: string[], flag: string): string | undefined {
@@ -128,60 +128,4 @@ export function createSessionGraphHandler<Context extends { readonly print: (mes
     context.print(lines.join('\n'));
   }
   return handleGraph;
-}
-
-/** What `/session accept` and `/session withdraw` need from the task graph. */
-export type SessionHandoffPort = Pick<CrossSessionTaskRegistry, 'getHandoffs' | 'acknowledgeHandoff' | 'withdrawHandoff'>;
-
-/** Find a handoff by full id or by the shortened id the graph view prints. */
-function resolveHandoff(handoffs: readonly TaskHandoffRecord[], given: string): TaskHandoffRecord | string {
-  const prefix = given.replace(/\.+$/, '');
-  const exact = handoffs.find((h) => h.handoffId === prefix);
-  if (exact) return exact;
-  const matches = handoffs.filter((h) => h.handoffId.startsWith(prefix));
-  if (matches.length === 1) return matches[0]!;
-  if (matches.length > 1) return `Ambiguous handoff: ${given}. Use more of the id: ${matches.map((h) => h.handoffId).join(', ')}`;
-  return `Unknown handoff: ${given}. Nothing was changed. See /session graph for the handoffs.`;
-}
-
-/**
- * `/session accept <handoffId>` (the destination session takes the task, which
- * goes back to the status it had in its source session) and
- * `/session withdraw <handoffId>` (the source session takes it back).
- */
-export function createSessionHandoffHandlers<Context extends { readonly print: (message: string) => void }>(
-  requireSessionOrchestration: (context: Context) => SessionHandoffPort,
-  currentSession: (context: Context) => string,
-) {
-  function handleAccept(args: string[], context: Context): void {
-    const given = args[0];
-    if (!given) { context.print('[session] Usage: /session accept <handoffId>'); return; }
-    const orchestration = requireSessionOrchestration(context);
-    const found = resolveHandoff(orchestration.getHandoffs(), given);
-    if (typeof found === 'string') { context.print(`[session] ${found}`); return; }
-    const session = currentSession(context);
-    if (found.toSessionId !== session) {
-      context.print(`[session] Handoff ${found.handoffId} is addressed to session ${found.toSessionId}; only that session can accept it. Nothing was changed.`);
-      return;
-    }
-    if (found.acknowledged) { context.print(`[session] Handoff ${found.handoffId} was already accepted.`); return; }
-    if (!orchestration.acknowledgeHandoff(found.handoffId, session)) {
-      context.print(`[session] Handoff ${found.handoffId} is no longer waiting (its source withdrew it, or it expired). Nothing was changed.`);
-      return;
-    }
-    context.print(`[session] Accepted handoff ${found.handoffId}: task ${found.taskRef.taskId} from session ${found.fromSessionId} is no longer blocked.`);
-  }
-
-  function handleWithdraw(args: string[], context: Context): void {
-    const given = args[0];
-    if (!given) { context.print('[session] Usage: /session withdraw <handoffId>'); return; }
-    const orchestration = requireSessionOrchestration(context);
-    const found = resolveHandoff(orchestration.getHandoffs(), given);
-    if (typeof found === 'string') { context.print(`[session] ${found}`); return; }
-    const result = orchestration.withdrawHandoff(found.handoffId, currentSession(context));
-    if (!result.ok) { context.print(`[session] ${result.error ?? 'The handoff could not be withdrawn. Nothing was changed.'}`); return; }
-    context.print(`[session] Withdrew handoff ${found.handoffId}: task ${found.taskRef.taskId} is ${result.status ?? 'unblocked'} again.`);
-  }
-
-  return { handleAccept, handleWithdraw };
 }

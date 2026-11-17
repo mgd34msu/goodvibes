@@ -1,5 +1,5 @@
 import { captureCatalogMethods, captureCatalogSnapshot, combineCatalogGuards, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { captureCatalogReadRequest, captureHarnessCatalogSelectionSource, selectHarnessCatalog, selectHarnessCatalogGroup } from './agent-harness-catalog-selection.ts';
+import { captureCatalogReadRequest, selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureStatefulCatalogRequest } from './agent-harness-stateful-catalog-source.ts';
 import { captureModelReadingSnapshotGuard, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -479,28 +479,16 @@ export function resolveWorkspaceActionIdentity(args: AgentHarnessWorkspaceAction
 export async function resolveWorkspaceActionDetail(args: AgentHarnessWorkspaceActionArgs, options: CatalogRankingOptions = {}): Promise<WorkspaceActionResolution | null> {
   const request = captureCatalogReadRequest(args, options);
   args = request.input;
-  const assertNative = captureWorkspaceCategories();
   const identity = resolveWorkspaceActionIdentity(args);
-  const lookup = workspaceActionLookupFromArgs(args);
-  const assertReaders = !identity && lookup ? captureHarnessCatalogSelectionSource('agent.workspace.action') : undefined;
-  const categoryId = readString(args.categoryId || args.category);
-  const categories = AGENT_WORKSPACE_CATEGORIES.filter(category => !categoryId || category.id === categoryId);
-  const entries = allWorkspaceActions().filter(entry => !categoryId || entry.category.id === categoryId);
-  request.retain(() => { assertNative(); assertReaders?.(); }, 'workspace:native-categories-and-readers');
   if (identity) return identity;
+  const lookup = workspaceActionLookupFromArgs(args);
   if (!lookup) return null;
-  return withModelReadingSource({ query: lookup.input, args, categories: AGENT_WORKSPACE_CATEGORIES }, request.options,
-    async (_captured, reading) => {
-      const category = await selectHarnessCatalogGroup(categories, lookup.input,
-        category => ({ description: category.label }), reading, 'agent.workspace.action-group', args);
-      reading.assertCurrent?.();
-      if (!category) return null;
-      const actions = entries.filter(entry => entry.category === category).map(entry => entry.action);
-      const selected = await selectHarnessCatalog(actions, lookup.input,
-        action => ({ id: action.id, description: action.label }), reading, 'agent.workspace.action', { category, args });
-      reading.assertCurrent?.();
-      if (!selected) return null;
-      const result: WorkspaceActionResolution = { status: 'found', ...originalWorkspaceEntry(entries, selected), lookup: { ...lookup, resolvedBy: 'search' } };
-      return result;
-    });
+  const categoryId = readString(args.categoryId || args.category);
+  const entries = allWorkspaceActions().filter(entry => !categoryId || entry.category.id === categoryId);
+  // One selector over every action, each described with its category, so a category and an action are found in one step.
+  const selected = await selectHarnessCatalog(entries, lookup.input,
+    entry => ({ id: entry.action.id, description: `${entry.category.label}: ${entry.action.label}` }), request.options, 'agent.workspace.action');
+  request.assertCurrent();
+  if (!selected) return null;
+  return { status: 'found', ...selected, lookup: { ...lookup, resolvedBy: 'search' } };
 }

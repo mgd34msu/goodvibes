@@ -262,7 +262,7 @@ export async function setupRepairTarget(
   const query = lookup?.input ?? 'Choose the next setup repair from the complete current wizard and plan, or none when no repair is appropriate.';
   const candidates = await setupRepairPlanCandidates(plan, query, request.options, { plan, wizard: request.input.wizard, args: request.input.args });
   request.assertCurrent();
-  const selected = await selectHarnessCatalog(candidates, query, item => ({ id: item.id, description: item.label, evidence: { item, plan: request.input.plan, wizard: request.input.wizard, args: request.input.args } }), request.options, 'agent.setup.repair-select');
+  const selected = await selectHarnessCatalog(candidates, query, item => ({ id: item.id, description: item.label }), request.options, 'agent.setup.repair-select');
   request.assertCurrent();
   if (selected) return { item: selected, lookup: { ...(lookup ?? { source: 'setup_wizard' }), resolvedBy: 'ranked-repair-search' } };
   return { error: {

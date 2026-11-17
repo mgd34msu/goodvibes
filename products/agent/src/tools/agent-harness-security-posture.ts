@@ -560,7 +560,7 @@ export async function describeHarnessSecurityFinding(context: CommandContext, ar
   const normalized = input.toLowerCase();
   const insensitive = findings.find((finding) => finding.findingId.toLowerCase() === normalized);
   if (insensitive) return { status: 'found', finding: describeFinding(insensitive, true, { source: findingId ? 'findingId' : target ? 'target' : 'query', input, resolvedBy: 'case-insensitive-id' }) };
-  const selected = await selectHarnessCatalog(findings, input, finding => ({ id: finding.findingId, description: finding.title, evidence: { finding, securitySnapshot, policySnapshot, args: request.input } }), request.options, 'agent.security.finding');
+  const selected = await selectHarnessCatalog(findings, input, finding => ({ id: finding.findingId, description: finding.title }), request.options, 'agent.security.finding');
   request.assertCurrent();
   if (selected) return { status: 'found', finding: describeFinding(selected, true, { source: findingId ? 'findingId' : target ? 'target' : 'query', input, resolvedBy: 'search' }) };
   return {

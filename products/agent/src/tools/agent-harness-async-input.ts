@@ -1,93 +1,29 @@
-import { types as nodeTypes } from 'node:util';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, captureCatalogSnapshot, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 
-/** Bind the full original public input and restrictions across async reads.
- * With retainAtPublication, call retainSourceCurrent before publishing the result. */
-export function captureAsyncHarnessInput<T>(rawArgs: T, options: CatalogRankingOptions, retainAtPublication = false, initialGuards: readonly (() => void)[] = []) {
-  const assertOptions = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
-  assertOptions();
-  const keys = Reflect.ownKeys(options);
-  const allowed = ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource'];
-  if (keys.some(key => typeof key !== 'string' || !allowed.includes(key))) throw new ToolInputProjectionError('invalid');
-  const assertKeys = (): void => {
-    const current = Reflect.ownKeys(options);
-    if (current.length !== keys.length || current.some((key, index) => key !== keys[index])) throw new ToolInputProjectionError('held');
-  };
-  const outerCurrent = options.assertCurrent, outerRetain = options.retainCurrent, signal = options.signal;
-  if ((outerCurrent !== undefined && (typeof outerCurrent !== 'function' || nodeTypes.isProxy(outerCurrent)))
-    || (outerRetain !== undefined && (typeof outerRetain !== 'function' || nodeTypes.isProxy(outerRetain)))) throw new ToolInputProjectionError('invalid');
-  const nativeGuards = new Set<() => void>(initialGuards);
-  const assertInitial = (): void => {
-    for (const guard of nativeGuards) {
-      if (typeof guard !== 'function' || nodeTypes.isProxy(guard)) throw new ToolInputProjectionError('invalid');
-      const result: unknown = guard();
-      if (result !== undefined) {
-        if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-        throw new ToolInputProjectionError('held');
-      }
-    }
-  };
-  const throwIfAborted = AbortSignal.prototype.throwIfAborted;
-  const checkSignal = (): void => { if (signal) Reflect.apply(throwIfAborted, signal, []); };
-  const assertOuter = (): void => {
-    assertOptions(); assertKeys(); checkSignal();
-    const result: unknown = outerCurrent?.();
-    if (result !== undefined) {
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      throw new ToolInputProjectionError('held');
-    }
-    assertOptions(); assertKeys(); checkSignal();
-  };
-  assertInitial(); assertOuter(); assertInitial();
-  const input = captureCatalogSnapshot(rawArgs);
-  const assertInputCurrent = (): void => {
-    assertOptions(); assertKeys(); checkSignal(); input.assertCurrent(rawArgs);
-  };
-  // This guard may outlive a nested read and enter its parent's retention set.
-  // It never invokes the outer callback that visits that same retention set.
-  const assertSourceCurrent = (): void => {
-    assertInputCurrent();
-    for (const guard of nativeGuards) {
-      const result: unknown = guard();
-      if (result !== undefined) {
-        if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-        throw new ToolInputProjectionError('held');
-      }
-    }
-    assertInputCurrent();
-  };
-  // Independent child sources keep caller restrictions without inheriting
-  // unrelated sibling observations. The parent still validates all native
-  // observations before joining and publishing the child result.
-  const assertCallerCurrent = (): void => {
-    assertInputCurrent(); assertOuter(); assertInputCurrent();
-  };
-  const assertCurrent = (): void => {
-    assertOuter(); assertSourceCurrent(); assertOuter(); assertSourceCurrent();
-  };
-  const retainCurrent = (guard: () => void, key?: string): void => {
-    assertCurrent();
-    if (typeof guard !== 'function' || nodeTypes.isProxy(guard)
-      || guard === assertCurrent || guard === assertSourceCurrent || guard === outerCurrent) throw new ToolInputProjectionError('invalid');
-    nativeGuards.add(guard);
-    const result: unknown = retainAtPublication ? undefined : outerRetain?.(guard, key);
-    if (result !== undefined) {
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      throw new ToolInputProjectionError('held');
-    }
-    assertCurrent();
-  };
-  const retainSourceCurrent = (key?: string): void => {
-    assertCurrent();
-    const result: unknown = outerRetain?.(assertSourceCurrent, key);
-    if (result !== undefined) {
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      throw new ToolInputProjectionError('held');
-    }
-    assertCurrent();
-  };
+const ALLOWED_OPTIONS: readonly string[] = ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource', 'semantic'];
+
+/**
+ * A reader's view of its call: the arguments captured once as a frozen copy,
+ * and one answer to "is this call still wanted", the call's AbortSignal plus
+ * the caller's own check, each run once per check. The caller's check is
+ * handed to nested readers unchanged, so a check at the bottom of any number
+ * of readers costs the same as one at the top. A frozen copy cannot change, so
+ * nothing re-compares it, and a status read keeps no list of source re-reads:
+ * it is correct for the moment it was taken.
+ */
+export function captureAsyncHarnessInput<T>(rawArgs: T, options: CatalogRankingOptions, _retainAtPublication = false, _initialGuards: readonly (() => void)[] = []) {
+  if (Reflect.ownKeys(options).some(key => typeof key !== 'string' || !ALLOWED_OPTIONS.includes(key))) throw new ToolInputProjectionError('invalid');
+  const signal = options.signal, callerCurrent = options.assertCurrent;
+  if (callerCurrent !== undefined && typeof callerCurrent !== 'function') throw new ToolInputProjectionError('invalid');
+  const assertCurrent = (): void => { signal?.throwIfAborted(); callerCurrent?.(); };
+  const checkSignal = (): void => { signal?.throwIfAborted(); };
   assertCurrent();
-  return { args: input.captured, assertCurrent, assertCallerCurrent, assertInputCurrent, assertSourceCurrent, retainSourceCurrent, options: { signal, sourceOwner: options.sourceOwner, assertCurrent, retainCurrent,
-    ...(options.requirePreservedSource !== undefined ? { requirePreservedSource: options.requirePreservedSource } : {}) } satisfies CatalogRankingOptions };
+  const args = captureCatalogData(rawArgs);
+  // Kept so existing readers can still name what they read; nothing is re-read on a later check.
+  const retainCurrent = (_guard: () => void, _key?: string): void => { checkSignal(); };
+  const retainSourceCurrent = (_key?: string): void => { checkSignal(); };
+  return { args, assertCurrent, assertCallerCurrent: assertCurrent, assertInputCurrent: checkSignal, assertSourceCurrent: checkSignal, retainSourceCurrent,
+    options: { signal, sourceOwner: options.sourceOwner, assertCurrent: callerCurrent ?? checkSignal, retainCurrent,
+      ...(options.requirePreservedSource !== undefined ? { requirePreservedSource: options.requirePreservedSource } : {}) } satisfies CatalogRankingOptions };
 }

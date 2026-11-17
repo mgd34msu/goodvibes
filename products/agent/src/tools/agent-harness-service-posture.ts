@@ -135,7 +135,7 @@ async function resolveEndpoint(
   if (label) {
     return { status: 'found', endpoint: describeEndpoint(label, { includeParameters: options.includeParameters, lookup: { ...lookup, resolvedBy: 'label' } }) };
   }
-  const selected = await selectHarnessCatalog(endpoints, lookup.input, endpoint => ({ id: endpoint.id, description: endpoint.label, evidence: { endpoint, posture, args } }), catalogOptions, 'agent.service.endpoint');
+  const selected = await selectHarnessCatalog(endpoints, lookup.input, endpoint => ({ id: endpoint.id, description: endpoint.label }), catalogOptions, 'agent.service.endpoint');
   catalogOptions.assertCurrent?.();
   if (selected) return { status: 'found', endpoint: describeEndpoint(selected, { includeParameters: options.includeParameters, lookup: { ...lookup, resolvedBy: 'search' } }) };
   return {

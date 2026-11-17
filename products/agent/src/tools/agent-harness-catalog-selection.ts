@@ -1,254 +1,86 @@
-import { LIMITS } from '@goodvibes-jev/judgment';
-import { types as nodeTypes } from 'node:util';
+import { LIMITS, type JsonValue } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { gateJudgmentRegistry, prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { registryCatalogGroupFit, registrySelect, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogMethods, captureCatalogSnapshot, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { activateClassicFallback, decisionOrClassic, isClassicOperation, rankClassicCatalog, selectClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
+import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
+import { registrySelect, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { captureCatalogData, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { isClassicOperation, rankClassicCatalog } from '@goodvibes-jev/engine/platform/platform/runtime';
 
-function requireSynchronousRestriction(result: unknown): void {
-  if (result === undefined) return;
-  if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-  throw new ToolInputProjectionError('held');
-}
+const ALLOWED_OPTIONS: readonly string[] = ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource', 'semantic'];
 
-/** Original callbacks and the protected owner are restriction sources, never replacement authority. */
+/**
+ * A reader's request, captured once at the tool boundary: a frozen copy of the
+ * input and one answer to "is this call still wanted" (the call's signal plus
+ * the caller's own check, once each). A frozen copy cannot change, so nothing
+ * re-compares it, and a listing is correct for the moment it was taken.
+ */
 export function captureCatalogReadRequest<T>(input: T, options: CatalogRankingOptions) {
-  const request = captureCatalogSnapshot(input);
-  const allowed = ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource'];
-  const assertOptions = captureCatalogMethods(options, allowed);
-  const keys = Reflect.ownKeys(options);
-  if (keys.some(key => typeof key !== 'string' || !allowed.includes(key))) throw new ToolInputProjectionError('invalid');
-  const { signal, sourceOwner, assertCurrent: originalAssert, retainCurrent: originalRetain, requirePreservedSource } = options;
-  if ([originalAssert, originalRetain].some(callback => callback !== undefined
-    && (typeof callback !== 'function' || nodeTypes.isProxy(callback)))) throw new ToolInputProjectionError('invalid');
-  const assertOwner = sourceOwner ? captureCatalogMethods(sourceOwner, ['capture', 'screen', 'project', 'release']) : () => {};
-  const retained = new Set<() => void>();
-  const throwIfAborted = AbortSignal.prototype.throwIfAborted;
-  const assertBinding = () => {
-    assertOptions(); assertOwner();
-    const current = Reflect.ownKeys(options);
-    if (current.length !== keys.length || current.some((key, index) => key !== keys[index])) throw new ToolInputProjectionError('held');
-    if (signal) Reflect.apply(throwIfAborted, signal, []);
-    request.assertCurrent(input);
-  };
-  const assertCurrent = () => {
-    assertBinding();
-    requireSynchronousRestriction(originalAssert?.());
-    assertBinding();
-    for (const guard of retained) {
-      requireSynchronousRestriction(guard());
-      assertBinding();
-    }
-  };
-  const retain = (guard: () => void, key?: string) => {
-    assertBinding();
-    if (typeof guard !== 'function' || nodeTypes.isProxy(guard)) throw new ToolInputProjectionError('invalid');
-    retained.add(guard);
-    requireSynchronousRestriction(originalRetain?.(guard, key));
-    assertCurrent();
-  };
-  assertBinding();
-  return { input: request.captured, assertCurrent, retain,
+  if (Reflect.ownKeys(options).some(key => typeof key !== 'string' || !ALLOWED_OPTIONS.includes(key))) throw new ToolInputProjectionError('invalid');
+  const { signal, sourceOwner, assertCurrent: callerCurrent, requirePreservedSource } = options;
+  if (callerCurrent !== undefined && typeof callerCurrent !== 'function') throw new ToolInputProjectionError('invalid');
+  const assertCurrent = (): void => { signal?.throwIfAborted(); callerCurrent?.(); };
+  // Kept so existing readers can still name what they read; nothing is re-read on a later check.
+  const retain = (_guard: () => void, _key?: string): void => { signal?.throwIfAborted(); };
+  assertCurrent();
+  return { input: captureCatalogData(input), assertCurrent, retain,
     options: Object.freeze({ signal, sourceOwner, assertCurrent, retainCurrent: retain,
       ...(requirePreservedSource === undefined ? {} : { requirePreservedSource }) }) };
 }
 
-/** Capture both native stages before an outer source owner or restriction can run. */
-export function captureHarnessCatalogSelectionSource(site: string): () => void {
-  if (isClassicOperation()) return () => { isClassicOperation(); };
-  const assertRegistry = captureCatalogMethods(gateJudgmentRegistry, ['get']);
-  const getDefinition = gateJudgmentRegistry.get;
-  const assertGroup = captureCatalogMethods(registryCatalogGroupFit, ['name', 'version', 'description', 'accuracyFloor', 'model', 'fixtureCount', 'checkFixtures', 'rerank']);
-  const assertSelection = captureCatalogMethods(registrySelect, ['name', 'version', 'description', 'accuracyFloor', 'model', 'fixtureCount', 'checkFixtures', 'select']);
-  let installation: ReturnType<ReturnType<typeof captureJudgmentPort>['consumeObservation']>;
-  try { installation = captureJudgmentPort(site).consumeObservation(); }
-  catch (error) {
-    if (!activateClassicFallback(error)) throw error;
-    return () => { isClassicOperation(); };
-  }
-  const assertCurrent = () => {
-    // A Preferred outage retires the unused decision backend, not the native
-    // catalog/source restrictions retained by the caller.
-    if (isClassicOperation()) return;
-    assertRegistry(); assertGroup(); assertSelection(); installation.assertCurrent();
-    if (getDefinition.call(gateJudgmentRegistry, registryCatalogGroupFit.name) !== registryCatalogGroupFit
-      || getDefinition.call(gateJudgmentRegistry, registrySelect.name) !== registrySelect) throw new ToolInputProjectionError('held');
-  };
-  assertCurrent();
-  return assertCurrent;
-}
-
-function entryId(entry: unknown): string | undefined {
-  const id: unknown = entry && typeof entry === 'object' ? Object.getOwnPropertyDescriptor(entry, 'id')?.value : undefined;
-  return typeof id === 'string' ? id : undefined;
-}
-
-/** The one entry whose declared id is the query, ignoring case; a lookup by id needs no reading. */
-function exactIdEntry<T>(entries: readonly T[], query: string, id: (entry: T) => string | undefined): T | null {
-  const wanted = query.trim().toLocaleLowerCase();
-  if (!wanted) return null;
-  const matches = entries.filter(entry => id(entry)?.toLocaleLowerCase() === wanted);
-  return matches.length === 1 ? matches[0] ?? null : null;
-}
-
-/** Most catalog rows the one selection request is shown when code found literal matches. */
+/** Most catalog rows the one selection request is shown. */
 const SELECTION_SHORTLIST = 8;
+/** Shared context goes once, and only when it is small; a large context is the caller's own state, not a clue. */
+const MAX_CONTEXT_CHARACTERS = 2_000;
 
 /**
- * Read the groups in one request; only one affirmative group can scope a record
- * choice. A lookup that names a group id exactly needs no reading, and a group
- * whose reading did not settle is not a match.
- */
-export async function selectHarnessCatalogGroup<T>(entries: readonly T[], query: string,
-  describe: (entry: T) => { readonly description: string },
-  options: CatalogRankingOptions = {}, site = 'agent.catalog.group', contextEvidence?: unknown): Promise<T | null> {
-  const exact = exactIdEntry(entries, query, entryId);
-  if (exact !== null) return exact;
-  return decisionOrClassic(() => selectDecisionHarnessCatalogGroup(entries, query, describe, options, site, contextEvidence),
-    () => classicCatalogSelection(entries, query, entry => {
-      const id: unknown = entry && typeof entry === 'object' ? Object.getOwnPropertyDescriptor(entry, 'id')?.value : undefined;
-      const description = describe(entry).description;
-      return { id: typeof id === 'string' ? id : description, description };
-    }, options, site, contextEvidence));
-}
-
-async function selectDecisionHarnessCatalogGroup<T>(entries: readonly T[], query: string,
-  describe: (entry: T) => { readonly description: string }, options: CatalogRankingOptions, site: string, contextEvidence?: unknown): Promise<T | null> {
-  const request = captureCatalogReadRequest({ query, ...(contextEvidence === undefined ? {} : { context: contextEvidence }) }, options);
-  const source = captureCatalogSnapshot(entries);
-  const assertRegistry = captureCatalogMethods(gateJudgmentRegistry, ['get']);
-  const getDefinition = gateJudgmentRegistry.get;
-  const assertDefinition = captureCatalogMethods(registryCatalogGroupFit, ['name', 'version', 'description', 'accuracyFloor', 'model', 'fixtureCount', 'checkFixtures', 'rerank']);
-  const installation = entries.length
-    ? captureJudgmentPort(site, { signal: request.options.signal }).consumeObservation() : undefined;
-  const assertBackend = () => {
-    if (isClassicOperation()) { request.options.signal?.throwIfAborted(); return; }
-    assertRegistry(); assertDefinition(); installation?.assertCurrent();
-    if (getDefinition.call(gateJudgmentRegistry, registryCatalogGroupFit.name) !== registryCatalogGroupFit) throw new ToolInputProjectionError('held');
-  };
-  assertBackend();
-  request.retain(assertBackend, `${site}:definition`);
-  request.retain(() => source.assertCurrent(entries), `${site}:source`);
-  request.assertCurrent();
-  const ranked = await rankHarnessCatalog(source.captured.map((entry, index) => ({ index, entry })), request.input.query,
-    row => ({ id: String(row.index), description: describe(row.entry).description, evidence: { record: row.entry } }), site,
-    { ...request.options, requirePreservedSource: true }, registryCatalogGroupFit.name, request.input.context);
-  request.assertCurrent();
-  if (ranked.provenance === 'classic') return classicCatalogSelection(entries, query, entry => {
-    const id: unknown = entry && typeof entry === 'object' ? Object.getOwnPropertyDescriptor(entry, 'id')?.value : undefined;
-    const description = describe(entry).description;
-    return { id: typeof id === 'string' ? id : description, description };
-  }, options, site, contextEvidence);
-  if (ranked.judgments.length !== entries.length || new Set(ranked.judgments.map(reading => reading.id)).size !== entries.length) throw new ToolInputProjectionError('held');
-  const matches: T[] = [];
-  for (const judgment of ranked.judgments) {
-    if (!/^(0|[1-9][0-9]*)$/.test(judgment.id)) throw new ToolInputProjectionError('held');
-    const entry = entries[Number(judgment.id)];
-    if (entry === undefined) throw new ToolInputProjectionError('held');
-    if (judgment.reading.outcome === 'act' && judgment.reading.verdict === 'yes') matches.push(entry);
-  }
-  request.assertCurrent();
-  return matches.length === 1 ? matches[0] ?? null : null;
-}
-
-/**
- * A complete screened choice maps only to the original local row. An exact id
- * is a lookup with no reading; otherwise one selection request reads the
- * catalog, cut to the best literal matches when code found any.
+ * The one record selector. Code decides first, for free: an exact id
+ * (ignoring case), a sole id prefix, then the only row carrying every query
+ * word. Nothing matching in code is "unknown" (the caller lists the valid
+ * ids); several partial matches are settled by ONE selection request over the
+ * best few, each candidate carrying only its id and description, with any
+ * shared context sent once. A failed or unsettled reading selects nothing.
  */
 export async function selectHarnessCatalog<T>(entries: readonly T[], query: string,
   describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown },
   options: CatalogRankingOptions = {}, site = 'agent.catalog.select', contextEvidence?: unknown): Promise<T | null> {
-  const exact = exactIdEntry(entries, query, entry => describe(entry).id);
-  if (exact !== null) return exact;
-  const literal = rankClassicCatalog(entries, query, entry => describe(entry));
-  const shortlist = literal.length > 0 && entries.length > SELECTION_SHORTLIST
-    ? literal.slice(0, SELECTION_SHORTLIST).map(match => match.entry) : entries;
-  return decisionOrClassic(() => selectDecisionHarnessCatalog(shortlist, query, describe, options, site, contextEvidence),
-    () => classicCatalogSelection(entries, query, describe, options, site, contextEvidence));
-}
-
-async function classicCatalogSelection<T>(entries: readonly T[], query: string,
-  describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown },
-  options: CatalogRankingOptions, site: string, contextEvidence?: unknown): Promise<T | null> {
-  const request = captureCatalogReadRequest({ query, ...(contextEvidence === undefined ? {} : { context: contextEvidence }) }, options);
-  const source = captureCatalogSnapshot(entries);
-  const assertSource = () => source.assertCurrent(entries);
-  request.retain(assertSource, `${site}:classic-source`);
-  request.assertCurrent();
-  const catalog = source.captured.map((entry, index) => ({ index, ...describe(entry) }));
-  return withModelReadingSource({ ...request.input, catalog, records: source.captured }, {
-    signal: request.options.signal, sourceOwner: request.options.sourceOwner,
-    assertCurrent: request.assertCurrent, retainCurrent: request.retain,
-  }, async (captured, reading) => {
-    reading.assertCurrent?.();
-    const selected = selectClassicCatalog(captured.catalog, captured.query, item => item);
-    reading.assertCurrent?.();
-    return selected === null ? null : entries[selected.index] ?? null;
+  options.signal?.throwIfAborted();
+  const text = typeof query === 'string' ? query.trim() : '';
+  if (!text || entries.length === 0) return null;
+  const rows = entries.map((entry, index) => {
+    const { id, description } = describe(entry);
+    return { id: String(id), description: typeof description === 'string' ? description : '', index };
   });
-}
-
-async function selectDecisionHarnessCatalog<T>(entries: readonly T[], query: string,
-  describe: (entry: T) => { readonly id: string; readonly description: string; readonly evidence?: unknown },
-  options: CatalogRankingOptions, site: string, contextEvidence?: unknown): Promise<T | null> {
-  const request = captureCatalogReadRequest({ query, ...(contextEvidence === undefined ? {} : { context: contextEvidence }) }, options);
-  const source = captureCatalogSnapshot(entries);
-  const assertRegistry = captureCatalogMethods(gateJudgmentRegistry, ['get']);
-  const getDefinition = gateJudgmentRegistry.get;
-  const assertDefinition = captureCatalogMethods(registrySelect, ['name', 'version', 'description', 'accuracyFloor', 'model', 'fixtureCount', 'checkFixtures', 'select']);
-  const select = registrySelect.select;
-  // Acquire installation identity without invoking the original caller's
-  // restrictions. The observation is only a retained publication restriction.
-  const installation = entries.length
-    ? captureJudgmentPort(site, { signal: request.options.signal }).consumeObservation() : undefined;
-  const assertBackend = () => {
-    if (isClassicOperation()) { request.options.signal?.throwIfAborted(); return; }
-    assertRegistry(); assertDefinition(); installation?.assertCurrent();
-    if (getDefinition.call(gateJudgmentRegistry, registrySelect.name) !== registrySelect) throw new ToolInputProjectionError('held');
-  };
-  assertBackend();
-  const assertCurrent = () => { assertBackend(); request.assertCurrent(); source.assertCurrent(entries); assertBackend(); };
-  request.retain(assertBackend, `${site}:definition`);
-  request.retain(() => source.assertCurrent(entries), `${site}:source`);
-  const readingOptions = { ...request.options, assertCurrent };
-  assertCurrent();
-  const catalog = source.captured.map(describe);
-  if (new Set(catalog.map(entry => entry.id)).size !== entries.length) throw new ToolInputProjectionError('held');
-  return withModelReadingSource({ ...request.input, catalog, records: source.captured }, readingOptions, async (captured, current) => {
-    current.assertCurrent?.();
-    if (!entries.length) return null;
-    if (entries.length >= LIMITS.maxChoiceOptions) throw new ToolInputProjectionError('held');
-    assertBackend();
-    current.retainCurrent?.(assertBackend, `${site}:definition`);
-    const authority = captureJudgmentPort(site, { signal: current.signal, assertCurrent: () => { current.assertCurrent?.(); assertBackend(); },
-      prepareResultCapture: prepareJudgmentResult });
+  const wanted = text.toLocaleLowerCase();
+  const exact = rows.filter(row => row.id.toLocaleLowerCase() === wanted);
+  if (exact.length === 1) return entries[exact[0]!.index] ?? null;
+  const prefix = rows.filter(row => row.id.toLocaleLowerCase().startsWith(wanted));
+  if (prefix.length === 1) return entries[prefix[0]!.index] ?? null;
+  const literal = rankClassicCatalog(rows, text, row => row);
+  if (literal.length === 0) return null;
+  if (literal.length === 1) return entries[literal[0]!.entry.index] ?? null;
+  const complete = literal.filter(match => match.score === 1);
+  if (complete.length === 1) return entries[complete[0]!.entry.index] ?? null;
+  if (isClassicOperation()) return null;
+  const shortlist = literal.slice(0, Math.min(SELECTION_SHORTLIST, LIMITS.maxChoiceOptions - 1)).map(match => match.entry);
+  let contextJson: string | undefined;
+  if (contextEvidence !== undefined) {
+    try { contextJson = JSON.stringify(contextEvidence); } catch { contextJson = undefined; }
+    if (typeof contextJson !== 'string' || contextJson.length > MAX_CONTEXT_CHARACTERS) contextJson = undefined;
+  }
+  try {
+    const authority = captureJudgmentPort(site, { signal: options.signal, prepareResultCapture: prepareJudgmentResult });
     try {
-      const contextJson = contextEvidence === undefined ? undefined : JSON.stringify(captured.context);
-      if (contextEvidence !== undefined && typeof contextJson !== 'string') throw new ToolInputProjectionError('held');
-      const result = await select.call(registrySelect, authority.port, { query: captured.query,
-        ...(contextJson === undefined ? {} : { contextJson }),
-      }, captured.catalog.map((entry, index) => ({
-        id: String(index), content: JSON.stringify({ ...entry, record: captured.records[index] }),
-      })), { site, signal: authority.signal, beforeAttempt: authority.assertCurrent });
-      authority.assertCurrent(); current.assertCurrent?.();
+      const result = await registrySelect.select(authority.port, { query: text, ...(contextJson === undefined ? {} : { contextJson }) },
+        shortlist.map((row, index) => ({ id: String(index), content: { name: row.id, description: row.description } satisfies JsonValue })),
+        { site, signal: authority.signal });
       result.recordAction('read-only catalog detail selection');
-      authority.assertCurrent(); current.assertCurrent?.();
-      // An unsettled selection selects nothing; the caller reports the lookup as unresolved.
-      if (result.outcome !== 'act') return null;
-      if (result.pick.choice === 'none') {
-        if (result.chosen !== undefined) throw new ToolInputProjectionError('held');
-        return null;
-      }
-      if (result.chosen === undefined || !/^(0|[1-9][0-9]*)$/.test(result.chosen)) throw new ToolInputProjectionError('held');
-      const entry = entries[Number(result.chosen)];
-      if (entry === undefined || result.pick.choice !== result.chosen) throw new ToolInputProjectionError('held');
-      return entry;
-    } finally {
-      const observation = authority.consumeObservation();
-      current.retainCurrent?.(observation.assertCurrent, `${site}:backend`);
-      observation.assertCurrent(); assertBackend(); current.assertCurrent?.();
-    }
-  });
+      // An unsettled selection or "none" selects nothing; the caller reports the lookup as unresolved.
+      if (result.outcome !== 'act' || result.pick.choice === 'none' || result.chosen === undefined) return null;
+      const row = /^(0|[1-9][0-9]*)$/.test(result.chosen) ? shortlist[Number(result.chosen)] : undefined;
+      return row ? entries[row.index] ?? null : null;
+    } finally { authority.consumeObservation(); }
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    // No reading could be taken (no decision model, an outage): several partial matches stay unresolved.
+    return null;
+  }
 }

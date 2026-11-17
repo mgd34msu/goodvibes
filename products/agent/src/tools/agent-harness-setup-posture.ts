@@ -604,7 +604,7 @@ export async function describeHarnessSetupItem(context: CommandContext, rawArgs:
     ...items.map(item => ({ kind: 'capability' as const, item })),
     ...plan.map(item => ({ kind: 'plan' as const, item })),
   ];
-  const selected = await selectHarnessCatalog(entries, lookup.input, entry => ({ id: `${entry.kind}:${entry.item.id}`, description: entry.item.label, evidence: { entry, snapshot, servicePosture, items, plan, args } }), caller.options, 'agent.setup.item');
+  const selected = await selectHarnessCatalog(entries, lookup.input, entry => ({ id: `${entry.kind}:${entry.item.id}`, description: entry.item.label }), caller.options, 'agent.setup.item');
   caller.assertCurrent();
   if (selected?.kind === 'capability') return publish({ status: 'found', item: describeItem(selected.item, snapshot, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'search' } }) });
   if (selected?.kind === 'plan') return publish({ status: 'found', item: { ...describePlanItem(selected.item, true), lookup: { ...lookup, resolvedBy: 'plan-search' } } });

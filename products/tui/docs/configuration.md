@@ -35,7 +35,7 @@ Settings sit next to several other stores that follow the same global-versus-pro
 | --- | --- |
 | `~/.goodvibes/tui/secrets.enc` and the project's `.goodvibes/tui/secrets.enc` | Secure encrypted secrets; a key in the project's store is used once you stored it there or confirmed it with `/secrets trust <KEY> --yes` |
 | `~/.goodvibes/goodvibes.secrets.json` and the project's `.goodvibes/goodvibes.secrets.json` | Plaintext compatibility secrets, with the same confirmation rule for the project's file |
-| `~/.goodvibes/tui/services.json` | The service registry, backing auth/account surfaces in the TUI and daemon; a project's `.goodvibes/tui/services.json` adds only services whose credentials are keys in your store. A service's credential is sent by name only to its own `baseUrl` origin |
+| `~/.goodvibes/tui/services.json` | The service registry, backing auth/account surfaces in the TUI and daemon; a project's `.goodvibes/tui/services.json` adds only services whose credentials are keys in your store, and each one only after you confirm it with `/services trust <name>` (an edit of its keys, header or host needs a new confirmation). A service's credential is sent by name only to its own `baseUrl` origin |
 | `~/.goodvibes/tui/providers/*.json` | Custom provider JSON |
 | `~/.goodvibes/tui/keybindings.json` | Keybinding overrides |
 | `.goodvibes/tui/repl-history.json` | REPL history |

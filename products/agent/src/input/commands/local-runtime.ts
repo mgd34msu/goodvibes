@@ -4,18 +4,19 @@ import { handleBookmarks } from '@goodvibes-jev/engine/terminal-shell/bookmark-c
 import 'path';
 import 'node:fs';
 import 'node:fs/promises';
-import type { CommandRegistry, CommandContext } from '../command-registry.ts';
+import type { CommandRegistry, CommandContext, SlashCommand } from '../command-registry.ts';
 
 import '@goodvibes-jev/engine/platform/platform/utils';
 import '@goodvibes-jev/engine/platform/platform/config';
-import { requireBookmarkManager, requireProviderApi, requireSecretsManager } from './runtime-services.ts';
+import { requireBookmarkManager, requireProviderApi, requireSecretsManager, requireServiceRegistry } from './runtime-services.ts';
+import { describePendingProjectService, pendingProjectServiceLines } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   credentialWriteScopeWasRelocated,
   resolveCredentialDeleteScope,
   resolveCredentialWriteScope,
 } from '../../config/credential-scope.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { requireYesFlag, stripYesFlag, withOwnerConfirmation, type ConfirmableCommand } from './confirmation.ts';
 import { collectAgentMedia, mediaCollectCommand } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentMediaGenerationResult, generateAgentMedia } from '@goodvibes-jev/engine/terminal-shell/agent-turn/media-generation';
 
@@ -118,7 +119,58 @@ const secretsCommand = createSecretsCommand<CommandContext>(requireSecretsManage
   deleted: (key) => '[secrets] Deleted\n  key ' + key,
 });
 
+/**
+ * The services this app sends stored credentials to, and the confirmation a
+ * project's services file entry needs before it is used. Confirming is the
+ * owner's: a model-run line is always put to the owner.
+ */
+const servicesCommand = withOwnerConfirmation<CommandContext, SlashCommand & Pick<ConfirmableCommand<CommandContext>, 'confirm'>>({
+  name: 'services',
+  effect: 'mixed',
+  readVerbs: ['list'],
+  description: 'List API services and confirm the ones a project\'s services file defines',
+  hidden: true,
+  usage: '[list|trust <name> --yes]',
+  argsHint: '[list|trust] [name]',
+  subcommands: { list: '', trust: '<name> --yes' },
+  confirm: (args) => args[0] === 'trust' && args[1]
+    ? {
+        title: `Use the service ${args[1]} from this project's services file?`,
+        detail: `A project's services file is part of the checkout, so whoever wrote the repository chose which of your stored keys ${args[1]} sends and to which host. Once confirmed, ${args[1]} is used as it stands now; if the repository changes its keys, header or host it waits for confirmation again.`,
+        confirmLabel: 'Use it',
+      }
+    : undefined,
+  handler(args, ctx) {
+    const services = requireServiceRegistry(ctx);
+    const pendingLines = () => pendingProjectServiceLines(services.pendingProjectServices());
+    if (args[0] === 'trust') {
+      const name = args[1];
+      if (!name) {
+        ctx.print(['[services] Usage: /services trust <name> --yes', ...pendingLines()].join('\n'));
+        return;
+      }
+      try {
+        const result = services.confirmProjectService(name);
+        ctx.print(result.ok
+          ? '[services] ' + name + ' from this project is used from now on\n  ' + describePendingProjectService(result.service)
+          : '[services] Nothing was confirmed: ' + result.reason + '.');
+      } catch (error) {
+        ctx.print('[services] Nothing was confirmed: the confirmation could not be saved (' + summarizeError(error) + ').');
+      }
+      return;
+    }
+    const all = services.getAll();
+    const names = Object.keys(all).sort((a, b) => a.localeCompare(b));
+    ctx.print([
+      names.length ? '[services]' : '[services] No services configured. Add entries to ' + (services.userServicesFilePath || 'your services file') + '.',
+      ...names.map((name) => '  ' + name.padEnd(20) + ' ' + (all[name]?.authType ?? '').padEnd(10) + ' ' + (all[name]?.baseUrl ?? '(no url)')),
+      ...pendingLines(),
+    ].join('\n'));
+  },
+});
+
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
+  registry.register(servicesCommand);
   registry.register({
     name: 'expand',
     effect: 'ui-navigation',

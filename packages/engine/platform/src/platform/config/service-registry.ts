@@ -10,8 +10,11 @@ import { captureFileIdentities } from '../security/read-source.js';
  * an entry from it is used only when every credential it names is a key in the
  * user's store: no secret reference of any kind (a reference can run a command
  * or read a file) and no `oauth` block (it would replace a provider's sign-in
- * endpoints). Such an entry is skipped with a warning, and an entry of the
- * user's own file always wins over a project entry of the same name.
+ * endpoints). Such an entry is skipped with a warning. An admissible entry
+ * still chooses which stored key goes to which host, so it resolves nothing
+ * until the user confirms it once (`/services trust <name>`); until then it is
+ * listed as waiting and a request through it is refused by name. An entry of
+ * the user's own file always wins over a project entry of the same name.
  *
  * Example services.json:
  * {
@@ -22,6 +25,8 @@ import { captureFileIdentities } from '../security/read-source.js';
  */
 
 import { readFileSync, statSync } from 'fs';
+import { dirname, join } from 'path';
+import { ProjectServiceApprovals } from './project-service-approvals.js';
 import { SecretsManager, captureSecretsReadSource } from './secrets.js';
 import {
   describeSecretRef,
@@ -160,6 +165,62 @@ function projectEntryRefusal(entry: unknown): string | null {
   return null;
 }
 
+/**
+ * What confirming a project entry agrees to: its auth type, the key names it
+ * reads, the provider whose sign-in it may use, the header and the origin its
+ * credential goes to. Changing any of them in the repository needs a new
+ * confirmation; a change of path under the same origin does not.
+ */
+function projectEntryFingerprint(entry: ServiceConfig): string {
+  return JSON.stringify({
+    authType: entry.authType,
+    origin: originOf(entry.baseUrl),
+    providerId: entry.providerId ?? null,
+    apiKeyHeader: entry.apiKeyHeader ?? null,
+    keys: KEY_FIELDS.map((field) => [field, entry[field] ?? null]),
+  });
+}
+
+/** The key names a project entry reads from the user's store. */
+function projectEntryKeys(entry: ServiceConfig): string[] {
+  return KEY_FIELDS.map((field) => entry[field]).filter((key): key is string => typeof key === 'string' && key.length > 0);
+}
+
+/** A project services entry that is admissible but not yet confirmed by the user. */
+export interface PendingProjectService {
+  readonly name: string;
+  /** The project services file it comes from. */
+  readonly path: string;
+  readonly authType: ServiceConfig['authType'];
+  /** Where its credential would be sent, or null when it names no usable baseUrl. */
+  readonly origin: string | null;
+  /** The key names in the user's store it would read. */
+  readonly keys: readonly string[];
+  /** The provider whose signed-in token it would send, when it names one. */
+  readonly providerId?: string | undefined;
+}
+
+/** One line saying what a waiting project service would send where. */
+export function describePendingProjectService(service: PendingProjectService): string {
+  const keys = service.keys.length ? service.keys.join(', ') : 'no stored key';
+  const sends = service.providerId ? `${service.providerId} sign-in token or ${keys}` : keys;
+  return `${service.name}: sends ${sends} (${service.authType}) to ${service.origin ?? '(no baseUrl)'}`;
+}
+
+/** The lines naming project services that wait for confirmation, empty when none do. */
+export function pendingProjectServiceLines(pending: readonly PendingProjectService[]): string[] {
+  if (pending.length === 0) return [];
+  return [
+    '',
+    `Waiting for your confirmation (from ${pending[0]?.path ?? 'the project services file'}; not used until confirmed):`,
+    ...pending.map((service) => `  ${describePendingProjectService(service)}  -> /services trust ${service.name}`),
+  ];
+}
+
+export type ProjectServiceConfirmation =
+  | { readonly ok: true; readonly service: PendingProjectService }
+  | { readonly ok: false; readonly reason: string };
+
 /** The origin (scheme, host, port) of a URL, or null when it is not one. */
 function originOf(url: string | undefined): string | null {
   if (!url?.trim()) return null;
@@ -236,7 +297,7 @@ export class ServiceRegistry {
    * read ran.
    */
   captureReadSource(): () => void {
-    const files = captureFileIdentities('service list', [this.servicesFilePath, this.projectServicesFilePath].filter((path): path is string => Boolean(path)));
+    const files = captureFileIdentities('service list', [this.servicesFilePath, this.projectServicesFilePath, this.projectApprovals?.path].filter((path): path is string => Boolean(path)));
     const secretsCurrent = captureSecretsReadSource(this.secretsManager), subscriptionsCurrent = captureSubscriptionReadSource(this.subscriptionManager);
     return () => { files(); secretsCurrent(); subscriptionsCurrent(); };
   }
@@ -246,10 +307,13 @@ export class ServiceRegistry {
   private readonly subscriptionManager: SubscriptionManager;
   private readonly diagnosticMode: 'default' | 'structural';
   private readonly reportedProjectRefusals = new Set<string>();
+  /** Confirmed project entries, kept beside the user's own services file; none without one. */
+  private readonly projectApprovals: ProjectServiceApprovals | null;
 
   /**
-   * `files.user` is the user's own services file. A bare path is read as a
-   * project file: only its entries that name store keys are used.
+   * `files.user` is the user's own services file; confirmations of project
+   * entries are kept beside it. A bare path is read as a project file with no
+   * user file, so its entries are listed as waiting and never used.
    */
   constructor(files: ServiceRegistryFiles | string, options: ServiceRegistryOptions) {
     const resolved: ServiceRegistryFiles = typeof files === 'string' ? { user: '', project: files } : files;
@@ -258,19 +322,70 @@ export class ServiceRegistry {
     this.secretsManager = options.secretsManager;
     this.subscriptionManager = options.subscriptionManager;
     this.diagnosticMode = options.diagnosticMode ?? 'default';
+    this.projectApprovals = resolved.user ? new ProjectServiceApprovals(join(dirname(resolved.user), 'project-service-approvals.json')) : null;
   }
 
   /**
    * Return all registered service configs.
    */
   getAll(): Record<string, ServiceConfig> {
+    return this.readServices().services;
+  }
+
+  /**
+   * The project services file's entries that are admissible but wait for the
+   * user's confirmation, leaving out any name the user's own file defines.
+   */
+  pendingProjectServices(): PendingProjectService[] {
+    return [...this.readServices().pending.values()];
+  }
+
+  /**
+   * Confirm the project services entry `name` as it stands now. Refused when
+   * there is no such waiting entry, or when this registry has no user services
+   * file to keep the record beside. Throws when the record cannot be written.
+   */
+  confirmProjectService(name: string): ProjectServiceConfirmation {
+    const pending = this.readServices().pending.get(name);
+    if (!pending || !this.projectServicesFilePath) {
+      return { ok: false, reason: this.get(name)
+        ? `${name} is already in use; nothing needed confirming`
+        : `${name} is not a service in this project's services file${this.projectServicesFilePath ? ` (${this.projectServicesFilePath})` : ''}` };
+    }
+    if (!this.projectApprovals) return { ok: false, reason: 'this app has no services file of your own to keep the confirmation beside' };
+    const entry = readServicesFile(this.projectServicesFilePath).services[name];
+    if (!entry) return { ok: false, reason: `${name} is no longer in ${this.projectServicesFilePath}` };
+    this.projectApprovals.approve(this.projectServicesFilePath, name, projectEntryFingerprint(entry));
+    return { ok: true, service: pending };
+  }
+
+  /** Why `name` resolves nothing although the project file defines it, or null. */
+  private pendingRefusal(name: string): string | null {
+    const pending = this.readServices().pending.get(name);
+    if (!pending) return null;
+    const keys = pending.keys.length ? pending.keys.join(', ') : 'no stored key';
+    const target = pending.providerId ? `${pending.providerId}'s signed-in token or ${keys}` : keys;
+    return `service "${name}" comes from this project's services file (${pending.path}) and is not used until you confirm it: it would send ${target} to ${pending.origin ?? 'no origin'}. Confirm it with /services trust ${name}, or add it to your own services file.`;
+  }
+
+  private readServices(): { readonly services: Record<string, ServiceConfig>; readonly pending: Map<string, PendingProjectService> } {
     // A copy: the parsed file is kept for the next read.
     const own = this.servicesFilePath ? { ...readServicesFile(this.servicesFilePath).services } : {};
-    if (!this.projectServicesFilePath) return own;
+    const pending = new Map<string, PendingProjectService>();
+    if (!this.projectServicesFilePath) return { services: own, pending };
+    const projectPath = this.projectServicesFilePath;
     const merged: Record<string, ServiceConfig> = {};
-    for (const [name, entry] of Object.entries(readServicesFile(this.projectServicesFilePath).services)) {
+    for (const [name, entry] of Object.entries(readServicesFile(projectPath).services)) {
       const refusal = projectEntryRefusal(entry);
-      if (refusal === null) { merged[name] = entry; continue; }
+      if (refusal === null) {
+        if (Object.hasOwn(own, name)) continue;
+        if (this.projectApprovals?.isApproved(projectPath, name, projectEntryFingerprint(entry))) { merged[name] = entry; continue; }
+        pending.set(name, {
+          name, path: projectPath, authType: entry.authType, origin: originOf(entry.baseUrl), keys: projectEntryKeys(entry),
+          ...(typeof entry.providerId === 'string' && entry.providerId ? { providerId: entry.providerId } : {}),
+        });
+        continue;
+      }
       const id = `${name}\0${refusal}`;
       if (!this.reportedProjectRefusals.has(id)) {
         this.reportedProjectRefusals.add(id);
@@ -280,7 +395,7 @@ export class ServiceRegistry {
         });
       }
     }
-    return Object.assign(merged, own);
+    return { services: Object.assign(merged, own), pending };
   }
 
   /**
@@ -348,7 +463,10 @@ export class ServiceRegistry {
    */
   async resolveAuthFor(serviceName: string, url: string): Promise<{ readonly headers: Record<string, string> | null } | { readonly refused: string }> {
     const config = this.get(serviceName);
-    if (!config) return { headers: await this.resolveAuth(serviceName) };
+    if (!config) {
+      const waiting = this.pendingRefusal(serviceName);
+      return waiting ? { refused: waiting } : { headers: await this.resolveAuth(serviceName) };
+    }
     const serviceOrigin = originOf(config.baseUrl);
     const requested = originOf(url);
     if (!serviceOrigin) {
@@ -371,7 +489,9 @@ export class ServiceRegistry {
     const config = this.get(serviceName);
     if (!config) {
       const unreadable = this.unreadableReason();
+      const waiting = unreadable ? null : this.pendingRefusal(serviceName);
       if (unreadable) logger.warn('ServiceRegistry: no credentials resolved because the services file is unusable', { serviceName, reason: unreadable });
+      else if (waiting) logger.warn('ServiceRegistry: no credentials resolved for an unconfirmed project service', { serviceName, reason: waiting });
       else logger.debug('ServiceRegistry: unknown service', { serviceName });
       return null;
     }
@@ -509,12 +629,15 @@ export class ServiceRegistry {
     const config = this.get(serviceName);
     if (!config) {
       const unreadable = this.unreadableReason();
+      const waiting = unreadable ? null : this.pendingRefusal(serviceName);
       return {
         ok: false,
         outcome: 'not-tested',
         status: null,
         testedUrl: null,
-        error: unreadable ? `Service list unusable: ${unreadable}` : `Unknown service ${serviceName}; add it to ${this.servicesFilePath || 'your services file'}`,
+        error: unreadable ? `Service list unusable: ${unreadable}`
+          : waiting ? `Nothing was sent: ${waiting}`
+          : `Unknown service ${serviceName}; add it to ${this.servicesFilePath || 'your services file'}`,
       };
     }
 

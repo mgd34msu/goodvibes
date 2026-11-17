@@ -4,9 +4,14 @@ import { atomicWriteFileSync } from '@goodvibes-jev/engine/platform/platform/con
 import type { CommandRegistry } from '../command-registry.ts';
 import type { SelectionAction, SelectionItem } from '../selection-modal.ts';
 import { requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
+import { describePendingProjectService, pendingProjectServiceLines, type ServiceRegistry } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 
 const SERVICE_AUTH_TYPES = new Set(['bearer', 'basic', 'api-key', 'oauth']);
+
+function pendingServiceLines(registry: ServiceRegistry): string[] {
+  return pendingProjectServiceLines(registry.pendingProjectServices());
+}
 
 /** Why `parsed` cannot be a services.json: a name-to-service object whose entries each name an auth type and a token key. */
 function servicesImportProblems(parsed: unknown): string[] {
@@ -26,7 +31,14 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
     name: 'services',
     aliases: ['svc'],
     description: 'Manage API service configurations',
-    usage: '[open|list|inspect <name>|test <name>|resolve|auth <name>|auth-review|doctor|export <path>|import <path>]',
+    usage: '[open|list|inspect <name>|test <name>|resolve|auth <name>|auth-review|doctor|trust <name>|export <path>|import <path>]',
+    confirm: (args) => args[0] === 'trust' && args[1]
+      ? {
+          title: `Use the service ${args[1]} from this project's services file?`,
+          detail: `A project's services file is part of the checkout, so whoever wrote the repository chose which of your stored keys ${args[1]} sends and to which host. Once confirmed, ${args[1]} is used as it stands now; if the repository changes its keys, header or host it waits for confirmation again.`,
+          confirmLabel: 'Use it',
+        }
+      : undefined,
     async handler(args, ctx) {
       const sub = args[0] ?? 'open';
       const shellPaths = requireShellPaths(ctx);
@@ -42,6 +54,22 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
         ctx.print(`Service list unusable: ${unreadable}. Fix or remove the file; services cannot be listed or inspected until then.`);
         return;
       }
+      if (sub === 'trust') {
+        const name = args[1];
+        if (!name) {
+          ctx.print(['Usage: /services trust <name>', ...pendingServiceLines(svcRegistry)].join('\n'));
+          return;
+        }
+        try {
+          const result = svcRegistry.confirmProjectService(name);
+          ctx.print(result.ok
+            ? `Service ${name} from this project is used from now on: ${describePendingProjectService(result.service)}.`
+            : `Nothing was confirmed: ${result.reason}.`);
+        } catch (error) {
+          ctx.print(`Nothing was confirmed: the confirmation could not be saved (${summarizeError(error)}).`);
+        }
+        return;
+      }
       if (sub === 'inspect') {
         const name = args[1];
         if (!name) {
@@ -50,7 +78,10 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
         }
         const inspection = await svcRegistry.inspect(name);
         if (!inspection) {
-          ctx.print(`Unknown service: ${name}`);
+          const waiting = svcRegistry.pendingProjectServices().find((service) => service.name === name);
+          ctx.print(waiting
+            ? `Service ${name} waits for your confirmation and is not used: ${describePendingProjectService(waiting)}. /services trust ${name} confirms it.`
+            : `Unknown service: ${name}`);
           return;
         }
         ctx.print([
@@ -222,10 +253,10 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
         return;
       }
       if (keys.length === 0) {
-        ctx.print('[services] No services configured. Add entries to ~/.goodvibes/tui/services.json or /services import <path>');
+        ctx.print(['[services] No services configured. Add entries to ~/.goodvibes/tui/services.json or /services import <path>', ...pendingServiceLines(svcRegistry)].join('\n'));
         return;
       }
-      ctx.print(['Services:', '', ...keys.map((key) => `  ${key.padEnd(20)} ${all[key].authType.padEnd(10)} ${all[key].baseUrl ?? '(no url)'}`)].join('\n'));
+      ctx.print(['Services:', '', ...keys.map((key) => `  ${key.padEnd(20)} ${all[key].authType.padEnd(10)} ${all[key].baseUrl ?? '(no url)'}`), ...pendingServiceLines(svcRegistry)].join('\n'));
     },
   });
 }

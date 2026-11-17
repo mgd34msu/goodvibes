@@ -20,7 +20,6 @@ export type NoticeSink = (content: string, options: {
     /** The writer's declaration (addNotice); a sink shows it as given and reads nothing. */
     readonly notice?: NoticeMeta | undefined;
     readonly signal: AbortSignal;
-    readonly assertCurrent: () => void;
 }) => void | Promise<void>;
 export interface TerminalConversationPresentation {
     readonly renderer: ReturnType<typeof createConversationRenderer>;
@@ -168,21 +167,14 @@ export class TerminalConversationManager extends PlatformConversationManager {
         const message = (known ?? this.getMessageSnapshot())[index];
         if (!message || message.role !== 'system')
             return;
-        const lifetime = this.noticeLifetime;
-        const eventType = message.runtimeEvent?.type;
-        const occurrenceId = message.runtimeEvent?.occurrenceId;
-        const assertCurrent = () => {
-            const retained = this.hasSystemMessage(current => current.content === message.content
-                && current.runtimeEvent?.type === eventType && current.runtimeEvent?.occurrenceId === occurrenceId);
-            if (lifetime.signal.aborted || this.noticeLifetime !== lifetime || this.noticeSink !== sink || !retained)
-                throw new JudgmentAuthorityRetiredError();
-        };
+        // The level stored with the line: the writer's declaration, else the
+        // severity saved with an older line, else information. Nothing is read.
+        const severity = message.presentation?.severity;
+        const notice: NoticeMeta = message.notice ?? { level: severity === 'error' || severity === 'warning' ? severity : 'info' };
         try {
-            // A line whose writer declared no level is information: the sink reads nothing to colour it.
-            const result = sink(message.content, { restored, runtimeEvent: message.runtimeEvent, notice: message.notice ?? { level: 'info' }, signal: lifetime.signal, assertCurrent });
+            const result = sink(message.content, { restored, runtimeEvent: message.runtimeEvent, notice, signal: this.noticeLifetime.signal });
             if (result) {
-                // Unavailable or retired readings leave the original message saved;
-                // neither a guessed severity nor an unhandled rejection is emitted.
+                // A failed publication leaves the line in the history; no unhandled rejection.
                 const pending = Promise.resolve(result).catch(() => { });
                 this.noticePublications.add(pending);
                 void pending.then(() => this.noticePublications.delete(pending));

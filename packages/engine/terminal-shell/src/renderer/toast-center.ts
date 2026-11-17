@@ -88,7 +88,7 @@ function toneForNotice(level: NotificationFeedEntry['level']): ToastTone {
 export type ToastPrintLevel = () => unknown;
 
 function toneFor(entry: NotificationFeedEntry, level: unknown): ToastTone | null {
-    if (entry.severityPending || entry.toast === 'never')
+    if (entry.toast === 'never')
         return null;
     if (level === 'quiet')
         return toneForLevel(entry.level);

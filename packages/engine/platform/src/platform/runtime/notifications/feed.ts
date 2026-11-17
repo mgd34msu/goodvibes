@@ -13,8 +13,6 @@ import type { Notification, RoutingDecision } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 export interface NotificationFeedEntry {
-    /** Never set: every notice arrives with its writer's level. Kept until the toast center stops reading it. */
-    readonly severityPending?: boolean | undefined;
     readonly key: string;
     readonly domain: string;
     readonly level: Notification['level'] | undefined;

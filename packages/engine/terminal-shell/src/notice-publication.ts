@@ -38,8 +38,6 @@ export function noticeParts(text: string): NoticeParts {
 export interface NoticeOptions {
   /** An aborted signal means the conversation that sent the notice is gone: nothing is recorded. */
   readonly signal?: AbortSignal | undefined;
-  /** Accepted for the sink's shape; publication is synchronous, so it is not consulted. */
-  readonly assertCurrent?: (() => void) | undefined;
   /** Restored from a saved session: kept in history, not toasted. */
   readonly restored?: boolean | undefined;
   readonly now?: (() => number) | undefined;

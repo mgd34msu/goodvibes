@@ -587,7 +587,7 @@ export class AgentResearchRunRegistry {
     const sourceIds = normalizeList(input.sourceIds);
     if (input.status === 'cancelled' || input.status === 'completed' || input.status === 'failed') {
       const route = input.status === 'cancelled' ? 'cancel' : input.status === 'completed' ? 'complete' : 'fail';
-      throw new Error(`A checkpoint cannot set status ${input.status}; the run would stay as it is. Use ${route} to end a research run.`);
+      throw new Error(`A checkpoint cannot set status ${input.status}. Nothing was changed. End a research run with the ${route} action instead; a checkpoint may set planned, running, paused or blocked.`);
     }
     const finalStatus = input.status;
     assertRunContentSafe([note, ...nextSteps, ...sourceIds]);

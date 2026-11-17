@@ -79,11 +79,6 @@ function readStatus(value: unknown): AgentResearchRunStatus | undefined {
 
 const MUTABLE_STATUS_VALUES: readonly AgentResearchRunStatus[] = ['planned', 'running', 'paused', 'blocked'];
 
-function readMutableStatus(value: unknown): AgentResearchRunStatus | undefined {
-  const status = readStatus(value);
-  return status && MUTABLE_STATUS_VALUES.includes(status) ? status : undefined;
-}
-
 function readPhase(value: unknown): AgentResearchRunPhase | undefined {
   return typeof value === 'string' && PHASE_VALUES.includes(value as AgentResearchRunPhase) ? value as AgentResearchRunPhase : undefined;
 }
@@ -386,10 +381,11 @@ function createAgentResearchRunsTool(shellPaths?: Pick<ShellPathService, 'resolv
         if (mode === 'checkpoint') {
           assertWrite();
           const phase = readPhase(args.phase);
-          const status = readMutableStatus(args.status);
+          // A terminal status is refused by the registry, which owns that rule for every caller.
+          const status = readStatus(args.status);
           // A value that was sent but not applied must not come back as "Checkpointed".
           if (readString(args.status) && !status) {
-            return failure(`status '${readString(args.status)}' cannot be set by a checkpoint. Use one of: ${MUTABLE_STATUS_VALUES.join(', ')}. To finish a run use mode:"complete", "fail" or "cancel". Nothing was changed.`);
+            return failure(`status '${readString(args.status)}' is not a research run status. Use one of: ${MUTABLE_STATUS_VALUES.join(', ')}. To finish a run use mode:"complete", "fail" or "cancel". Nothing was changed.`);
           }
           if (readString(args.phase) && !phase) {
             return failure(`phase '${readString(args.phase)}' is not a research phase. Use one of: ${PHASE_VALUES.join(', ')}. Nothing was changed.`);

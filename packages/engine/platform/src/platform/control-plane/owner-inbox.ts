@@ -46,7 +46,7 @@ import {
 } from './question-store.js';
 import type { RevisionSource } from '../utils/revision.js';
 import { logger } from '../utils/logger.js';
-import { askerLivenessPath, isAskerRunning, type OwnerAskerKind } from './owner-asker-liveness.js';
+import { askerLivenessPath, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
 
 export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA };
 
@@ -580,9 +580,44 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     this.#probes = [probe, ...this.#probes];
   }
 
+  /** Whether the asker has a question still open (not answered, withdrawn or expired). One indexed read. */
+  #hasOpenQuestion(scope: QuestionAskerScope): boolean {
+    const now = this.#now();
+    return this.#questions.undelivered(scope).some((entry) => storedStatus(entry, now) === 'open');
+  }
+
+  /**
+   * Whether the asker is running (some process holds its lock). When it is not
+   * and it has no open question left, its lock file is removed under the lock:
+   * a file exists only while a question from that asker is open or the asker
+   * runs. Called by every close of a question and by every read of an asker.
+   */
+  #settleAsker(asker: OwnerAsker): boolean {
+    let running = false;
+    if (asker.agent !== undefined) {
+      const agent = asker.agent;
+      running = settleAskerLock(this.askerLivenessPath('agent', agent), () => !this.#hasOpenQuestion({ agent })) || running;
+    }
+    if (asker.session !== undefined) {
+      const session = asker.session;
+      running = settleAskerLock(this.askerLivenessPath('session', session), () => !this.#hasOpenQuestion({ session })) || running;
+    }
+    return running;
+  }
+
+  /** A question of this asker closed: its lock file goes if nothing of it is open or running any more. */
+  #closed(item: Pick<OwnerItem, 'metadata'>): void {
+    const asker = askerOf(item);
+    if (asker === undefined) return;
+    try {
+      this.#settleAsker(asker);
+    } catch (error) {
+      logger.debug('[owner-inbox] could not settle an asker\'s lock after a question closed', { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
   #presenceOf = (asker: OwnerAsker): OwnerAskerPresence => {
-    const running = (asker.agent !== undefined && isAskerRunning(this.askerLivenessPath('agent', asker.agent)))
-      || (asker.session !== undefined && isAskerRunning(this.askerLivenessPath('session', asker.session)));
+    const running = this.#settleAsker(asker);
     for (const probe of this.#probes) {
       try {
         const found = probe(asker, running);
@@ -600,7 +635,10 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   }
 
   #project(entry: StoredOwnerEntry, now: number): OwnerItem {
-    return projectStored(entry, now, this.#presenceOf);
+    const item = projectStored(entry, now, this.#presenceOf);
+    // Expiry closes a question without any write; the first read after it settles the asker's lock file.
+    if (item.status === 'expired' && entry.closedAt === undefined) this.#closed(item);
+    return item;
   }
 
   get(id: string): OwnerItem | undefined {
@@ -683,6 +721,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       const answered = this.#project(result.entry, now);
       if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
       this.#emit(answered);
+      this.#closed(answered);
       return { applied: true, item: answered, ...(answered.delivery ? { delivery: answered.delivery } : {}) };
     }
     const approval = this.#approvals?.getApproval(id);
@@ -698,6 +737,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const item = this.#project(result.entry, now);
     if (!result.applied) return { applied: false, item, refusal: closedRefusal(item) };
     this.#emit(item);
+    this.#closed(item);
     return { applied: true, item };
   }
 
@@ -716,6 +756,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const result = this.#questions.recordDelivery(id, 'delivered', undefined, this.#now());
     if (!result?.applied) return false;
     this.#emit(this.#project(result.entry, this.#now()));
+    this.#closed(result.entry.item);
     return true;
   }
 
@@ -734,7 +775,10 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     );
     for (const id of changed) {
       const entry = this.#questions.get(id);
-      if (entry) this.#emit(this.#project(entry, now));
+      if (entry) {
+        this.#emit(this.#project(entry, now));
+        this.#closed(entry.item);
+      }
     }
   }
 
@@ -784,6 +828,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       };
     }
     this.#emit(updated);
+    this.#closed(updated);
     return { applied: true, item: updated, ...(updated.delivery ? { delivery: updated.delivery } : {}) };
   }
 

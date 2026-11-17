@@ -145,7 +145,7 @@ export type {
 } from './owner-inbox.js';
 export { QuestionStore, ownerInboxStorePath, sharedQuestionStore } from './question-store.js';
 export { terminalSessionPresence } from './owner-session-presence.js';
-export { askerLivenessPath, holdAskerRunning, isAskerRunning } from './owner-asker-liveness.js';
+export { askerLivenessPath, holdAskerRunning, isAskerRunning, settleAskerLock } from './owner-asker-liveness.js';
 export type { OwnerAskerKind } from './owner-asker-liveness.js';
 export type { QuestionAskerScope, StoredAnswerDelivery, StoredOwnerEntry, StoredOwnerItem, StoredOwnerItemKind } from './question-store.js';
 export { registerOwnerInboxGatewayMethods } from './routes/owner-inbox.js';

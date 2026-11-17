@@ -160,7 +160,7 @@ function restartedDaemon(now: () => number, checkpoint: CheckoutWindowCheckpoint
       prepare: owner => prepareRestoredPaymentReplyWindow({
         purchaseId: PURCHASE, checkpoint, recipients: [], readHistory: undefined, replies,
         router: { deliver: async () => { throw new Error('No channel recipient to notify again'); } },
-        signal: owner.signal ?? next.stop.signal, assertCurrent: owner.assertCurrent, renewMinutes: 60,
+        signal: owner.signal ?? next.stop.signal, assertCurrent: () => owner.assertCurrent?.(), renewMinutes: 60,
         inbox: { port: next.inbox, key: purchaseInboxKey(PURCHASE, 'approval'), delivery: inboxDelivery },
       }),
     },
@@ -193,7 +193,7 @@ test('a yes to the follow-up approval after a restart buys exactly once', async 
   expect(outcome.kind).toBe('purchased');
   expect(merchant.submissions).toHaveLength(1);
   expect(new DaemonPurchaseLedger({ filePath: join(dir, 'purchases.json') }).list({ limit: 10, dayKey: undefined }).total).toBe(1);
-  expect(budget(now)).toEqual({ spent: checkpoint.record.totalMinorUnits, reserved: 0 });
+  expect(budget(now)).toEqual({ spent: checkpoint.record.totalMinorUnits ?? Number.NaN, reserved: 0 });
 });
 
 test('silence on the follow-up approval across a restart buys nothing and frees the money', async () => {

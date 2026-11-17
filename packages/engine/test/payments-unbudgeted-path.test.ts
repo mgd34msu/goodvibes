@@ -85,7 +85,7 @@ test.each([
 test('the payment flow\'s own submit is the one path that presses it', async () => {
   const page = checkoutPage({ tag: 'button', role: 'button', name: 'Place order', submits: true });
   await page.engine.snapshot({});
-  const ownership = {};
+  const ownership = { assertCurrent: () => {} };
   markPaymentCheckoutAction(ownership);
   await page.engine.click({}, { ref: 'e1' }, ownership);
   expect(page.effects).toEqual(['click']);

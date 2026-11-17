@@ -1,14 +1,11 @@
-import { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from './agent-schedule-effect.ts';
+import { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from './schedule-effect.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@/runtime/index.ts';
-import {
-  buildScheduleEditPreview,
-  parseScheduleEditArgs,
-  scheduleEditKindFromValue,
-} from '../agent/schedule-edit.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { buildScheduleEditPreview, parseScheduleEditArgs, scheduleEditKindFromValue } from './schedule-edit.js';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
+import type { AgentInProcessHost } from './in-process-host.js';
 
 export interface AgentScheduleEditToolArgs {
   readonly scheduleId?: unknown;
@@ -75,6 +72,7 @@ export function createAgentScheduleEditTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
   registry: ToolRegistry,
+  inProcess?: AgentInProcessHost,
 ): Tool {
   return {
     definition: {
@@ -136,7 +134,7 @@ export function createAgentScheduleEditTool(
     execute: async (rawArgs, options) => {
       let effect: ReturnType<typeof captureScheduleEffect> | undefined;
       try {
-        effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
+        effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry, inProcess);
         const parsed = parseScheduleEditArgs(buildScheduleEditArgs(rawArgs));
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildScheduleEditPreview(parsed);
@@ -154,10 +152,13 @@ export function createAgentScheduleEditTool(
   };
 }
 
+/** `inProcess`: the daemon hosting this Agent turn, reached in process; absent in the Agent's own process. */
 export function registerAgentScheduleEditTool(
   registry: ToolRegistry,
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
+  inProcess?: AgentInProcessHost,
 ): void {
-  registry.register(createAgentScheduleEditTool(shellPaths, configManager, registry), { inputProjection: createScheduleInputProjector(shellPaths, configManager) });
+  registry.register(createAgentScheduleEditTool(shellPaths, configManager, registry, inProcess),
+    { inputProjection: createScheduleInputProjector(shellPaths, configManager, inProcess) });
 }

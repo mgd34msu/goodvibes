@@ -1,15 +1,13 @@
-import { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from './agent-schedule-effect.ts';
+import { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from './schedule-effect.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@/runtime/index.ts';
-import {
-  buildReminderSchedulePreview,
-  parseReminderScheduleArgs,
-} from '../agent/reminder-schedule.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { buildReminderSchedulePreview, parseReminderScheduleArgs } from './reminder-schedule.js';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
+import type { AgentInProcessHost } from './in-process-host.js';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './personal-ops-effect-receipt.js';
 
 function createdScheduleId(output: string | undefined): string | undefined {
   try {
@@ -97,6 +95,7 @@ export function createAgentReminderScheduleTool(
   configManager: AgentConnectedHostConfigReader,
   registry: ToolRegistry,
   artifactStore?: ArtifactStore,
+  inProcess?: AgentInProcessHost,
 ): Tool {
   /** The Personal Ops reminders lane lists one receipt per schedule request that reached the connected host. */
   const recordEffect = (status: PersonalOpsEffectReceiptStatus, summary: string, subjectId?: string) => writePersonalOpsEffectReceipt(artifactStore, {
@@ -167,7 +166,7 @@ export function createAgentReminderScheduleTool(
     execute: async (rawArgs, options) => {
       let effect: ReturnType<typeof captureScheduleEffect> | undefined;
       try {
-        effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
+        effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry, inProcess);
         const parsed = parseReminderScheduleArgs(buildReminderScheduleArgs(rawArgs));
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildReminderSchedulePreview(parsed);
@@ -194,11 +193,14 @@ export function createAgentReminderScheduleTool(
   };
 }
 
+/** `inProcess`: the daemon hosting this Agent turn, reached in process; absent in the Agent's own process. */
 export function registerAgentReminderScheduleTool(
   registry: ToolRegistry,
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
   artifactStore?: ArtifactStore,
+  inProcess?: AgentInProcessHost,
 ): void {
-  registry.register(createAgentReminderScheduleTool(shellPaths, configManager, registry, artifactStore), { inputProjection: createScheduleInputProjector(shellPaths, configManager) });
+  registry.register(createAgentReminderScheduleTool(shellPaths, configManager, registry, artifactStore, inProcess),
+    { inputProjection: createScheduleInputProjector(shellPaths, configManager, inProcess) });
 }

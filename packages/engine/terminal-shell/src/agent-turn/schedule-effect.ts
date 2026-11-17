@@ -1,21 +1,28 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertProjectionExecution, type ToolInputProjector, type ToolRegistry, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@/runtime/index.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { captureOperatorAutomationTarget } from '../agent/operator-automation-target.ts';
-import { executeOperatorMethodWithReceipt } from '../agent/operator-method-receipt.ts';
-import { scheduleNextRouteLines } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import { agentArtifactEffectGuard, captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import { captureOperatorConnection } from './operator-connection-owner.js';
+import { captureOperatorAutomationTarget } from './operator-automation-target.js';
+import { executeOperatorMethodWithReceipt } from './operator-method-receipt.js';
+import { scheduleNextRouteLines } from './schedule-next-routes.js';
+import { agentArtifactEffectGuard, captureAgentExportPath } from './artifact-effect.js';
+import type { AgentInProcessHost } from './in-process-host.js';
 
 let nextScheduleCall = 0;
 const captures = new WeakMap<object, { readonly shellPaths: ShellPathService; readonly configManager: AgentConnectedHostConfigReader;
+  readonly inProcess: AgentInProcessHost | undefined;
   readonly connection: ReturnType<typeof captureOperatorConnection>;
   readonly selectedTarget?: { readonly id: string; readonly revision: string } | undefined }>();
 
-/** Resolve selected sources before any repair or model admission. */
-export function createScheduleInputProjector(shellPaths: ShellPathService, configManager: AgentConnectedHostConfigReader): ToolInputProjector {
+/**
+ * Resolve selected sources before any repair or model admission. The host is
+ * the Agent's connected host; in a turn the daemon hosts for the Agent it is
+ * that daemon, reached in process (`inProcess`) with the Agent's own credential.
+ */
+export function createScheduleInputProjector(shellPaths: ShellPathService, configManager: AgentConnectedHostConfigReader,
+  inProcess?: AgentInProcessHost): ToolInputProjector {
   return { async project(request) {
     request.assertCurrent(); request.signal?.throwIfAborted();
     const directory = shellPaths.workingDirectory;
@@ -28,7 +35,7 @@ export function createScheduleInputProjector(shellPaths: ShellPathService, confi
       if (getSessionUntrustedContentLedger() !== ledger || ledger.getPublicationRevision !== revisionOf
         || revisionOf.call(ledger) !== ledgerRevision) throw new ToolInputProjectionError('stale');
       workspace.assertCurrent();
-    });
+    }, inProcess);
     const assertCurrent = () => { request.assertCurrent(); connection.assertCurrent(); };
     assertCurrent();
     let selectedTarget: { readonly id: string; readonly revision: string } | undefined;
@@ -44,7 +51,7 @@ export function createScheduleInputProjector(shellPaths: ShellPathService, confi
       selectedTarget = Object.freeze({ id: targetId, revision });
     }
     const context = Object.freeze({});
-    captures.set(context, { shellPaths, configManager, connection, selectedTarget });
+    captures.set(context, { shellPaths, configManager, inProcess, connection, selectedTarget });
     return { status: 'projected', args: request.args, executionContext: context, assertCurrent,
       async release() { captures.delete(context); } };
   } };
@@ -52,11 +59,12 @@ export function createScheduleInputProjector(shellPaths: ShellPathService, confi
 
 /** A connection/workspace restriction accompanies each newly admitted operator child. */
 export function captureScheduleEffect(rawArgs: Record<string, unknown>, options: Parameters<Tool['execute']>[1],
-  shellPaths: ShellPathService, configManager: AgentConnectedHostConfigReader, registry: ToolRegistry) {
+  shellPaths: ShellPathService, configManager: AgentConnectedHostConfigReader, registry: ToolRegistry, inProcess?: AgentInProcessHost) {
   const assertEffect = agentArtifactEffectGuard(rawArgs, options);
   assertEffect();
   const context = options?.inputProjectionContext, capture = context && captures.get(context);
-  if (!context || !capture || capture.shellPaths !== shellPaths || capture.configManager !== configManager) throw new ToolInputProjectionError('held');
+  if (!context || !capture || capture.shellPaths !== shellPaths || capture.configManager !== configManager
+    || capture.inProcess !== inProcess) throw new ToolInputProjectionError('held');
   const assertSource = () => {
     assertProjectionExecution(context, rawArgs); capture.connection.assertCurrent();
   };
@@ -79,7 +87,7 @@ export function captureScheduleEffect(rawArgs: Record<string, unknown>, options:
       sent = true;
       // Once the host has answered, its answer is the outcome: no fence runs after it.
       const receipt = await executeOperatorMethodWithReceipt(registry, `schedule-operator-${++nextScheduleCall}`, methodId,
-        payload, options, { signal: options?.signal, assertCurrent: assertSource });
+        payload, options, { ...(options?.signal ? { signal: options.signal } : {}), assertCurrent: assertSource });
       if (!receipt.result.success && methodId === 'automation.jobs.update' && /AUTOMATION_JOB_STALE|"status": 409\b/.test(receipt.result.error ?? '')) {
         return { success: false, error: `The schedule changed since it was read, so the host refused the edit and nothing was changed. Read it again with schedule action:"list" scheduleId:"${String(input.jobId)}" and repeat the edit if it still applies.` };
       }

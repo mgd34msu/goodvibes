@@ -1,13 +1,11 @@
-import { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from './agent-schedule-effect.ts';
+import { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from './schedule-effect.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@/runtime/index.ts';
-import {
-  buildAutonomySchedulePreview,
-  parseAutonomyScheduleArgs,
-} from '../agent/autonomy-schedule.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { buildAutonomySchedulePreview, parseAutonomyScheduleArgs } from './autonomy-schedule.js';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
+import type { AgentInProcessHost } from './in-process-host.js';
 
 type AutonomyScheduleKind = 'at' | 'every' | 'cron';
 
@@ -92,6 +90,7 @@ export function createAgentAutonomyScheduleTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
   registry: ToolRegistry,
+  inProcess?: AgentInProcessHost,
 ): Tool {
   return {
     definition: {
@@ -161,7 +160,7 @@ export function createAgentAutonomyScheduleTool(
     execute: async (rawArgs, options) => {
       let effect: ReturnType<typeof captureScheduleEffect> | undefined;
       try {
-        effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry);
+        effect = captureScheduleEffect(rawArgs, options, shellPaths, configManager, registry, inProcess);
         const parsed = parseAutonomyScheduleArgs(buildAutonomyScheduleArgs(rawArgs), { requireExplicitUserRequest: false });
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildAutonomySchedulePreview(parsed);
@@ -181,10 +180,13 @@ export function createAgentAutonomyScheduleTool(
   };
 }
 
+/** `inProcess`: the daemon hosting this Agent turn, reached in process; absent in the Agent's own process. */
 export function registerAgentAutonomyScheduleTool(
   registry: ToolRegistry,
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
+  inProcess?: AgentInProcessHost,
 ): void {
-  registry.register(createAgentAutonomyScheduleTool(shellPaths, configManager, registry), { inputProjection: createScheduleInputProjector(shellPaths, configManager) });
+  registry.register(createAgentAutonomyScheduleTool(shellPaths, configManager, registry, inProcess),
+    { inputProjection: createScheduleInputProjector(shellPaths, configManager, inProcess) });
 }

@@ -1,9 +1,9 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { ShellPathService } from '@/runtime/index.ts';
-import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { randomUUID } from 'node:crypto';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 type ScheduleAction =
   | 'list'

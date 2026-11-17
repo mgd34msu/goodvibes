@@ -60,6 +60,8 @@ type RouteBinding = import('../automation/routes.js').AutomationRouteBinding;
  * blocks) show this; chat surfaces that only take a body ignore it.
  */
 const NOTICE_TITLE = 'goodvibes';
+/** First-party surfaces a person reads; a session one of them is attached to shows its approvals on screen. */
+const INTERACTIVE_SURFACE_KINDS: ReadonlySet<string> = new Set(['tui', 'web', 'agent', 'webui', 'companion']);
 
 function isSupportedDeliverySurface(surface: string): surface is DeliverySurface {
   return surface === 'slack'
@@ -725,15 +727,18 @@ export class DaemonSurfaceDeliveryHelper {
   /**
    * Show an approval update on the conversation it belongs to (its route, else
    * its session's first route). When a prompt that still waits for an answer
-   * did not get there (no route, a refused or failed send), it is taken to the
-   * owner's other conversations through the owner-alert path, and the approval
-   * record says the prompt was not delivered, once.
+   * did not get there (a refused or failed send, a binding that is gone, or no
+   * one attached to see it), it is taken to the owner's other conversations
+   * through the owner-alert path, and the approval record says the prompt was
+   * not delivered, once. A prompt of a session open in a terminal app, the
+   * Agent or the web UI is on the owner's screen already: nothing more is done.
    */
   async notifyApprovalUpdate(approval: SharedApprovalRecord): Promise<void> {
     await this.context.sessionBroker.start();
     await this.context.routeBindings.start();
     const outcome = await this.deliverApprovalToItsRoute(approval);
     if (outcome.delivered || (approval.status !== 'pending' && approval.status !== 'claimed')) return;
+    if (!this.approvalNeedsOwnerAlert(approval)) return;
     // Marked already: the record update that said so is itself published here.
     const marked = approval.metadata['promptDelivery'];
     if (typeof marked === 'object' && marked !== null && (marked as { delivered?: unknown }).delivered === false) return;
@@ -751,6 +756,25 @@ export class DaemonSurfaceDeliveryHelper {
     })?.catch((error: unknown) => {
       logger.warn('An undelivered approval prompt could not be marked on its record', { approvalId: approval.id, error: summarizeError(error) });
     });
+  }
+
+  /**
+   * Whether an approval that did not reach a channel conversation must be taken
+   * to the owner. It must when it belonged to a conversation (its route or its
+   * session's routes) and the send failed or the binding is gone, and when no
+   * one is attached to see it (no session, or a session with only background
+   * participants). A session a terminal app, the Agent or the web UI is
+   * attached to already shows the prompt on the owner's screen: nothing is
+   * sent and the record is not rewritten.
+   */
+  private approvalNeedsOwnerAlert(approval: SharedApprovalRecord): boolean {
+    if (approval.routeId !== undefined) return true;
+    if (approval.sessionId === undefined) return true;
+    const session = this.context.sessionBroker.getSession(approval.sessionId);
+    // A session this daemon does not hold is not known to be unattended.
+    if (!session) return false;
+    if (session.routeIds.length > 0) return true;
+    return !session.participants.some((participant) => INTERACTIVE_SURFACE_KINDS.has(participant.surfaceKind));
   }
 
   private async deliverApprovalToItsRoute(approval: SharedApprovalRecord): Promise<SurfaceNoticeDelivery> {

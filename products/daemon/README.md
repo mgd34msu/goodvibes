@@ -205,13 +205,14 @@ infer admission for configured standalone accounts.
 
 In cluster mode, these explicit factories authenticate expected account metadata
 before enrolling through the canonical root's owned election gates. Slack also
-requires the root's config/credential invalidation subscription. Email eligibility
-does not require a preexisting UID checkpoint. Actual authority invalidation
+requires the root's config/credential invalidation subscription. The email inbox
+is not polled or elected on its own: it is fed by the daemon's one mailbox reader,
+placed by that reader's surface. Actual authority invalidation
 withdraws and drains accepted polling before reentry. A held content result does
 not itself withdraw membership or block holder heartbeats. Standby reads remain
 account- and generation-protected. State is node-local: returning nodes resume
 their own committed mirror; cold nodes use each provider's bounded initialization.
-Email discloses omitted history and pending backlog. There is no previous-holder
+Email discloses the reader's history window and pending backlog. There is no previous-holder
 cursor transfer, globally
 identical feed or exactly-once guarantee. A failed owned drain prevents local
 reentry and explicit RESIGN, but heartbeat expiry may still permit peer takeover;

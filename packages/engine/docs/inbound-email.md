@@ -13,9 +13,32 @@ health entry and `email.inbound.status` name each further mailbox's state, and a
 account with no usable entry is named with what to fix. Arrival is untrusted input; the watcher cannot
 start an agent or a session merely because a message arrived.
 
+## One reader per mailbox
+
+The supervisor is the only thing that reads a mailbox. Inbound notices and the
+inbox (`channels.inbox.list`) are both its consumers: one connection, one cursor
+per account (its UIDVALIDITY and position, or its Gmail history id), one
+placement. The daemon's own mailbox gets a supervisor whenever it is configured,
+labelled with the first entry of `surfaces.email.inbound.accounts` or, when that
+list is empty, the mail user; it reads while notices are on or an inbox is
+attached, and does not sign in otherwise.
+
+- Each batch (up to 50 messages) goes to every consumer, and the cursor moves
+  past the messages they all settled. The inbox reads a message's full text on
+  the reader's own session, and only for a message it has not stored.
+- First run, or a changed UIDVALIDITY: the position starts at the newest
+  message, and the newest 50 already there are kept as history: shown in the
+  inbox, never announced. An inbox attached to a mailbox that already has a
+  position asks for that history once.
+- A message that cannot be read is tried on three drains, then stepped over:
+  the inbox shows a row saying it could not be read, the daemon log records it,
+  and the messages after it arrive.
+- Placement: the cluster surface of the mailbox decides which node reads, and on
+  one machine a lease beside the cursor file lets only one daemon sign in.
+
 The composition in `platform/src/platform/daemon/facade-inbound-mail.ts` reads
 `surfaces.email.inbound.*` settings and stores its state through the daemon's
-user-path resolver. `facade-builtin-channels.ts` supplies the adopted Gmail reader
+user-path resolver; the inbox attaches through the runtime's mailbox readers. `facade-builtin-channels.ts` supplies the adopted Gmail reader
 and includes inbound email in the runtime's health reporting. An enabled mailbox
 that cannot be composed is reported as unavailable.
 

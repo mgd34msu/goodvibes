@@ -113,14 +113,15 @@ const collectSetupReview = createSetupReviewCollector<
       sandboxMcpIsolation: String(context.platform.configManager.get('sandbox.mcpIsolation')),
       sandboxSecureModeReady: buildSandboxReview(context.platform.configManager).host.secureSandboxReady,
     }),
-    extraIssues: (snapshot) => [
+    // Hooks and remote runners are optional: none configured is information, not an issue.
+    extraChecks: (snapshot) => [
       {
-        severity: snapshot.managedHookCount > 0 || snapshot.managedHookChainCount > 0 ? 'pass' : 'warn',
+        severity: snapshot.managedHookCount > 0 || snapshot.managedHookChainCount > 0 ? 'pass' : 'info',
         area: 'hooks',
         message: snapshot.managedHookCount + ' managed hook(s), ' + snapshot.managedHookChainCount + ' chain(s)',
       },
       {
-        severity: snapshot.remoteRunnerCount > 0 ? 'pass' : 'warn',
+        severity: snapshot.remoteRunnerCount > 0 ? 'pass' : 'info',
         area: 'remote',
         message:
           snapshot.remoteRunnerCount > 0
@@ -128,7 +129,7 @@ const collectSetupReview = createSetupReviewCollector<
             : 'no remote runner contracts registered',
       },
       {
-        severity: 'pass',
+        severity: 'info',
         area: 'sandbox',
         message: 'local backend: separate host processes; no VM guest',
       },

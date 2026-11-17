@@ -12,6 +12,7 @@ import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/run
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandRegistry } from '../command-registry.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
+import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
 import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
 import {
   requireLocalUserAuthManager,
@@ -104,7 +105,6 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
             `  users: ${auth.userCount}`,
             `  sessions: ${auth.sessionCount}`,
             `  bootstrap file: ${auth.bootstrapCredentialPresent ? 'present' : 'cleared'}`,
-            ...(auth.userCount <= 1 ? ['  issue: only one local auth user configured'] : []),
             ...(auth.bootstrapCredentialPresent
               ? ['  issue: bootstrap credential file still present; rotate or clear it when no longer needed']
               : []),
@@ -459,7 +459,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
         ctx.print(
           [
             'Health Review: Setup',
-            ...snapshot.issues.map((issue) => `  [${issue.severity.toUpperCase()}] ${issue.area}: ${issue.message}`),
+            ...setupReviewLines(snapshot.checks),
             ...(snapshot.serviceIssues.length > 0
               ? ['', '  Service issues:', ...snapshot.serviceIssues.map((issue) => `    - ${issue}`)]
               : []),
@@ -491,9 +491,8 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
           ...renderSandboxHealthSummary(ctx.platform.configManager),
           '',
           ...formatSessionMaintenanceLines(maintenance, 'guided').map((line) => `  ${line}`),
-          ...(snapshot.issues.length > 0
-            ? ['', ...snapshot.issues.map((issue) => `  [${issue.severity.toUpperCase()}] ${issue.area}: ${issue.message}`)]
-            : []),
+          '',
+          ...setupReviewLines(snapshot.checks),
           ...(snapshot.serviceIssues.length > 0 ? ['', ...snapshot.serviceIssues.map((issue) => `  service: ${issue}`)] : []),
           '',
           'Next steps:',

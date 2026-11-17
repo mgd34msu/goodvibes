@@ -14,6 +14,7 @@ import {
   revertSetupTransferChanges,
 } from './local-setup-transfer.ts';
 import { buildSetupReviewSnapshot, exportSetupSupportBundle, renderSetupSandboxReview } from './local-setup-review.ts';
+import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
 import { openOnboardingWizard, requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -106,7 +107,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
         const snapshot = await getSnapshot();
         ctx.print([
           'Startup Doctor',
-          ...snapshot.issues.map((issue) => `  [${issue.severity.toUpperCase()}] ${issue.area}: ${issue.message}`),
+          ...setupReviewLines(snapshot.checks),
           ...(snapshot.serviceIssues.length > 0
             ? ['', '  Service issues:', ...snapshot.serviceIssues.map((issue) => `    - ${issue}`)]
             : []),

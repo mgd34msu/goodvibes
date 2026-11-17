@@ -268,7 +268,7 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
           'Intelligence Repair',
           '  verify: /health intelligence',
           ...(state.diagnosticsStatus !== 'ready' ? ['  /setup review', '  /health intelligence'] : []),
-          ...(state.symbolSearchStatus !== 'ready' ? ['  /symbols', '  /intelligence symbols <file>', '  /health intelligence'] : []),
+          ...(state.symbolSearchStatus !== 'ready' ? ['  /intelligence symbols <file>', '  /health intelligence'] : []),
           ...(state.completionsStatus !== 'ready' || state.hoverStatus !== 'ready'
             ? ['  /intelligence review', '  /intelligence hover <file> <line> <column>', '  /setup onboarding']
             : []),

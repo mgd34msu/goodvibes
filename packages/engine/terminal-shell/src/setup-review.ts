@@ -8,10 +8,28 @@ import {
 import type { ProviderApi } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { UiReadModels } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+/** One setup check: `warn` and `fail` are issues; `pass` and `info` (an optional feature not in use) are not. */
 export interface SetupReviewIssue {
-  readonly severity: 'pass' | 'warn' | 'fail';
+  readonly severity: 'pass' | 'info' | 'warn' | 'fail';
   readonly area: string;
   readonly message: string;
+}
+export function isSetupIssue(check: SetupReviewIssue): boolean {
+  return check.severity === 'warn' || check.severity === 'fail';
+}
+/**
+ * The checks of a setup review for a report: the issues first (or a line that
+ * there are none), then everything else under its own heading, so a pass is
+ * never counted or shown as an issue. `separator` goes between area and message.
+ */
+export function setupReviewLines(checks: readonly SetupReviewIssue[], separator = ': '): string[] {
+  const line = (check: SetupReviewIssue): string => `  [${check.severity.toUpperCase()}] ${check.area}${separator}${check.message}`;
+  const issues = checks.filter(isSetupIssue);
+  const fine = checks.filter((check) => !isSetupIssue(check));
+  return [
+    ...(issues.length > 0 ? ['  Issues:', ...issues.map(line)] : ['  No setup issues.']),
+    ...(fine.length > 0 ? ['  Other checks:', ...fine.map(line)] : []),
+  ];
 }
 export interface TerminalSetupReviewSnapshot {
   readonly sessionId: string;
@@ -32,6 +50,9 @@ export interface TerminalSetupReviewSnapshot {
   readonly quarantinedMcpCount: number;
   readonly elevatedMcpCount: number;
   readonly remoteRunnerCount: number;
+  /** Every check, passes and informational ones included. */
+  readonly checks: SetupReviewIssue[];
+  /** The checks that need attention (`warn` or `fail`). */
   readonly issues: SetupReviewIssue[];
   readonly services: string[];
 }
@@ -65,7 +86,7 @@ export function createSetupReviewCollector<
     readonly serviceNoun: string;
     readonly emptyServices: string;
     readonly extraSnapshot: (context: Context) => Extra;
-    readonly extraIssues: (snapshot: TerminalSetupReviewSnapshot & Extra) => readonly SetupReviewIssue[];
+    readonly extraChecks: (snapshot: Omit<TerminalSetupReviewSnapshot, 'issues'> & Extra) => readonly SetupReviewIssue[];
   },
 ) {
   const { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, discoverSkills } =
@@ -116,16 +137,17 @@ export function createSetupReviewCollector<
         // Ignore malformed hook config during snapshot collection.
       }
     }
-    const issues: SetupReviewIssue[] = [
+    const checks: SetupReviewIssue[] = [
       {
         severity: providerCount > 0 ? 'pass' : 'fail',
         area: 'providers',
         message: providerCount > 0 ? `${providerCount} model(s) available` : 'no models available',
       },
       {
+        // No services is an optional feature not in use, not a fault.
         severity:
           services.length === 0 && oauthProviderCount === 0 && builtinSubscriptionProviderCount === 0
-            ? 'warn'
+            ? 'info'
             : serviceIssues.length === 0
               ? 'pass'
               : 'warn',
@@ -172,11 +194,11 @@ export function createSetupReviewCollector<
       elevatedMcpCount,
       remoteRunnerCount,
       ...extra,
-      issues,
+      checks,
       services,
     };
-    issues.push(...policy.extraIssues(snapshot));
-    return snapshot;
+    checks.push(...policy.extraChecks(snapshot));
+    return { ...snapshot, issues: checks.filter(isSetupIssue) };
   }
   return buildSetupReviewSnapshot;
 }

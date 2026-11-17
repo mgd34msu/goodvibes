@@ -27,13 +27,17 @@ export function renderMetricMap(label: string, map: Record<string, unknown> | un
 }
 
 /**
- * When a telemetry verb fails because the companion token lacks the required
- * scope, say exactly that, never render zeros in place of missing authority.
- * Returns the honest line, or null when the error is not a scope refusal.
+ * When a telemetry verb is refused, say why, never render zeros in place of
+ * missing authority: a 401 means the daemon did not accept the token at all, a
+ * 403 that the token lacks the read:telemetry scope. Returns the line, or null
+ * when the error is neither.
  */
 export function telemetryScopeRefusalLine(error: unknown, what: string): string | null {
-  if (error instanceof GoodVibesError && (error.status === 401 || error.status === 403)) {
-    return `  ${what}: unavailable; the companion token lacks the read:telemetry scope this data requires (daemon returned ${error.status}).`;
+  if (error instanceof GoodVibesError && error.status === 401) {
+    return `  ${what}: unavailable; the daemon did not accept the token (401). Pair this terminal again or check the daemon's token.`;
+  }
+  if (error instanceof GoodVibesError && error.status === 403) {
+    return `  ${what}: unavailable; the companion token lacks the read:telemetry scope this data requires (daemon returned 403).`;
   }
   return null;
 }

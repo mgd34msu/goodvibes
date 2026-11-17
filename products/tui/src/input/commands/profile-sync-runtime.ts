@@ -156,8 +156,8 @@ export function registerProfileSyncRuntimeCommands(registry: CommandRegistry): v
         return;
       }
 
-      recordSettingsSyncFailure('profiles', `unsupported subcommand: ${sub}`, controlPlaneConfigDir);
-      ctx.print('Usage: /profile-sync [list|export <path>|inspect <path>|import <path> [prefix] [--overwrite]]');
+      // A mistyped subcommand is a usage error, not a failed sync: nothing is recorded.
+      ctx.print(`Unknown subcommand "${sub}". Usage: /profile-sync [list|export <path>|inspect <path>|import <path> [prefix] [--overwrite]]`);
     },
   });
 }

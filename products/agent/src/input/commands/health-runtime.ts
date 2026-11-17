@@ -11,6 +11,7 @@ import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/run
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
+import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
 import { describeApprovalsUnavailable } from '../../runtime/client/approvals-view.ts';
 import { buildProviderAccountSnapshot } from '@/runtime/index.ts';
 import { getSettingsControlPlaneSnapshot } from '@/runtime/index.ts';
@@ -429,7 +430,7 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
           ctx.print(
             [
               'Health Review Setup',
-              ...snapshot.issues.map((issue) => `  [${issue.severity.toUpperCase()}] ${issue.area} ${issue.message}`),
+              ...setupReviewLines(snapshot.checks, ' '),
               ...(snapshot.hostIntegrationIssues.length > 0
                 ? ['', '  Connected host integration issues', ...snapshot.hostIntegrationIssues.map((issue) => `    - ${issue}`)]
                 : []),
@@ -450,9 +451,8 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
             `  managed locks ${settingsSnapshot.managedLockCount}`,
             `  connected host auth owner outside Agent`,
             ...formatSessionMaintenanceLines(maintenance, 'guided').map((line) => `  ${line}`),
-            ...(snapshot.issues.length > 0
-              ? ['', ...snapshot.issues.map((issue) => `  [${issue.severity.toUpperCase()}] ${issue.area} ${issue.message}`)]
-              : []),
+            '',
+            ...setupReviewLines(snapshot.checks, ' '),
             ...(snapshot.hostIntegrationIssues.length > 0
               ? ['', ...snapshot.hostIntegrationIssues.map((issue) => `  host integration ${issue}`)]
               : []),

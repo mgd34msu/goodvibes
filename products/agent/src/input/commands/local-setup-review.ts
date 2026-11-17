@@ -21,7 +21,7 @@ const collectSetupReview = createSetupReviewCollector<CommandContext, Record<nev
     serviceNoun: 'host integration',
     emptyServices: 'no connected host integrations configured',
     extraSnapshot: () => ({}),
-    extraIssues: () => [],
+    extraChecks: () => [],
   },
 );
 export async function buildSetupReviewSnapshot(context: CommandContext): Promise<SetupReviewSnapshot> {

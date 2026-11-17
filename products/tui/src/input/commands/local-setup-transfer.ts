@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
+import type { TerminalSetupReviewSnapshot } from '@goodvibes-jev/engine/terminal-shell/setup-review';
 import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { CONFIG_SCHEMA, CONFIG_KEYS, configKeyFacts, isProtectedConfigValue, isSecretReferenceValue } from '@goodvibes-jev/engine/platform/platform/config';
 import { redactDiagnosticValue } from '@goodvibes-jev/engine/platform/platform/utils';
@@ -42,31 +43,12 @@ function holdsMaskedValue(value: unknown): boolean {
   return false;
 }
 
-export interface SetupReviewSnapshot {
-  readonly sessionId: string;
-  readonly providerCount: number;
-  readonly serviceCount: number;
-  readonly oauthProviderCount: number;
-  readonly builtinSubscriptionProviderCount: number;
-  readonly activeSubscriptionCount: number;
-  readonly pendingSubscriptionCount: number;
-  readonly serviceIssues: string[];
-  readonly skillCount: number;
-  readonly pluginCount: number;
-  readonly quarantinedPluginCount: number;
-  readonly pluginDirectories: string[];
-  readonly managedHookCount: number;
-  readonly managedHookChainCount: number;
-  readonly mcpServerCount: number;
-  readonly quarantinedMcpCount: number;
-  readonly elevatedMcpCount: number;
-  readonly remoteRunnerCount: number;
+/** The shared setup review plus the TUI's sandbox facts. */
+export type SetupReviewSnapshot = TerminalSetupReviewSnapshot & {
   readonly sandboxReplIsolation: string;
   readonly sandboxMcpIsolation: string;
   readonly sandboxSecureModeReady: boolean;
-  readonly issues: Array<{ severity: 'pass' | 'warn' | 'fail'; area: string; message: string }>;
-  readonly services: string[];
-}
+};
 
 export interface SetupTransferBundle {
   readonly schemaVersion: 'v1';

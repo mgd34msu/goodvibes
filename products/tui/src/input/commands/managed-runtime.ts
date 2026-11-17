@@ -243,9 +243,9 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
         return;
       }
 
+      // A mistyped subcommand is a usage error, not a failed sync: nothing is recorded.
       if (sub !== 'inspect' && sub !== 'stage' && sub !== 'apply') {
-        recordSettingsSyncFailure('managed', `unsupported subcommand: ${sub}`, controlPlaneConfigDir);
-        ctx.print(MANAGED_USAGE);
+        ctx.print(`Unknown subcommand "${sub}".\n${MANAGED_USAGE}`);
         return;
       }
       const pathArg = args[1];

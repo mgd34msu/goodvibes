@@ -347,21 +347,22 @@ export async function runTests(options: RunOptions): Promise<number> {
     const failed = outcomes.filter((outcome) => outcome.failure !== undefined);
     console.log('\nSlowest files:');
     for (const outcome of [...outcomes].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${outcome.seconds.toFixed(1).padStart(5)}s  ${outcome.file.name}`);
-    let overBudget = false;
+    let overBudget: string | undefined;
     for (const kind of ['default', 'live', 'e2e'] as const) {
       const ofKind = outcomes.filter((outcome) => outcome.file.kind === kind);
       if (ofKind.length === 0) continue;
       const total = ofKind.reduce((sum, outcome) => sum + outcome.seconds, 0);
       const over = kind === 'default' && total > DEFAULT_SUITE_LIMIT_SECONDS;
-      overBudget ||= over;
+      if (over) overBudget = `  FAIL the default suite took ${total.toFixed(1)} file-seconds, over its ${DEFAULT_SUITE_LIMIT_SECONDS} limit`;
       console.log(`${KIND_LABEL[kind]}: ${ofKind.length} files, ${total.toFixed(1)} file-seconds${kind === 'default' ? ` (limit ${DEFAULT_SUITE_LIMIT_SECONDS})` : ''}${over ? ' OVER THE LIMIT' : ''}`);
     }
     const notRun = files.length - outcomes.length;
     console.log(`\nFiles: ${outcomes.length} run, ${outcomes.length - failed.length} passed, ${failed.length} failed, 0 refused${notRun > 0 ? `, ${notRun} not started (interrupted)` : ''}. ${((performance.now() - started) / 1000).toFixed(1)}s`);
     for (const outcome of failed.sort((a, b) => a.file.name.localeCompare(b.file.name))) console.log(`  FAIL ${outcome.file.name}`);
+    if (overBudget !== undefined) console.log(overBudget);
     const stop = signalled();
     if (stop !== undefined) return 128 + SIGNAL_NUMBERS[stop];
-    return failed.length > 0 || overBudget ? 1 : 0;
+    return failed.length > 0 || overBudget !== undefined ? 1 : 0;
   });
 }
 

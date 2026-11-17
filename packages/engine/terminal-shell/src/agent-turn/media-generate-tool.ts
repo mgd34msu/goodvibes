@@ -140,7 +140,7 @@ export function createAgentMediaGenerateTool(
             { signal: executionOptions?.signal, assertCurrent });
           return output(formatAgentMediaGenerationResult(result));
         } catch (error) {
-          return failure(toolErrorText(error));
+          return failure(toolErrorText(error, executionOptions?.signal));
         }
       }
       if (!prompt) return failure('prompt is required (or taskId to collect a pending job).');
@@ -168,7 +168,7 @@ export function createAgentMediaGenerateTool(
         }, { signal: executionOptions?.signal, assertCurrent });
         return output(formatAgentMediaGenerationResult(result));
       } catch (error) {
-        return failure(toolErrorText(error));
+        return failure(toolErrorText(error, executionOptions?.signal));
       }
     },
   };

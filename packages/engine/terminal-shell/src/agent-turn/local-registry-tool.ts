@@ -29,6 +29,7 @@ import {
 } from './local-registry-args.js';
 import { handleMemory, MEMORY_CLASSES, MEMORY_SCOPES } from './local-registry-memory.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
+import { toolErrorText } from './tool-error-text.js';
 
 export type AgentLocalRegistryDomain = 'memory' | 'note' | 'persona' | 'skill' | 'skill_bundle' | 'routine';
 export type AgentLocalRegistryAction = 'list' | 'search' | 'get' | 'create' | 'update' | 'enable' | 'disable' | 'review' | 'stale' | 'use' | 'clear_active' | 'start' | 'delete';
@@ -647,8 +648,10 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
         if (args.domain === 'skill_bundle') return registryOutput(handleSkillBundle(shellPaths, args.action, args, effects));
         return registryOutput(handleRoutine(shellPaths, args.action, args, effects));
       } catch (error) {
+        // An admission problem or a cancelled call is rethrown for the tool runtime to report.
+        const text = toolErrorText(error, options?.signal);
         const refused = readRefusal(error);
-        return registryError(refused ? formatRefusal(refused) : error instanceof Error ? error.message : String(error));
+        return registryError(refused ? formatRefusal(refused) : text);
       }
     },
   };

@@ -142,7 +142,7 @@ export function createAgentNotifyTool(
         if (result.failed > 0) return output(`${formatSendResult(result)}\nDo not resend the whole message: the targets marked ok already received it.`);
         return output(formatSendResult(result));
       } catch (error) {
-        return failure(toolErrorText(error));
+        return failure(toolErrorText(error, executionOptions?.signal));
       }
     },
   };

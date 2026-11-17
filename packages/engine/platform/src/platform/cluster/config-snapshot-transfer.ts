@@ -1,6 +1,6 @@
 /** Bounded, authenticated in-memory transfer of one complete config snapshot.
  * No part mutates a replica or advertises its revision as locally complete. */
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { randomUUID } from 'node:crypto';
 import { MAX_GROUP_MEMBERS } from './group-state.js';
 import { MAX_ENVELOPE_BYTES, type ClusterEnvelope } from './protocol-envelope.js';
 
@@ -37,15 +37,17 @@ const invalid = () => new Error('Cluster config snapshot transfer is unavailable
 export function prepareConfigSnapshotTransfer(document: unknown, revision: number): readonly Readonly<Part>[] {
   const bytes = Buffer.from(JSON.stringify(document), 'utf8');
   if (bytes.length === 0 || bytes.length > MAX_BYTES || !Number.isSafeInteger(revision) || revision < 0) throw invalid();
-  const id = opaqueUuid(), count = Math.ceil(bytes.length / CHUNK_BYTES);
+  const id = randomUUID(), count = Math.ceil(bytes.length / CHUNK_BYTES);
   const parts: Readonly<Part>[] = [];
   for (let index = 0; index < count; index++) parts.push(Object.freeze({ id, revision, index, count, bytes: bytes.length,
     data: bytes.subarray(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES).toString('base64') }));
   return parts;
 }
+/** A transfer id is a plain UUID; one spelled with the letters a to p (sent by
+ * 3.2 and earlier) is accepted too. */
 function readPart(body: Readonly<Record<string, unknown>>): Part | null {
   const { id, revision, index, count, bytes, data } = body;
-  if (Object.keys(body).length !== 6 || typeof id !== 'string' || !/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/.test(id)
+  if (Object.keys(body).length !== 6 || typeof id !== 'string' || !/^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$/.test(id)
     || typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0
     || typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0
     || typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1 || count > MAX_PARTS || index >= count

@@ -464,10 +464,12 @@ export class RemoteRunnerRegistry {
   buildSessionBundle(store?: RuntimeStore): RemoteSessionBundle {
     this.ensureContractsFromStore(store);
     const activeConnectionIds = store?.getState().acp.activeConnectionIds ?? [];
+    const conversationSessionId = store?.getState().session.conversationSessionId;
     return Object.freeze({
       version: 1,
       exportedAt: Date.now(),
       sessionId: store?.getState().session.id || 'unknown-session',
+      ...(conversationSessionId ? { conversationSessionId } : {}),
       activeConnectionIds: Object.freeze([...activeConnectionIds]),
       pools: Object.freeze(this.listPools()),
       contracts: Object.freeze(this.listContracts()),

@@ -113,7 +113,10 @@ export interface RemoteExecutionArtifact {
 export interface RemoteSessionBundle {
   readonly version: 1;
   readonly exportedAt: number;
+  /** The process session id (`user-<id>`), fixed for the life of the exporting process. */
   readonly sessionId: string;
+  /** The saved conversation the process was running, the id /resume and the session list use; absent when none was open. */
+  readonly conversationSessionId?: string | undefined;
   readonly activeConnectionIds: readonly string[];
   readonly pools: readonly RemoteRunnerPool[];
   readonly contracts: readonly RemoteRunnerContract[];

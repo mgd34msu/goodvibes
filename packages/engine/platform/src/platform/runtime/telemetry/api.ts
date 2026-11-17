@@ -144,7 +144,10 @@ export interface TelemetryAggregates {
 }
 
 export interface TelemetryRuntimeSnapshot {
+  /** The process session id (`user-<id>`), fixed for the life of this process. */
   readonly sessionId: string;
+  /** The saved conversation running now, the id /resume and the session list use; empty when none is open. */
+  readonly conversationSessionId: string;
   readonly sessionStatus: string;
   /** Whether this process records spans (`telemetry.otelMode`) and where it sends them. */
   readonly traceExport: TraceExportState;
@@ -332,6 +335,7 @@ export class TelemetryApiService {
       capabilities: this.getCapabilities(),
       runtime: {
         sessionId: state.session.id,
+        conversationSessionId: state.session.conversationSessionId,
         sessionStatus: state.session.status,
         traceExport: readTraceExportState(),
         tasks: {

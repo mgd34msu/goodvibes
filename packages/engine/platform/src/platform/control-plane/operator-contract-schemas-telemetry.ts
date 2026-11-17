@@ -178,6 +178,7 @@ const TELEMETRY_TRACE_EXPORT_SCHEMA = objectSchema({
 
 const TELEMETRY_RUNTIME_SNAPSHOT_SCHEMA = objectSchema({
   sessionId: STRING_SCHEMA,
+  conversationSessionId: STRING_SCHEMA,
   sessionStatus: STRING_SCHEMA,
   traceExport: TELEMETRY_TRACE_EXPORT_SCHEMA,
   tasks: objectSchema({
@@ -193,7 +194,7 @@ const TELEMETRY_RUNTIME_SNAPSHOT_SCHEMA = objectSchema({
   approvals: objectSchema({
     pending: NUMBER_SCHEMA,
   }, ['pending']),
-}, ['sessionId', 'sessionStatus', 'traceExport', 'tasks', 'agents', 'approvals']);
+}, ['sessionId', 'conversationSessionId', 'sessionStatus', 'traceExport', 'tasks', 'agents', 'approvals']);
 
 const TELEMETRY_SESSION_METRICS_SCHEMA = objectSchema({
   turns: NUMBER_SCHEMA,

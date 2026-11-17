@@ -26,6 +26,13 @@ import { logger } from '../utils/logger.js';
 import { canonicalFilePath } from '../utils/canonical-path.js';
 import type { OwnerAnswer, OwnerAnswerSource, OwnerItemKind } from './owner-inbox.js';
 
+/**
+ * A quick burst of writes to the WAL is reported as one watch event, which can
+ * arrive before the burst's last commit (an answer) is visible; no further
+ * event follows. One more look this long after the last event hears it.
+ */
+const WAL_BURST_SETTLE_MS = 50;
+
 /** Item kinds the question store holds; approvals live in the approval broker. */
 export type StoredOwnerItemKind = Exclude<OwnerItemKind, 'approval'>;
 
@@ -237,6 +244,7 @@ export class QuestionStore implements RevisionSource {
   #versions: Map<string, string> | null = null;
   #announcedRevision = -1;
   #watcher: FSWatcher | null = null;
+  #settleTimer: ReturnType<typeof setTimeout> | null = null;
   #scheduled = false;
 
   constructor(options: { readonly path: string }) {
@@ -427,7 +435,13 @@ export class QuestionStore implements RevisionSource {
     this.#versions = new Map([...this.#entries()].map(([id, entry]): [string, string] => [id, storedEntryVersion(entry)]));
     if (this.#path === ':memory:') return;
     const wal = `${this.#path}-wal`;
-    const onChange = (): void => this.#schedule();
+    const onChange = (): void => {
+      this.#schedule();
+      // The look after the burst settles: one revision read, and only after an event.
+      if (this.#settleTimer) clearTimeout(this.#settleTimer);
+      this.#settleTimer = setTimeout(() => { this.#settleTimer = null; this.#schedule(); }, WAL_BURST_SETTLE_MS);
+      this.#settleTimer.unref?.();
+    };
     let watcher: FSWatcher;
     try {
       // In WAL mode every commit by any process appends to the -wal file, which stays while this connection is open.
@@ -457,6 +471,8 @@ export class QuestionStore implements RevisionSource {
     const watcher = this.#watcher;
     this.#watcher = null;
     this.#versions = null;
+    if (this.#settleTimer) clearTimeout(this.#settleTimer);
+    this.#settleTimer = null;
     try { watcher?.close(); } catch { /* already closed */ }
   }
 

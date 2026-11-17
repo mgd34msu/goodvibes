@@ -111,6 +111,19 @@ function reviewerReadinessStatus(checks: readonly ReviewerReadinessCheck[]): Rev
   return 'ready';
 }
 
+/**
+ * The repair for a judgment that hides its winner: reveal the comparison it
+ * judged (stored, or still held this session), which names the winner from
+ * data the program has. With neither, the route decision is what is left.
+ */
+function hiddenJudgmentRepairRoute(judgment: Pick<ArtifactDescriptor, 'id' | 'metadata'>): string {
+  const sourceArtifactId = readMetadataString(judgment.metadata.sourceArtifactId);
+  if (sourceArtifactId) return `agent_model_compare reveal artifactId:"${sourceArtifactId}"`;
+  const comparisonId = readMetadataString(judgment.metadata.comparisonId);
+  if (comparisonId) return `agent_model_compare reveal comparisonId:"${comparisonId}"`;
+  return `agent_model_compare apply artifactId:"${judgment.id}" or agent_model_compare routeDecision artifactId:"${judgment.id}" decision:"left-unchanged"`;
+}
+
 export function buildReviewerReadinessChecklist(
   context: CommandContext,
   options: {
@@ -220,10 +233,12 @@ export function buildReviewerReadinessChecklist(
         : firstHiddenJudgment
           ? `agent_model_compare review artifactId:"${firstHiddenJudgment.id}"`
           : 'agent_model_compare review',
+      // A blind judgment's winner is already known from its stored comparison:
+      // reveal that comparison, or decide the route; never judge it again.
       repairRoute: firstUnrevealedComparison
         ? `agent_model_compare reveal artifactId:"${firstUnrevealedComparison.id}"`
         : firstHiddenJudgment
-          ? `agent_model_compare judge artifactId:"${readMetadataString(firstHiddenJudgment.metadata.sourceArtifactId) || firstHiddenJudgment.id}" winnerBlindId:"${readMetadataString(firstHiddenJudgment.metadata.winnerBlindId) || '...'}" reveal:true`
+          ? hiddenJudgmentRepairRoute(firstHiddenJudgment)
           : undefined,
     },
     {

@@ -1,5 +1,5 @@
 import { createCommandModeTokenHandler } from '@goodvibes-jev/engine/terminal-shell/command-mode-route';
-import { loadSkillByTrigger } from '@goodvibes-jev/engine/platform/platform/tools';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { summarizeCommandError } from './commands/command-error.ts';
 import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import type { AutocompleteEngine } from './autocomplete.ts';
@@ -59,6 +59,7 @@ function withComposerBindings(context: CommandContext, state: CommandModeRouteSt
 }
 
 export const handleCommandModeToken = createCommandModeTokenHandler<CommandContext, CommandModeRouteState>({
+  surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
   unknownCommand: (name) => `Unknown command /${name}. Type /help for available commands.`,
   commandError: (error) => summarizeCommandError(error),
   prepare(context, state, raw) {

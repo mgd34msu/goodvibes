@@ -1,33 +1,28 @@
 /**
  * Skill loader, finds and loads skills by trigger match.
  *
- * Scans skill directories for SKILL.md files with trigger frontmatter.
- * Returns the skill body (system prompt) if a matching trigger is found.
+ * Reads the skills platform/skills lists for the surface (every skill folder,
+ * both `<name>.md` and `<folder>/SKILL.md`, a skill's name being its frontmatter
+ * `name` or its file or folder name), and returns the body of the first whose
+ * triggers or `/<name>` match the input.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import {
   parseMarkdownFrontmatter,
   normalizeFrontmatterList,
 } from '../../utils/markdown-disclosure.js';
 import { logger } from '../../utils/logger.js';
+import { listSkillIndex, readLocatedSkill } from '../../skills/discovery.js';
+import { resolveSkillRoots } from '../../skills/roots.js';
+import type { SkillFrontmatterValue } from '../../skills/model.js';
 import { isInsideLiveRegistryScope, liveRegistryScope } from './source.js';
 
 export interface SkillLoaderRoots {
   readonly workingDirectory: string;
   readonly homeDirectory?: string | undefined;
-}
-
-function getSkillDirs(roots: SkillLoaderRoots): string[] {
-  const dirs = [
-    join(roots.workingDirectory, '.goodvibes', 'skills'),
-  ];
-  if (roots.homeDirectory) {
-    dirs.push(
-      join(roots.homeDirectory, '.goodvibes', 'skills'),
-    );
-  }
-  return dirs;
+  /** The product surface whose own skill folder (`.goodvibes/<surface>/skills`) is searched too. */
+  readonly surfaceRoot?: string | undefined;
 }
 
 /**
@@ -64,63 +59,30 @@ function materializeScoped(
   return result.join('\n');
 }
 
+function triggersOf(value: SkillFrontmatterValue | undefined): string[] {
+  if (value === undefined) return [];
+  return normalizeFrontmatterList(typeof value === 'string' ? value : [...value]);
+}
+
 /**
- * Find a skill whose triggers include the given input string.
- * Returns the skill body (markdown content to inject as prompt), or null.
+ * Find a skill whose triggers include the given input string, or whose name is
+ * the input after `/`. Returns the skill body (markdown content to inject as
+ * prompt), or null.
  */
-export function loadSkillByTrigger(input: string, roots: SkillLoaderRoots): string | null {
+export async function loadSkillByTrigger(input: string, roots: SkillLoaderRoots): Promise<string | null> {
   const normalizedInput = input.toLowerCase().trim();
   const scope = liveRegistryScope(roots);
-
-  for (const dir of getSkillDirs(roots)) {
-    if (!existsSync(dir)) continue;
-
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      // Check for directory-based skill: entry/SKILL.md
-      const skillPath = join(dir, entry, 'SKILL.md');
-      // Also check flat file: entry.md
-      const flatPath = join(dir, entry);
-
-      let content: string | null = null;
-      let filePath: string | null = null;
-
-      if (existsSync(skillPath)) {
-        filePath = skillPath;
-      } else if (entry.endsWith('.md') && existsSync(flatPath)) {
-        filePath = flatPath;
-      }
-
-      if (!filePath || !isInsideLiveRegistryScope(scope, filePath)) continue;
-
-      try {
-        content = readFileSync(filePath, 'utf-8');
-      } catch {
-        continue;
-      }
-
-      const { metadata: frontmatter, body } = parseMarkdownFrontmatter(content);
-      const name = typeof frontmatter.name === 'string' ? frontmatter.name : undefined;
-      const triggers = normalizeFrontmatterList(frontmatter.triggers);
-
-      for (const trigger of triggers) {
-        if (trigger.toLowerCase().trim() === normalizedInput) {
-          return materializeScoped(scope, filePath, body);
-        }
-      }
-
-      // Also match by name: /skill-name
-      if (name && `/${name}`.toLowerCase() === normalizedInput) {
-        return materializeScoped(scope, filePath, body);
-      }
-    }
+  const entries = await listSkillIndex(resolveSkillRoots(
+    { workingDirectory: roots.workingDirectory, homeDirectory: roots.homeDirectory || undefined },
+    roots.surfaceRoot ?? '',
+  ));
+  const matches = (entry: (typeof entries)[number]): boolean =>
+    triggersOf(entry.metadata.triggers).some((trigger) => trigger.toLowerCase().trim() === normalizedInput)
+    || `/${entry.name}`.toLowerCase() === normalizedInput;
+  for (const entry of entries) {
+    if (!matches(entry) || !isInsideLiveRegistryScope(scope, entry.path)) continue;
+    const skill = await readLocatedSkill(entry);
+    if (skill) return materializeScoped(scope, entry.path, skill.body);
   }
-
   return null;
 }

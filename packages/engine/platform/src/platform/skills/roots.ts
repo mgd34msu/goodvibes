@@ -2,8 +2,9 @@
  * skills/roots.ts
  *
  * Where skills live. Every reader of skills (the daemon's skills.* verbs, the terminal
- * apps' discovery, the TUI Skills modal) takes its directories from `resolveSkillRoots`,
- * so a skill one of them sees is a skill all of them see.
+ * apps' discovery, the TUI Skills modal, a typed /<skill>, the model's registry tool)
+ * takes its directories from `resolveSkillRoots`, so a skill one of them sees is a skill
+ * all of them see.
  *
  * Search order, first match of a name wins:
  *   1. `<project>/.goodvibes/skills`
@@ -26,10 +27,10 @@ export interface SkillRoot {
   readonly origin: SkillOrigin;
 }
 
-/** The directories skill roots are resolved from. Without a working directory there are no project roots. */
+/** The directories skill roots are resolved from. Without a working directory there are no project roots; without a home directory, no global ones. */
 export interface SkillRootPaths {
   readonly workingDirectory?: string | undefined;
-  readonly homeDirectory: string;
+  readonly homeDirectory?: string | undefined;
 }
 
 /**
@@ -37,16 +38,20 @@ export interface SkillRootPaths {
  * directory is the home directory, each directory is listed once, as the project's.
  */
 export function resolveSkillRoots(paths: SkillRootPaths, surfaceRoot: string): SkillRoot[] {
-  const projectRoots: SkillRoot[] = paths.workingDirectory === undefined ? [] : [
-    { directory: resolve(join(paths.workingDirectory, '.goodvibes', 'skills')), origin: 'project-local' },
-    { directory: resolve(join(paths.workingDirectory, '.goodvibes', surfaceRoot, 'skills')), origin: 'project-local' },
-  ];
-  const projectDirectories = new Set(projectRoots.map((root) => root.directory));
-  const globalRoots: SkillRoot[] = [
-    { directory: resolve(join(paths.homeDirectory, '.goodvibes', 'skills')), origin: 'global' },
-    { directory: resolve(join(paths.homeDirectory, '.goodvibes', surfaceRoot, 'skills')), origin: 'global' },
-  ];
-  return [...projectRoots, ...globalRoots.filter((root) => !projectDirectories.has(root.directory))];
+  const owners: Array<readonly [string | undefined, SkillOrigin]> = [[paths.workingDirectory, 'project-local'], [paths.homeDirectory, 'global']];
+  const roots: SkillRoot[] = [];
+  const seen = new Set<string>();
+  for (const [owner, origin] of owners) {
+    if (owner === undefined) continue;
+    // An empty surface root names no surface folder; the shared folder is listed once.
+    const directories = [join(owner, '.goodvibes', 'skills'), ...(surfaceRoot.trim() ? [join(owner, '.goodvibes', surfaceRoot, 'skills')] : [])];
+    for (const directory of directories.map((entry) => resolve(entry))) {
+      if (seen.has(directory)) continue;
+      seen.add(directory);
+      roots.push({ directory, origin });
+    }
+  }
+  return roots;
 }
 
 /** Project skills first, then by name: the order every skill list is shown in. */

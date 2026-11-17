@@ -17,7 +17,10 @@ import { toRecord } from '../../utils/record-coerce.js';
 import type { RegistryInput } from './schema.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { ContractInputAuthority } from '../../contract/input-authority.js';
-import { createLiveRegistrySource, liveRegistryScope, registryMarkdown, materializeRegistryMarkdown, type RegistryToolSource } from './source.js';
+import {
+  createLiveRegistrySource, liveRegistryScope, registryAgentDirectories, registryMarkdown, registrySkillDirectories,
+  materializeRegistryMarkdown, type RegistryToolSource,
+} from './source.js';
 import { capturedRegistryAdmission, type CapturedRegistryContext } from './captured-source.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { rankClassicCatalog, type ClassicCatalogMatch } from '../../runtime/classic-catalog.js';
@@ -47,6 +50,8 @@ interface RegistryMatch {
 export interface RegistryToolRoots {
   readonly workingDirectory: string;
   readonly homeDirectory?: string | undefined;
+  /** The product surface whose own skill folder is searched too (platform/skills resolveSkillRoots). */
+  readonly surfaceRoot?: string | undefined;
   readonly capturedInput?: CapturedRegistryContext | undefined;
 }
 
@@ -215,29 +220,6 @@ function listTools(toolRegistry: ToolRegistry): RegistryMatch[] {
   return toolRegistry.list().map((t): RegistryMatch => ({ name: t.definition.name, type: 'tool', description: t.definition.description, path: '' }));
 }
 
-function getSkillDirs(roots: RegistryToolRoots): string[] {
-  const dirs = [
-    join(roots.workingDirectory, '.goodvibes', 'skills'),
-  ];
-  if (roots.homeDirectory) {
-    dirs.push(
-      join(roots.homeDirectory, '.goodvibes', 'skills'),
-    );
-  }
-  return dirs;
-}
-
-function getAgentDirs(roots: RegistryToolRoots): string[] {
-  const dirs = [
-    join(roots.workingDirectory, '.goodvibes', 'agents'),
-  ];
-  if (roots.homeDirectory) {
-    dirs.push(
-      join(roots.homeDirectory, '.goodvibes', 'agents'),
-    );
-  }
-  return dirs;
-}
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -252,8 +234,8 @@ function getAgentDirs(roots: RegistryToolRoots): string[] {
 export function createRegistryTool(toolRegistry: ToolRegistry, roots: RegistryToolRoots): Tool {
   const captured = roots.capturedInput === undefined ? undefined : capturedRegistryAdmission(roots.capturedInput);
   roots = Object.freeze(captured
-    ? { workingDirectory: captured.workingDirectory, homeDirectory: captured.homeDirectory }
-    : { workingDirectory: roots.workingDirectory, homeDirectory: roots.homeDirectory });
+    ? { workingDirectory: captured.workingDirectory, homeDirectory: captured.homeDirectory, surfaceRoot: captured.surfaceRoot }
+    : { workingDirectory: roots.workingDirectory, homeDirectory: roots.homeDirectory, surfaceRoot: roots.surfaceRoot });
   const liveSource = createLiveRegistrySource(roots);
   const definition: ToolDefinition = {
     name: 'registry',
@@ -328,10 +310,10 @@ async function runSearch(
   const all: RegistryMatch[] = [];
 
   if (typeFilter === 'skills' || typeFilter === 'all') {
-    for (const dir of getSkillDirs(roots)) all.push(...await scanDirectoryAll(dir, 'skill', source));
+    for (const dir of registrySkillDirectories(roots)) all.push(...await scanDirectoryAll(dir, 'skill', source));
   }
   if (typeFilter === 'agents' || typeFilter === 'all') {
-    for (const dir of getAgentDirs(roots)) all.push(...await scanDirectoryAll(dir, 'agent', source));
+    for (const dir of registryAgentDirectories(roots)) all.push(...await scanDirectoryAll(dir, 'agent', source));
   }
   if (typeFilter === 'tools' || typeFilter === 'all') {
     all.push(...listTools(toolRegistry));
@@ -368,7 +350,7 @@ async function runRecommend(
     candidates = listTools(toolRegistry);
   } else {
     candidates = [];
-    for (const dir of getSkillDirs(roots)) {
+    for (const dir of registrySkillDirectories(roots)) {
       candidates.push(...await scanDirectoryAll(dir, 'skill', source));
     }
     candidates = dedupe(candidates);
@@ -417,7 +399,7 @@ async function runDependencies(
   // file name, or the directory of a SKILL.md) resolves here too. The name is
   // only compared with what the scan found, never joined into a path.
   let found: RegistryMatch | undefined;
-  for (const dir of getSkillDirs(roots)) {
+  for (const dir of registrySkillDirectories(roots)) {
     found = (await scanDirectoryAll(dir, 'skill', source)).find((match) => {
       const file = basename(match.path);
       const stem = file === 'SKILL.md' ? basename(dirname(match.path)) : file.replace(/\.md$/, '');
@@ -522,7 +504,7 @@ async function resolveRegistryPath(path: string | undefined, roots: RegistryTool
   if (!insideScope) {
     return {
       ok: false,
-      error: `mode can only read files inside .goodvibes/skills or .goodvibes/agents (of the project or the home directory); ${resolvedPath} is outside them. Use mode=search to list the available files.`,
+      error: `mode can only read files inside the skill folders (.goodvibes/skills and .goodvibes/<surface>/skills) or .goodvibes/agents (of the project or the home directory); ${resolvedPath} is outside them. Use mode=search to list the available files.`,
     };
   }
 

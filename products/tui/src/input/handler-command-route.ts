@@ -5,6 +5,7 @@ import type { CommandContext, CommandRegistry } from './command-registry.ts';
 import type { AutocompleteEngine } from './autocomplete.ts';
 import type { ConversationManager } from '../core/conversation';
 import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 
 export type CommandModeRouteState = {
   commandMode: boolean;
@@ -62,6 +63,7 @@ function withComposerBindings(context: CommandContext, state: CommandModeRouteSt
 }
 
 export const handleCommandModeToken = createCommandModeTokenHandler<CommandContext, CommandModeRouteState>({
+  surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
   unknownCommand: (name) => `Unknown command: /${name}. Type /help for available commands.`,
   commandError: (error, name) => `Command /${name} failed: ${summarizeError(error)}`,
   prepare(context, state, raw) {

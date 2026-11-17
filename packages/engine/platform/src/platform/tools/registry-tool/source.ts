@@ -5,6 +5,7 @@ import {
   collectMarkdownReferences, extractMarkdownPreview, extractMarkdownSections,
   parseMarkdownFrontmatter, type MarkdownDisclosure,
 } from '../../utils/markdown-disclosure.js';
+import { resolveSkillRoots } from '../../skills/roots.js';
 
 export interface RegistryToolSource {
   /** True for the live file-system source, whose judgments need no per-candidate serialisation. */
@@ -19,12 +20,25 @@ export interface RegistryToolSource {
 export interface LiveRegistryRoots {
   readonly workingDirectory: string;
   readonly homeDirectory?: string | undefined;
+  /** The product surface whose own skill folder (`.goodvibes/<surface>/skills`) is searched too. */
+  readonly surfaceRoot?: string | undefined;
 }
 
-/** The only directories a live registry read may reach: `.goodvibes/{skills,agents}` of the project and of the home directory. */
-export function liveRegistryScope(roots: LiveRegistryRoots): string[] {
+/** The skill directories, in search order: the same list every skill reader takes from platform/skills. */
+export function registrySkillDirectories(roots: LiveRegistryRoots): string[] {
+  return resolveSkillRoots({ workingDirectory: roots.workingDirectory, homeDirectory: roots.homeDirectory || undefined }, roots.surfaceRoot ?? '')
+    .map((root) => root.directory);
+}
+
+/** The agent directories, in search order: `.goodvibes/agents` of the project, then of the home directory. */
+export function registryAgentDirectories(roots: LiveRegistryRoots): string[] {
   const owners = [roots.workingDirectory, ...(roots.homeDirectory ? [roots.homeDirectory] : [])];
-  return owners.flatMap((owner) => ['skills', 'agents'].map((kind) => join(owner, '.goodvibes', kind)));
+  return owners.map((owner) => join(owner, '.goodvibes', 'agents'));
+}
+
+/** The only directories a live registry read may reach: the skill directories and `.goodvibes/agents` of the project and of the home directory. */
+export function liveRegistryScope(roots: LiveRegistryRoots): string[] {
+  return [...registrySkillDirectories(roots), ...registryAgentDirectories(roots)];
 }
 
 function realOrUndefined(path: string): string | undefined {

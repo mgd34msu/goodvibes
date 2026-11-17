@@ -759,6 +759,7 @@ export function registerAllTools(
       capturedInput: deps.capturedRegistry,
       workingDirectory,
       homeDirectory: deps.configManager.getHomeDirectory() ?? undefined,
+      surfaceRoot: deps.surfaceRoot,
     }),
   );
   // The task registry keys refs by owning session, and that key is now the

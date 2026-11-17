@@ -948,7 +948,7 @@ export class AgentOrchestrator {
         authority && needsCapturedRegistry
           ? await admitCapturedRegistryContext(
               { authority, root: cwd, readAccessFilter: ownerReadAccess, signal },
-              { homeDirectory },
+              { homeDirectory, surfaceRoot: this.toolDeps?.surfaceRoot },
             )
           : undefined;
       if (authority) await assertContractInputAuthority(authority, cwd, signal);

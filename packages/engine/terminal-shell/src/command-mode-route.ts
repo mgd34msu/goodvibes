@@ -68,6 +68,8 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
     | undefined;
   readonly unknownCommand: (name: string) => string;
   readonly commandError: (error: unknown, name: string) => string;
+  /** The product's surface folder, so `/<skill>` finds skills in `.goodvibes/<surface>/skills` too. */
+  readonly surfaceRoot: string;
 }) {
   function handleCommandModeToken(state: State, token: InputToken): boolean {
     if (!state.commandMode) return false;
@@ -130,15 +132,16 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
           ? state.commandRegistry.executeFromOwner(name, args, ctx, originalCommand)
           : (ctx.executeCommand?.(name, args) ?? Promise.resolve(false));
         commandPromise
-          .then((handled) => {
+          .then(async (handled) => {
             if (handled) {
               state.requestRender();
             } else {
               const shellPaths = state.commandContext?.workspace.shellPaths;
               const skillContent = shellPaths
-                ? loadSkillByTrigger('/' + name, {
+                ? await loadSkillByTrigger('/' + name, {
                     workingDirectory: shellPaths.workingDirectory,
                     homeDirectory: shellPaths.homeDirectory,
+                    surfaceRoot: presentation.surfaceRoot,
                   })
                 : null;
               const submitTurn = state.commandContext?.submitTurn;

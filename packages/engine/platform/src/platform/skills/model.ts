@@ -113,22 +113,36 @@ function parseFrontmatterValue(raw: string): SkillFrontmatterValue {
 }
 
 /**
- * Parse a frontmatter block's `key: value` lines into a flat map. Comment
- * lines (`#`) and blank lines are skipped; a line without a colon is ignored
- * rather than throwing, so a malformed extra key can never make an otherwise
- * valid skill unreadable.
+ * Parse a frontmatter block's `key: value` lines into a flat map. A key with no
+ * value followed by indented `- item` lines is a list (`triggers:` then
+ * `  - /deploy`). Comment lines (`#`) and blank lines are skipped; a line
+ * without a colon is ignored rather than throwing, so a malformed extra key can
+ * never make an otherwise valid skill unreadable.
  */
 function parseFrontmatterBlock(block: string): Map<string, SkillFrontmatterValue> {
   const out = new Map<string, SkillFrontmatterValue>();
+  let listKey: string | undefined;
+  let listItems: string[] = [];
+  const flush = (): void => {
+    if (listKey !== undefined && listItems.length > 0) out.set(listKey, Object.freeze([...listItems]));
+    listKey = undefined;
+    listItems = [];
+  };
   for (const line of block.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+    const item = listKey === undefined ? null : /^\s+-\s+(.+)$/.exec(line);
+    if (item) { listItems.push(unquote(item[1]!)); continue; }
+    flush();
     const colon = line.indexOf(':');
     if (colon === -1) continue;
     const key = line.slice(0, colon).trim();
     if (key.length === 0) continue;
-    out.set(key, parseFrontmatterValue(line.slice(colon + 1)));
+    const raw = line.slice(colon + 1);
+    if (raw.trim().length === 0) { listKey = key; out.set(key, ''); continue; }
+    out.set(key, parseFrontmatterValue(raw));
   }
+  flush();
   return out;
 }
 

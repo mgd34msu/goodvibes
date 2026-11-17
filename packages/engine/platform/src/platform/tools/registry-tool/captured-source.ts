@@ -21,6 +21,7 @@ interface Admission {
   readonly authority: ContractInputAuthority;
   readonly workingDirectory: string;
   readonly homeDirectory: string | undefined;
+  readonly surfaceRoot: string | undefined;
   readonly source: (signal?: AbortSignal) => RegistryToolSource;
 }
 const admissions = new WeakMap<CapturedRegistryContext, Admission>();
@@ -34,7 +35,8 @@ const contained = (root: string, path: string): boolean => {
 
 /**
  * Configured home is a host declaration, not a grant; every file uses the pinned host filter.
- * Capture only .goodvibes/{skills,agents} below the admitted owner/configured home.
+ * Capture only the skill folders (.goodvibes/skills and .goodvibes/<surface>/skills) and
+ * .goodvibes/agents below the admitted owner/configured home.
  * Other .goodvibes paths and symlinks remain unavailable. Included files may have
  * any extension, but an excluded/restricted/out-of-scope include holds content.
  * Capture metadata for the complete registry; read bytes on demand under the
@@ -42,7 +44,7 @@ const contained = (root: string, path: string): boolean => {
  */
 export async function admitCapturedRegistryContext(
   binding: CapturedRegistryBinding,
-  roots: { readonly homeDirectory?: string | undefined } = {},
+  roots: { readonly homeDirectory?: string | undefined; readonly surfaceRoot?: string | undefined } = {},
 ): Promise<CapturedRegistryContext> {
   binding = Object.freeze({ authority: binding.authority, root: resolve(binding.root), readAccessFilter: binding.readAccessFilter, signal: binding.signal });
   // Capture all caller-owned inputs before the first callback/await.
@@ -54,7 +56,12 @@ export async function admitCapturedRegistryContext(
   const filter = binding.readAccessFilter;
   if (!filter) throw new Error('registry input requires original-owner read authorization');
   const owners = [...new Set([workingDirectory, ...(homeDirectory === undefined ? [] : [homeDirectory])])];
-  const declared = owners.flatMap((root) => ['skills', 'agents'].map((kind) => join(root, '.goodvibes', kind)));
+  const surfaceRoot = roots.surfaceRoot?.trim() ? roots.surfaceRoot : undefined;
+  const declared = owners.flatMap((root) => [
+    join(root, '.goodvibes', 'skills'),
+    ...(surfaceRoot === undefined ? [] : [join(root, '.goodvibes', surfaceRoot, 'skills')]),
+    join(root, '.goodvibes', 'agents'),
+  ]);
   const files = new Map<string, CapturedFile>();
   const directories = new Map<string, readonly string[]>();
   const directoryIdentities = new Map<string, string>();
@@ -117,7 +124,7 @@ export async function admitCapturedRegistryContext(
   await checkAuthority();
   const token = Object.freeze({ kind: 'captured-registry-context' as const });
   const admission: Admission = {
-    authority: binding.authority, workingDirectory, homeDirectory,
+    authority: binding.authority, workingDirectory, homeDirectory, surfaceRoot,
     source: (signal) => {
       // Inside one call the authority was proved when the call began (assertCurrent);
       // each read checks its own path and access, and the call ends with assertCurrent again.

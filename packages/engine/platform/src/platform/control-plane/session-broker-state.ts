@@ -295,12 +295,18 @@ export function sortSessions(records: Iterable<SharedSessionRecord>): SharedSess
   return [...records].sort((a, b) => (b.updatedAt - a.updatedAt) || a.id.localeCompare(b.id));
 }
 
+/**
+ * Messages and inputs by time, keeping the order they were stored in when two
+ * share a millisecond (the sort is stable). Callers hand them over in stored
+ * order (a session's log, a snapshot's array, a bucket); their ids are random,
+ * so ordering ties by id would shuffle a burst of messages on every restart.
+ */
 export function sortMessages(records: Iterable<SharedSessionMessage>): SharedSessionMessage[] {
-  return [...records].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  return [...records].sort((a, b) => a.createdAt - b.createdAt);
 }
 
 export function sortInputs(records: Iterable<SharedSessionInputRecord>): SharedSessionInputRecord[] {
-  return [...records].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  return [...records].sort((a, b) => a.createdAt - b.createdAt);
 }
 
 /** A stored session, message or input this build cannot read: kept on disk untouched and named, never fatal. */

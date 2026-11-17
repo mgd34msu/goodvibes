@@ -199,6 +199,15 @@ export function createSettingsModalRoute<Context extends { readonly openSelectio
         }
       } else if (token.logicalName === 'space' && searching && !modal.editingMode) {
         setQuery(`${modal.searchQuery} `);
+      } else if (
+        (token.logicalName === 'left' || token.logicalName === 'right') &&
+        token.shift &&
+        !modal.editingMode &&
+        (searching || focusRegion === 'settings')
+      ) {
+        // Shift+arrow nudges the selected number, choice, on/off or trust row
+        // in place; a plain arrow moves focus between the two panes.
+        modal.adjustSelected(token.logicalName);
       } else if ((token.logicalName === 'left' || token.logicalName === 'right') && !modal.editingMode && !searching) {
         if (token.logicalName === 'left') modal.focusCategories?.();
         else modal.focusSettings?.();

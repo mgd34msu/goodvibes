@@ -138,7 +138,12 @@ export function handleResetConfirmKey({
   if (key === 'enter' || key === 'y') {
     const entries: Array<{ key: string; value: unknown }> = [];
     const failedKeys: string[] = [];
+    // A key listed under two categories (network, fleet, push, feature
+    // headers) is reset and counted once.
+    const seen = new Set<string>();
     const resetOne = (item: SettingEntry): void => {
+      if (seen.has(item.setting.key)) return;
+      seen.add(item.setting.key);
       const ok = item.kind === 'host'
         ? setHostValue?.(item.setting.key, item.setting.default)
         : setValue(item.setting.key, item.setting.default);

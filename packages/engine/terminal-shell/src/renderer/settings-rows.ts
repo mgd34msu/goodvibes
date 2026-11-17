@@ -151,6 +151,7 @@ export function settingsNavigationHints(
       ['↑↓', 'move'],
       ['⏎', 'change'],
       ['⌫', 'edit search'],
+      ['shift+←→', 'adjust'],
       ['ctrl+r', 'reset'],
     ];
   if (policy.categoryFocused)
@@ -169,9 +170,13 @@ export function settingsNavigationHints(
           ? 'toggle'
           : 'change',
   ];
+  // A number, choice, on/off or trust row can be nudged in place; the
+  // subscription and connection lists have nothing to adjust.
+  const adjustable = state.currentCategory !== 'subscriptions' && state.currentCategory !== 'connections';
   return [
     ['↑↓', 'move'],
     enter,
+    ...(adjustable ? ([['shift+←→', 'adjust']] satisfies KitHint[]) : []),
     ['←→', 'category'],
     ['pgup pgdn', 'docs'],
     ['ctrl+r', 'reset'],

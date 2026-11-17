@@ -492,6 +492,16 @@ export class SettingsModal extends TerminalSettingsModalState<
     const entry = this.getSelected();
     if (!entry || !this.configManager) return;
     const { setting } = entry;
+    // Rows whose value is chosen in a picker (models, voices, themes, choice lists) are changed there, not nudged.
+    if (
+      SETTINGS_CHOICE_ACTIONS[setting.key] !== undefined ||
+      setting.key === 'tts.provider' ||
+      setting.key === 'tts.voice' ||
+      setting.key === 'daemon.timezone' ||
+      setting.key === 'display.theme' ||
+      modelPickerLaunchForKey(setting.key) !== null
+    )
+      return;
 
     const adjustment = adjustedSettingValue(setting, entry.currentValue, direction, step);
     if (adjustment) this._setValue(setting.key, adjustment.value);

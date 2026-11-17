@@ -1,9 +1,10 @@
-import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
+import { cycleSettingChoice, adjustedSettingValue, modelPickerLaunchForKey } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
+import { SETTINGS_CHOICE_ACTIONS } from '@goodvibes-jev/engine/terminal-shell/settings-choice-actions';
 /**
  * settings-modal-adjustment, pure adjustment helpers for SettingsModal.
  *
  * These functions encapsulate the directional-adjustment operation:
- *   - adjustSelected: cycle enum/boolean/number values via left/right arrow keys
+ *   - adjustSelected: cycle enum/boolean/number values via Shift+Left/Right
  *
  * Each function takes its dependencies as explicit arguments rather than
  * accessing class-level state directly, following the same pattern as
@@ -34,6 +35,15 @@ export interface AdjustSelectedContext {
   setHostValue?(key: string, value: boolean): void;
   setMcpEntries(entries: McpEntry[]): void;
   setMcpAllowAllConfirmationTarget(value: string | null): void;
+  setEditingMode(value: boolean): void;
+  setEditBuffer(value: string): void;
+}
+
+/** Rows whose value is chosen in a picker (models, voices, themes, choice lists) are changed there, not nudged. */
+function adjustsInPlace(key: string): boolean {
+  if (SETTINGS_CHOICE_ACTIONS[key] !== undefined) return false;
+  if (key === 'tts.provider' || key === 'tts.voice' || key === 'display.theme') return false;
+  return modelPickerLaunchForKey(key) === null;
 }
 
 export function adjustSelected(ctx: AdjustSelectedContext, direction: 'left' | 'right', step = 1): void {
@@ -48,7 +58,15 @@ export function adjustSelected(ctx: AdjustSelectedContext, direction: 'left' | '
     if (!entry || !ctx.mcpRegistry) return;
     const modes: McpEntry['trustMode'][] = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'];
     const nextMode = cycleSettingChoice(modes, entry.trustMode, direction);
-    if (nextMode !== undefined) ctx.mcpRegistry.setServerTrustMode(entry.name, nextMode);
+    if (nextMode === undefined) return;
+    if (nextMode === 'allow-all' && entry.trustMode !== 'allow-all') {
+      // The same typed "ALLOW ALL <server>" confirmation as the edit path.
+      ctx.setEditingMode(true);
+      ctx.setEditBuffer('');
+      ctx.setMcpAllowAllConfirmationTarget(entry.name);
+      return;
+    }
+    ctx.mcpRegistry.setServerTrustMode(entry.name, nextMode);
     ctx.setMcpEntries(buildMcpEntries(ctx.mcpRegistry));
     ctx.setMcpAllowAllConfirmationTarget(null);
     return;
@@ -62,6 +80,7 @@ export function adjustSelected(ctx: AdjustSelectedContext, direction: 'left' | '
   }
   if (entry.metadataUnavailable) return;
   const { setting } = entry;
+  if (!adjustsInPlace(setting.key)) return;
 
   const adjustment = adjustedSettingValue(setting, entry.currentValue, direction, step);
   if (adjustment) ctx.setValue(setting.key as ConfigKey, adjustment.value);

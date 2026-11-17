@@ -77,7 +77,7 @@ Spoken turns stay active until the logical turn reaches `TURN_COMPLETED`, `TURN_
 
 The platform synthesis API (`VoiceSynthesisRequest`) accepts a `speed` field (positive number; 1.0 is normal speed). The TUI reads this from config and passes it through to the synthesis call.
 
-`tts.speed` is visible in `/config tts` and can be adjusted with arrow keys (0.1 steps, within the supported range) or inline edit mode (Enter). The default is `1` (normal speed).
+`tts.speed` is visible in `/config tts` and can be adjusted in place with `Shift+Left` / `Shift+Right` (0.1 steps, within the supported range) or typed after `Enter`. The default is `1` (normal speed).
 
 The platform defines `tts.speed` in the config schema (default `1`, supported range 0.25–4.0), and both the settings modal and the synthesis call read it from there. The modal renders the schema descriptor like every other key, and a `readOptionalConfigNumber` helper in the platform's spoken-turn controller module (`platform/voice/spoken-turn/controller`) reads the value on every synthesis call and passes it into `VoiceSynthesisRequest.speed`.
 

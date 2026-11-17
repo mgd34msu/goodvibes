@@ -557,6 +557,12 @@ export class SettingsModal extends TerminalSettingsModalState<
         setMcpAllowAllConfirmationTarget: (v) => {
           this.mcpAllowAllConfirmationTarget = v;
         },
+        setEditingMode: (v) => {
+          this.editingMode = v;
+        },
+        setEditBuffer: (v) => {
+          this.editBuffer = v;
+        },
       },
       direction,
       step,

@@ -181,14 +181,17 @@ export class RelayHub {
 
   /**
    * @internal Register a daemon that proved it owns `rid`. A registration
-   * already held for the id is a stale connection of the same daemon (only
-   * the key holder can prove the id), so it is closed with its pipes and
-   * replaced. Returns an error code or null on success.
+   * already held for the id belongs to a holder of the same key: a stale
+   * connection of this daemon, or another daemon sharing its identity. It is
+   * closed with its pipes and replaced, and told so with a `replaced` error
+   * frame first, so a live daemon on that socket stops instead of dialling
+   * back and evicting this one. Returns an error code or null on success.
    */
   _register(rid: RendezvousId, socket: RelayServerSocket): RelayErrorCode | null {
     const stale = this.daemons.get(rid);
     if (stale && stale.socket !== socket) {
       this._unregister(rid, stale.socket);
+      try { stale.socket.send(errorFrame('replaced', 'another daemon registered with this relay identity')); } catch { /* already gone */ }
       try { stale.socket.close(1008, 'replaced'); } catch { /* already gone */ }
       this.logger.info('relay daemon registration replaced', { rid });
     }

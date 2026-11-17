@@ -50,6 +50,7 @@ export type RelayRole = 'daemon' | 'client';
 export type RelayErrorCode =
   | 'daemon-offline' // client dialed a rendezvous id with no registered daemon
   | 'rid-taken' // another live connection holds the rendezvous id and this registration did not prove ownership
+  | 'replaced' // another daemon proved the same rendezvous id, so this registration was closed in its favour
   | 'capacity' // the relay instance hit a configured cap (daemons/pipes/rate)
   | 'protocol-version' // incompatible RELAY_PROTOCOL_VERSION
   | 'malformed' // unparseable or invalid control frame
@@ -343,6 +344,14 @@ export const RELAY_ERROR_ADVICE: Readonly<Record<RelayErrorCode, RelayErrorAdvic
     state: 'another connection holds this daemon\'s relay id',
     next: ['Update the relay and the daemon to the same release so the daemon can prove the id is its own', 'Check remote access with /relay status'],
     retryable: true,
+  },
+  replaced: {
+    state: 'another daemon registered on the relay with this daemon\'s relay identity, so the relay closed this registration',
+    next: [
+      'Stop the other daemon that uses this relay identity (a second daemon on the same home, or a copied or restored daemon home)',
+      'Or give this daemon its own relay identity, then start remote access again with /relay status',
+    ],
+    retryable: false,
   },
   capacity: {
     state: 'the relay is at capacity',

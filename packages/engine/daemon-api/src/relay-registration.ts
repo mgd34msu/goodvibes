@@ -396,6 +396,8 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
   let awaitingPong = false;
   let lastConfirmedAt: number | null = null;
   let lastRefusal: RelayRegistrationRefusal | null = null;
+  // When the current connection registered; a registration that held for a keepalive interval resets the backoff.
+  let registeredAt: number | null = null;
   // Partial fragmented frames per channel, bounded like the admission queue.
   const joiners = new WeakMap<RelaySecureChannel, TunnelFragmentJoiner>();
   // Secure channels keyed by pipe. Map insertion order is the LRU order used
@@ -576,6 +578,10 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
 
   function scheduleReconnect(): void {
     if (stopped) return;
+    // Only a registration that held for a keepalive interval earns a fast retry;
+    // one cut sooner keeps backing off, so two holders of one identity cannot churn.
+    if (registeredAt !== null && Date.now() - registeredAt >= keepaliveInterval) attempt = 0;
+    registeredAt = null;
     setStatus('reconnecting');
     const delay = Math.min(baseDelay * 2 ** attempt, maxDelay);
     attempt += 1;
@@ -937,7 +943,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
               const proof = await proveRelayRegistration(options.identity, id, frame.nonce);
               if (socket === ws && !stopped) ws.send(encodeControlFrame(proof));
             } else if (frame.t === 'registered') {
-              attempt = 0;
+              registeredAt = Date.now();
               clearRegistrationTimer();
               frameLimit = tunnelFrameLimit(frame.maxMessageBytes ?? RELAY_DEFAULT_MAX_MESSAGE_BYTES);
               lastConfirmedAt = Date.now();
@@ -954,8 +960,9 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
               closePipeStreams(frame.pipe);
             } else if (frame.t === 'error') {
               logger.warn('relay error frame', { code: frame.code, message: frame.message });
-              // Before `registered`, an unscoped error means the relay refused this registration.
-              if (status !== 'registered' && frame.pipe === undefined) {
+              // Before `registered`, an unscoped error means the relay refused this registration;
+              // `replaced` ends a live one because another daemon proved the same identity.
+              if (frame.pipe === undefined && (status !== 'registered' || frame.code === 'replaced')) {
                 const advice = relayErrorAdvice(frame.code);
                 lastRefusal = { code: frame.code, message: frame.message, state: advice.state, next: advice.next, retryable: advice.retryable };
                 if (advice.retryable) failRegistration(ws, `relay error ${frame.code}`);
@@ -974,8 +981,17 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
         }
       })();
     });
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (event) => {
       if (socket !== ws) return;
+      const closed = event as { code?: unknown; reason?: unknown } | null;
+      if (closed?.code === 1008 && closed.reason === 'replaced') {
+        // The relay closed this registration for another daemon with the same identity;
+        // dialling back would evict that daemon in turn, so the registration stops and says why.
+        const advice = relayErrorAdvice('replaced');
+        lastRefusal = { code: 'replaced', message: 'another daemon registered with this relay identity', state: advice.state, next: advice.next, retryable: advice.retryable };
+        refuseRegistration(ws, lastRefusal);
+        return;
+      }
       clearRegistrationTimer();
       stopKeepalive();
       socket = null;
@@ -996,6 +1012,7 @@ export function createRelayDaemonRegistration(options: RelayDaemonRegistrationOp
       if (status === 'refused') lastRefusal = null;
       stopped = false;
       attempt = 0;
+      registeredAt = null;
       openConnection();
     },
     stop(): void {

@@ -508,6 +508,18 @@ export class SecretsManager {
     return () => { this.#elsewhereListeners.delete(listener); };
   }
 
+  /**
+   * Re-`stat` every store file this owner has read (one `stat` each) and count a
+   * rewrite by another process exactly as the directory watch does when it fires,
+   * telling the invalidation subscribers. For a reader whose stores another
+   * process writes, where a missed or unavailable watch would otherwise keep a
+   * rotated or removed credential in use. Returns the owner's credential revision.
+   */
+  checkStoresChangedElsewhere(): number {
+    this.#noticeStoreChange([...this.#storeIdentities.keys()].filter((path) => path !== this.keyFilePath));
+    return this.credentialMutationGeneration + this.#foreignStoreWrites;
+  }
+
   /** Value-free local owner state; no credential names, paths, bytes or hashes. */
   getCredentialMutationState(): Readonly<{ generation: number; pending: boolean }> {
     return Object.freeze({ generation: this.credentialMutationGeneration, pending: this.pendingLocalMutations.size > 0 });

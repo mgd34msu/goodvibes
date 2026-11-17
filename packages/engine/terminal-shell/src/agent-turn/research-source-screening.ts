@@ -91,9 +91,11 @@ export function createAgentSettingsReader(homeDirectory: string): AgentSettingsR
  * The daemon's own store is a different surface's, so a screening key the
  * owner saved in the Agent would not be found there.
  *
- * Read only: nothing is written, so the mutation generation stays put and no
- * invalidation fires here; a key changed by another process is seen on the next
- * acquisition, as in the Agent's own process. No settings object is given to
+ * Read only: nothing is written here, so the generation this reader reports is
+ * the store's revision after re-`stat`ing the store files it has read (one
+ * `stat` each per check). A key the Agent process rotates or removes moves it,
+ * so the next check retires the acquisition and the next one reads the new
+ * key, whether or not the directory watch saw the write. No settings object is given to
  * the stores, so the daemon's process-wide password-manager settings are left
  * as they are. The project tier is left out: the Agent reads only its launch
  * directory's, and only for a key the owner confirmed there; here the project
@@ -114,7 +116,11 @@ export function createAgentCredentialReader(homeDirectory: string, settings: Pic
   };
   return {
     resolveLocalCredentialSnapshot: (key) => current().resolveLocalCredentialSnapshot(key),
-    getCredentialMutationState: () => current().getCredentialMutationState(),
+    getCredentialMutationState: () => {
+      const store = current();
+      const revision = store.checkStoresChangedElsewhere();
+      return Object.freeze({ generation: revision, pending: store.getCredentialMutationState().pending });
+    },
     onDidInvalidateCredentials: (listener) => current().onDidInvalidateCredentials(listener),
   };
 }

@@ -569,7 +569,7 @@ async function main() {
       try {
         await commandRegistry.execute('model', [model], commandContext);
       } catch (error) {
-        systemMessageRouter.high(`[Model] Could not switch to ${model}: ${summarizeError(error)}`);
+        systemMessageRouter.high(`[Model] Could not switch to ${model}: ${summarizeError(error)}`, 'error');
       }
       const current = (() => { try { return providerRegistry.getCurrentModel(); } catch { return null; } })();
       const landed = runtime.model !== before || (current !== null && runtime.model === current.registryKey && (model === current.registryKey || model === current.id));
@@ -625,7 +625,7 @@ async function main() {
     const block = conversation.getBlockRegistry().find((entry) => entry.collapseKey === key);
     const line = block?.startLine ?? resolveFoldedBookmarkLine(conversation, key);
     if (line === null) {
-      systemMessageRouter.high(`[Bookmark] Not found: ${key}`);
+      systemMessageRouter.high(`[Bookmark] Not found: ${key}`, 'warning');
       render();
       return;
     }
@@ -1316,6 +1316,7 @@ async function main() {
     if (rOpts?.nativeConversationTurnPermit && !orchestrator.canRetryNativeConversationTurn(rOpts.nativeConversationTurnPermit)) {
       systemMessageRouter.high(
         'Native turn recovery is required before another model attempt. Its transcript and original source were retained.',
+        'warning',
       );
       render();
       return false;
@@ -1325,7 +1326,7 @@ async function main() {
     // that notice used to vanish before anyone could read it. The caller hands it over instead, and
     // it is posted here: after the rollback, above the prompt it explains.
     conversation.removeMessagesAfter(count);
-    if (failover) systemMessageRouter.userReceipt(failover.notice);
+    if (failover) systemMessageRouter.userReceipt(failover.notice, 'warning');
     const retry = failover?.retry;
     // A failover retry that never submits (cancelled, superseded, or its
     // preparation failed) ends the user turn as failed instead of leaving it open.

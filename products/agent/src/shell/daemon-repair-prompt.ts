@@ -22,6 +22,7 @@ import {
   type DaemonRepairResult,
   type DaemonRepairSessionMemory,
 } from '../runtime/daemon-repair.ts';
+import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
 import type { DaemonCliRunner } from '../runtime/daemon-cli-service.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
 import type { SelectionOpener } from './workspace-registration-question.ts';
@@ -61,7 +62,7 @@ export interface DaemonRepairPromptOptions {
   readonly offer: DaemonRepairOffer;
   readonly config: DaemonRepairConfig;
   readonly session: DaemonRepairSessionMemory;
-  readonly systemMessageRouter: { high(message: string): void };
+  readonly systemMessageRouter: { high(message: string, level?: NoticeLevel): void };
   readonly render: () => void;
   /** Shows the question (the shell passes {@link createDaemonRepairQuestion} over its selection modal). */
   readonly ask: AskDaemonRepair;
@@ -121,7 +122,7 @@ export function createDaemonRepairPrompt(options: DaemonRepairPromptOptions): Da
       })
       .catch((error: unknown) => {
         logger.error('[daemon-repair] the repair failed unexpectedly', { error: summarizeError(error) });
-        systemMessageRouter.high(`[Daemon] The repair did not complete: ${summarizeError(error)}`);
+        systemMessageRouter.high(`[Daemon] The repair did not complete: ${summarizeError(error)}`, 'error');
         render();
       });
   });

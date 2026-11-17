@@ -2,6 +2,7 @@ import { CacheRegistry, PauseController } from '@goodvibes-jev/engine/platform/p
 import { fireSessionStart } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
 import { emitSessionStarted, emitSessionReady } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { startMcpConfigAutoReload, type McpRuntimeReloadOptions } from './mcp-runtime-reload.js';
 
@@ -42,7 +43,7 @@ export function wireTerminalMcpReload(
   registry: McpRuntimeReloadOptions['registry'],
   discovery: { stop(): void | Promise<void> },
   unsubs: Array<() => void | Promise<void>>,
-  router: { low(text: string): void; high(text: string): void },
+  router: { low(text: string): void; high(text: string, level?: NoticeLevel): void },
   render: () => void,
 ): void {
   const reload = startMcpConfigAutoReload({
@@ -55,7 +56,7 @@ export function wireTerminalMcpReload(
     onError: (error) => {
       const message = summarizeError(error);
       logger.warn('MCP config auto-reload failed', { error: message });
-      router.high(`[MCP] Config reload failed: ${message}`);
+      router.high(`[MCP] Config reload failed: ${message}`, 'error');
       render();
     },
   });

@@ -1,5 +1,6 @@
 import type { ConfigManager } from '../config/manager.js';
 import { logger } from '../utils/logger.js';
+import type { NoticeLevel } from '../core/conversation.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { autoRegisterProviders } from '../providers/auto-register.js';
 import { scan, scanLocalhost, loadPersistedProviders, persistProviders, scanMcpServers } from '../discovery/index.js';
@@ -15,7 +16,7 @@ export interface RuntimeSelectionState {
 
 export interface HostSystemMessageSink {
   low(message: string): void;
-  high(message: string): void;
+  high(message: string, level?: NoticeLevel): void;
 }
 
 export interface BackgroundProviderDiscoveryOptions {
@@ -183,6 +184,7 @@ export function startBackgroundProviderDiscovery(
         if (currentModelBareId !== undefined && server.models.includes(currentModelBareId)) {
           systemMessageRouter.high(
             `[Scan] The active model is on ${server.name}, which did not answer this scan. Nothing was switched and your saved model is unchanged; pick another model if requests fail.`,
+            'warning',
           );
         }
       }

@@ -306,7 +306,7 @@ export function wireAgentExternalServices(options: {
     onError: (error) => {
       const message = summarizeError(error);
       logger.error('Deferred connected-host discovery failed', { error: message });
-      systemMessageRouter.high(`[Startup] Connected-host discovery failed: ${message}`);
+      systemMessageRouter.high(`[Startup] Connected-host discovery failed: ${message}`, 'error');
       requestRender();
     },
   });

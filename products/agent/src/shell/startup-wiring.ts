@@ -1,4 +1,5 @@
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
 import type { HookDispatcher, HookEventPath, HookPhase, HookCategory } from '@goodvibes-jev/engine/platform/platform/hooks';
 import {
   checkRecoveryFile,
@@ -32,7 +33,7 @@ export interface SessionPersistenceAndRecoveryDeps {
   readonly homeDirectory: string;
   /** Declare-once session-storage handle (platform/runtime/session-surface.ts); threaded through every persistConversation/checkRecoveryFile/writeRecoveryFile call below instead of loose workingDirectory/homeDirectory options. */
   readonly surface: SessionSurface;
-  readonly systemMessageRouter: { high(message: string): void; low(message: string): void };
+  readonly systemMessageRouter: { high(message: string, level?: NoticeLevel): void; low(message: string): void };
   readonly render: () => void;
   readonly unsubs: Array<() => void>;
   readonly uiServicesTurns: {
@@ -175,7 +176,7 @@ export function wireSessionPersistenceAndRecovery(
       }
       if (!autosaveFailing) {
         autosaveFailing = true;
-        systemMessageRouter.high('[Session] This session could not be saved after the last turn, so it may be lost if the process stops. Check free disk space and write access to the sessions directory; saving is retried after every turn.');
+        systemMessageRouter.high('[Session] This session could not be saved after the last turn, so it may be lost if the process stops. Check free disk space and write access to the sessions directory; saving is retried after every turn.', 'error');
       }
     }
   }));
@@ -271,7 +272,7 @@ export function wireSessionPersistenceAndRecovery(
       // One line: what is wrong, then the offer. Both come from the policy
       // module so the interactive wording and headless run's stderr wording
       // cannot drift apart.
-      systemMessageRouter.high(`[Daemon] ${offer.diagnosis} ${offer.offer}`);
+      systemMessageRouter.high(`[Daemon] ${offer.diagnosis} ${offer.offer}`, 'warning');
       render();
       daemonRepairPrompt = createDaemonRepairPrompt({
         offer,

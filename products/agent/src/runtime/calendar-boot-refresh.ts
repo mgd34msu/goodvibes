@@ -26,6 +26,7 @@
  * per-feed health (unreachable / parse-error / stale with age).
  */
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {
   CalendarSubscriptionRegistry,
@@ -34,7 +35,7 @@ import {
 } from '../agent/calendar-subscription-registry.ts';
 
 interface SystemMessageSinkLike {
-  low(message: string): void;
+  low(message: string, runtimeEvent?: undefined, level?: NoticeLevel): void;
 }
 
 export interface CalendarBootRefreshOptions {
@@ -101,7 +102,7 @@ export function scheduleCalendarSubscriptionBootRefresh(options: CalendarBootRef
       logger.debug('Calendar subscription boot refresh failed', { error: summarizeError(error) });
       // The per-feed line above only exists when the refresh itself returned; a throw
       // would otherwise leave the calendar silently stale.
-      options.systemMessageRouter.low(`[Calendar] refresh failed: ${summarizeError(error)}. Subscribed calendars keep their last saved events; run /calendar refresh to retry.`);
+      options.systemMessageRouter.low(`[Calendar] refresh failed: ${summarizeError(error)}. Subscribed calendars keep their last saved events; run /calendar refresh to retry.`, undefined, 'error');
       options.requestRender();
     }
   };

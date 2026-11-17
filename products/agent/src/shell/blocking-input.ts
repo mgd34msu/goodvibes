@@ -126,16 +126,17 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
           const replayed = result.journalReplay.replayed;
           systemMessageRouter.high(
             `[Recovery] Session restored (${result.messageCount} messages${replayed > 0 ? `, including ${replayed} recorded after the last snapshot` : ''}).`,
+            'success',
           );
           if (result.journalReplay.failed !== undefined) {
-            systemMessageRouter.high(`[Recovery] Recovery of the journal failed (${result.journalReplay.failed}); it was kept and will be retried on the next resume.`);
+            systemMessageRouter.high(`[Recovery] Recovery of the journal failed (${result.journalReplay.failed}); it was kept and will be retried on the next resume.`, 'error');
           }
         } else if (result.refusal === 'apply-failed') {
-          systemMessageRouter.high('[Recovery] The saved session could not be restored. The saved copy is still on disk and will be offered again at the next launch.');
+          systemMessageRouter.high('[Recovery] The saved session could not be restored. The saved copy is still on disk and will be offered again at the next launch.', 'error');
         } else if (result.refusal === 'unusable-snapshot') {
-          systemMessageRouter.high('[Recovery] The saved session was damaged and held no conversation, so it was discarded. Nothing was changed in this session.');
+          systemMessageRouter.high('[Recovery] The saved session was damaged and held no conversation, so it was discarded. Nothing was changed in this session.', 'warning');
         } else {
-          systemMessageRouter.high('[Recovery] Failed to restore saved data. The saved copy, if any, was left on disk.');
+          systemMessageRouter.high('[Recovery] Failed to restore saved data. The saved copy, if any, was left on disk.', 'error');
         }
         render();
         return { handled: true, pendingPermission: null, recoveryPending: null };
@@ -147,12 +148,12 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       if (recovery) {
         try {
           conversation.fromJSON({ messages: readConversationMessageSnapshots(recovery.messages) });
-          systemMessageRouter.high('[Recovery] Session restored.');
+          systemMessageRouter.high('[Recovery] Session restored.', 'success');
         } catch {
-          systemMessageRouter.high('[Recovery] The saved session could not be applied, and the saved copy has already been consumed.');
+          systemMessageRouter.high('[Recovery] The saved session could not be applied, and the saved copy has already been consumed.', 'error');
         }
       } else {
-        systemMessageRouter.high('[Recovery] Failed to restore saved data.');
+        systemMessageRouter.high('[Recovery] Failed to restore saved data.', 'error');
       }
       render();
       return { handled: true, pendingPermission: null, recoveryPending: null };

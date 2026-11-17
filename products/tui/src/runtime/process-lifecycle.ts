@@ -212,7 +212,8 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
         error: String(reason),
       }));
       bestEffort('critical error notice', () => ctx.systemMessageRouter.high(
-        `[Critical] Multiple errors detected (${_unhandledRejectionCount} in 10s). If the issue persists, please restart. Latest: ${msg}`
+        `[Critical] Multiple errors detected (${_unhandledRejectionCount} in 10s). If the issue persists, please restart. Latest: ${msg}`,
+        'error'
       ));
       bestEffort('critical error render', render);
     } else {
@@ -235,7 +236,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
               ? `[Error] Unexpected error: ${msg}. Retry your last message, or switch models with /model.`
               : `[Error] Unexpected error: ${msg}. This is a GoodVibes bug, not a provider failure; if it repeats, restart the session.`;
           }
-          ctx.systemMessageRouter.high(line);
+          ctx.systemMessageRouter.high(line, 'error');
           render();
         },
       });

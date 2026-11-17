@@ -1,4 +1,5 @@
 import type { UiRuntimeEvents } from '@/runtime/index.ts';
+import type { NoticeLevel } from '@goodvibes-jev/engine/platform/platform/core';
 import type { StreamMetrics } from './stream-metrics.ts';
 import { createStreamStallWatchdog, type StallTimers } from './stream-stall-watchdog.ts';
 import { buildRoutingChip } from './model-routing-chip.ts';
@@ -64,7 +65,7 @@ interface FailoverOptimizer {
 
 /** Minimal system-message surface required for user-visible notifications. */
 interface StreamSystemMessageRouter {
-  high(message: string): void;
+  high(message: string, level?: NoticeLevel): void;
   low(message: string): void;
   /**
    * Unconditional conversation delivery (see system-message-router.ts). Used
@@ -579,7 +580,7 @@ export function wireStreamEventMetrics(
     void readUserErrorClass(errVal, 'tui.stream-error').then((reading) => {
       if (reading.kind === shown.kind && !reading.sessionEnded) return;
       if (closed || !stillCurrent() || options.isActive?.() === false) return;
-      systemMessageRouter.high(`[Error] ${userErrorLine(describeUserError(errVal, reading))}`);
+      systemMessageRouter.high(`[Error] ${userErrorLine(describeUserError(errVal, reading))}`, 'error');
       render();
     }, (error: unknown) => logger.debug('error reading failed', { error: String(error) }));
   };
@@ -605,7 +606,7 @@ export function wireStreamEventMetrics(
     // Only a shown error line is refined: a failover notice already names the
     // class, and an [Error] line beside a running retry would read as the end.
     const surface = (exhausted: boolean): void => {
-      systemMessageRouter.high(`[Error] ${errorClass}`);
+      systemMessageRouter.high(`[Error] ${errorClass}`, 'error');
       notifyErrorSurfaced(exhausted);
       render();
       refineErrorLater(errVal, shown, failure.isLatestAttempt);

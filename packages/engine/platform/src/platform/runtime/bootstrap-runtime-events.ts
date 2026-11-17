@@ -1,5 +1,6 @@
 import type { RuntimeEventProvenance } from '../../events/occurrence.js';
 export type { RuntimeEventProvenance } from '../../events/occurrence.js';
+import type { NoticeLevel } from '../core/conversation.js';
 import type { ConversationFollowUpItem } from '../core/conversation-follow-ups.js';
 import type { AgentEvent, CompactionEvent, ProviderEvent, RuntimeEventBus } from './events/index.js';
 import type { GateEvent } from '../../events/gate.js';
@@ -15,7 +16,7 @@ const AGENT_STATUS_INTERVAL_MS = 30_000;
 
 export interface HostRuntimeMessageRouter {
   low(message: string, runtimeEvent?: RuntimeEventProvenance): void;
-  high(message: string): void;
+  high(message: string, level?: NoticeLevel): void;
   /** Contract lifecycle lines for the operator feed (`ui.contractMessages` decides where they show). */
   contract(message: string, priority?: 'high' | 'low', runtimeEvent?: RuntimeEventProvenance): void;
 }
@@ -311,7 +312,7 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
 
   unsubs.push(runtimeBus.on<Extract<ProviderEvent, { type: 'MODEL_FALLBACK' }>>('MODEL_FALLBACK', ({ payload }) => {
     withRouter(getSystemMessageRouter, (router) => {
-      router.high(`[Model] ${payload.from} exhausted across all providers. Automatically falling back to ${payload.to} via ${payload.provider}.`);
+      router.high(`[Model] ${payload.from} exhausted across all providers. Automatically falling back to ${payload.to} via ${payload.provider}.`, 'warning');
     });
     requestRender();
   }));

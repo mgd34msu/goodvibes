@@ -350,6 +350,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   if (bootModelSubstitution) {
     systemMessageRouter.high(
       `[Startup] Configured model '${bootModelSubstitution.configured}' is unavailable; using '${bootModelSubstitution.replacement}' this session. Your saved model is unchanged.`,
+      'warning',
     );
   }
   // Recovery can await a planner or executor. Let the shell render while it
@@ -595,7 +596,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     onError: (error) => {
       const message = summarizeError(error);
       logger.error('Deferred external service startup failed', { error: message });
-      systemMessageRouter.high(`[Startup] Background services failed to start: ${message}`);
+      systemMessageRouter.high(`[Startup] Background services failed to start: ${message}`, 'error');
       requestRender();
     },
   });
@@ -644,7 +645,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       onError: (error) => {
         const message = summarizeError(error);
         logger.error('Deferred automation startup failed', { error: message });
-        systemMessageRouter.high(`[Startup] Scheduled routines could not be started: ${message}. /schedule list shows where they are kept.`);
+        systemMessageRouter.high(`[Startup] Scheduled routines could not be started: ${message}. /schedule list shows where they are kept.`, 'error');
         requestRender();
       },
     });

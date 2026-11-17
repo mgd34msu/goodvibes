@@ -243,6 +243,7 @@ async function main() {
     },
     onResolveFailed: (error) => systemMessageRouter.high(
       `[Approval] Your answer was not recorded: ${summarizeError(error)}. The request is still waiting; answer it again.`,
+      'error',
     ),
   });
 
@@ -580,6 +581,7 @@ async function main() {
           error,
           'Native turn dispatch requires recovery. Its durable claim was preserved; no legacy fallback was started.',
         ),
+        'error',
       );
       render();
     }
@@ -628,7 +630,7 @@ async function main() {
       state: 'not sent; your text is back in the composer',
       reason: `Not sent: a conversation turn carries typed text only, and this message has ${named.join(', ')}`,
       next: [`Your text is back in the composer; to send it, ${next.join('; ')}, then press Enter`],
-    })));
+    })), 'warning');
     restoreDraft(draft);
     render();
     return true;
@@ -659,7 +661,7 @@ async function main() {
       void shellPassthrough
         .run(command, workingDir)
         .then((result) => systemMessageRouter.high(result.display))
-        .catch((shellErr: unknown) => systemMessageRouter.high(`[Shell] Failed to run: ${summarizeError(shellErr)}`))
+        .catch((shellErr: unknown) => systemMessageRouter.high(`[Shell] Failed to run: ${summarizeError(shellErr)}`, 'error'))
         .finally(() => { shellCommandsRunning -= 1; render(); });
       return;
     }
@@ -750,7 +752,7 @@ async function main() {
       } catch (error) {
         // Routing failed before the input was admitted: give back the draft.
         notSent(source.text);
-        systemMessageRouter.high(`Your message was not sent: ${summarizeError(error)}`);
+        systemMessageRouter.high(`Your message was not sent: ${summarizeError(error)}`, 'error');
         render();
       }
     })();
@@ -787,7 +789,7 @@ async function main() {
   // Companion messages and an activated plan take the composer's path as sent (no
   // composer grammar), carrying their origin; refused text is shown, not put in the draft.
   bindOwnerInput(orchestrator, (text, turnOptions) => sendTurn(text, {}, turnOptions, (unsent) => {
-    systemMessageRouter.high(`Not sent: "${unsent.length > 120 ? `${unsent.slice(0, 117)}...` : unsent}". Send it again once the current message is taken.`);
+    systemMessageRouter.high(`Not sent: "${unsent.length > 120 ? `${unsent.slice(0, 117)}...` : unsent}". Send it again once the current message is taken.`, 'warning');
     render();
   }));
   // Composer line prompts: masked for card material, echoed for addresses (see input/handler-line-prompts.ts).
@@ -932,7 +934,7 @@ async function main() {
       executeOwnerCommand: (line) => {
         const parsed = parseSlashCommand(line);
         void commandRegistry.executeFromOwner(parsed.name, [...parsed.args], commandContext).catch(() => {
-          systemMessageRouter.userAction('Pairing replacement command failed. Preview pairing again before taking further action.');
+          systemMessageRouter.userAction('Pairing replacement command failed. Preview pairing again before taking further action.', 'error');
           render();
         });
       },

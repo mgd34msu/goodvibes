@@ -10,6 +10,7 @@ import { getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes-
 import { createRuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/store';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { RuntimeEventBus, runtimeEventBusOptionsFrom } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import { publishDaemonRuntimeRecord, type PublishedDaemonRuntimeRecord } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { isKnownConfigKey } from '../config/config-key-guard.js';
 import { getPackageVersion, renderDaemonBoundEndpoint, renderDaemonStartupBanner } from './help.js';
 import { createDaemonHost } from '../runtime/daemon-host.js';
@@ -72,6 +73,8 @@ export function runConfiguredDaemonCli(
   let processHandle: DaemonProcessHandle;
   processHandle = runDaemonProcess(() => {
     let host: ReturnType<typeof createDaemonHost> | undefined;
+    // Where this daemon actually listens, for surfaces that resolve its address (a one-run port included).
+    let published: PublishedDaemonRuntimeRecord | null = null;
     let closed = false;
     const maintenance = new AbortController();
     let configurationWork: Promise<DaemonCliConfiguration | null> | undefined;
@@ -87,7 +90,7 @@ export function runConfiguredDaemonCli(
           if (selected === null) return restarted;
           active = selected;
         }
-        const { config, homeDirectory, daemonHomeDirectory, workingDirectory, isOverridden } = active;
+        const { config, homeDirectory, daemonHomeDirectory, workingDirectory, workingDirectoryOverride, isOverridden } = active;
         const version = getPackageVersion();
         const intended = resolveHostBinding(config.get('controlPlane.hostMode'), config.get('controlPlane.host'),
           config.get('controlPlane.port'), 'controlPlane');
@@ -114,6 +117,7 @@ export function runConfiguredDaemonCli(
           },
           daemon: { token },
           hasOverriddenHome: isOverridden,
+          ...(workingDirectoryOverride ? { workingDirectoryOverride } : {}),
           ...(updateArtifact ? { updateArtifact } : {}),
           ...(config.get('danger.httpListener') ? { httpListener: { token: env.GOODVIBES_HTTP_TOKEN?.trim() ? env.GOODVIBES_HTTP_TOKEN : token } } : {}),
           // A handover that stopped the runtime and then could not complete
@@ -146,6 +150,7 @@ export function runConfiguredDaemonCli(
         try { persistDaemonStartupPublicUrl(active, actual); }
         catch { stderr('[goodvibes-daemon] warning: the startup public URL could not be persisted.'); }
         stdout(renderDaemonBoundEndpoint(version, actual));
+        published = publishDaemonRuntimeRecord(daemonHomeDirectory, { ...actual, command: 'goodvibes-daemon serve' });
         // Background: the sweep reads git for every leftover worktree and must not delay the endpoint line.
         // close() waits for it, so the process never exits halfway through removing a worktree.
         worktreeSweep = sweepWorktrees(active).then((notice) => { if (notice && !closed) stderr(`[goodvibes-daemon] ${notice}`); });
@@ -168,6 +173,7 @@ export function runConfiguredDaemonCli(
         // Fence the live host synchronously, then drain both original owners.
         const closing = host?.close() ?? Promise.resolve();
         const results = await Promise.allSettled([configurationWork ?? Promise.resolve(), closing, worktreeSweep ?? Promise.resolve()]);
+        published?.remove();
         // Startup's own original promise already reports its rejection. A
         // separate host cleanup failure must still fail the process drain.
         const cleanup = results[1]!;

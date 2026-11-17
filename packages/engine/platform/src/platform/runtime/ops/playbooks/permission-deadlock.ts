@@ -1,125 +1,77 @@
 /**
  * Playbook: Permission Deadlock
  *
- * Diagnoses and resolves situations where permission requests are blocking
- * forward progress, typically from circular approval chains, missing
- * policy rules, or a stalled host permission prompt.
+ * Tool calls held by permission asks nobody answers.
  */
-import type { Playbook, DiagnosticCheckResult } from '../types.js';
+import type { Playbook } from '../types.js';
 import { safeCheck } from '../safe-check.js';
+
+/** An approval older than this has been waiting long enough to hold up work. */
+const LONG_WAIT_MS = 30_000;
 
 /** Permission deadlock resolution playbook. */
 export const permissionDeadlockPlaybook: Playbook = {
   id: 'permission-deadlock',
   name: 'Permission Deadlock',
-  description:
-    'Diagnoses and resolves permission deadlocks where tool execution is ' +
-    'blocked waiting for approvals that never arrive or form a cycle.',
+  description: 'Diagnoses tool calls held by permission asks that nobody answers.',
   symptoms: [
-    'Tool calls stuck in AWAITING_PERMISSION state for > 30 s',
-    'Host permission prompt displayed but not responding to input',
-    'Turn throughput drops to zero with CPU near 0%',
-    'Permission span shows no RESOLVED event',
-    'Multiple tools queued behind a single blocked permission request',
+    'A tool call waits for permission for a long time',
+    'A permission prompt does not respond or never appears',
+    'Several tool calls queued behind one approval',
+    'Approval asked on another device that nobody sees',
   ],
   checks: [
     {
       id: 'permission.pending-requests',
-      label: 'Pending permission requests',
-      description: 'Checks how many permission requests are currently awaiting approval.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'Pending request count requires live PermissionManager context.',
-          severity: 'info',
-          context: { hint: 'Inspect PermissionManager.pendingRequests()' },
-        })),
+      label: 'Approvals waiting on you',
+      description: 'Approvals waiting on the owner, and how long the oldest has waited.',
+      run: (ctx) => safeCheck(() => {
+        const pending = ctx.pendingApprovals?.();
+        if (!pending) {
+          const { permissions } = ctx.store.getState();
+          return {
+            passed: !permissions.awaitingDecision,
+            summary: permissions.awaitingDecision
+              ? `A permission decision is in progress (${permissions.decisionMachineState ?? 'deciding'}).`
+              : 'No permission decision is in progress.',
+            severity: permissions.awaitingDecision ? 'warning' : 'info',
+          };
+        }
+        if (pending.length === 0) return { passed: true, summary: 'Nothing is waiting on your answer.', severity: 'info' };
+        const oldest = pending[0]!;
+        const waitedMs = ctx.now() - oldest.createdAt;
+        return {
+          passed: waitedMs <= LONG_WAIT_MS,
+          summary: `${pending.length} approval(s) wait on your answer; the oldest (${oldest.tool}) has waited ${Math.round(waitedMs / 1000)} s.`,
+          severity: waitedMs > LONG_WAIT_MS ? 'error' : 'warning',
+          context: { pendingApprovals: pending.length, oldestTool: oldest.tool, oldestWaitedMs: waitedMs },
+        };
+      }),
     },
     {
-      id: 'permission.policy-match',
-      label: 'Policy rule matched',
-      description: 'Checks whether the blocked permission request matches any configured allow/deny rule.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'Policy matching requires live policy engine context.',
-          severity: 'info',
-          context: { hint: 'Run PermissionPolicyEngine.evaluate(request) to test match' },
-        })),
-    },
-    {
-      id: 'permission.ui-responsive',
-      label: 'Permission UI responsive',
-      description: 'Checks whether the host permission prompt is rendered and responding to input.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'UI responsiveness requires live render context.',
-          severity: 'info',
-          context: { hint: 'Check host render context for active PermissionPrompt component' },
-        })),
+      id: 'permission.gate-in-flight',
+      label: 'Calls held at the gate',
+      description: 'Tool calls whose permission decision has started and not ended.',
+      run: (ctx) => safeCheck(() => {
+        const { permissions } = ctx.store.getState();
+        const held = permissions.inFlightCallIds?.length ?? (permissions.awaitingDecision ? 1 : 0);
+        return {
+          passed: held === 0,
+          summary: held === 0 ? 'No tool call is held at the gate.' : `${held} tool call(s) are held at the gate.`,
+          severity: held === 0 ? 'info' : 'warning',
+          context: { heldCalls: held, mode: permissions.mode },
+        };
+      }),
     },
   ],
   steps: [
-    {
-      step: 1,
-      title: 'List pending permission requests',
-      action:
-        'Enumerate all requests currently in the AWAITING_PERMISSION state. ' +
-        'Note the tool name, requested capability, and how long it has been pending.',
-      kind: 'observe',
-      expectedOutcome: 'List of pending requests with ages.',
-      automatable: false,
-    },
-    {
-      step: 2,
-      title: 'Check policy coverage',
-      action:
-        'Evaluate each pending request against the configured policy rules. ' +
-        'Identify requests with no matching rule (falling through to manual approval).',
-      kind: 'observe',
-      expectedOutcome: 'Each request either has a matching rule or is identified as uncovered.',
-      automatable: false,
-    },
-    {
-      step: 3,
-      title: 'Add a temporary allow rule',
-      action:
-        'Add a scoped allow rule for the blocked capability to unblock forward progress. ' +
-        'Log the rule addition for audit review.',
-      kind: 'config',
-      expectedOutcome: 'Pending request auto-approved; tool execution resumes.',
-      automatable: false,
-    },
-    {
-      step: 4,
-      title: 'Deny and skip blocked tool',
-      action:
-        'If adding an allow rule is not appropriate, deny the pending request and ' +
-        'allow the turn to continue without the blocked tool.',
-      kind: 'command',
-      expectedOutcome: 'Tool call skipped; turn resumes with remaining tools.',
-      automatable: false,
-    },
-    {
-      step: 5,
-      title: 'Review and update policy ruleset',
-      action:
-        'Audit the permission policy configuration to add appropriate rules ' +
-        'that prevent this deadlock from recurring.',
-      kind: 'config',
-      expectedOutcome: 'Policy updated; future similar requests handled automatically.',
-      automatable: false,
-    },
+    { step: 1, title: 'Answer the waiting approvals', action: 'Open /questions and answer what is waiting; an answer from any surface releases the call.', kind: 'command', command: '/questions', expectedOutcome: 'The held calls run or are refused.', automatable: false },
+    { step: 2, title: 'Remember the answer', action: 'Answer with "always" for a call you want to stop being asked about; review remembered answers with /decisions.', kind: 'command', command: '/decisions', expectedOutcome: 'The same call no longer asks.', automatable: false },
+    { step: 3, title: 'Stop the turn', action: 'If you do not want the held calls to run, press Esc to cancel the turn.', kind: 'command', command: 'Esc', expectedOutcome: 'The turn ends and the asks are withdrawn.', automatable: false },
   ],
   escalationCriteria: [
-    'Permission UI is rendering but unresponsive to keyboard input (Host render stall)',
-    'Adding allow rules does not unblock the pending request',
-    'Multiple concurrent permission deadlocks across different turns',
-    'Policy engine itself is throwing on evaluation',
+    'An approval stays waiting after it was answered',
+    'Approvals keep arriving for calls a remembered rule should cover',
   ],
-  tags: ['permission', 'deadlock', 'tools', 'policy', 'approval'],
+  tags: ['permission', 'approval', 'deadlock', 'blocked', 'gate'],
 };

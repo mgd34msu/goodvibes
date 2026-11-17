@@ -1,208 +1,129 @@
 /**
  * Playbook: Stuck Turn / Task
  *
- * Diagnoses and resolves turns or tasks that have stopped progressing.
- * Common causes: LLM timeout, tool deadlock, event loop stall.
+ * Diagnoses turns or tasks that have stopped progressing.
+ * Common causes: a slow or stalled provider, a tool call that never returns,
+ * a permission ask nobody answered.
  */
-import type { Playbook, DiagnosticCheckResult } from '../types.js';
+import type { Playbook } from '../types.js';
 import { safeCheck } from '../safe-check.js';
-import { getOpsRuntimeContext } from '../runtime-context.js';
-import type { OpsRuntimeContextState } from '../runtime-context.js';
 import type { TurnState, ToolExecutionState } from '../../store/domains/conversation.js';
 
 /** Turn states in which a turn is still in flight. A finished turn keeps its id and start time. */
 const IN_FLIGHT_TURN_STATES: ReadonlySet<TurnState> = new Set(['preflight', 'streaming', 'tool_dispatch', 'post_hooks']);
 /** Tool calls stay in the map after they finish, until the next turn is submitted. */
 const FINISHED_TOOL_STATES: ReadonlySet<ToolExecutionState> = new Set(['succeeded', 'failed', 'cancelled']);
+/** How long a turn or the event flow may stay quiet before it counts as stuck. */
+const STUCK_AFTER_MS = 30_000;
 
-export function createStuckTurnPlaybook(
-  getRuntimeContext: () => OpsRuntimeContextState | null = () => null,
-): Playbook {
-  return {
+/** Stuck turn / task resolution playbook. */
+export const stuckTurnPlaybook: Playbook = {
   id: 'stuck-turn',
   name: 'Stuck Turn / Task',
-  description:
-    'Diagnoses turns or tasks that have stopped progressing. ' +
-    'Covers LLM timeout, tool deadlock, and event-loop stall scenarios.',
+  description: 'Diagnoses turns or tasks that have stopped progressing: a stalled provider, a tool call that never returns, or an unanswered permission ask.',
   symptoms: [
-    'Turn has been in-flight longer than the configured timeout',
-    'No new events emitted on the task event bus for > 30 s',
-    'Spinner/progress indicator frozen in TUI',
-    'CPU near 0% with pending async operations',
-    'Health check reports degraded turn throughput',
+    'Turn has been running much longer than usual',
+    'Spinner or progress indicator frozen',
+    'No output and no tool activity for more than 30 seconds',
+    'The agent is stuck, hangs, or does not respond',
   ],
   checks: [
     {
       id: 'turn.timeout-elapsed',
-      label: 'Turn timeout elapsed',
-      description: 'Checks whether the active turn has exceeded its configured timeout.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => {
-          const runtime = getRuntimeContext();
-          if (!runtime) {
-            return {
-              passed: false,
-              evaluated: false,
-              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
-              severity: 'info',
-            };
-          }
-          const { conversation } = runtime.store.getState();
-          if (!conversation.currentTurnId || !conversation.turnStartedAt || !IN_FLIGHT_TURN_STATES.has(conversation.turnState)) {
-            return {
-              passed: true,
-              summary: conversation.currentTurnId && conversation.turnState !== 'idle'
-                ? `No turn is in flight; the last turn ${conversation.currentTurnId} is ${conversation.turnState}.`
-                : 'No active turn is currently in flight.',
-              severity: 'info',
-            };
-          }
-          const elapsedMs = runtime.now() - conversation.turnStartedAt;
-          const thresholdMs = 30_000;
-          const exceeded = elapsedMs > thresholdMs;
-          return {
-            passed: !exceeded,
-            summary: exceeded
-              ? `Active turn ${conversation.currentTurnId} has exceeded ${thresholdMs}ms (${elapsedMs}ms elapsed).`
-              : `Active turn ${conversation.currentTurnId} is still within the ${thresholdMs}ms threshold.`,
-            severity: exceeded ? 'error' : 'info',
-            context: {
-              turnId: conversation.currentTurnId,
-              turnState: conversation.turnState,
-              elapsedMs,
-              thresholdMs,
-            },
-          };
-        }),
+      label: 'Turn running too long',
+      description: `Whether the turn in flight started more than ${STUCK_AFTER_MS / 1000} s ago.`,
+      run: (ctx) => safeCheck(() => {
+        const { conversation } = ctx.store.getState();
+        if (!conversation.currentTurnId || !conversation.turnStartedAt || !IN_FLIGHT_TURN_STATES.has(conversation.turnState)) {
+          return { passed: true, summary: 'No turn is in flight.', severity: 'info' };
+        }
+        const elapsedMs = ctx.now() - conversation.turnStartedAt;
+        const exceeded = elapsedMs > STUCK_AFTER_MS;
+        return {
+          passed: !exceeded,
+          summary: `The turn in flight (${conversation.turnState}) started ${Math.round(elapsedMs / 1000)} s ago.`,
+          severity: exceeded ? 'warning' : 'info',
+          context: { turnId: conversation.currentTurnId, turnState: conversation.turnState, elapsedMs },
+        };
+      }),
     },
     {
       id: 'turn.event-bus-inactive',
-      label: 'Event bus inactive',
-      description: 'Checks whether the RuntimeEventBus has emitted any events recently.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => {
-          const runtime = getRuntimeContext();
-          if (!runtime) {
-            return {
-              passed: false,
-              evaluated: false,
-              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
-              severity: 'info',
-            };
-          }
-          const inactiveMs = runtime.now() - runtime.lastEventAt;
-          const thresholdMs = 30_000;
-          const inactive = inactiveMs > thresholdMs;
-          return {
-            passed: !inactive,
-            summary: inactive
-              ? `No runtime events have been observed for ${inactiveMs}ms.`
-              : `Runtime event flow is active (${inactiveMs}ms since the last event).`,
-            severity: inactive ? 'warning' : 'info',
-            context: {
-              inactiveMs,
-              thresholdMs,
-              lastEventAt: runtime.lastEventAt,
-            },
-          };
-        }),
+      label: 'No runtime activity during the turn',
+      description: 'Whether a turn is in flight while no runtime event has been seen for 30 s.',
+      run: (ctx) => safeCheck(() => {
+        const { conversation } = ctx.store.getState();
+        if (!IN_FLIGHT_TURN_STATES.has(conversation.turnState)) {
+          return { passed: true, summary: 'No turn is in flight, so quiet is normal.', severity: 'info' };
+        }
+        const last = ctx.lastEventAt();
+        const quietMs = ctx.now() - (last ?? conversation.turnStartedAt ?? ctx.now());
+        const stalled = quietMs > STUCK_AFTER_MS;
+        return {
+          passed: !stalled,
+          summary: stalled
+            ? `Nothing has happened for ${Math.round(quietMs / 1000)} s while a turn is in flight.`
+            : `The turn is active (last activity ${Math.round(quietMs / 1000)} s ago).`,
+          severity: stalled ? 'error' : 'info',
+          context: { quietMs },
+        };
+      }),
     },
     {
       id: 'turn.pending-tool-calls',
-      label: 'Pending tool calls',
-      description: 'Checks for tool calls that have been dispatched but not yet resolved.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => {
-          const runtime = getRuntimeContext();
-          if (!runtime) {
-            return {
-              passed: false,
-              evaluated: false,
-              summary: 'Ops runtime context is not configured, so this check was not evaluated.',
-              severity: 'info',
-            };
-          }
-          const { conversation } = runtime.store.getState();
-          const pendingToolCalls = [...conversation.activeToolCalls.values()]
-            .filter((call) => !FINISHED_TOOL_STATES.has(call.state)).length;
-          const blocked = pendingToolCalls > 0;
-          // Pending permission prompts are not visible here: the gate reports a
-          // request only after its decision. They are listed by the approval
-          // broker, so the summary points there instead of claiming none exist.
+      label: 'Tool calls not finished',
+      description: 'Tool calls dispatched in this turn that have not finished.',
+      run: (ctx) => safeCheck(() => {
+        const { conversation } = ctx.store.getState();
+        const pending = [...conversation.activeToolCalls.values()].filter((call) => !FINISHED_TOOL_STATES.has(call.state));
+        return {
+          passed: pending.length === 0,
+          summary: pending.length === 0
+            ? 'No tool call is waiting to finish.'
+            : `${pending.length} tool call(s) not finished: ${pending.slice(0, 5).map((call) => call.toolName).join(', ')}.`,
+          severity: pending.length === 0 ? 'info' : 'warning',
+          context: { pendingToolCalls: pending.length },
+        };
+      }),
+    },
+    {
+      id: 'turn.waiting-on-owner',
+      label: 'Waiting on your answer',
+      description: 'Approvals waiting on the owner, which hold the calls that asked.',
+      run: (ctx) => safeCheck(() => {
+        const pending = ctx.pendingApprovals?.();
+        if (!pending) {
+          const { permissions } = ctx.store.getState();
           return {
-            passed: !blocked,
-            summary: blocked
-              ? `Detected ${pendingToolCalls} unfinished tool call(s). Pending permission prompts are listed under approvals.`
-              : 'No unfinished tool calls recorded. Pending permission prompts are listed under approvals.',
-            severity: blocked ? 'warning' : 'info',
-            context: {
-              pendingToolCalls,
-            },
+            passed: !permissions.awaitingDecision,
+            summary: permissions.awaitingDecision ? 'A permission decision is in progress.' : 'No permission decision is in progress.',
+            severity: permissions.awaitingDecision ? 'warning' : 'info',
           };
-        }),
+        }
+        return {
+          passed: pending.length === 0,
+          summary: pending.length === 0 ? 'Nothing is waiting on your answer.' : `${pending.length} approval(s) wait on your answer.`,
+          severity: pending.length === 0 ? 'info' : 'warning',
+          context: { pendingApprovals: pending.length },
+        };
+      }),
     },
   ],
   steps: [
-    {
-      step: 1,
-      title: 'Identify stuck span',
-      action:
-        'Query the active span list from the RuntimeTracer. ' +
-        'Look for spans with durationMs > turnTimeoutMs and status UNSET.',
-      kind: 'observe',
-      expectedOutcome: 'One or more spans identified as candidates.',
-      automatable: false,
-    },
-    {
-      step: 2,
-      title: 'Check for tool deadlock',
-      action:
-        'Inspect the PhasedToolExecutor queue for tools awaiting permissions or locks. ' +
-        'Cross-reference with PermissionManager.pendingRequests().',
-      kind: 'observe',
-      expectedOutcome: 'Tool queue is empty or shows a specific blocked tool.',
-      automatable: false,
-    },
-    {
-      step: 3,
-      title: 'Cancel the stuck turn',
-      action:
-        'Emit a task.cancel event on the RuntimeEventBus with the stuck taskId. ' +
-        'The TaskStateMachine should transition to CANCELLED within 1 s.',
-      kind: 'command',
-      expectedOutcome: 'Turn transitions to CANCELLED; health check recovers.',
-      automatable: false,
-    },
-    {
-      step: 4,
-      title: 'Restart turn with reduced timeout',
-      action:
-        'Re-submit the failed turn with a shorter LLM timeout (e.g. 30 s) and ' +
-        'tool-use disabled to isolate whether the model or a tool is the root cause.',
-      kind: 'command',
-      expectedOutcome: 'Turn completes or fails fast with a clear error.',
-      automatable: false,
-    },
-    {
-      step: 5,
-      title: 'Review LLM provider health',
-      action:
-        'Check the provider health dashboard or call the provider status endpoint. ' +
-        'Consider switching to a fallback provider if degraded.',
-      kind: 'observe',
-      expectedOutcome: 'Provider status confirmed healthy or fallback selected.',
-      automatable: false,
-    },
+    { step: 1, title: 'Answer what is waiting on you', action: 'If an approval is waiting, open /questions and answer it; the call that asked continues at once.', kind: 'command', command: '/questions', expectedOutcome: 'The held call runs or is refused and the turn moves on.', automatable: false },
+    { step: 2, title: 'Stop the turn', action: 'Press Esc (or Ctrl+C) to cancel the turn in flight; tool calls in flight are cancelled with it.', kind: 'command', command: 'Esc', expectedOutcome: 'The turn ends as cancelled and the composer is free.', automatable: false },
+    { step: 3, title: 'Look at the provider', action: 'Run /health provider to see whether the model provider is degraded, and switch with /model if it is.', kind: 'command', command: '/health provider', expectedOutcome: 'A healthy provider is selected.', automatable: false },
+    { step: 4, title: 'Retry the turn', action: 'Run /retry to send the last message again.', kind: 'command', command: '/retry', expectedOutcome: 'The turn completes or fails with a clear error.', automatable: false },
   ],
   escalationCriteria: [
-    'Multiple consecutive turns stuck after attempting cancel+restart',
-    'Event loop stall confirmed by > 60 s with zero runtime events',
-    'Memory usage growing continuously without turns completing',
-    'Core health check reports CRITICAL for > 5 minutes',
+    'Several turns in a row stall after cancel and retry',
+    'No runtime activity for more than 60 s with a turn in flight',
+    'Memory keeps growing while no turn completes (/health memory)',
   ],
-  tags: ['turn', 'task', 'timeout', 'deadlock', 'llm'],
-  };
-}
+  tags: ['turn', 'task', 'stuck', 'timeout', 'hang', 'llm'],
+};
 
-/** Stuck turn / task resolution playbook. */
-export const stuckTurnPlaybook: Playbook = createStuckTurnPlaybook(getOpsRuntimeContext);
+/** The stuck-turn playbook (kept as a function for callers that build playbooks). */
+export function createStuckTurnPlaybook(): Playbook {
+  return stuckTurnPlaybook;
+}

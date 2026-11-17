@@ -10,6 +10,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import { probeTermCaps } from '../../renderer/term-caps.ts';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
+import { formatDoctorReport } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { CommandRegistry } from '../command-registry.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
 import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
@@ -30,16 +31,31 @@ function renderSandboxHealthSummary(configManager: ConfigManager): string[] {
   return renderSandboxDoctor(configManager).split('\n').slice(1);
 }
 
+/** The health domains; any other first word is a symptom for the runbooks. */
+const HEALTH_SUBCOMMANDS: ReadonlySet<string> = new Set(['report', 'review', 'open', 'panel', 'setup', 'services', 'sandbox', 'provider', 'accounts', 'auth', 'settings', 'intelligence', 'remote', 'mcp', 'memory', 'metrics', 'runtime', 'quota', 'continuity', 'worktrees', 'maintenance', 'term', 'next', 'repair']);
+
 export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
     name: 'health',
     aliases: ['doctor'],
     description: 'Health workspace for startup posture, service readiness, sandbox posture, and provider health',
     usage:
-      '[report|review|open|setup|services|sandbox|provider|accounts|auth|settings|intelligence|remote|mcp|memory|metrics|continuity|worktrees|maintenance|term|next [domain]]: bare and report stay a cross-domain transcript report (see also /health provider for the providers modal)',
+      '[report|review|open|setup|services|sandbox|provider|accounts|auth|settings|intelligence|remote|mcp|memory|metrics|continuity|worktrees|maintenance|term|next [domain]] | <symptom>: bare and report stay a cross-domain transcript report (see also /health provider for the providers modal); a symptom (/doctor stuck turn) runs its runbook\'s checks',
     async handler(args, ctx) {
       const sub = (args[0] ?? 'review').toLowerCase();
       const readModels = requireReadModels(ctx);
+
+      // Anything that is not a health domain is a symptom: find its runbook and
+      // run the checks against this app's live state (no model request).
+      if (sub === 'diagnose' || (args.length > 0 && !HEALTH_SUBCOMMANDS.has(sub))) {
+        const symptom = (sub === 'diagnose' ? args.slice(1) : args).join(' ');
+        if (!symptom.trim()) {
+          ctx.print('Usage: /doctor <symptom>, for example /doctor stuck turn');
+          return;
+        }
+        ctx.print(formatDoctorReport(await readModels.doctor.diagnose(symptom)).join('\n'));
+        return;
+      }
 
       if (sub === 'open' || sub === 'panel' || sub === 'provider') {
         ctx.openModal?.('providers-modal'); // provider-health view -> config modal

@@ -1,88 +1,85 @@
-import { AsyncLocalStorage } from 'async_hooks';
-import { existsSync, readFileSync } from 'fs';
+/**
+ * The live state a playbook's diagnostic checks read: the runtime store, the
+ * time of the last runtime event (kept by one long-lived observer), the
+ * approvals waiting on the owner, and the session recovery files when this
+ * process has them. A source this process does not have is absent, and a
+ * check that needs it reports itself as not evaluated.
+ */
+import { existsSync, readFileSync } from 'node:fs';
 import type { RuntimeEventBus } from '../events/index.js';
 import type { RuntimeStore } from '../store/index.js';
 import { summarizeError } from '../../utils/error-display.js';
 
-export interface OpsRuntimeContextConfig {
-  runtimeBus: RuntimeEventBus;
-  store: RuntimeStore;
-  recoveryFilePath: string;
-  lastSessionPointerPath: string;
-  now?: (() => number) | undefined;
+/** An approval waiting on the owner, as a check sees it. */
+export interface OpsPendingApproval {
+  readonly id: string;
+  readonly tool: string;
+  readonly createdAt: number;
 }
 
-export interface OpsRuntimeContextState {
-  runtimeBus: RuntimeEventBus;
-  store: RuntimeStore;
-  recoveryFilePath: string;
-  lastSessionPointerPath: string;
-  now: () => number;
-  lastEventAt: number;
-  sessionRecoveryFailedAt?: number | undefined;
-  sessionRecoveryFailedCount: number;
-  detach: () => void;
+export interface OpsCheckContext {
+  readonly store: Pick<RuntimeStore, 'getState'>;
+  readonly now: () => number;
+  /** When the last runtime event was seen; undefined before the first. */
+  readonly lastEventAt: () => number | undefined;
+  /** Approvals waiting on the owner, when this process holds the approval broker. */
+  readonly pendingApprovals?: (() => readonly OpsPendingApproval[]) | undefined;
+  /** The crash-recovery file of the open session, when this surface keeps one. */
+  readonly recoveryFilePath?: (() => string | undefined) | undefined;
+  /** The pointer to the last session this surface had open, when it has one. */
+  readonly lastSessionPointerPath?: string | undefined;
 }
 
+/** The runtime event domains whose traffic counts as "the runtime is doing something". */
 const OBSERVED_DOMAINS = [
-  'session',
-  'turn',
-  'tools',
-  'tasks',
-  'agents',
-  'contracts',
-  'providers',
-  'gate',
-  'planner',
-  'plugins',
-  'mcp',
-  'transport',
-  'ops',
+  'session', 'turn', 'tools', 'tasks', 'agents', 'contracts', 'providers',
+  'gate', 'compaction', 'plugins', 'mcp', 'transport', 'ops',
 ] as const;
 
-const scopedContext = new AsyncLocalStorage<OpsRuntimeContextState | null>();
-
-function createOpsRuntimeContextState(config: OpsRuntimeContextConfig): OpsRuntimeContextState {
-  const now = config.now ?? Date.now;
-  const unsubs = OBSERVED_DOMAINS.map((domain) =>
-    config.runtimeBus.onDomain(domain, (envelope) => {
-      state.lastEventAt = envelope.ts;
-      if (envelope.type === 'SESSION_RECOVERY_FAILED') {
-        state.sessionRecoveryFailedAt = envelope.ts;
-        state.sessionRecoveryFailedCount += 1;
-      }
-    }));
-
-  const state: OpsRuntimeContextState = {
-    runtimeBus: config.runtimeBus,
-    store: config.store,
-    recoveryFilePath: config.recoveryFilePath,
-    lastSessionPointerPath: config.lastSessionPointerPath,
-    now,
-    lastEventAt: now(),
-    sessionRecoveryFailedCount: 0,
-    detach: () => {
-      for (const unsub of unsubs) unsub();
-    },
+/**
+ * One observer per process, created where the services are composed: it only
+ * remembers the time of the last event (one number written per event), so a
+ * check can tell an idle runtime from a stalled one.
+ */
+export function createOpsEventObserver(runtimeBus: Pick<RuntimeEventBus, 'onDomain'>): {
+  readonly lastEventAt: () => number | undefined;
+  readonly dispose: () => void;
+} {
+  let last: number | undefined;
+  const unsubscribes = OBSERVED_DOMAINS.map((domain) => runtimeBus.onDomain(domain, (envelope) => { last = envelope.ts; }));
+  return {
+    lastEventAt: () => last,
+    dispose: () => { for (const unsubscribe of unsubscribes) unsubscribe(); },
   };
-  return state;
 }
 
-/** The context of the enclosing `withOpsRuntimeContext` call, or null outside one. */
-export function getOpsRuntimeContext(): OpsRuntimeContextState | null {
-  return scopedContext.getStore() ?? null;
+export interface OpsCheckContextOptions {
+  readonly store: Pick<RuntimeStore, 'getState'>;
+  readonly runtimeBus: Pick<RuntimeEventBus, 'onDomain'>;
+  readonly listApprovals?: ((limit: number) => readonly { readonly id: string; readonly status: string; readonly createdAt: number; readonly request: { readonly tool: string } }[]) | undefined;
+  readonly recoveryFilePath?: (() => string | undefined) | undefined;
+  readonly lastSessionPointerPath?: string | undefined;
+  readonly now?: (() => number) | undefined;
 }
 
-export async function withOpsRuntimeContext<T>(
-  config: OpsRuntimeContextConfig,
-  fn: () => Promise<T> | T,
-): Promise<T> {
-  const state = createOpsRuntimeContextState(config);
-  try {
-    return await scopedContext.run(state, fn);
-  } finally {
-    state.detach();
-  }
+/** Build the check context once per process; checks read it on demand, so it costs nothing until one runs. */
+export function createOpsCheckContext(options: OpsCheckContextOptions): OpsCheckContext & { readonly dispose: () => void } {
+  const observer = createOpsEventObserver(options.runtimeBus);
+  const listApprovals = options.listApprovals;
+  return {
+    store: options.store,
+    now: options.now ?? Date.now,
+    lastEventAt: observer.lastEventAt,
+    ...(listApprovals ? {
+      pendingApprovals: () => listApprovals(Number.MAX_SAFE_INTEGER)
+        .filter((approval) => approval.status === 'pending' || approval.status === 'claimed')
+        .map((approval) => ({ id: approval.id, tool: approval.request.tool, createdAt: approval.createdAt }))
+        .sort((a, b) => a.createdAt - b.createdAt),
+    } : {}),
+    ...(options.recoveryFilePath ? { recoveryFilePath: options.recoveryFilePath } : {}),
+    ...(options.lastSessionPointerPath ? { lastSessionPointerPath: options.lastSessionPointerPath } : {}),
+    dispose: observer.dispose,
+  };
 }
 
 export function readRecoveryFileMetadata(path: string): { ok: boolean; summary: string } {

@@ -98,13 +98,20 @@ export {
   createStuckTurnPlaybook,
 } from './ops/playbooks/stuck-turn.js';
 export {
-  getOpsRuntimeContext,
-  withOpsRuntimeContext,
-} from './ops/runtime-context.js';
+  createOpsCheckContext,
+  createOpsEventObserver,
+  findPlaybooksBySymptom,
+  formatDoctorReport,
+  getPlaybook,
+  runDoctor,
+} from './ops/index.js';
 export type {
-  OpsRuntimeContextConfig,
-  OpsRuntimeContextState,
-} from './ops/runtime-context.js';
+  DoctorCheckReport,
+  DoctorPlaybookReport,
+  DoctorReport,
+  OpsCheckContext,
+  OpsCheckContextOptions,
+} from './ops/index.js';
 export {
   evaluateOrchestrationSpawn,
 } from './orchestration/spawn-policy.js';

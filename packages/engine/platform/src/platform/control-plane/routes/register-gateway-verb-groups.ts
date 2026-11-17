@@ -41,6 +41,8 @@ import { resolveEffectiveWorktreeSetup } from '../../runtime/worktree/setup.js';
 import { registerCostGatewayMethods } from './cost.js';
 import { registerPermissionRulesGatewayMethods } from './permission-rules.js';
 import { registerOwnerInboxGatewayMethods, type OwnerInboxGatewayService } from './owner-inbox.js';
+import { registerOpsDoctorGatewayMethod } from './ops-doctor.js';
+import { createOpsCheckContext } from '../../runtime/ops/index.js';
 import type { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import { registerMemoryProjectionsGatewayMethods, type MemoryProjectionSource } from './memory-projections.js';
 import {
@@ -339,6 +341,12 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * decide verbs are unaffected.
    */
   readonly approvalRaise?: ApprovalRaiseService | undefined;
+  /**
+   * The same approval broker, read for the approvals waiting on the owner when
+   * ops.doctor diagnoses a stuck turn or a permission deadlock. Absent → those
+   * checks read the runtime store's permission state instead.
+   */
+  readonly approvalList?: { listApprovals(limit: number): readonly { readonly id: string; readonly status: string; readonly createdAt: number; readonly request: { readonly tool: string } }[] } | undefined;
   /**
    * The composition's one owner inbox (control-plane/owner-inbox.ts), built over
    * the same approval broker. Absent → inbox.* stay cataloged-but-unhandled.
@@ -723,6 +731,20 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // windows and queued actions, answered once from any surface.
   if (deps.ownerInbox) {
     registerOwnerInboxGatewayMethods(catalog, deps.ownerInbox);
+  }
+
+  // ops.doctor, a symptom's runbook run against this daemon's live state. The
+  // context's one bus observer keeps the time of the last event; nothing else
+  // is read until a diagnosis is asked for.
+  if (deps.runtimeBus) {
+    const approvals = deps.approvalList;
+    const doctorContext = createOpsCheckContext({
+      store: deps.runtimeStore,
+      runtimeBus: deps.runtimeBus,
+      listApprovals: approvals ? (limit) => approvals.listApprovals(limit) : undefined,
+    });
+    deps.disposal?.add('ops doctor observer', doctorContext.dispose);
+    registerOpsDoctorGatewayMethod(catalog, doctorContext);
   }
 
   // Memory projection read verbs (memory.projections.list/get) over the canonical

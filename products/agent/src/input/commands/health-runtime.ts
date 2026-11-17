@@ -9,6 +9,7 @@ import {
 import '@goodvibes-jev/engine/platform/platform/config';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
 import { estimateConversationTokens } from '@goodvibes-jev/engine/platform/platform/core';
+import { formatDoctorReport } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { buildSetupReviewSnapshot } from './local-setup-review.ts';
 import { setupReviewLines } from '@goodvibes-jev/engine/terminal-shell/setup-review';
@@ -86,7 +87,7 @@ async function renderApprovalsHealth(ctx: CommandContext): Promise<string> {
   ].join('\n');
 }
 
-const HEALTH_USAGE = '[review|setup|approvals|host|provider|accounts|auth|settings|remote|mcp|memory|continuity|maintenance|repair [domain]]';
+const HEALTH_USAGE = '[review|setup|approvals|host|provider|accounts|auth|settings|remote|mcp|memory|continuity|maintenance|repair [domain]] | <symptom> (/doctor stuck turn runs that runbook\'s checks)';
 const HEALTH_SUBCOMMANDS = new Set(['review', 'open', 'panel', 'setup', 'approvals', 'host', 'services', 'provider', 'accounts', 'auth', 'settings', 'remote', 'mcp', 'memory', 'continuity', 'maintenance', 'repair']);
 
 export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
@@ -98,8 +99,15 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
     usage: HEALTH_USAGE,
     async handler(args, ctx) {
       const sub = (args[0] ?? 'review').toLowerCase();
-      if (!HEALTH_SUBCOMMANDS.has(sub)) {
-        ctx.print(`Unknown /health subcommand ${args[0]}. Usage: /health ${HEALTH_USAGE}`);
+      // Anything that is not a health domain is a symptom: find its runbook and
+      // run the checks against this app's live state (no model request).
+      if (sub === 'diagnose' || !HEALTH_SUBCOMMANDS.has(sub)) {
+        const symptom = (sub === 'diagnose' ? args.slice(1) : args).join(' ');
+        if (!symptom.trim()) {
+          ctx.print('Usage: /doctor <symptom>, for example /doctor stuck turn');
+          return;
+        }
+        ctx.print(formatDoctorReport(await requireReadModels(ctx).doctor.diagnose(symptom)).join('\n'));
         return;
       }
       try {

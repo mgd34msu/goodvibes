@@ -1,123 +1,68 @@
 /**
  * Playbook: Compaction Failure
  *
- * Diagnoses and resolves conversation compaction failures that block
- * new turns from starting.
+ * Conversation compaction that failed, with the context window filling up.
  */
-import type { Playbook, DiagnosticCheckResult } from '../types.js';
+import type { Playbook } from '../types.js';
 import { safeCheck } from '../safe-check.js';
+
+/** Share of the context window above which compaction is due. */
+const NEAR_FULL = 0.9;
 
 /** Compaction failure resolution playbook. */
 export const compactionFailurePlaybook: Playbook = {
   id: 'compaction-failure',
   name: 'Compaction Failure',
-  description:
-    'Diagnoses and resolves conversation compaction failures. ' +
-    'When compaction fails, new turns are blocked until the issue is resolved.',
+  description: 'Diagnoses a conversation compaction that failed while the context window fills up.',
   symptoms: [
-    'Compaction health check reports FAILED',
-    'New turn submissions rejected with BLOCK_NEW cascade',
-    'CompactionStateMachine stuck in error state',
-    'Context window approaching limit with no successful compaction',
-    'Compaction span shows repeated ERROR status',
+    'Compaction failed',
+    'Context window is full or nearly full',
+    'The model says the conversation is too long',
+    'Turns fail with a context length error',
   ],
   checks: [
     {
-      id: 'compaction.strategy-available',
-      label: 'Compaction strategy available',
-      description: 'Checks whether a compaction strategy is configured and operative.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'Compaction strategy availability requires live CompactionManager context.',
-          severity: 'info',
-          context: { hint: 'Inspect CompactionManager.currentStrategy, confirm it is not null' },
-        })),
+      id: 'compaction.state-machine',
+      label: 'Last compaction',
+      description: 'Whether the last compaction failed, and why.',
+      run: (ctx) => safeCheck(() => {
+        const { session } = ctx.store.getState();
+        const failed = session.compactionState === 'failed';
+        return {
+          passed: !failed,
+          summary: failed
+            ? `The last compaction failed${session.compactionError ? `: ${session.compactionError}` : '.'}`
+            : `Compaction is ${session.compactionState}${session.lastCompactedAt ? `; last ran ${Math.round((ctx.now() - session.lastCompactedAt) / 60_000)} min ago` : ''}.`,
+          severity: failed ? 'error' : 'info',
+        };
+      }),
     },
     {
       id: 'compaction.token-budget',
-      label: 'Token budget within limit',
-      description: 'Checks whether the current context window token count is within the compaction trigger threshold.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'Token budget check requires live ContextWindowManager context.',
-          severity: 'info',
-          context: { hint: 'Compare ContextWindowManager.currentTokens with config.compactionTriggerTokens' },
-        })),
-    },
-    {
-      id: 'compaction.state-machine',
-      label: 'Compaction state machine in error state',
-      description: 'Confirms the CompactionStateMachine is in an error state, not idle or running.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'State machine inspection requires live CompactionStateMachine context.',
-          severity: 'info',
-          context: { hint: 'Call CompactionStateMachine.getState(), expect "error" or "failed"' },
-        })),
+      label: 'Context window use',
+      description: 'The estimated size of the conversation against the model\'s context window.',
+      run: (ctx) => safeCheck(() => {
+        const { conversation, model } = ctx.store.getState();
+        const window = model.contextWindow;
+        if (!window) return { passed: true, evaluated: false, summary: 'The model\'s context window is not known.', severity: 'info' };
+        const share = conversation.estimatedContextTokens / window;
+        return {
+          passed: share < NEAR_FULL,
+          summary: `The conversation uses about ${Math.round(share * 100)}% of the ${window.toLocaleString('en-US')}-token context window.`,
+          severity: share >= 1 ? 'error' : share >= NEAR_FULL ? 'warning' : 'info',
+          context: { estimatedContextTokens: conversation.estimatedContextTokens, contextWindow: window },
+        };
+      }),
     },
   ],
   steps: [
-    {
-      step: 1,
-      title: 'Inspect compaction error telemetry',
-      action:
-        'Review compaction.* spans in the local ledger for ERROR status. ' +
-        'Note the error message, strategy, and token count at time of failure.',
-      kind: 'observe',
-      expectedOutcome: 'Cause identified from span error messages.',
-      automatable: false,
-    },
-    {
-      step: 2,
-      title: 'Reset the compaction state machine',
-      action:
-        'Reset the compaction state machine back to idle. ' +
-        'This unblocks new turns without re-attempting the failed compaction.',
-      kind: 'command',
-      expectedOutcome: 'CompactionStateMachine returns to idle; new turns unblocked.',
-      automatable: false,
-    },
-    {
-      step: 3,
-      title: 'Switch to a fallback compaction strategy',
-      action:
-        'If the default strategy continues to fail, switch to a simpler fallback ' +
-        '(e.g. truncation or summarization) to restore turn availability.',
-      kind: 'config',
-      expectedOutcome: 'Compaction succeeds with fallback strategy; turns resume.',
-      automatable: false,
-    },
-    {
-      step: 4,
-      title: 'Manually compact the conversation',
-      action:
-        'Trigger a manual compaction run with verbose logging to isolate the failure point.',
-      kind: 'command',
-      expectedOutcome: 'Compaction completes or fails with a detailed error message.',
-      automatable: false,
-    },
-    {
-      step: 5,
-      title: 'Review context window limits',
-      action:
-        'Verify that the configured context window limit matches the active model capabilities. ' +
-        'Reduce the turn token budget if needed to prevent repeated overflow.',
-      kind: 'config',
-      expectedOutcome: 'Token budget aligned with model; compaction triggering correctly.',
-      automatable: false,
-    },
+    { step: 1, title: 'Compact now', action: 'Run /compact to summarise the conversation and free the context window.', kind: 'command', command: '/compact', expectedOutcome: 'Compaction succeeds and context use drops.', automatable: false },
+    { step: 2, title: 'Keep a copy and start over', action: 'If compaction keeps failing, save the transcript with /export and start a new session with /clear.', kind: 'command', command: '/export', expectedOutcome: 'Work continues in a fresh session.', automatable: false },
+    { step: 3, title: 'Use a larger window', action: 'Switch to a model with a larger context window with /model.', kind: 'command', command: '/model', expectedOutcome: 'The conversation fits.', automatable: false },
   ],
   escalationCriteria: [
-    'Compaction fails consistently across all available strategies',
-    'Context window overflow preventing any new model calls',
-    'CompactionStateMachine crash-loops on reset',
-    'Token budget configuration is corrupt or missing',
+    'Compaction fails on a fresh session',
+    'Context use stays high right after a successful compaction',
   ],
-  tags: ['compaction', 'context-window', 'token-budget', 'turn-blocking'],
+  tags: ['compaction', 'context', 'tokens', 'memory'],
 };

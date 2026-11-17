@@ -1,10 +1,13 @@
 /**
  * Type definitions for operational runbooks.
  *
- * Playbooks are machine-readable structured runbooks consumed by the
- * diagnostics panel and the ops registry. Each playbook describes
- * symptoms, diagnostic checks, resolution steps, and escalation criteria.
+ * Playbooks are structured runbooks read by `/doctor <symptom>` in both
+ * terminal apps and by the `ops.doctor` operator method. Each playbook
+ * describes symptoms, diagnostic checks over live state, resolution steps
+ * that name real commands, and escalation criteria.
  */
+
+import type { OpsCheckContext } from './runtime-context.js';
 
 // ── Diagnostic check ─────────────────────────────────────────────────────────
 
@@ -17,7 +20,7 @@ export interface DiagnosticCheckResult {
   readonly passed: boolean;
   /** Human-readable summary of the check outcome. */
   readonly summary: string;
-  /** Optional structured context for the diagnostics panel. */
+  /** Optional structured detail behind the summary. */
   readonly context?: Record<string, string | number | boolean> | undefined;
   /** Severity when the check fails. */
   readonly severity: DiagnosticSeverity;
@@ -30,10 +33,10 @@ export interface DiagnosticCheckResult {
 }
 
 /**
- * A single diagnostic check.
+ * A single diagnostic check over the live state in its context.
  *
- * The `run` function must not throw, it should catch all internal errors
- * and return them as a failing check result.
+ * `run` must not throw: wrap it in `safeCheck`, which turns a throw into an
+ * unevaluated ("unknown") result.
  */
 export interface DiagnosticCheck {
   /** Unique identifier for this check (e.g. 'queue.overflow'). */
@@ -42,8 +45,8 @@ export interface DiagnosticCheck {
   readonly label: string;
   /** Longer description of what this check verifies. */
   readonly description: string;
-  /** Execute the check and return a result. Never throws. */
-  readonly run: () => Promise<DiagnosticCheckResult>;
+  /** Execute the check against live state and return a result. Never throws. */
+  readonly run: (context: OpsCheckContext) => Promise<DiagnosticCheckResult>;
 }
 
 // ── Playbook step ─────────────────────────────────────────────────────────────
@@ -60,14 +63,14 @@ export type PlaybookStepKind =
 export interface PlaybookStep {
   /** Step number (1-indexed). */
   readonly step: number;
-  /** Short title for display in the diagnostics panel. */
+  /** Short title for display. */
   readonly title: string;
   /** Detailed action description. */
   readonly action: string;
   /** Category of this step. */
   readonly kind: PlaybookStepKind;
   /**
-   * For 'command' steps: the command or API call to run.
+   * For 'command' steps: the slash command (or key) to use.
    * For 'config' steps: the config key and value to set.
    * For 'wait' steps: condition description.
    * Optional for 'observe' and 'escalate' steps.
@@ -90,13 +93,12 @@ export interface Playbook {
   /** Description of what this playbook addresses. */
   readonly description: string;
   /**
-   * Observable symptoms that suggest this playbook applies.
-   * Used by the diagnostics panel to surface relevant runbooks.
+   * Observable symptoms that suggest this playbook applies; the symptom
+   * search matches against these, the name, the description and the tags.
    */
   readonly symptoms: string[];
   /**
-   * Diagnostic checks to run when this playbook is triggered.
-   * Results are displayed in the diagnostics panel.
+   * Diagnostic checks to run when this playbook is matched.
    */
   readonly checks: DiagnosticCheck[];
   /** Ordered resolution steps. */
@@ -106,7 +108,7 @@ export interface Playbook {
    * automated remediation and requires human intervention.
    */
   readonly escalationCriteria: string[];
-  /** Tags for filtering/categorisation in the diagnostics panel. */
+  /** Tags; a symptom that names one picks this playbook first. */
   readonly tags: string[];
 }
 

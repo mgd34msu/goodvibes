@@ -1,124 +1,65 @@
 /**
  * Playbook: Plugin Degradation
  *
- * Diagnoses and resolves scenarios where a plugin is operating in a
- * degraded state, returning errors, crashing, or producing incorrect output.
+ * Plugins that failed to start, stopped, or run degraded.
  */
-import type { Playbook, DiagnosticCheckResult } from '../types.js';
+import type { Playbook } from '../types.js';
 import { safeCheck } from '../safe-check.js';
 
 /** Plugin degradation resolution playbook. */
 export const pluginDegradationPlaybook: Playbook = {
   id: 'plugin-degradation',
   name: 'Plugin Degradation',
-  description:
-    'Diagnoses and resolves plugins operating in a degraded state. ' +
-    'Covers plugin crashes, capability failures, and unsupported plugin versions.',
+  description: 'Diagnoses plugins that failed to start, stopped, or run degraded, and the tools they no longer provide.',
   symptoms: [
-    'Plugin health check returns DEGRADED or ERROR',
-    'Tool calls routed to the plugin consistently failing',
-    'Plugin span shows repeated ERROR events with short durations',
-    'Plugin capability telemetry shows 0 successful invocations',
-    'MCP server for the plugin is unresponsive',
+    'A plugin failed to load or start',
+    'Tools from a plugin are missing',
+    'Plugin errors in the activity log',
+    'A plugin was quarantined or disabled',
   ],
   checks: [
     {
       id: 'plugin.health-status',
-      label: 'Plugin health status',
-      description: 'Checks the current health status reported by the plugin.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'Plugin health status requires live PluginManager context.',
-          severity: 'info',
-          context: { hint: 'Inspect PluginManager.getHealth(pluginId)' },
-        })),
+      label: 'Plugins in error or degraded',
+      description: 'Plugins whose last lifecycle state is error or degraded.',
+      run: (ctx) => safeCheck(() => {
+        const { plugins } = ctx.store.getState();
+        const failing = [...plugins.plugins.values()].filter((plugin) => plugin.status === 'error' || plugin.status === 'degraded');
+        return {
+          passed: failing.length === 0,
+          summary: failing.length === 0
+            ? `${plugins.totalActive} plugin(s) active; none in error.`
+            : failing.slice(0, 5).map((plugin) => `${plugin.name}: ${plugin.status}${plugin.error ? ` (${plugin.error})` : ''}`).join('; '),
+          severity: failing.length === 0 ? 'info' : 'error',
+          context: { failing: failing.length, active: plugins.totalActive },
+        };
+      }),
     },
     {
       id: 'plugin.capability-available',
-      label: 'Required capability available',
-      description: 'Checks whether the plugin exposes the expected capability/tool.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'Capability availability requires live plugin registry context.',
-          severity: 'info',
-          context: { hint: 'Run PluginRegistry.listCapabilities(pluginId)' },
-        })),
-    },
-    {
-      id: 'plugin.version-compat',
-      label: 'Plugin version supported',
-      description: 'Checks whether the plugin version is supported by the current runtime version.',
-      run: async (): Promise<DiagnosticCheckResult> =>
-        safeCheck(async () => ({
-          passed: false,
-          evaluated: false,
-          summary: 'Version support requires live plugin manifest context.',
-          severity: 'info',
-          context: { hint: 'Compare plugin.manifest.runtimeVersion with runtime.version' },
-        })),
+      label: 'Enabled plugins not active',
+      description: 'Plugins that are enabled but not running, so their tools are not offered.',
+      run: (ctx) => safeCheck(() => {
+        const { plugins } = ctx.store.getState();
+        if (!plugins.initialLoadComplete) return { passed: true, summary: 'Plugins are still loading.', severity: 'info' };
+        const idle = [...plugins.plugins.values()].filter((plugin) => plugin.enabled && !plugin.active);
+        return {
+          passed: idle.length === 0,
+          summary: idle.length === 0 ? 'Every enabled plugin is active.' : `Enabled but not active: ${idle.slice(0, 5).map((plugin) => plugin.name).join(', ')}.`,
+          severity: idle.length === 0 ? 'info' : 'warning',
+          context: { enabledNotActive: idle.length },
+        };
+      }),
     },
   ],
   steps: [
-    {
-      step: 1,
-      title: 'Inspect plugin error telemetry',
-      action:
-        'Review the local ledger for plugin.* spans with ERROR status. ' +
-        'Note the error message, plugin ID, and capability being invoked.',
-      kind: 'observe',
-      expectedOutcome: 'Cause identified from span error messages.',
-      automatable: false,
-    },
-    {
-      step: 2,
-      title: 'Restart the plugin',
-      action:
-        'Trigger a graceful plugin restart via the PluginManager. ' +
-        'This resets the plugin process and re-establishes MCP connection.',
-      kind: 'command',
-      expectedOutcome: 'Plugin lifecycle spans show INIT → READY sequence.',
-      automatable: false,
-    },
-    {
-      step: 3,
-      title: 'Disable degraded plugin',
-      action:
-        'If the restart does not recover the plugin, disable it to prevent ' +
-        'further tool-call failures. Other plugins and turns can continue.',
-      kind: 'command',
-      expectedOutcome: 'Plugin disabled; tool calls routed away or failing fast.',
-      automatable: false,
-    },
-    {
-      step: 4,
-      title: 'Check plugin version support',
-      action:
-        'Verify that the installed plugin version is supported by the current runtime. ' +
-        'Update or downgrade the plugin if needed.',
-      kind: 'observe',
-      expectedOutcome: 'Compatible version identified and installed.',
-      automatable: false,
-    },
-    {
-      step: 5,
-      title: 'Re-enable plugin after fix',
-      action:
-        'After resolving the root cause, re-enable the plugin and verify ' +
-        'capability invocations succeed.',
-      kind: 'command',
-      expectedOutcome: 'Plugin health returns to HEALTHY; tool calls succeed.',
-      automatable: false,
-    },
+    { step: 1, title: 'See why it failed', action: 'Run /plugin inspect <name> in the goodvibes terminal app for the plugin\'s state, trust and last error.', kind: 'command', command: '/plugin inspect <name>', expectedOutcome: 'The cause is named.', automatable: false },
+    { step: 2, title: 'Reload it', action: 'Fix the cause (a missing dependency, a setting) and reload the plugin from /plugin.', kind: 'command', command: '/plugin', expectedOutcome: 'The plugin is active and its tools are offered again.', automatable: false },
+    { step: 3, title: 'Turn it off', action: 'If it keeps failing, disable it from /plugin so it stops being retried.', kind: 'command', command: '/plugin', expectedOutcome: 'The plugin is disabled; everything else is unaffected.', automatable: false },
   ],
   escalationCriteria: [
-    'Plugin crashes immediately after restart (< 5 s uptime)',
-    'All available plugin versions are unsupported by the runtime',
-    'Plugin degradation causes cascading failures in dependent plugins',
-    'MCP server for the plugin cannot be started (port conflict, missing binary)',
+    'A plugin fails again right after a reload',
+    'A plugin is quarantined and you did not expect it',
   ],
-  tags: ['plugin', 'mcp', 'capability', 'crash', 'degradation'],
+  tags: ['plugin', 'degraded', 'error', 'quarantine'],
 };

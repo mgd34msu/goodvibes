@@ -21,18 +21,16 @@ registry.register(memorySearchRerank);
 registry.register(knowledgeInjectionRerank);
 registry.register(memoryUsage);
 
-// Runtime: compaction, forensics, ops, tool contracts.
+// Runtime: compaction, forensics, tool contracts.
 // (The forensics classifier reads error messages through engine.failure-reading,
 // registered in packages/engine/errors/src/judgment-registry.ts.)
 import { compactionFidelity } from './compaction/batteries/compaction-fidelity.js';
 import { compactionRetention } from './compaction/batteries/compaction-retention.js';
 import { recommendationFit } from './ecosystem/batteries/recommendation-fit.js';
-import { playbookSearch } from './ops/batteries/playbook-search.js';
 import { descriptionQuality } from './tools/batteries/description-quality.js';
 registry.register(compactionFidelity);
 registry.register(compactionRetention);
 registry.register(recommendationFit);
-registry.register(playbookSearch);
 registry.register(descriptionQuality);
 
 // Runtime: session return, setup contract, system messages.

@@ -1,28 +1,14 @@
-import { decisionOrClassic } from '../decision-policy.js';
 import { rankClassicCatalog } from '../classic-catalog.js';
 /**
- * Operational runbook registry for the GoodVibes platform runtime.
+ * Operational runbooks: `/doctor <symptom>` in both terminal apps and the
+ * `ops.doctor` operator method find the playbook for a symptom and run its
+ * checks against the live state of the process that answers.
  *
- * Provides a machine-readable playbook registry consumed by the diagnostics
- * panel. Each playbook describes symptoms, diagnostic checks, resolution
- * steps, and escalation criteria for a specific failure scenario.
- *
- * @example
- * ```ts
- * import { getPlaybookRegistry, getPlaybook } from './index.js';
- *
- * const registry = getPlaybookRegistry();
- * const playbook = getPlaybook('stuck-turn');
- * if (playbook) {
- *   for (const check of playbook.checks) {
- *     const result = await check.run();
- *     console.log(check.label, result.passed ? 'PASS' : 'FAIL', result.summary);
- *   }
- * }
- * ```
+ * Finding a playbook is a lookup over seven fixed entries (an id or tag the
+ * symptom names, then word overlap with names, descriptions and symptoms); no
+ * model is asked.
  */
 
-// Re-export types
 export type {
   DiagnosticSeverity,
   DiagnosticCheckResult,
@@ -34,7 +20,6 @@ export type {
   PlaybookRegistry,
 } from './types.js';
 
-// Re-export all playbooks
 export {
   stuckTurnPlaybook,
   reconnectFailurePlaybook,
@@ -45,12 +30,17 @@ export {
   compactionFailurePlaybook,
 } from './playbooks/index.js';
 
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { retainStrictJudgmentJson, prepareJudgmentResult } from '../../gate/judgment-result.js';
-import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { requireActingReading } from '../../types/judgment-held.js';
-import type { Playbook, PlaybookRegistry, PlaybookRegistryEntry } from './types.js';
-import { playbookCandidate, playbookSearch } from './batteries/playbook-search.js';
+export {
+  createOpsCheckContext,
+  createOpsEventObserver,
+  type OpsCheckContext,
+  type OpsCheckContextOptions,
+  type OpsPendingApproval,
+} from './runtime-context.js';
+
+import type { DiagnosticCheckResult, Playbook, PlaybookRegistry, PlaybookRegistryEntry, PlaybookStep } from './types.js';
+import type { OpsCheckContext } from './runtime-context.js';
+import { safeCheck } from './safe-check.js';
 import {
   stuckTurnPlaybook,
   reconnectFailurePlaybook,
@@ -70,87 +60,117 @@ const ALL_PLAYBOOKS: readonly Playbook[] = [
   exportRecoveryPlaybook,
   sessionUnrecoverablePlaybook,
   compactionFailurePlaybook,
-] as const;
+];
 
 /** Registry version, bump when playbooks are added or updated. */
-export const REGISTRY_VERSION = '1.0.0';
+export const REGISTRY_VERSION = '2.0.0';
 
-/**
- * Build and return the playbook registry.
- *
- * The registry is a Map keyed by playbook ID for O(1) lookup.
- */
+/** The registry, keyed by playbook id. */
 export function getPlaybookRegistry(): PlaybookRegistry {
   const registry: PlaybookRegistry = new Map<string, PlaybookRegistryEntry>();
   for (const playbook of ALL_PLAYBOOKS) {
-    registry.set(playbook.id, {
-      playbook,
-      version: REGISTRY_VERSION,
-      updatedAt: new Date().toISOString(),
-    });
+    registry.set(playbook.id, { playbook, version: REGISTRY_VERSION, updatedAt: '2026-11-16' });
   }
   return registry;
 }
 
-/**
- * Look up a single playbook by ID.
- *
- * @param id - The playbook ID (e.g. 'stuck-turn').
- * @returns The playbook, or undefined if not found.
- */
+/** Look up a single playbook by id. */
 export function getPlaybook(id: string): Playbook | undefined {
   return ALL_PLAYBOOKS.find((p) => p.id === id);
 }
 
-/**
- * Find playbooks whose tags overlap with the provided set.
- *
- * @param tags - One or more tag strings to match.
- * @returns Playbooks that have at least one matching tag.
- */
+/** Playbooks with at least one of these tags. */
 export function findPlaybooksByTag(...tags: string[]): Playbook[] {
-  const tagSet = new Set(tags);
+  const tagSet = new Set(tags.map((tag) => tag.toLowerCase()));
   return ALL_PLAYBOOKS.filter((p) => p.tags.some((t) => tagSet.has(t)));
 }
 
-/** Decision site for the symptom search. */
-export const PLAYBOOK_SEARCH_SITE = 'runtime.ops.playbook-search';
-
 /**
- * Find the playbooks that address a symptom described in free text.
- *
- * Each playbook is read against the query by Jev (`engine.ops.playbook-search`,
- * the rerank pattern, one request per playbook); a playbook is returned when
- * the reading is a confident yes. Classic instead lists literal token matches
- * with Classic provenance; it never runs a check or remediation during search.
- *
- * @param query - The symptom in the operator's own words.
- * @returns Matching playbooks, best match first.
+ * The playbooks for a symptom in the person's own words, best first: an exact
+ * id, then playbooks a word of the symptom tags, then word overlap with names,
+ * descriptions and symptoms. Empty when nothing matches.
  */
-export type PlaybookSearchMatch = Playbook & { readonly provenance?: 'classic'; readonly scoreSource?: 'literal-overlap' };
-export async function findPlaybooksBySymptom(query: string, options: { signal?: AbortSignal } = {}): Promise<PlaybookSearchMatch[]> {
-  const candidates = ALL_PLAYBOOKS.map(playbookCandidate);
-  const original = retainStrictJudgmentJson({ query, candidates });
-  snapshotJudgmentInput(original.snapshot);
-  const version = JSON.stringify(original.snapshot.candidates);
-  const current = () => {
-    original.assertCurrent(); options.signal?.throwIfAborted();
-    if (JSON.stringify(snapshotJudgmentInput(ALL_PLAYBOOKS.map(playbookCandidate))) !== version) throw new Error('Playbook catalog changed during search.');
-  };
-  return decisionOrClassic(async () => {
-    const owner = captureJudgmentPort(PLAYBOOK_SEARCH_SITE, { signal: options.signal, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
-    const { ranked } = await playbookSearch.rerank(owner.port, original.snapshot.query, original.snapshot.candidates,
-      { site: PLAYBOOK_SEARCH_SITE, signal: owner.signal, beforeAttempt: owner.assertCurrent });
-    owner.assertCurrent();
-    for (const entry of ranked) requireActingReading(entry.reading);
-    const byId = new Map(ALL_PLAYBOOKS.map((p) => [p.id, p]));
-    return ranked.filter((r) => r.reading.verdict === 'yes').map((r) => byId.get(r.id)!);
-  }, () => {
-    current();
-    const matches = rankClassicCatalog(ALL_PLAYBOOKS, query, playbook => ({ id: playbook.id,
-      description: `${playbook.name} ${playbook.description} ${playbook.symptoms.join(' ')}` }))
-      .map(match => ({ ...match.entry, provenance: 'classic' as const, scoreSource: 'literal-overlap' as const }));
-    current();
-    return matches;
-  });
+export function findPlaybooksBySymptom(query: string): Playbook[] {
+  const text = query.trim().toLowerCase();
+  if (!text) return [];
+  const exact = getPlaybook(text);
+  if (exact) return [exact];
+  const words = text.split(/[^a-z0-9]+/).filter(Boolean);
+  const tagged = findPlaybooksByTag(...words);
+  const ranked = rankClassicCatalog(ALL_PLAYBOOKS, text, (playbook) => ({
+    id: playbook.id,
+    description: `${playbook.name} ${playbook.description} ${playbook.symptoms.join(' ')} ${playbook.tags.join(' ')}`,
+  })).map((match) => match.entry);
+  return [...new Set([...tagged, ...ranked])];
+}
+
+/** One check's outcome: pass, fail, or unknown when it could not look. */
+export type DoctorCheckOutcome = 'pass' | 'fail' | 'unknown';
+
+export interface DoctorCheckReport {
+  readonly id: string;
+  readonly label: string;
+  readonly outcome: DoctorCheckOutcome;
+  readonly severity: DiagnosticCheckResult['severity'];
+  readonly summary: string;
+}
+
+export interface DoctorPlaybookReport {
+  readonly id: string;
+  readonly name: string;
+  readonly checks: readonly DoctorCheckReport[];
+  readonly steps: readonly PlaybookStep[];
+}
+
+export interface DoctorReport {
+  readonly symptom: string;
+  /** The matched playbooks, best first; empty when the symptom matched none. */
+  readonly playbooks: readonly DoctorPlaybookReport[];
+  /** Every playbook id and name, for a symptom that matched nothing. */
+  readonly available: readonly { readonly id: string; readonly name: string }[];
+}
+
+/** Most playbooks a diagnosis runs for one symptom. */
+const MAX_PLAYBOOKS = 2;
+
+/** Find the playbooks for a symptom and run their checks against live state. Paid only when asked. */
+export async function runDoctor(symptom: string, context: OpsCheckContext): Promise<DoctorReport> {
+  const matched = findPlaybooksBySymptom(symptom).slice(0, MAX_PLAYBOOKS);
+  const playbooks = await Promise.all(matched.map(async (playbook): Promise<DoctorPlaybookReport> => ({
+    id: playbook.id,
+    name: playbook.name,
+    steps: playbook.steps,
+    checks: await Promise.all(playbook.checks.map(async (check): Promise<DoctorCheckReport> => {
+      const result = await safeCheck(() => check.run(context));
+      return {
+        id: check.id,
+        label: check.label,
+        outcome: result.evaluated === false ? 'unknown' : result.passed ? 'pass' : 'fail',
+        severity: result.severity,
+        summary: result.summary,
+      };
+    })),
+  })));
+  return { symptom, playbooks, available: ALL_PLAYBOOKS.map((p) => ({ id: p.id, name: p.name })) };
+}
+
+/** The plain lines a terminal prints for a diagnosis. */
+export function formatDoctorReport(report: DoctorReport): string[] {
+  if (report.playbooks.length === 0) {
+    return [
+      `Nothing matched "${report.symptom}".`,
+      `Name one of: ${report.available.map((p) => p.id).join(', ')}; for example /doctor stuck turn.`,
+    ];
+  }
+  const lines: string[] = [];
+  for (const playbook of report.playbooks) {
+    lines.push(`${playbook.name}`);
+    for (const check of playbook.checks) {
+      lines.push(`  ${check.outcome.toUpperCase().padEnd(7)} ${check.label}: ${check.summary}`);
+    }
+    const failing = playbook.checks.some((check) => check.outcome === 'fail');
+    lines.push(failing ? '  Next:' : '  If it still happens:');
+    for (const step of playbook.steps) lines.push(`    ${step.step}. ${step.title}: ${step.action}`);
+  }
+  return lines;
 }

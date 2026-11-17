@@ -85,7 +85,7 @@ export interface OrchestrationEngineDeps {
   readonly stateNamespace?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly createWorktree?: (() => WorktreeOps) | undefined;
-  readonly priceUsage?: ((model: string | undefined, usage: WorkItemUsage) => number | null) | undefined;
+  readonly priceUsage?: ((model: string | undefined, usage: WorkItemUsage, provider?: string | undefined) => number | null) | undefined;
   /** Provenance for the same resolution priceUsage prices with, stamped onto committed usage records at pricing time. */
   readonly priceProvenance?: PriceProvenanceFn | undefined;
   readonly skipClaimVerification?: boolean | undefined;

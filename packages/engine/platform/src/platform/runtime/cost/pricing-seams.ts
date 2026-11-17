@@ -18,7 +18,7 @@ import { computeUsageCostUsd, type ResolvedModelPricing, type UsageTokenCounts }
 
 export interface PricingSeams {
   readonly priceUsage: (model: string | undefined, usage: UsageTokenCounts, provider?: string | undefined) => number | null;
-  readonly priceProvenance: (model: string | undefined) => { source: 'user' | 'provider' | 'catalog'; asOf?: string | undefined } | null;
+  readonly priceProvenance: (model: string | undefined, provider?: string | undefined) => { source: 'user' | 'provider' | 'catalog'; asOf?: string | undefined } | null;
 }
 
 export function buildPricingSeams(
@@ -26,9 +26,9 @@ export function buildPricingSeams(
 ): PricingSeams {
   return {
     priceUsage: (model, usage, provider) => (model ? computeUsageCostUsd(registry.resolveModelPricing(model, provider), usage, provider) : null),
-    priceProvenance: (model) => {
+    priceProvenance: (model, provider) => {
       if (!model) return null;
-      const resolved = registry.resolveModelPricing(model);
+      const resolved = registry.resolveModelPricing(model, provider);
       return resolved.status === 'priced' ? { source: resolved.source, asOf: resolved.asOf } : null;
     },
   };

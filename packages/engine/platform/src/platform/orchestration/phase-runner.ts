@@ -111,7 +111,7 @@ export interface PhaseRunnerDeps {
   readonly cancellation: CancellationRegistry;
   /** Engine-owned phase signal, registered before worktree setup or any spawn callback. */
   readonly cancellationSignal?: AbortSignal | undefined;
-  readonly priceUsage?: ((model: string | undefined, usage: WorkItemUsage) => number | null) | undefined;
+  readonly priceUsage?: ((model: string | undefined, usage: WorkItemUsage, provider?: string | undefined) => number | null) | undefined;
   /** Provenance for the same resolution priceUsage prices with, stamped onto the committed usage record at pricing time. */
   readonly priceProvenance?: PriceProvenanceFn | undefined;
   readonly skipClaimVerification?: boolean | undefined;
@@ -243,12 +243,13 @@ export function usageFromRecord(
   let provenance: ReturnType<PriceProvenanceFn> = null;
   if (u && priceUsage) {
     try {
-      const priced = priceUsage(record?.model, { ...base, costUsd: null, costState: 'unpriced' });
+      // The provider too, so this figure matches cost attribution's for the same run.
+      const priced = priceUsage(record?.model, { ...base, costUsd: null, costState: 'unpriced' }, record?.provider);
       if (priced !== null) {
         costUsd = priced;
         costState = 'priced';
         // Same resolution instant as the dollars, never re-derived later.
-        provenance = priceProvenance?.(record?.model) ?? null;
+        provenance = priceProvenance?.(record?.model, record?.provider) ?? null;
       }
     } catch {
       // stays unpriced, never fabricate a cost from a throwing pricer.

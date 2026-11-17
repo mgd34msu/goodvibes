@@ -47,9 +47,9 @@ export interface AgentAdapterContext {
   readonly agentIdByOrchestrationNodeId: ReadonlyMap<string, string>;
   /** All agent ids present in this snapshot. */
   readonly agentIds: ReadonlySet<string>;
-  readonly priceUsage?: ((model: string | undefined, usage: ProcessUsage) => number | null) | undefined;
+  readonly priceUsage?: ((model: string | undefined, usage: ProcessUsage, provider?: string | undefined) => number | null) | undefined;
   /** Provenance for the same resolution priceUsage prices with, stamped onto the node at pricing time. */
-  readonly priceProvenance?: ((model: string | undefined) => { readonly source: 'user' | 'provider' | 'catalog'; readonly asOf?: string | undefined } | null) | undefined;
+  readonly priceProvenance?: ((model: string | undefined, provider?: string | undefined) => { readonly source: 'user' | 'provider' | 'catalog'; readonly asOf?: string | undefined } | null) | undefined;
   /**
    * True when the registry was constructed with a `messageBus` dep, gates
    * `steerable`. Without it, steering has no delivery mechanism, so every
@@ -177,7 +177,8 @@ export function adaptAgent(record: AgentRecord, ctx: AgentAdapterContext): Proce
   if (usage && ctx.priceUsage) {
     let priced: number | null = null;
     try {
-      priced = ctx.priceUsage(record.model, usage);
+      // The provider too, so the fleet figure matches cost attribution's for the same run.
+      priced = ctx.priceUsage(record.model, usage, record.provider);
     } catch {
       priced = null;
     }
@@ -185,7 +186,7 @@ export function adaptAgent(record: AgentRecord, ctx: AgentAdapterContext): Proce
       costUsd = priced;
       costState = 'priced';
       // Same resolution instant as the dollars, never re-derived later.
-      const provenance = ctx.priceProvenance?.(record.model) ?? null;
+      const provenance = ctx.priceProvenance?.(record.model, record.provider) ?? null;
       if (provenance) {
         costSource = provenance.source;
         pricingAsOf = provenance.asOf;

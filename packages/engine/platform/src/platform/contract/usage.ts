@@ -20,8 +20,8 @@ import { emptyWorkItemUsage, mergeWorkItemUsage, type PriceProvenanceFn, type Wo
 import type { AgentRecord } from '../tools/agent/index.js';
 import type { Contract, JudgmentUsage } from './types.js';
 
-/** Prices a usage record for a model; null when the model has no price. */
-export type PriceUsageFn = (model: string | undefined, usage: WorkItemUsage) => number | null;
+/** Prices a usage record for a model; null when the model has no price. `provider` gives cache tokens that provider's published ratio. */
+export type PriceUsageFn = (model: string | undefined, usage: WorkItemUsage, provider?: string | undefined) => number | null;
 
 export interface UsagePricing {
   readonly priceUsage: PriceUsageFn;

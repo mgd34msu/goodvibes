@@ -241,7 +241,7 @@ export interface PricingProvenance {
   readonly asOf?: string | undefined;
 }
 
-export type PriceProvenanceFn = (model: string | undefined) => PricingProvenance | null;
+export type PriceProvenanceFn = (model: string | undefined, provider?: string | undefined) => PricingProvenance | null;
 
 /**
  * One unit of pipeline work. `visits` counts the runs of each phase, keyed by

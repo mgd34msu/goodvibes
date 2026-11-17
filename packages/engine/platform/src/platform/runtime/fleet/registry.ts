@@ -185,9 +185,9 @@ export interface ProcessRegistryDeps {
   /** Optional: feeds the fine-grained agent activity side-table. Without it the registry degrades to coarse states. */
   readonly runtimeBus?: RuntimeEventBus | undefined;
   /** Optional: honest cost pricing. Return null when the model is unknown, NEVER fabricate. */
-  readonly priceUsage?: ((model: string | undefined, usage: ProcessUsage) => number | null) | undefined;
+  readonly priceUsage?: ((model: string | undefined, usage: ProcessUsage, provider?: string | undefined) => number | null) | undefined;
   /** Optional: provenance for the same resolution priceUsage prices with (costSource + as-of date on priced nodes). */
-  readonly priceProvenance?: ((model: string | undefined) => { readonly source: 'user' | 'provider' | 'catalog'; readonly asOf?: string | undefined } | null) | undefined;
+  readonly priceProvenance?: ((model: string | undefined, provider?: string | undefined) => { readonly source: 'user' | 'provider' | 'catalog'; readonly asOf?: string | undefined } | null) | undefined;
   readonly now?: (() => number) | undefined;
   readonly stalledThresholdMs?: number | undefined;
   /** Stall-tell threshold: a live node quiet this long gains the marker (default 5 min). */

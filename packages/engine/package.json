@@ -3132,6 +3132,11 @@
       "types": "./terminal-shell/dist/cli-workspace-commands.d.ts",
       "import": "./terminal-shell/dist/cli-workspace-commands.js"
     },
+    "./terminal-shell/cli-one-shot-services": {
+      "bun": "./terminal-shell/src/cli-one-shot-services.ts",
+      "types": "./terminal-shell/dist/cli-one-shot-services.d.ts",
+      "import": "./terminal-shell/dist/cli-one-shot-services.js"
+    },
     "./terminal-shell/shell-core-actions": {
       "bun": "./terminal-shell/src/shell-core-actions.ts",
       "types": "./terminal-shell/dist/shell-core-actions.d.ts",

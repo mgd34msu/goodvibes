@@ -192,6 +192,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     triggers: 'host',
     // This surface runs follow-ups for the sessions it hosts behind its build guard (below).
     continuationRunner: 'product',
+    // Contracts left on disk are taken up by the long-lived hosts that follow them
+    // (bootstrap.ts, for the interactive TUI and headless runs), never by a
+    // one-shot command's graph that closes a moment later.
+    contractRecovery: 'product',
     taskGraphReaping: 'never',
     profileCapture: false,
     extras: (base, scope) => {

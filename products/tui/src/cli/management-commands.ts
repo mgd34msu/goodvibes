@@ -24,7 +24,10 @@ import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs,
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
 import { classifyBindPosture, isNetworkFacing } from '@goodvibes-jev/engine/terminal-shell';
 import type { CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
-import type { RuntimeServices } from '../runtime/services.ts';
+import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
+import { withProviderServices, withSessionServices, type OneShotProviderServices, type OneShotSessionServices } from './one-shot-services.ts';
 import {
   formatJsonOrText,
   openBrowser,
@@ -128,7 +131,10 @@ interface PairingHandoffCreateResult {
 }
 
 export async function renderPairing(runtime: CliCommandRuntime): Promise<string> {
-  return await withRuntimeServices(runtime, async (services) => {
+  // The daemon mints the token; this process only asks it and prints the answer,
+  // so no runtime of the folder the command was typed in is built.
+  const daemonVerbs = createDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
+  const output = await (async (): Promise<string> => {
     // Freeze a stable web origin once (never clobbering a user-set value) so the
     // printed link and the daemon's own handoff origin agree and survive a DHCP
     // lease change where a stable name exists. The verb re-derives the same origin
@@ -143,7 +149,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     // local `services.gatewayMethods` catalog only forwards invokable
     // built-ins (runtime/gateway-daemon-forward.ts); the daemon verb caller is
     // the direct route for this one and refuses honestly when no daemon is reachable.
-    const result = await services.daemonVerbs.invoke<PairingHandoffCreateResult>('pairing.handoff.create', {
+    const result = await daemonVerbs.invoke<PairingHandoffCreateResult>('pairing.handoff.create', {
       name,
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
     });
@@ -171,7 +177,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     // Tailscale detection is read-only here (the interactive serve lives in the
     // pairing modal); when detected with an https MagicDNS URL, name the encrypted
     // path. Absence stays quiet.
-    lines.push(...(await renderPairingTailscaleLines(services)));
+    lines.push(...(await renderPairingTailscaleLines(daemonVerbs)));
     lines.push('', qr);
     // A device that cannot resolve the name in the link (no mDNS, not on the
     // tailnet) can still use the routable address with the same one-time token.
@@ -179,7 +185,13 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
       lines.push('', 'If the link does not open on the device, use the address instead:', `  ${webOrigin.alternateOrigin}${link.slice(webOrigin.origin.length)}`);
     }
     return lines.join('\n');
-  }, { modelData: 'skip' });
+  })();
+  // A stable web origin frozen above is a daemon setting: wait for the daemon's
+  // answer before this process exits, and say if it refused.
+  for (const refused of await runtime.configManager.settleDaemonWrites()) {
+    process.stderr.write(`The daemon refused ${refused.key}; it was not changed: ${summarizeError(refused.error)}\n`);
+  }
+  return output;
 }
 
 interface TailscaleGetResult {
@@ -194,9 +206,9 @@ interface TailscaleGetResult {
  * interactive one-action serve lives in the pairing modal). Quiet, an empty
  * array, when tailscale is absent or the probe fails.
  */
-async function renderPairingTailscaleLines(services: RuntimeServices): Promise<string[]> {
+async function renderPairingTailscaleLines(daemonVerbs: DaemonVerbCaller): Promise<string[]> {
   try {
-    const ts = await services.daemonVerbs.invoke<TailscaleGetResult>('tailscale.get', {});
+    const ts = await daemonVerbs.invoke<TailscaleGetResult>('tailscale.get', {});
     if (!ts.available) return [];
     if (ts.httpsUrl) return ['', `Encrypted access (Tailscale): ${ts.httpsUrl}`];
     return ['', 'Tailscale detected: run it as a serve target for encrypted https access (see the pairing modal).'];
@@ -253,7 +265,8 @@ export function renderWeb(runtime: CliCommandRuntime): string {
   );
 }
 
-export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRuntime, RuntimeServices>(withRuntimeServices, {
+export const { renderSubscriptions } = createCliSubscriptionView<CliCommandRuntime, OneShotProviderServices>(
+  (runtime, fn) => withProviderServices(runtime, fn, { modelData: 'skip' }), {
   inline: true,
   manualOnly: false,
   binary: () => 'goodvibes',
@@ -272,12 +285,12 @@ export const { runSecrets } = createCliSecretsCommand<CliCommandRuntime>({
   deleteScope: (_key, requested) => requested,
   relocation: () => [],
 });
-export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCommandRuntime, RuntimeServices>(withRuntimeServices, {
+export const { handleSessions, handleTasks } = createCliWorkspaceCommands<CliCommandRuntime, OneShotSessionServices>(withSessionServices, {
   binary: () => 'goodvibes',
   inline: true,
   time: (timestamp) => new Date(timestamp).toISOString(),
   allowSubmit: true,
-  verbs: (_runtime, services) => services.daemonVerbs,
+  verbs: (runtime) => createDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory }),
   async submit(runtime, rest) {
     const prompt = rest.join(' ').trim();
     if (!prompt) return cliCommandRefusal(runtime.cli, 'usage', 'Usage: goodvibes tasks submit <prompt>');

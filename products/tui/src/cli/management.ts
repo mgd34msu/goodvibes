@@ -1,6 +1,7 @@
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
 export { buildSyntheticChainEntries, formatSyntheticChainText } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
-import type { RuntimeServices } from '../runtime/services.ts';
+import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
+import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
 import 'node:fs';
 import 'node:path';
 
@@ -40,7 +41,6 @@ import {
   yesNo,
   formatJsonOrText,
   hasCommandFlag,
-  withRuntimeServices,
   runNonInteractiveAgent,
   isPresentConfigValue,
   urlHostForBindHost,
@@ -94,7 +94,16 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult
   const ok = (output: string): AuthCommandResult => ({ output, exitCode: 0 });
   const notFound = (output: string): AuthCommandResult => ({ output, exitCode: 1 });
   const usage = (output: string): AuthCommandResult => ({ output, exitCode: 2 });
-  return await withRuntimeServices(runtime, (services): AuthCommandResult => {
+  // The local user file and the setup credential are this user's own files: the
+  // command opens them alone, not the whole runtime of the folder it was typed in.
+  const authPaths = readAuthPaths(runtime);
+  const services = {
+    localUserAuthManager: new UserAuthManager({
+      bootstrapFilePath: authPaths.userStorePath,
+      bootstrapCredentialPath: authPaths.bootstrapCredentialPath,
+    }),
+  };
+  {
     const [sub = 'status', ...rawRest] = runtime.cli.commandArgs;
     const rest = commandValues(rawRest);
     if (sub === 'add-user' || sub === 'add') {
@@ -180,7 +189,7 @@ async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult
         `  operator tokens: ${paths.operatorTokenPresent ? 'present' : 'missing'} (${paths.operatorTokenPath})`,
       ].join('\n'),
     ));
-  }, { modelData: 'skip' });
+  }
 }
 
 export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Promise<CliCommandResult> {
@@ -280,7 +289,7 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
   }
 }
 
-const { renderProviders, renderModels } = createCliProviderViews<CliCommandRuntime, RuntimeServices>(withRuntimeServices, {
+const { renderProviders, renderModels } = createCliProviderViews<CliCommandRuntime, OneShotProviderServices>(withProviderServices, {
   surface: 'tui',
   enrichModelFamilies: true,
   syntheticCatalog: true,

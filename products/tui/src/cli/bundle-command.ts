@@ -1,6 +1,6 @@
 import { createSupportBundleCommand } from '@goodvibes-jev/engine/terminal-shell/support-bundle-command';
-import type { RuntimeServices } from '../runtime/services.ts';
-import { readAuthPaths, withRuntimeServices } from './management-utils.ts';
+import { readAuthPaths } from './management-utils.ts';
+import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveRouterDeps } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -15,7 +15,7 @@ import { buildCliServicePosture } from './service-posture.ts';
 
 export const handleBundleCommand = createSupportBundleCommand<
   CliCommandRuntime,
-  RuntimeServices,
+  OneShotProviderServices,
   Awaited<ReturnType<typeof buildCliServicePosture>>
 >(
   {
@@ -27,7 +27,7 @@ export const handleBundleCommand = createSupportBundleCommand<
       configManager: runtime.configManager,
       daemonHome: resolveGoodVibesDaemonHome(runtime.homeDirectory),
     }),
-    withServices: withRuntimeServices,
+    withServices: withProviderServices,
     providerRegistry: (services) => services.providerRegistry,
     classifyProvider: classifyProviderSetup,
     servicePosture: buildCliServicePosture,

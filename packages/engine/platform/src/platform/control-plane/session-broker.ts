@@ -173,7 +173,6 @@ export class SharedSessionBroker {
   private bootSweepDone = false;
   private readonly runtimeBusBridge = new SharedSessionRuntimeBusBridge();
   private readonly changeListeners = new Set<() => void>();
-  private intakeHold: (() => boolean) | null = null;
   /** provider message key -> the input that holds it; built from the persisted rows on first use. */
   private providerMessageIndex: Map<string, { sessionId: string; inputId: string }> | null = null;
   private eventPublisher: SharedSessionEventPublisher | null = null;
@@ -246,24 +245,6 @@ export class SharedSessionBroker {
 
   setEventPublisher(publisher: SharedSessionEventPublisher | null): void {
     this.eventPublisher = publisher;
-  }
-
-  /**
-   * While the hold answers true, new turns are refused with a retryable
-   * WORKSPACE_BUSY (409) instead of being recorded against stores that are
-   * moving to another working directory. Set post-construction by the host
-   * that owns the workspace swap.
-   */
-  setIntakeHold(hold: (() => boolean) | null): void {
-    this.intakeHold = hold;
-  }
-
-  private assertIntakeOpen(): void {
-    if (this.intakeHold?.() !== true) return;
-    throw Object.assign(
-      new Error('A workspace swap is in progress, so this message was not recorded. Retry in a moment, once the swap has finished.'),
-      { code: 'WORKSPACE_BUSY', status: 409, retryAfterMs: 1000 },
-    );
   }
 
   /**
@@ -1236,7 +1217,6 @@ export class SharedSessionBroker {
     allowSpawnFallback: boolean,
     onQueued?: (input: SharedSessionInputRecord) => void,
   ): Promise<SharedSessionSubmission> {
-    this.assertIntakeOpen();
     // Concurrent webhook deliveries for one conversation must not both see "no session yet" and each create one.
     const routeKey = input.routeId
       ? `route:${input.routeId}`
@@ -1283,7 +1263,6 @@ export class SharedSessionBroker {
 
   /** Host-private native reservation. Never queues into the legacy retry/spawn path. */
   async reserveNativeTurnInput(sessionId: string, permit: NativeConversationTurnPermit): Promise<SharedSessionInputRecord> {
-    this.assertIntakeOpen();
     const source = readNativeConversationTurnPermit(permit);
     await revalidateNativeConversationTurnPermit(permit);
     await this.start();

@@ -72,7 +72,6 @@ import { OPERATOR_CONTRACT_SCHEMA } from './operator-contract.js';
 // runtime-session routes); declared here so the operator contract carries them.
 const SESSION_NOT_FOUND: ContractErrorCode = { code: 'SESSION_NOT_FOUND', status: 404, meaning: 'No shared session has that id.' };
 const SESSION_CLOSED: ContractErrorCode = { code: 'SESSION_CLOSED', status: 409, meaning: 'The session is closed; reopen it (sessions.reopen) before sending to it.' };
-const WORKSPACE_BUSY: ContractErrorCode = { code: 'WORKSPACE_BUSY', status: 409, meaning: 'A workspace swap is in progress; retry after retryAfterMs.' };
 const SESSION_AGENT_BIND_FAILED: ContractErrorCode = { code: 'SESSION_AGENT_BIND_FAILED', status: 500, meaning: 'The input was accepted but the agent started for it could not be bound; the input was released to the queue.' };
 const SESSION_ACTIVE: ContractErrorCode = { code: 'SESSION_ACTIVE', status: 409, meaning: 'The session is still active; close it, then delete it.' };
 const HOSTED_SESSION_STILL_RUNNING: ContractErrorCode = { code: 'HOSTED_SESSION_STILL_RUNNING', status: 409, meaning: 'A daemon-hosted session is still running; end it with sessions.hosted.kill, which also closes the record. Nothing was changed.' };
@@ -82,7 +81,7 @@ const CANCEL_NOT_ALLOWED: ContractErrorCode = { code: 'CANCEL_NOT_ALLOWED', stat
 const INVALID_KIND: ContractErrorCode = { code: 'INVALID_KIND', status: 400, meaning: 'Unknown message kind (task, message or followup); nothing was changed.' };
 const INVALID_MESSAGE_ID: ContractErrorCode = { code: 'INVALID_MESSAGE_ID', status: 400, meaning: 'messageId is not 1 to 128 letters, digits, ".", "_", ":" or "-"; nothing was changed.' };
 /** What every route that submits work to a session can answer. */
-const SUBMISSION_ERROR_CODES: readonly ContractErrorCode[] = [SESSION_NOT_FOUND, SESSION_CLOSED, WORKSPACE_BUSY, SESSION_AGENT_BIND_FAILED];
+const SUBMISSION_ERROR_CODES: readonly ContractErrorCode[] = [SESSION_NOT_FOUND, SESSION_CLOSED, SESSION_AGENT_BIND_FAILED];
 
 export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({

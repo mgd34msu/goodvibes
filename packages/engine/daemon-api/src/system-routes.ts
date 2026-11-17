@@ -656,11 +656,9 @@ async function handleWorkingDirectoryConfig(
     {
       error: result.reason,
       code: result.code,
-      // The swap manager counts seconds; the wire (and the retry layers) read milliseconds.
-      ...(result.code === 'WORKSPACE_BUSY' && typeof result.retryAfter === 'number' ? { retryAfterMs: result.retryAfter * 1000 } : {}),
     },
-    // REROOT_FAILED is the daemon failing to move its own stores, not a bad request.
-    { status: result.code === 'WORKSPACE_BUSY' ? 409 : result.code === 'REROOT_FAILED' ? 500 : 400 },
+    // REROOT_FAILED is the daemon failing to save its own setting, not a bad request.
+    { status: result.code === 'REROOT_FAILED' ? 500 : 400 },
   );
 }
 

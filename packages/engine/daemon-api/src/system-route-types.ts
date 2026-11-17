@@ -245,7 +245,6 @@ export interface WorkspaceSwapManagerLike {
       /** Subsystems that keep using the previous working directory until restart. */
       requiresRestart?: readonly string[] | undefined;
     }
-    | { ok: false; code: 'WORKSPACE_BUSY'; reason: string; retryAfter: number }
     | { ok: false; code: 'INVALID_PATH'; reason: string }
     | { ok: false; code: 'REROOT_FAILED'; reason: string }
   >;

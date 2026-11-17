@@ -438,7 +438,8 @@ export class GeminiProvider implements LLMProvider {
       let outputTokens = 0;
       let cacheReadTokens = 0;
       let lastFinishReason = '';
-      let promptBlock: { reason: string; message?: string | undefined } | undefined;
+      // Written by processSseLine and read after the stream ends.
+      const refusal: { block?: { reason: string; message?: string | undefined } } = {};
       let streamedText = '';
 
       const reader = res.body?.getReader();
@@ -474,7 +475,7 @@ export class GeminiProvider implements LLMProvider {
         responseIdentity.observe(chunk);
         const blockReason = chunk.promptFeedback?.blockReason;
         if (blockReason && blockReason !== 'BLOCK_REASON_UNSPECIFIED') {
-          promptBlock = { reason: blockReason, message: chunk.promptFeedback?.blockReasonMessage };
+          refusal.block = { reason: blockReason, message: chunk.promptFeedback?.blockReasonMessage };
         }
         const candidate = chunk.candidates?.[0];
         if (candidate) {
@@ -522,6 +523,7 @@ export class GeminiProvider implements LLMProvider {
 
       // A refused prompt is Gemini's answer, not a cut connection: the same
       // prompt is refused again, so it is final and names the reason.
+      const promptBlock = refusal.block;
       if (promptBlock && !lastFinishReason) {
         throw new ProviderError(
           `Gemini refused the prompt (${promptBlock.reason})${promptBlock.message ? `: ${promptBlock.message}` : '.'}`,

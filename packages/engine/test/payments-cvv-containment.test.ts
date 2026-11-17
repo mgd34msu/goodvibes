@@ -2,6 +2,8 @@
 // Red when: The security code is stored in plain text, or a driver error, a page read after the fill or the activity log carries the number or the code.
 // Proves: On an install with no decision model, a page snapshot reports the value of a text box, select or misspelt input type, handing a typed card number to the model provider.
 // Red when: The no-decision-model fallback in `classifyCardFields` reports a control's value instead of withholding it.
+// Proves: With code handling set to "prompt" the security code is stored or an older stored one is still supplied; a deleted card's number stays in the secret store.
+// Red when: `DaemonCardStore` writes the code under "prompt", hands back a code stored earlier once "prompt" is on, or a removed card leaves one of its five secret keys set.
 /**
  * Card material goes to the daemon's encrypted secret store and nowhere else:
  * not in plain text on disk, not into a settings key a surface can write, not
@@ -19,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SecretsManager } from '../platform/src/platform/config/secrets.js';
 import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.js';
+import { CARD_MATERIAL_FIELDS, cardSecretKey, DaemonCardStore, type CvvHandling } from '../platform/src/platform/payments/host/card-store.js';
 import { fillCard } from '../platform/src/platform/payments/fill-card.js';
 import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
 import { CheckoutRegistry, MemoryCheckoutJournal, type InFlightCheckout } from '../platform/src/platform/payments/checkout-registry.js';
@@ -62,6 +65,33 @@ test('a stored security code is encrypted on disk and still readable by the daem
   expect(files.length).toBeGreaterThan(0);
   expect(files.filter(file => file.text.includes(CVV_SENTINEL)).map(file => file.path)).toEqual([]);
   expect(await manager.get(key)).toBe(CVV_SENTINEL);
+});
+
+test('under "prompt" the security code is neither kept nor supplied, and a deleted card leaves no secret behind', async () => {
+  const { manager, home } = secrets();
+  let handling: CvvHandling = 'prompt';
+  // The daemon's own adapter over its secret store (runtime/payments-composition.ts).
+  const store = new DaemonCardStore({ filePath: join(home, 'payments-cards.json'), cvvHandling: () => handling, secrets: {
+    get: key => manager.get(key),
+    set: async (key, value) => { await manager.set(key, value, { scope: 'daemon', medium: 'secure' }); },
+    delete: async key => { await manager.delete(key, { scope: 'daemon' }); },
+  } });
+  const card = { label: 'Test card', kind: 'virtual' as const, number: PAN, expiryMonth: 7, expiryYear: 2029, cvv: CVV,
+    cardholderName: 'Pat Fixture', issuerCapMinorUnits: null };
+
+  const prompted = await store.create(card);
+  expect(await manager.get(cardSecretKey(prompted.id, 'cvv'))).toBeNull();
+  expect(await store.read(prompted.id)).toBeNull();
+  expect((await store.read(prompted.id, { securityCode: '123' }))?.cvv).toBe('123');
+
+  handling = 'stored';
+  const kept = await store.create(card);
+  expect((await store.read(kept.id))?.cvv).toBe(CVV);
+  handling = 'prompt';
+  expect(await store.read(kept.id)).toBeNull();
+
+  expect(await store.remove(kept.id)).toEqual({ deleted: true, secretsCleared: 5 });
+  for (const field of CARD_MATERIAL_FIELDS) expect(`${field}: ${await manager.get(cardSecretKey(kept.id, field))}`).toBe(`${field}: null`);
 });
 
 const MATERIAL: CardMaterial = { number: PAN, expiryMonth: '07', expiryYear: '2029', cvv: CVV, cardholderName: 'Pat Fixture' };

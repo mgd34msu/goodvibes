@@ -82,7 +82,7 @@ export function catalogRoutingInput(input: Record<string, unknown>): Record<stri
 export function isHarnessCatalogQuery(input: Record<string, unknown>): boolean {
   const routing = catalogRoutingInput(input);
   if (typeof routing.mode === 'string' && (PERSONAL_OPS_MODES.has(routing.mode) || PROTECTED_COMMS_EFFECT_MODES.has(routing.mode) || MEMORY_CATALOG_MODES.has(routing.mode))) { captureCatalogData(input); return true; }
-  if (routing.mode === 'model_routing' || routing.mode === 'model_route') { captureCatalogData(input); return true; }
+  if (routing.mode === 'model_routing' || routing.mode === 'model_route' || routing.mode === 'local_model_cookbook') { captureCatalogData(input); return true; }
   if (typeof routing.mode === 'string' && PRESERVED_CATALOG_MODES.has(routing.mode)) captureCatalogData(input);
   // `target` names an exact id: the lookup is code (rankHarnessCatalog), so it is not screened as a phrase.
   return typeof routing.mode === 'string' && CATALOG_MODES.has(routing.mode)
@@ -121,7 +121,7 @@ export function createHarnessCatalogInputProjector(registry: ToolRegistry, fallb
     const previewInspection = routing.mode === 'run_workspace_action' && isAgentWorkspaceSettingsImportPreview(request.args);
     const settingsInspection = request.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting' || previewInspection;
     const assertContext = protectedQuery ? catalogContextGuard(registry, context, settingsInspection) : () => {};
-    const modelInspection = routing.mode === 'model_routing' || routing.mode === 'model_route' || request.name === 'models'
+    const modelInspection = routing.mode === 'model_routing' || routing.mode === 'model_route' || routing.mode === 'local_model_cookbook' || request.name === 'models'
       || routing.mode === 'memory_posture' || routing.mode === 'memory_provider' || request.name === 'memory';
     const original = protectedQuery && (modelInspection || settingsInspection) ? captureModelReadingInput(request.args) : undefined;
     const originalJson = original && JSON.stringify(original);

@@ -265,6 +265,24 @@ function cookbookSnapshot(context: CommandContext, includeParameters: boolean, e
 }
 
 /**
+ * `models action:"local"`: the cookbook itself, read directly. A query keeps
+ * the recipes whose id, label, fit or best-for text contains every word of it;
+ * it never decides whether the cookbook is shown.
+ */
+export async function localModelCookbookSummary(context: CommandContext, args: { readonly query?: unknown; readonly target?: unknown; readonly includeParameters?: unknown }, options: ModelReadingOptions): Promise<Record<string, unknown>> {
+  const cookbook = await readLocalModelCookbook(context, args.includeParameters === true, options);
+  const query = (readString(args.query) || readString(args.target)).toLowerCase();
+  if (!query) return cookbook;
+  const words = query.split(/\s+/).filter(Boolean);
+  const recipes = Array.isArray(cookbook.recipes) ? cookbook.recipes as readonly Record<string, unknown>[] : [];
+  const matches = recipes.filter(recipe => {
+    const text = [recipe.id, recipe.label, recipe.fit, recipe.bestFor].map(value => typeof value === 'string' ? value.toLowerCase() : '').join('\n');
+    return words.every(word => text.includes(word));
+  });
+  return { ...cookbook, query, recipes: matches, returned: matches.length, totalRecipes: recipes.length };
+}
+
+/**
  * Explicit inspection adds the hardware-fit reading of each recipe (one
  * judgment per recipe); detection, endpoints and route readiness are code
  * facts read once from the registry.

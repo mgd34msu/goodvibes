@@ -9,7 +9,7 @@ export const AGENT_HARNESS_MODES = [
   'setup_posture', 'setup_item', 'setup_repair', 'setup_checkpoint', 'mark_setup_checkpoint', 'clear_setup_checkpoint', 'provision_connected_host_token', 'run_setup_smoke',
   'project_context', 'project_context_file', 'prompt_context',
   'agent_orchestration', 'agent_orchestration_agent',
-  'model_routing', 'model_route', 'run_local_model_smoke',
+  'model_routing', 'model_route', 'local_model_cookbook', 'run_local_model_smoke',
   'execution_posture', 'execution_route', 'browser_control_route',
   'background_processes', 'background_process', 'run_background_process',
   'execution_history', 'execution_history_item',

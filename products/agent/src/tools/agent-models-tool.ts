@@ -107,12 +107,12 @@ function routeArgs(args: AgentModelsToolArgs): Record<string, unknown> {
   });
 }
 
+/** The cookbook has its own route; a query searches within its recipes. */
 function localArgs(args: AgentModelsToolArgs): Record<string, unknown> {
   return compactArgs({
-    mode: 'model_routing',
-    query: args.query ?? args.target ?? 'local',
+    mode: 'local_model_cookbook',
+    query: args.query ?? args.target,
     includeParameters: args.includeParameters,
-    limit: args.limit,
   });
 }
 

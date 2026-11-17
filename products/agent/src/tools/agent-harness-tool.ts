@@ -37,6 +37,7 @@ import { describeHarnessExecutionRoute, executionPostureCatalogStatus, execution
 import { fileRecoveryCatalogStatus, fileRecoverySummary, runFileRecovery } from './agent-harness-file-recovery.ts';
 import { describeHarnessMcpServer, mcpServerCatalogStatus, mcpServerSummary } from './agent-harness-mcp-metadata.ts';
 import { describeHarnessModelRoute, modelRoutingCatalogStatus, modelRoutingSummary, runLocalModelServerSmoke } from './agent-harness-model-routing.ts';
+import { localModelCookbookSummary } from './agent-harness-local-model-cookbook.ts';
 import { describeHarnessModelTool, describeUnknownModelTool, searchHarnessModelTools } from './agent-harness-model-tool-catalog.ts';
 import { describeMemoryProvider, memoryPostureCatalogStatus, memoryPostureSummary } from './agent-harness-memory-posture.ts';
 import { memoryRefinementCatalogStatus, memoryRefinementSummary, runMemoryRefinement } from './agent-harness-memory-refinement.ts';
@@ -227,7 +228,7 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         return error(resolved.usage);
       }
       if (dispatchMode === 'run_background_process') return effectOutput(await runBackgroundProcessAction(deps.commandContext, args, processClassificationOptions(deps.commandContext, deps.toolRegistry, signal, () => { assertCurrentToolExecution(rawArgs, options); }), rawArgs, options));
-      if (dispatchMode === 'model_routing' || dispatchMode === 'model_route') {
+      if (dispatchMode === 'model_routing' || dispatchMode === 'model_route' || dispatchMode === 'local_model_cookbook') {
         // Independent read-only observations keep their own source checks;
         // join the complete set before exposing the combined catalog.
         const guards = new Set<() => void>();
@@ -236,6 +237,9 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         const result = await withModelReadingContext(deps.commandContext, rawArgs, reading, async (context, scoped) => {
           if (dispatchMode === 'model_routing') {
             const result = await modelRoutingSummary(context, args, scoped); scoped.assertCurrent?.(); return output(result);
+          }
+          if (dispatchMode === 'local_model_cookbook') {
+            const result = await localModelCookbookSummary(context, args, scoped); scoped.assertCurrent?.(); return output(result);
           }
           const resolved = await describeHarnessModelRoute(context, args, scoped); scoped.assertCurrent?.();
           if (resolved.status === 'found') return output(resolved.route);

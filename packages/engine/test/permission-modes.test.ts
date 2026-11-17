@@ -2,6 +2,8 @@
 // Red when: A mode sends a call to the wrong party (an owner-only call runs or goes to Jev, a judgment call goes to the owner), jev-decides without a model does not behave as ask-me, a hosted session's mode is overridden by a looser setting, or one approval covers another held call.
 // Proves: A hook the model asked for is registered without the owner being asked.
 // Red when: The hook-change decision stops putting the change to the owner as an owner-only grant, so Jev, the mode or the owner's standing allow for other state calls settles it.
+// Proves: An action the decision model refused runs when the model then becomes unavailable and the fallback sees the owner's allow.
+// Red when: The no-decision-model path stops consulting the refusals the decision model made earlier in the same operation, so the owner's allow runs the refused call.
 /**
  * Who is asked in each mode. ask-me asks the owner; jev-decides asks Jev on a
  * judgment call when a decision model works and is ask-me when none does,
@@ -13,13 +15,18 @@
  * Real settings manager, permission manager, tool registry, executor and
  * held-call ledger over a temp directory; the two tools only count their runs.
  * Decision models are off except where the case is about one working; Jev's
- * port counts every question and answers none.
+ * port counts every question and answers none. Under Hybrid, one case stands
+ * in for a decision model that refuses a call and then goes down: the same call
+ * stays refused within that operation, and a different call is settled by the
+ * owner's allow, which shows the fallback was in force.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
+import { gateReadingsPort } from './_helpers/gate-readings.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
@@ -31,7 +38,7 @@ import { HeldForOwnerLedger } from '../platform/src/platform/permissions/held-fo
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.ts';
 import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
-import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
+import { configureDecisionModelPolicy, withDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { withExecutionModeOwner } from '../platform/src/platform/gate/execution-context.ts';
 import type { GatePresetName } from '../platform/src/platform/gate/presets.ts';
 
@@ -81,7 +88,7 @@ function gate(mode: GatePresetName, options: { readonly decisionModel?: boolean;
   let calls = 0;
   const check = async (call: { readonly tool: string; readonly args: Record<string, unknown> }): Promise<ToolResult> =>
     (await executeToolCalls(deps, `turn-${++calls}`, [{ id: `call-${calls}`, name: call.tool, arguments: { ...call.args } }]))[0]!;
-  return { manager, held, check, ran, asked: () => ({ owner: ownerAsked, jev: jevQuestions }) };
+  return { manager, held, registry, check, ran, asked: () => ({ owner: ownerAsked, jev: jevQuestions }) };
 }
 
 /** What one call came to: whether it ran, its decision, and who was asked. */
@@ -173,4 +180,36 @@ test('a hook change goes to the owner, never to Jev or his standing allow for st
   const plan = gate('plan', { rules, ownerApproves: () => true });
   expect((await plan.manager.checkHookChange(hook)).approved).toBe(false);
   expect(plan.asked().owner).toBe(0);
+});
+
+test('a call the decision model refused stays refused when the model then fails, though the owner allows reads', async () => {
+  // The decision model: reads the gate's questions, refuses the call, and is unavailable once `down` is set.
+  let down = false;
+  let recorded = 0;
+  const readings = gateReadingsPort();
+  const decisionModel: JudgmentPort = {
+    model: 'fixture',
+    recorder: { recordReadings() {}, recordAction() {} },
+    async ask(request) {
+      if (down) throw new JudgmentError('unavailable', 'the decision model is down');
+      const name = Object.keys(request.questions).find((key) => key.endsWith('disposition'));
+      const result = name === undefined ? await readings.port.ask(request)
+        : { ...(await readings.port.ask({ ...request, questions: {} })), answers: { [name]: choiceAnswer(request.questions[name]!, 'reject', 0.97) } as never };
+      return { ...result, decisionId: `fixture-${++recorded}` };
+    },
+  };
+  installJudgmentPort(decisionModel);
+  const g = gate('jev-decides', { decisionModel: true });
+  g.registry.register({ definition: { name: 'read', description: 'read', parameters: { type: 'object' }, sideEffects: ['read_fs'], core: true },
+    execute: async (args) => { g.ran.push(`read ${String((args as { path?: unknown }).path)}`); return { success: true, output: 'ran' }; } });
+  const refused = { tool: 'read', args: { path: '/etc/shadow' } } as const;
+  const other = { tool: 'read', args: { path: '/etc/hostname' } } as const;
+  const outcome = await withDecisionModelPolicy(() => 'Hybrid', async () => {
+    const first = await g.check(refused);
+    down = true;
+    const again = await g.check(refused);
+    const different = await g.check(other);
+    return { first: first.success, firstBy: first.decision?.decidedBy, again: again.success, different: different.success };
+  });
+  expect({ ...outcome, ran: g.ran }).toEqual({ first: false, firstBy: 'jev', again: false, different: true, ran: ['read /etc/hostname'] });
 });

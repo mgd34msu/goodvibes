@@ -608,7 +608,7 @@ async function runSet(
     if (!swapManager) {
       return {
         success: false,
-        error: 'Cannot write to runtime.workingDir: this session cannot switch workspaces. Nothing was changed; do not retry. Ask the user to change the working directory from their client.',
+        error: 'Cannot write to runtime.workingDir: this session runs without a daemon that can save a working-directory change. Nothing was changed; do not retry. To work in another directory, start goodvibes in that directory, or restart the daemon with --working-dir <path> (or GOODVIBES_WORKING_DIR), or set runtime.workingDir in settings.json in the daemon home and restart the daemon.',
       };
     }
     const result = await swapManager.requestSwap(newDir);

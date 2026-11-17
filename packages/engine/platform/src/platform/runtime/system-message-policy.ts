@@ -77,4 +77,4 @@ export function resolveSystemMessageDelivery(
     : { toPanel: false, toConversation: true };
 }
 
-export { prepareSystemMessagePresentation, peekSystemMessagePresentation, type SystemMessagePresentation, type SystemMessageSeverity } from './system-message-presentation.js';
+export type { SystemMessagePresentation, SystemMessageSeverity, SystemMessageActivity, SystemMessageEvent } from './system-message-presentation.js';

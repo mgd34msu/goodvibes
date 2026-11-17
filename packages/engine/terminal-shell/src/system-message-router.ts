@@ -5,14 +5,58 @@ import {
   classifySystemMessageKind,
   defaultSystemMessageTarget,
   resolveSystemMessageDelivery,
+  type SystemMessageActivity,
   type SystemMessageKind,
   type SystemMessageTarget,
 } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { classifyNoise, foldProviderReplayLines, providerNameFromReplay, type NoiseGateDeps } from './system-message-noise.js';
-export type { SystemMessageKind, SystemMessageTarget } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+export type { SystemMessageActivity, SystemMessageKind, SystemMessageTarget } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 export type SystemMessagePriority = 'high' | 'low';
 export interface SystemMessageActivityFeed {
-  push(message: string, priority: SystemMessagePriority): unknown;
+  /** `activity` is the Activity category the router states for the line; the feed stores it as given. */
+  push(message: string, priority: SystemMessagePriority, activity: SystemMessageActivity): unknown;
+}
+/**
+ * The Activity category of each leading `[Tag]` the products and the platform
+ * write, keyed by the tag in lower case. An untagged line or an unlisted tag
+ * is 'system'.
+ */
+export const SYSTEM_MESSAGE_TAG_ACTIVITIES: Readonly<Record<string, SystemMessageActivity>> = {
+  agents: 'agent', agent: 'agent', 'delegated task': 'agent', wrfc: 'agent', contract: 'agent', replay: 'agent',
+  schedule: 'schedule', schedules: 'schedule', wake: 'schedule', calendar: 'schedule', reminder: 'schedule',
+  'occasion reminder': 'schedule', automation: 'schedule', routine: 'schedule', routines: 'schedule',
+  delivery: 'delivery', channel: 'delivery', channels: 'delivery', telegram: 'delivery', slack: 'delivery',
+  discord: 'delivery', ntfy: 'delivery', email: 'delivery', push: 'delivery', webhook: 'delivery',
+  approval: 'security', permission: 'security', permissions: 'security', security: 'security',
+  trust: 'security', auth: 'security', pairing: 'security',
+  tool: 'tool', 'tool recovery': 'tool', exec: 'tool', shell: 'tool', mcp: 'tool', plugin: 'tool', hook: 'tool',
+  model: 'status', provider: 'status', providers: 'status', local: 'status', scan: 'status', session: 'status',
+  resume: 'status', recovery: 'status', compaction: 'status', daemon: 'status', 'connected host': 'status',
+  remote: 'status', bridge: 'status', startup: 'status', setup: 'status', install: 'status', update: 'status',
+  workspace: 'status', memory: 'status', health: 'status', status: 'status', terminal: 'status',
+  voice: 'status', stop: 'status', rewind: 'status', revert: 'status',
+};
+/**
+ * The Activity category of a line, from what its writer stated: the runtime
+ * event it restates, a contract kind, else its leading tag. A table lookup;
+ * no model reads the line, so an Activity row has its category when it appears.
+ */
+export function activityKindFor(
+  message: string,
+  kind?: SystemMessageKind | undefined,
+  runtimeEvent?: RuntimeEventProvenance | undefined,
+): SystemMessageActivity {
+  const event = runtimeEvent?.type;
+  if (event !== undefined) {
+    if (event.startsWith('AGENT_') || event.startsWith('CONTRACT_')) return 'agent';
+    if (event.startsWith('TURN_')) return 'status';
+  }
+  if (kind === 'contract') return 'agent';
+  if (!message.startsWith('[')) return 'system';
+  const end = message.indexOf(']');
+  if (end <= 1) return 'system';
+  const tag = message.slice(1, end).trim().toLowerCase();
+  return Object.hasOwn(SYSTEM_MESSAGE_TAG_ACTIVITIES, tag) ? SYSTEM_MESSAGE_TAG_ACTIVITIES[tag]! : 'system';
 }
 export interface SystemMessageConversation {
   addSystemMessage(message: string, runtimeEvent?: RuntimeEventProvenance | undefined): void;
@@ -77,7 +121,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
     const target = this.getTargetForKind(kind);
     const delivery = resolveSystemMessageDelivery(target, this.feed !== null);
     if (delivery.toPanel) {
-      this.feed?.push(message, priority);
+      this.feed?.push(message, priority, activityKindFor(message, kind, runtimeEvent));
     }
     if (delivery.toConversation || this.presentation.forceConversationPrefixes.some((prefix) => message.startsWith(prefix))) {
       if (runtimeEvent === undefined) this.addDeclared(message, priority, this.presentation.typedConversation ? kind : undefined, level);
@@ -132,11 +176,11 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
   /** Direct response to a user action, always visible on the main screen once. */
   userAction(message: string, level?: NoticeLevel | undefined): void {
     this.addDeclared(message, 'high', undefined, level);
-    this.feed?.push(message, 'high');
+    this.feed?.push(message, 'high', activityKindFor(message));
   }
   /** Bookkeeping the person may look up but need not read now: the activity feed only, never the conversation. */
   activity(message: string): void {
-    this.feed?.push(message, 'low');
+    this.feed?.push(message, 'low', activityKindFor(message));
   }
   /** A local receipt bypasses ambient noise and delivery preferences. */
   userReceipt(message: string, level?: NoticeLevel | undefined): void {

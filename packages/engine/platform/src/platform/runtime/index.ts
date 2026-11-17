@@ -12,7 +12,7 @@ export { DECISION_MODEL_POLICIES, configureDecisionModelPolicy, parseDecisionMod
   decisionOrClassic, isClassicOperation, activateClassicFallback, requireDecisionFeature, DecisionModelPolicyChangedError,
   type DecisionModelPolicy, type DecisionModelPolicyState } from './decision-policy.js';
 
-export { prepareSystemMessagePresentation, peekSystemMessagePresentation, type SystemMessagePresentation } from './system-message-presentation.js';
+export type { SystemMessagePresentation, SystemMessageSeverity, SystemMessageActivity, SystemMessageEvent } from './system-message-presentation.js';
 
 export { declaredClassicCapabilityEvidence, declaredClassicRuntimeMetadata } from './classic-capability-facts.js';
 export { classicPersonalOpsResultField, classicPersonalOpsReceiptStatus } from './classic-personal-ops.js';

@@ -133,8 +133,6 @@ import { archetypeFamily } from '../agents/batteries/archetype-family.js';
 import { planningGoal } from '../agents/batteries/planning-goal.js';
 registry.register(archetypeFamily);
 registry.register(planningGoal);
-import { systemMessagePresentation } from './system-message-presentation.js';
-registry.register(systemMessagePresentation);
 
 import { browserLaunchCause } from '../browser/launch-reading.js';
 registry.register(browserLaunchCause);

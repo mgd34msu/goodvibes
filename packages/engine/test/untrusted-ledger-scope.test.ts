@@ -1,5 +1,7 @@
 // Proves: Once a turn has read untrusted text, a send goes only with the owner's approval of that exact message, and another session's turn start does not erase what this session read.
 // Red when: One session's turn start clears another session's reads on the shared ledger, or a send after an untrusted read goes without the owner's approval of that exact message within its window.
+// Proves: Input from a channel, a schedule or an unknown source is taken as typed by the owner: it erases the record of what was read and acts with his authority.
+// Red when: The owner-direct test accepts a source outside its list (or overrides an explicit ownerDirect false), so such input starts a turn that clears the ledger, or its tool calls skip the surface check.
 /**
  * Text from an untrusted source is never evidence for an approval: no surface
  * but the owner's own can mint one, and once a turn has read a page, a send is
@@ -11,6 +13,14 @@
  * off, so the derivation reading is code's.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { startTurnForOwnerInput, withTurnSurface } from '../platform/src/platform/security/turn-boundary.ts';
+import type { TurnInputOrigin } from '../platform/src/events/turn.ts';
 import { evaluateOutwardEffect, UntrustedContentLedger, withUntrustedContentScope } from '../platform/src/platform/security/untrusted-content.ts';
 import { grantOwnerApproval } from '../platform/src/platform/security/owner-approval.ts';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
@@ -54,4 +64,27 @@ test('after a page is read, a send goes only with the owner\'s approval of that 
   expect((await decide(grantOwnerApproval({ action: 'email.send', surface: 'owner-direct', content }))).allowed).toBe(true);
   // A turn that read nothing needs no approval.
   expect((await evaluateOutwardEffect({ request, ledger: new UntrustedContentLedger(), content })).allowed).toBe(true);
+});
+
+test('only the owner\'s own input starts a turn; channel, schedule and unknown input neither clears the record nor skips the surface check', async () => {
+  const rows: ReadonlyArray<readonly [TurnInputOrigin | undefined, boolean]> = [
+    [undefined, true], [{ ownerDirect: true, source: 'telegram' }, true], [{ source: 'operator' }, true],
+    [{ source: 'companion-followup' }, false], [{ source: 'telegram', surface: 'telegram' }, false], [{ source: 'email' }, false],
+    [{ source: 'schedule' }, false], [{ source: 'a-channel-added-later' }, false], [{ source: 'operator', ownerDirect: false }, false],
+  ];
+  for (const [origin, owner] of rows) {
+    const ledger = new UntrustedContentLedger();
+    page(ledger, 'read-before');
+    expect(`${JSON.stringify(origin)}: ${startTurnForOwnerInput(origin, ledger)} ${ledger.originsThisTurn().length}`)
+      .toBe(`${JSON.stringify(origin)}: ${owner} ${owner ? 0 : 1}`);
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'gv-turn-surface-'));
+  try {
+    const config = new ConfigManager({ configDir: join(dir, 'config'), workingDir: dir, surfaceRoot: 'goodvibes' });
+    const manager = new PermissionManager(async () => ({ approved: true }), createPermissionConfigReader(config), new PolicyRuntimeState());
+    const write = { path: join(dir, 'note.txt'), content: 'from the turn' };
+    expect(await withTurnSurface({ source: 'email' }, () => manager.checkDetailed('write', write)))
+      .toMatchObject({ approved: false, reasonCode: 'boundary_surface_authority' });
+    expect((await withTurnSurface({ source: 'operator' }, () => manager.checkDetailed('write', write))).reasonCode).not.toBe('boundary_surface_authority');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

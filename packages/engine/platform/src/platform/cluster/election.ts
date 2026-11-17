@@ -16,9 +16,16 @@
  * dependency in here, which is what makes a 90-second watchdog takeover a test
  * that runs in microseconds.
  *
- * The one invariant everything else serves: AT MOST ONE node has the consumer
- * for a given surface running at any moment, and a handoff never starts the
- * successor before the predecessor has finished stopping.
+ * What it guarantees: on an orderly handoff the successor never starts before
+ * the predecessor has finished stopping, and a node that could not stop its
+ * consumer fences the surface instead of contesting it again. What it does not
+ * guarantee: this is not a lease. A holder cut off by a partition keeps its
+ * consumer running while the peers, missing its heartbeats, elect another, so
+ * two nodes can consume one surface until the partition heals and the lower
+ * rank yields. A message delivered to both in that window is handled on each;
+ * on one node a redelivered message is handled once, because the session
+ * broker keys every inbound message by its provider message id
+ * (`providerMessageKey`), and Telegram itself refuses a second poller.
  *
  * Every role transition runs through a single serialized queue, per surface,
  * so a wedged ntfy stop cannot block a Telegram transition. Consumer start and

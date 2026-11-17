@@ -444,6 +444,26 @@ export async function resolveBuiltinAllowlist(
   };
 }
 
+/**
+ * The stored allowlist entry a removal candidate names: a typed id (`user:U1`)
+ * or a bare id of the edit's kind that is already on that list.
+ */
+function storedAllowlistMatch(
+  surface: ChannelSurface,
+  candidate: string,
+  kind: ChannelAllowlistTargetKind | undefined,
+  storedList: (kind: ChannelAllowlistTargetKind) => readonly string[],
+): ChannelAllowlistTarget | undefined {
+  const bare = candidate.replace(new RegExp(`^${surface}:`, 'i'), '');
+  const typed = bare.match(TYPED_ID);
+  const entryKind = typed ? typedIdKind(typed[1] ?? '') : kind;
+  if (!entryKind || (typed && kind && kind !== entryKind)) return undefined;
+  const raw = (typed ? typed[2] ?? '' : bare).trim();
+  const list = storedList(entryKind);
+  const id = [raw, raw.replace(/^[@#]/, '')].find((value) => value.length > 0 && list.includes(value));
+  return id === undefined ? undefined : { kind: entryKind, input: candidate, id, label: id, metadata: { source: 'stored-allowlist' } };
+}
+
 function refuseAllowlistEdit(code: string, reason: string, next: readonly string[]): never {
   throw new RefusalError(refusal({ code, state: 'the allowlist was not changed', reason, next, status: 409 }));
 }
@@ -467,26 +487,8 @@ export async function editBuiltinAllowlist(
     refuseAllowlistEdit('CHANNEL_ALLOWLIST_KIND_REQUIRED', 'An allowlist edit must say whether it lists people or conversations.',
       ['Pass kind: user, channel or group, or write each entry as user:<id>, channel:<id> or group:<id>.']);
   }
-  const resolution = await resolveBuiltinAllowlist(context, surface, input);
-  const unresolvedAdds = resolution.unresolved.filter((value) => addInputs.has(value));
-  if (unresolvedAdds.length > 0) {
-    const reasons = (resolution.metadata['reasons'] ?? {}) as Record<string, string>;
-    const kind = input.kind ?? 'user';
-    refuseAllowlistEdit('CHANNEL_ALLOWLIST_UNRESOLVED',
-      `These entries do not resolve to a ${surface} id: ${unresolvedAdds.map((value) => `'${value}'${reasons[value] ? ` (${reasons[value]})` : ''}`).join(', ')}.`,
-      [`Pass the ${allowlistIdForm(surface, kind)} as ${kind}:<id>, or check the name with the resolve-allowlist action.`]);
-  }
-  const added = resolution.resolved.filter((entry) => addInputs.has(entry.input));
-  const removed = resolution.resolved.filter((entry) => removeInputs.has(entry.input));
   const existing = context.channelPolicy.getPolicy(surface);
   const scoped = Boolean(input.groupId || input.channelId || input.workspaceId);
-  const ids = (entries: readonly ChannelAllowlistTarget[], kind: ChannelAllowlistTargetKind) => entries.filter((entry) => entry.kind === kind).map((entry) => entry.id);
-  const nextLists = (current: ChannelAllowlists) => ({
-    allowlistUserIds: applyAllowlistChanges(current.allowlistUserIds, ids(added, 'user'), ids(removed, 'user')),
-    allowlistChannelIds: applyAllowlistChanges(current.allowlistChannelIds, ids(added, 'channel'), ids(removed, 'channel')),
-    allowlistGroupIds: applyAllowlistChanges(current.allowlistGroupIds, ids(added, 'group'), ids(removed, 'group')),
-  });
-
   // The group is the one matching EVERY scope field given: matching on any one
   // of them would let an edit scoped to (group A, workspace W) rewrite another
   // group's policy that merely shares W.
@@ -500,6 +502,47 @@ export async function editBuiltinAllowlist(
   const before: ChannelAllowlists = scoped
     ? { allowlistUserIds: match?.allowlistUserIds ?? [], allowlistChannelIds: match?.allowlistChannelIds ?? [], allowlistGroupIds: match?.allowlistGroupIds ?? [] }
     : existing;
+  const storedList = (kind: ChannelAllowlistTargetKind) => kind === 'user' ? before.allowlistUserIds
+    : kind === 'channel' ? before.allowlistChannelIds : before.allowlistGroupIds;
+
+  // A removal names someone already listed, so it is matched against the stored
+  // ids first: a person who left, or a surface with no provider directory, can
+  // still be removed by the id that admits them. Only the rest ask the directory.
+  const storedRemovals: ChannelAllowlistTarget[] = [];
+  for (const candidate of removeInputs) {
+    if (addInputs.has(candidate)) continue;
+    const stored = storedAllowlistMatch(surface, candidate, input.kind, storedList);
+    if (stored) storedRemovals.push(stored);
+  }
+  const storedInputs = new Set(storedRemovals.map((entry) => entry.input));
+  const lookedUp = await resolveBuiltinAllowlist(context, surface, { ...input, remove: [...removeInputs].filter((value) => !storedInputs.has(value)) });
+  const resolution: ChannelAllowlistResolution = { ...lookedUp, resolved: [...lookedUp.resolved, ...storedRemovals] };
+  const reasons = (resolution.metadata['reasons'] ?? {}) as Record<string, string>;
+  const unresolvedAdds = resolution.unresolved.filter((value) => addInputs.has(value));
+  if (unresolvedAdds.length > 0) {
+    const kind = input.kind ?? 'user';
+    refuseAllowlistEdit('CHANNEL_ALLOWLIST_UNRESOLVED',
+      `These entries do not resolve to a ${surface} id: ${unresolvedAdds.map((value) => `'${value}'${reasons[value] ? ` (${reasons[value]})` : ''}`).join(', ')}.`,
+      [`Pass the ${allowlistIdForm(surface, kind)} as ${kind}:<id>, or check the name with the resolve-allowlist action.`]);
+  }
+  const added = resolution.resolved.filter((entry) => addInputs.has(entry.input));
+  const removed = resolution.resolved.filter((entry) => removeInputs.has(entry.input));
+  // A removal that takes nobody off the list would leave the person admitted
+  // behind a success answer; it is refused and nothing changes.
+  const missingRemovals = [...removeInputs].filter((value) => !addInputs.has(value)
+    && !removed.some((entry) => entry.input === value && storedList(entry.kind).includes(entry.id)));
+  if (missingRemovals.length > 0) {
+    const kind = input.kind ?? 'user';
+    refuseAllowlistEdit('CHANNEL_ALLOWLIST_UNRESOLVED',
+      `These entries match nobody on the ${scoped ? 'scoped ' : ''}${surface} allowlist: ${missingRemovals.map((value) => `'${value}'${reasons[value] ? ` (${reasons[value]})` : ''}`).join(', ')}.`,
+      [`Pass the stored ${allowlistIdForm(surface, kind)} as ${kind}:<id>; the surface policy lists the ids it holds.`]);
+  }
+  const ids = (entries: readonly ChannelAllowlistTarget[], kind: ChannelAllowlistTargetKind) => entries.filter((entry) => entry.kind === kind).map((entry) => entry.id);
+  const nextLists = (current: ChannelAllowlists) => ({
+    allowlistUserIds: applyAllowlistChanges(current.allowlistUserIds, ids(added, 'user'), ids(removed, 'user')),
+    allowlistChannelIds: applyAllowlistChanges(current.allowlistChannelIds, ids(added, 'channel'), ids(removed, 'channel')),
+    allowlistGroupIds: applyAllowlistChanges(current.allowlistGroupIds, ids(added, 'group'), ids(removed, 'group')),
+  });
   const after = nextLists(before);
   if (input.force !== true) assertCallerStaysAdmitted(surface, input, before, after);
 

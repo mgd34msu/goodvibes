@@ -83,6 +83,7 @@ import { createAgentSettingsInputProjector } from './goodvibes-runtime/settings-
 export {
   applyRoutedConfigWrite,
   localStorePathForKey,
+  projectOverlayRefusal,
   readRoutedConfigValue,
   readRoutedConfigValues,
   resolveRouterDeps,

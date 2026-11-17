@@ -6,7 +6,7 @@ import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate/judgment-input';
 import { agentSettingsWriteRefusal } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 import { assertCurrentToolInvocation, assertProjectionExecution, claimCurrentToolSettingsDispatch,
-  commitCurrentToolSettingsPlan, currentToolSettingsPresentation, ToolInputProjectionError,
+  commitCurrentToolSettingsPlan, currentToolSettingsPresentation, projectOverlayRefusal, ToolInputProjectionError,
   type ToolInputProjector, type ToolRegistry, type ToolPreparedSettingsMutation } from '@goodvibes-jev/engine/platform/platform/tools';
 import { assertPreparedConfigWriteRoute, resolvePreparedConfigWriteRoute, captureRemoteSettingsPrecondition,
   assertRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, applyRemoteSettingsPrecondition, isSecretBearingConfigKey, describeSettingsReceiptFailure,
@@ -160,7 +160,8 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
       effect = { operation: facts.operation, key: facts.key, value: facts.value, destinations: facts.destinations,
         ...('credential' in facts ? { credential: facts.credential } : {}), previous: { unavailable: true }, appliedBy: 'daemon', endpoint: facts.endpoint };
     } else {
-      route = await resolvePreparedConfigWriteRoute(key, buildAgentConfigRouting({ homeDir: config.getHomeDirectory() ?? undefined }), assertRoutingOwner);
+      const routing = buildAgentConfigRouting({ homeDir: config.getHomeDirectory() ?? undefined });
+      route = await resolvePreparedConfigWriteRoute(key, routing, assertRoutingOwner);
       if (route.mode === 'daemon') {
         remote = await captureRemoteSettingsPrecondition(route.endpoint, remoteRequest);
         remoteAssert = () => assertRemoteSettingsPrecondition(remote!);
@@ -170,6 +171,9 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
         effect = { operation: facts.operation, key: facts.key, value: facts.value, destinations: facts.destinations,
         ...('credential' in facts ? { credential: facts.credential } : {}), previous: { unavailable: true }, appliedBy: 'daemon', endpoint: facts.endpoint };
       } else {
+        // A project overlay that sets the key to something else wins on reload, so the write would not take effect.
+        const shadowed = operation === 'set' && setting.kind !== 'host' ? projectOverlayRefusal(config, key as ConfigKey, value, routing) : null;
+        if (shadowed) throw new ToolInputProjectionError('held', shadowed.message);
         const mutation = config.prepareSettingMutationPlan([
           operation === 'set' ? { operation, key: key as ConfigKey, value } : { operation, key: key as ConfigKey },
           ...(companion ? [{ operation: 'set' as const, key: companion.key as ConfigKey, value: companion.value }] : []),

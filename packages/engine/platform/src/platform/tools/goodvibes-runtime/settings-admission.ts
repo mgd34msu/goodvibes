@@ -5,7 +5,6 @@ import { preparedReceiptWrites, type ConfigManager, type PreparedConfigMutationF
 import { isValidConfigKey } from '../../config/schema.js';
 import { admitSettingValue } from '../../config/write-admission.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
-import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
 import { configKeyScope, describeConfigOwnership } from '../../config/config-ownership.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { describeSettingsReceiptFailure } from '../../config/settings-owner-wire.js';
@@ -14,7 +13,7 @@ import { applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, capt
 import type { ToolExecuteOptions } from '../../types/tools.js';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolPreparedSettingsMutation } from '../input-projection.js';
 import { assertCurrentToolExecution, claimCurrentToolSettingsDispatch, commitCurrentToolSettings, currentToolSettingsPresentation } from '../registry.js';
-import { applyRoutedConfigWrite, readClientOwnedValue, resolveRouterDeps, usesClientOwnedStore, type ClientOwnedStore, type ConfigRoutingOptions } from './config-routing.js';
+import { applyRoutedConfigWrite, readClientOwnedValue, resolveRouterDeps, settingsWriteRefusal, usesClientOwnedStore, type ClientOwnedStore, type ConfigRoutingOptions } from './config-routing.js';
 
 /**
  * A client-owned key of the surface a hosted session was created for: that
@@ -89,10 +88,11 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
       const args = request.args;
       if ((args.mode !== 'set' && args.mode !== 'reset') || typeof args.key !== 'string') throw new ToolInputProjectionError('invalid');
       const key = args.key.trim();
+      // The one admission of a settings write (unknown key, a refused value, a
+      // project overlay that would undo it), before any local or remote write is prepared.
+      const refusal = settingsWriteRefusal(configManager, { mode: args.mode, key, value: args.value }, routing);
+      if (refusal) throw new ToolInputProjectionError(refusal.code === 'unknown-key' ? 'invalid' : 'held', refusal.message);
       if (!isValidConfigKey(key)) throw new ToolInputProjectionError('invalid');
-      // The one refusal of a settings write, before any local or remote write is prepared.
-      const refusal = agentSettingsWriteRefusal({ mode: args.mode, key, value: args.value });
-      if (refusal) throw new ToolInputProjectionError('held', refusal);
       // A key the surface a hosted session was created for keeps in its own
       // file (a client-owned key, or its own provider.model override) belongs
       // to that file, never to the hosting manager's store: it is prepared

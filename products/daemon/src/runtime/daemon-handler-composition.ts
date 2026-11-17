@@ -39,6 +39,8 @@ export interface DaemonInboxControls extends Required<Pick<RegisterInboxSurfaceO
   readonly gatePollingOwned?: (providerId: string, control: InboxPollingControl) => () => Promise<void>;
   /** Subscribe to local config/credential revocation without exposing secrets. */
   readonly onAccountInvalidation?: (listener: () => void) => () => void;
+  /** Subscribe to changes of one provider's own settings and credentials (inbox-provider-facts.ts). */
+  readonly onProviderInvalidation?: (provider: import('./inbox-provider-facts.js').InboxProvider, listener: () => void) => () => void;
   /** Value-free notifications from the native configuration owner. */
   readonly onConfigurationChange?: (key: ConfigKey, listener: () => void) => () => void;
   /** Trusted root-owned constructor; no credentials or generic secret access escape. */

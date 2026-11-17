@@ -47,23 +47,34 @@ function assertUnconfigured(provider: Provider, context: Parameters<DaemonInboxF
   }
 }
 
-/** Absence is a fenced state, not a fake adapter, empty successful poll or stored feed. */
+/**
+ * Absence is a fenced state, not a fake adapter, empty successful poll or
+ * stored feed. It is established when the source is built and again on the
+ * first read after an invalidation notice; reads in between compare the
+ * notice counter only, so listing the inbox reads no secret store to say
+ * "not configured".
+ */
 function unconfiguredSource(provider: Provider): DaemonInboxSourceFactory {
   return async (context, _routing, controls): Promise<OwnedInboxSource> => {
     if (!controls.onAccountInvalidation) throw new Error('Production inbox admission requires config and credential invalidation');
     let generation = 0;
+    let established = -1;
     let closed = false;
     const unsubscribe = controls.onAccountInvalidation(() => { generation++; });
     const active = new Set<Promise<void>>();
     const assertCurrent = () => {
       if (closed) throw new Error('Inbox source is retired');
     };
-    const validate = async () => {
-      assertCurrent(); const captured = generation;
-      await assertUnconfigured(provider, context); assertCurrent();
+    /** Read absence once per invalidation notice; a configured provider refuses until it is rebuilt. */
+    const establish = () => {
+      assertCurrent();
+      if (established === generation) return;
+      const captured = generation;
+      assertUnconfigured(provider, context);
       if (captured !== generation) throw new Error('Inbox configuration changed during admission');
+      established = captured;
     };
-    try { await validate(); } catch (error) { unsubscribe(); throw error; }
+    try { establish(); } catch (error) { unsubscribe(); throw error; }
     const status: ProviderStatus = { id: provider, state: 'unavailable', configured: false, itemCount: 0,
       // No provider poll or sync receipt is claimed by an absence check.
       polled: false };
@@ -75,7 +86,7 @@ function unconfiguredSource(provider: Provider): DaemonInboxSourceFactory {
     return {
       providerIds: [provider], ready: Promise.resolve(), close, unregister() { void close(); },
       async acquireRead() {
-        assertCurrent();
+        establish();
         let release!: () => void;
         const held = new Promise<void>(done => { release = done; }); active.add(held);
         let released = false;
@@ -84,20 +95,16 @@ function unconfiguredSource(provider: Provider): DaemonInboxSourceFactory {
         const current = () => {
           assertCurrent();
           if (released || captured !== generation) throw new Error('Inbox read is retired or configuration changed');
-          assertUnconfigured(provider, context);
         };
-        try {
-          await validate(); current();
-          return { providerIds: [provider], release: retire, assertCurrent: current,
-            async validate() { current(); await validate(); current(); },
-            sources: {
-              store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
-                maxSequence: () => 0, getImapCheckpoint: () => null },
-              poller: { snapshotStatuses: selected => !selected || selected.includes(provider) ? [{ ...status }] : [],
-                isProviderRunning: () => false },
-            },
-          };
-        } catch (error) { retire(); throw error; }
+        return { providerIds: [provider], release: retire, assertCurrent: current,
+          async validate() { current(); },
+          sources: {
+            store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
+              maxSequence: () => 0, getImapCheckpoint: () => null },
+            poller: { snapshotStatuses: selected => !selected || selected.includes(provider) ? [{ ...status }] : [],
+              isProviderRunning: () => false },
+          },
+        };
       },
     };
   };

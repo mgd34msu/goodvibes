@@ -1,7 +1,6 @@
 /** Native account selectors remain independent of permission to screen message text. */
 import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
 import { triageAuthorityFromScreening, type EmailInboxAccount, type SlackInboxAccount, type OwnedInboxSource, type OwnedInboxRead, type ProviderStatus } from '@goodvibes-jev/engine/platform/platform/intake';
-import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
@@ -12,21 +11,16 @@ import type { HostedInboxScreeningOperation } from './hosted-source-screening-co
 import { INBOX_ADMISSION_ACTIONS, InboxAdmissionRefusal, inboxAdmissionClearsOnItsOwn, inboxAdmissionReason, inboxAdmissionRefusalOf, inboxBuildStage,
   type InboxAdmissionReason } from './inbox-admission-refusal.js';
 
-// Every setting a selected account depends on, plus the cluster switch that
-// decides how its poller is elected: a write to any of them ends the account's
-// lifetime, and the reacquiring source builds a fresh one.
-const slackKeys = ['cluster.enabled', 'surfaces.slack.enabled', 'surfaces.slack.workspaceId', 'surfaces.slack.inboxUserId'] as const;
-const emailKeys = ['cluster.enabled', 'surfaces.email.imap.host', 'surfaces.email.host',
-  'surfaces.email.user', 'surfaces.email.imap.user', 'surfaces.email.imap.port',
-  'surfaces.email.imap.secure', 'surfaces.email.imap.mailbox'] as const;
-const discordKeys = ['cluster.enabled', 'surfaces.discord.enabled', 'surfaces.discord.applicationId', 'surfaces.discord.guildId',
-  'surfaces.discord.defaultChannelId', 'surfaces.discord.inboxBotUserId', 'surfaces.discord.inboxChannelIds'] as const;
 type Context = Parameters<DaemonInboxFactory>[0];
 type Controls = Parameters<DaemonInboxFactory>[2];
 
+// A selected account lives until one of its provider's own settings or
+// credentials changes (inbox-provider-facts.ts): every `surfaces.<provider>.*`
+// key, the cluster switch, the screening consent and credentials. A write of
+// anything else leaves it, its store and its poller running.
 function selectedAccount<T>(context: Context, controls: Controls, provider: 'slack' | 'email' | 'discord',
-  keys: readonly ConfigKey[], read: () => T): { account: T; operation: HostedInboxScreeningOperation; close(): void } {
-  if (!controls.onAccountInvalidation || !controls.onConfigurationChange) throw new Error('Configured inbox requires native account subscriptions');
+  read: () => T): { account: T; operation: HostedInboxScreeningOperation; close(): void } {
+  if (!controls.onProviderInvalidation) throw new Error('Configured inbox requires native account subscriptions');
   const lifetime = new AbortController();
   const subscriptions: Array<() => void> = [];
   let closed = false;
@@ -42,10 +36,9 @@ function selectedAccount<T>(context: Context, controls: Controls, provider: 'sla
     }
   };
   try {
-    subscriptions.push(controls.onAccountInvalidation(() => lifetime.abort()));
-    for (const key of keys) subscriptions.push(controls.onConfigurationChange(key, () => lifetime.abort()));
+    subscriptions.push(controls.onProviderInvalidation(provider, () => lifetime.abort()));
     // The one currentness check for every layer of this account: the
-    // subscriptions above abort the lifetime on a write to any key it depends on,
+    // subscription above aborts the lifetime on a write to any fact it depends on,
     // so no layer re-reads them. A settings file whose provider section was
     // quarantined at load is the one fact a key read cannot show.
     const assertCurrent = (): void => {
@@ -81,7 +74,7 @@ function boundedName(value: unknown): value is string {
 }
 
 export function selectConfiguredSlackInboxAccount(context: Context, controls: Controls) {
-  return selectedAccount(context, controls, 'slack', slackKeys, (): SlackInboxAccount => {
+  return selectedAccount(context, controls, 'slack', (): SlackInboxAccount => {
     const reader: { get(key: string): unknown } = context.configManager;
     const workspaceId = reader.get('surfaces.slack.workspaceId'), userId = reader.get('surfaces.slack.inboxUserId');
     if (reader.get('surfaces.slack.enabled') !== true || !boundedName(workspaceId) || workspaceId.length > 200
@@ -91,7 +84,7 @@ export function selectConfiguredSlackInboxAccount(context: Context, controls: Co
 }
 
 export function selectConfiguredEmailInboxAccount(context: Context, controls: Controls) {
-  return selectedAccount(context, controls, 'email', emailKeys, (): EmailInboxAccount => {
+  return selectedAccount(context, controls, 'email', (): EmailInboxAccount => {
     const mail = createSurfaceEmailInboxConfigReader(configReaderWithOrigins(context.configManager));
     const host = mail('email.imapHost'), username = mail('email.username'), mailbox = mail('email.mailbox');
     const port = mail('email.imapPort');
@@ -104,7 +97,7 @@ export function selectConfiguredEmailInboxAccount(context: Context, controls: Co
 }
 
 export function selectConfiguredDiscordInboxAccount(context: Context, controls: Controls) {
-  return selectedAccount(context, controls, 'discord', discordKeys, (): ConfiguredDiscordInboxAccount => {
+  return selectedAccount(context, controls, 'discord', (): ConfiguredDiscordInboxAccount => {
     if (context.configManager.get('surfaces.discord.enabled') !== true) {
       throw new InboxAdmissionRefusal('account-incomplete', 'Discord inbox requires its expected bot and one-to-one DM registry');
     }
@@ -215,8 +208,10 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
   const retryDelays = options.retryDelaysMs ?? ADMISSION_RETRY_DELAYS_MS;
   const schedule = options.schedule ?? scheduleWithTimer;
   return (context, routing, controls) => {
-    const subscribe = controls.onAccountInvalidation;
-    if (!subscribe) throw new Error('Native inbox source requires account invalidation');
+    const onProvider = controls.onProviderInvalidation;
+    if (!onProvider) throw new Error('Native inbox source requires account invalidation');
+    // Only this provider's own settings and credentials replace the source.
+    const subscribe = (listener: () => void): (() => void) => onProvider(provider, listener);
     const lifetime = new AbortController();
     let revision = 0;
     let closed = false;
@@ -249,13 +244,19 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
       if (previous) void retire(previous).catch(() => {});
     };
     // Closing this facade also revokes an account that is still being acquired.
-    const ownedControls: Controls = { ...controls, onAccountInvalidation(listener) {
+    const scoped = (listener: () => void): (() => void) => {
       if (closed) throw unavailable();
       const stopNative = subscribe(listener);
       const stop = () => listener();
       lifetime.signal.addEventListener('abort', stop, { once: true });
       return () => { lifetime.signal.removeEventListener('abort', stop); stopNative(); };
-    } };
+    };
+    // The account, its owners and its screening see this provider's changes only.
+    const ownedControls: Controls = { ...controls, onAccountInvalidation: scoped,
+      onProviderInvalidation: (requested, listener) => {
+        if (requested !== provider) throw new Error('Native inbox source asked for another provider\'s changes');
+        return scoped(listener);
+      } };
     const stopRetry = (): void => {
       const cancel = cancelRetry;
       cancelRetry = undefined;
@@ -384,8 +385,11 @@ export function createReacquiringDaemonInboxSourceFactory(provider: 'slack' | 'e
         const source = current, captured = revision;
         if (closed || retirementFailed) throw unavailable();
         if (!source) {
-          if (!admissionFailure) throw unavailable();
-          return unavailableRead(provider, admissionFailure.reason, () => {
+          // Being rebuilt after its own settings changed: this provider reports
+          // `reacquiring` and a composite read still serves the others.
+          const reason = admissionFailure?.reason ?? (running ? 'reacquiring' : undefined);
+          if (!reason) throw unavailable();
+          return unavailableRead(provider, reason, () => {
             if (closed || captured !== revision || retirementFailed) throw unavailable();
           });
         }

@@ -488,7 +488,24 @@ export class SecretsManager {
       this.#storeCache.delete(path);
       this.#observeStore(path, identity, false);
     }
-    if (this.#foreignStoreWrites !== before) this.notifyCredentialInvalidation();
+    if (this.#foreignStoreWrites === before) return;
+    this.notifyCredentialInvalidation();
+    for (const listener of [...this.#elsewhereListeners]) {
+      try { listener(); } catch { /* One observer cannot hide a foreign write from another. */ }
+    }
+  }
+
+  readonly #elsewhereListeners = new Set<() => void>();
+
+  /**
+   * Another process rewrote a secret store this manager reads (the store
+   * watcher saw it; which key changed is not known). In-process writes are
+   * reported by key through {@link onDidChange}.
+   */
+  onDidChangeElsewhere(listener: () => void): () => void {
+    this.#startWatching();
+    this.#elsewhereListeners.add(listener);
+    return () => { this.#elsewhereListeners.delete(listener); };
   }
 
   /** Value-free local owner state; no credential names, paths, bytes or hashes. */

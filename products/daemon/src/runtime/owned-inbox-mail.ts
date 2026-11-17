@@ -9,6 +9,7 @@ import type { DaemonInboxControls, DaemonInboxFactory } from './daemon-handler-c
 import type { HandlerContext, OwnedHandlerSurface } from '../daemon/handlers/context.js';
 import type { RoutingRegistration } from '../daemon/handlers/index.js';
 import { acquireHostedInboxScreening, type HostedInboxScreeningHost, type HostedInboxScreeningAcquisition } from './hosted-source-screening-composition.js';
+import { inboxProviderFacts, SCREENING_FACTS, subscribeInboxFacts, type InboxFactOwners, type InboxFactScope, type InboxProvider } from './inbox-provider-facts.js';
 
 type MailInput = Omit<Parameters<typeof composeMailDeps>[0], 'registerDispose'> & {
   readonly configManager: Partial<Pick<ConfigManager, 'subscribe' | 'getIngestionQuarantine' | 'getConfigurationIncarnation'
@@ -21,11 +22,7 @@ function hasHostedScreeningOwners(input: MailInput): input is MailInput & {
 } {
   const { configManager: config, secretsManager: secrets } = input;
   return typeof config.get === 'function' && typeof config.getIngestionQuarantine === 'function'
-    && typeof config.getConfigurationIncarnation === 'function' && typeof config.onDidChangeIncarnation === 'function'
-    && typeof config.captureDurableConfigurationIncarnation === 'function' && typeof config.getDurableConfigurationIncarnation === 'function'
-    && typeof config.onDidInvalidate === 'function' && typeof secrets.resolveLocalCredentialSnapshot === 'function'
-    && typeof secrets.captureLocalCredentialReadset === 'function' && typeof secrets.getCredentialMutationState === 'function'
-    && typeof secrets.onDidInvalidateCredentials === 'function';
+    && typeof secrets.resolveLocalCredentialSnapshot === 'function' && typeof secrets.getCredentialMutationState === 'function';
 }
 
 /** Even a factory that throws after construction cannot orphan subscriptions. */
@@ -77,6 +74,25 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
       } catch (error) { close(); throw error; }
     } : undefined;
   const subscribeConfig = mailInput.configManager.subscribe?.bind(mailInput.configManager);
+  // Scoped invalidation: a source, its store and its screening are replaced
+  // only when one of their own settings or credentials changes (inbox-provider-facts.ts).
+  const secretChanges = mailInput.secretsManager as Partial<Pick<SecretsManager, 'onDidChange' | 'onDidChangeElsewhere'>>;
+  const factOwners: InboxFactOwners | undefined = subscribeConfig && secretChanges.onDidChange && secretChanges.onDidChangeElsewhere
+    ? { config: { subscribe: subscribeConfig }, secrets: {
+      onDidChange: secretChanges.onDidChange.bind(mailInput.secretsManager),
+      onDidChangeElsewhere: secretChanges.onDidChangeElsewhere.bind(mailInput.secretsManager),
+    } } : undefined;
+  const subscribeFacts = factOwners ? (scope: InboxFactScope, listener: () => void): (() => void) => {
+    if (retired) throw new Error('Inbox account lifecycle is retired');
+    const stop = subscribeInboxFacts(factOwners, scope, listener);
+    let closed = false;
+    const close = (): void => {
+      if (closed) return;
+      closed = true; mailClosers.delete(close); stop();
+    };
+    mailClosers.add(close);
+    return close;
+  } : undefined;
   const closeMail = (): void => {
     if (retired) return;
     retired = true;
@@ -106,10 +122,10 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
       onInvalidate(listener) { assertCurrent(); listeners.add(listener); return () => { listeners.delete(listener); }; }, assertCurrent,
     }) : undefined;
     registration = await factory(context, routing, { ...controls,
-      ...(hasHostedScreeningOwners(mailInput) ? { acquireHostedScreening: async (source, operation) => {
+      ...(hasHostedScreeningOwners(mailInput) && subscribeFacts ? { acquireHostedScreening: async (source, operation) => {
         assertCurrent();
         const acquisition = await acquireHostedInboxScreening({ config: mailInput.configManager, secrets: mailInput.secretsManager,
-          signal: lifetime.signal }, source, operation);
+          signal: lifetime.signal, onInvalidation: listener => subscribeFacts(SCREENING_FACTS, listener) }, source, operation);
         let closing: Promise<void> | undefined;
         const owned: HostedInboxScreeningAcquisition = { options: acquisition.options,
           close() {
@@ -123,6 +139,8 @@ export async function registerOwnedMailInbox(factory: DaemonInboxFactory, contex
         return owned;
       } } satisfies Pick<DaemonInboxControls, 'acquireHostedScreening'> : {}),
       ...(onAccountInvalidation ? { onAccountInvalidation } : {}),
+      ...(subscribeFacts ? { onProviderInvalidation: (provider: InboxProvider, listener: () => void) => subscribeFacts(inboxProviderFacts(provider), listener) }
+        satisfies Pick<DaemonInboxControls, 'onProviderInvalidation'> : {}),
       ...(subscribeConfig ? { onConfigurationChange: (key, listener) => {
         assertCurrent(); return subscribeConfig(key, listener);
       } } satisfies Pick<DaemonInboxControls, 'onConfigurationChange'> : {}),

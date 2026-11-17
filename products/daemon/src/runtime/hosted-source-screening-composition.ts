@@ -14,12 +14,18 @@ export interface HostedInboxScreeningAcquisition {
   readonly options: ProtectedSourceOwnerOptions;
   close(): Promise<void>;
 }
-type ConfigOwner = Pick<ConfigManager, 'get' | 'getIngestionQuarantine' | 'getConfigurationIncarnation' | 'onDidChangeIncarnation' | 'onDidInvalidate'>;
-type CredentialOwner = Pick<SecretsManager, 'resolveLocalCredentialSnapshot' | 'captureLocalCredentialReadset' | 'getCredentialMutationState' | 'onDidInvalidateCredentials'>;
+type ConfigOwner = Pick<ConfigManager, 'get' | 'getIngestionQuarantine'>;
+type CredentialOwner = Pick<SecretsManager, 'resolveLocalCredentialSnapshot' | 'getCredentialMutationState'>;
 export interface HostedInboxScreeningHost {
   readonly config: ConfigOwner;
   readonly secrets: CredentialOwner;
   readonly signal: AbortSignal;
+  /**
+   * Calls the listener when the screening consent setting or one of the two
+   * screening credentials changes, in this process or (by the secret store
+   * watcher) in another one. It is what keeps an acquisition current.
+   */
+  readonly onInvalidation: (listener: () => void) => () => void;
 }
 
 /** Values and alias revisions stay private; neither is an authority identifier. */
@@ -41,12 +47,9 @@ function captureCredential(key: string, secrets: CredentialOwner): { value: stri
   const snapshot = secrets.resolveLocalCredentialSnapshot(localKey);
   if (snapshot.state !== 'resolved' || !snapshot.value || snapshot.value.trim() !== snapshot.value
     || /[\r\n\0]/.test(snapshot.value)) throw new InboxAdmissionRefusal('credential-unavailable', 'Hosted inbox screening credential is unavailable');
+  // A stored credential that changes fires the host's invalidation, which aborts the acquisition.
   return { value: snapshot.value, assertCurrent() {
     if (process.env[key] !== environment) throw new Error('Hosted inbox screening credential changed');
-    const next = secrets.resolveLocalCredentialSnapshot(localKey);
-    if (next.state !== 'resolved' || next.revision !== snapshot.revision || next.value !== snapshot.value) {
-      throw new Error('Hosted inbox screening credential changed');
-    }
   } };
 }
 
@@ -69,32 +72,25 @@ export async function acquireHostedInboxScreening(host: HostedInboxScreeningHost
     if (failures.length) throw new AggregateError(failures, 'Hosted inbox screening subscriptions did not close');
   };
   try {
-    // Mutation onset is decisive, even if the write fails or restores the old bytes.
-    subscriptions.push(config.onDidChangeIncarnation(retire));
-    subscriptions.push(config.onDidInvalidate(retire));
-    subscriptions.push(secrets.onDidInvalidateCredentials(retire));
-    const incarnation = config.getConfigurationIncarnation();
-    const assertCredentials = secrets.captureLocalCredentialReadset();
-    // The subscriptions above abort `signal` on any settings or credential
-    // change, including one noticed from another process; the incarnation is
-    // the config owner's own counter. What is left to compare is integers and
-    // the one fact a subscription cannot show: a quarantined consent section.
-    const assertNative = (): void => {
-      signal.throwIfAborted();
-      if (closed || config.getConfigurationIncarnation() !== incarnation || secrets.getCredentialMutationState().pending
-        || config.getIngestionQuarantine().some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
-          || entry.key === 'surfaces.hostedInboxScreening')) throw new Error('Hosted inbox screening consent or source changed');
-      assertCredentials();
-    };
+    // The one currentness fact: the host aborts `signal` when the consent
+    // setting or a screening credential changes. A check is the abort signal,
+    // the environment and the account's own check; nothing is re-read from disk.
+    subscriptions.push(host.onInvalidation(retire));
+    // Read once, at acquisition: a quarantined consent section and a credential
+    // write in progress are the facts a subscription cannot show.
+    if (secrets.getCredentialMutationState().pending
+      || config.getIngestionQuarantine().some(entry => entry.key === '(whole file)' || entry.key === 'surfaces'
+        || entry.key === 'surfaces.hostedInboxScreening')) throw new Error('Hosted inbox screening consent or source changed');
     const reader: { get(key: string): unknown } = config;
     if (reader.get('surfaces.hostedInboxScreening') !== 'abacus-typesafe-provider-managed') {
       throw new InboxAdmissionRefusal('consent-missing', 'Hosted inbox screening consent or source changed');
     }
-    assertNative();
     const abacus = captureCredential('ABACUSAI_API_KEY', secrets);
     const typesafe = captureCredential('TYPESAFE_API_KEY', secrets);
     const assertCurrent = (): void => {
-      assertNative(); abacus.assertCurrent(); typesafe.assertCurrent();
+      signal.throwIfAborted();
+      if (closed) throw new Error('Hosted inbox screening consent or source changed');
+      abacus.assertCurrent(); typesafe.assertCurrent();
       accountCurrent();
     };
     assertCurrent();

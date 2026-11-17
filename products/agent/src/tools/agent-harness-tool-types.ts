@@ -70,6 +70,7 @@ export interface AgentHarnessToolArgs {
   readonly includeHidden?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
+  readonly offset?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
   readonly peerId?: unknown;

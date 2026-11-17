@@ -3,7 +3,7 @@ import { operatorContractMethods as contractMethodIndex, operatorMethodIsReadOnl
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
-import { catalogEnvelope, catalogFilters } from './agent-harness-tool-utils.ts';
+import { CATALOG_PAGE_MAX, CATALOG_PAGE_SIZE, catalogEnvelope, catalogFilters, readOffset } from './agent-harness-tool-utils.ts';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { operatorMethodIsOutward } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
@@ -14,6 +14,7 @@ export interface AgentHarnessOperatorMethodArgs {
   readonly query?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
+  readonly offset?: unknown;
 }
 
 // The effect names are the ones agent_operator_method itself reports in a preview.
@@ -91,10 +92,6 @@ type OperatorMethodResolution =
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function readLimit(value: unknown, fallback: number): number {
-  return clampReadLimit(value, fallback, 500);
 }
 
 /** The methods served over HTTP, by id; the listing is the route module's one index. */
@@ -279,14 +276,15 @@ export function operatorMethodCatalogStatus(): Record<string, unknown> {
 export async function operatorMethodSummary(args: AgentHarnessOperatorMethodArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const query = readString(args.query);
-  const limit = readLimit(args.limit, 200);
+  const limit = clampReadLimit(args.limit, CATALOG_PAGE_SIZE, CATALOG_PAGE_MAX);
+  const offset = readOffset(args.offset);
   const includeParameters = args.includeParameters === true;
   const all = allOperatorMethods();
   const found = query ? await rankHarnessCatalog(all, query, (entry) => ({ id: entry.id, description: methodSearchText(entry), evidence: entry }), 'agent.harness.operator-methods', { ...options, requirePreservedSource: true })
     : { matches: all.map((entry) => ({ entry, judgment: undefined })) };
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const methods = found.matches
-    .slice(0, limit)
+    .slice(offset, offset + limit)
     .map(({ entry, judgment }) => ({ ...describeMethod(entry, { includeParameters }), ...(judgment ? { judgment } : {}) }));
   return {
     ...catalogEnvelope(
@@ -295,6 +293,7 @@ export async function operatorMethodSummary(args: AgentHarnessOperatorMethodArgs
       all.length,
       catalogFilters(args, CATALOG_QUERIES.methods.filters),
       CATALOG_QUERIES.methods.discovery,
+      { offset, matched: found.matches.length },
     ),
     policy: 'Dynamic GoodVibes daemon operator catalog. Prefer simpler first-class tools when available; use agent_operator_method for exact contract parity.',
   };

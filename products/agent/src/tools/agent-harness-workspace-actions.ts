@@ -13,6 +13,7 @@ import { describeCommandPolicy } from './agent-harness-metadata.ts';
 import { describeLocalWorkspaceModelExecution } from './agent-harness-local-operations.ts';
 import { describeWorkspaceEditorModelExecution, workspaceEditorRouteHint } from './agent-harness-workspace-editor-execution.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { readOffset } from './agent-harness-tool-utils.ts';
 
 export { AGENT_WORKSPACE_CATEGORIES };
 
@@ -27,6 +28,7 @@ export interface AgentHarnessWorkspaceActionArgs {
   readonly categoryId?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
+  readonly offset?: unknown;
 }
 
 export interface WorkspaceEditorContext {
@@ -62,9 +64,6 @@ function readString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function readLimit(value: unknown, fallback: number): number {
-  return clampReadLimit(value, fallback, 1000);
-}
 
 function readFieldMap(value: unknown): Readonly<Record<string, string>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
@@ -322,11 +321,26 @@ export async function listWorkspaceActions(
   args: AgentHarnessWorkspaceActionArgs,
   options: CatalogRankingOptions = {},
 ): Promise<readonly Record<string, unknown>[]> {
+  return (await listWorkspaceActionsPage(context, args, options, 1000)).actions;
+}
+
+/**
+ * One page of the workspace action catalog: `defaultLimit` rows unless the
+ * caller names a `limit`, starting at `offset`, with how many matched in all.
+ */
+export async function listWorkspaceActionsPage(
+  context: CommandContext,
+  args: AgentHarnessWorkspaceActionArgs,
+  options: CatalogRankingOptions = {},
+  defaultLimit = 1000,
+  maxLimit = 1000,
+): Promise<{ readonly actions: readonly Record<string, unknown>[]; readonly offset: number; readonly matched: number }> {
   const request = captureStatefulCatalogRequest(context, args, options, [], () => [captureWorkspaceCategories()]);
   args = request.input;
   const query = readString(args.query);
   const categoryId = readString(args.categoryId || args.category);
-  const limit = readLimit(args.limit, 1000);
+  const limit = clampReadLimit(args.limit, defaultLimit, maxLimit);
+  const offset = readOffset(args.offset);
   const includeEditor = args.includeParameters === true;
   const editorContext = includeEditor ? buildWorkspaceEditorContext(context, args) : null;
   const entries = allWorkspaceActions().filter(entry => !categoryId || entry.category.id === categoryId);
@@ -353,11 +367,12 @@ export async function listWorkspaceActions(
       return matches.sort((left, right) => right.rankScore - left.rankScore || left.order - right.order).map(match => match.entry);
     }) : entries;
   request.assertCurrent();
-  return source
-    .slice(0, limit)
+  const actions = source
+    .slice(offset, offset + limit)
     .map((entry) => includeEditor
       ? describeWorkspaceAction(entry.category, entry.action, { includeEditor, editorContext })
       : describeWorkspaceActionSummary(entry.category, entry.action));
+  return { actions, offset, matched: source.length };
 }
 
 function workspaceActionLookupFromArgs(args: AgentHarnessWorkspaceActionArgs): { readonly source: WorkspaceActionLookup['source']; readonly input: string } | null {

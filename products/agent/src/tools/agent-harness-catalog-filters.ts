@@ -21,13 +21,13 @@ const COMMAND_DISCOVERY = 'agent_harness mode:"commands" with no query';
 
 const WORKSPACE_ACTION_FILTERS = ['query', 'category', 'categoryId'] as const;
 const WORKSPACE_ACTION_DISCOVERY =
-  'agent_harness mode:"workspace_actions" with no category or query';
+  'agent_harness mode:"workspace_actions" with no category or query, page by page with offset';
 
 const SETTING_FILTERS = ['query', 'category', 'prefix'] as const;
-const SETTING_DISCOVERY = 'agent_harness mode:"settings" with no category, prefix, or query';
+const SETTING_DISCOVERY = 'agent_harness mode:"settings" with no category, prefix, or query, page by page with offset';
 
 const METHOD_FILTERS = ['query', 'methodId', 'target'] as const;
-const METHOD_DISCOVERY = 'host action:"methods" with no query';
+const METHOD_DISCOVERY = 'host action:"methods" with no query, page by page with offset';
 
 /** Filter names and full-listing route for each catalog mode, keyed by mode id. */
 export const CATALOG_QUERIES = {

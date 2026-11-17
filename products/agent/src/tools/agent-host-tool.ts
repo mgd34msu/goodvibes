@@ -23,6 +23,7 @@ interface AgentHostToolArgs {
   readonly query?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
+  readonly offset?: unknown;
 }
 
 type AgentHostToolDeps = HarnessFacadeDeps;
@@ -83,7 +84,8 @@ export function createAgentHostTool(deps: AgentHostToolDeps): Tool {
           target: { type: 'string', description: 'Lookup target for a capability, endpoint, or method.' },
           query: { type: 'string', description: 'Search text for capabilities or methods.' },
           includeParameters: { type: 'boolean', description: 'Include detailed method schemas, route families, probes, or diagnostics.' },
-          limit: { type: 'number', description: 'Maximum methods to return for action:methods.' },
+          limit: { type: 'number', description: 'Methods per page for action:methods (default 50, at most 100).' },
+          offset: { type: 'number', description: 'Row to start an action:methods page at; a short page names the next offset.' },
         },
         additionalProperties: false,
       },
@@ -138,6 +140,7 @@ export function createAgentHostTool(deps: AgentHostToolDeps): Tool {
           query: args.query ?? args.target,
           includeParameters: args.includeParameters,
           limit: args.limit,
+          offset: args.offset,
         }));
       }
       return dispatch(compactArgs({

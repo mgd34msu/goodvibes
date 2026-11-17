@@ -346,7 +346,11 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   limit: {
     type: 'number',
-    description: 'Maximum catalog entries to return.',
+    description: 'Maximum catalog entries to return. settings, workspace_actions and operator_methods page 50 rows by default, at most 100.',
+  },
+  offset: {
+    type: 'number',
+    description: 'Row to start a settings, workspace_actions or operator_methods page at; a short page names the next offset.',
   },
   confirm: confirmParameter('Without admission the call is refused and names the missing approval.'),
   explicitUserRequest: requestParameter(),

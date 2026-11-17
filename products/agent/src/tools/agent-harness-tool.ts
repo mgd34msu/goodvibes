@@ -64,11 +64,11 @@ import { AGENT_HARNESS_MODES, AGENT_HARNESS_PARAMETER_PROPERTIES } from './agent
 import { runCommand } from './agent-harness-command-runner.ts';
 import { runWorkspaceAction } from './agent-harness-workspace-action-runner.ts';
 import type { AgentHarnessToolArgs, AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
-import { catalogEnvelope, catalogFilters, effectOutput, error, output, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
+import { CATALOG_PAGE_MAX, CATALOG_PAGE_SIZE, catalogEnvelope, catalogFilters, effectOutput, error, output, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
 import { CATALOG_QUERIES as CQ } from './agent-harness-catalog-filters.ts';
 import { describeHarnessMode, HARNESS_MODE_DESCRIPTORS, HARNESS_READ_MODES, installedModeDescriptors, listHarnessModes, type AgentHarnessMode } from './agent-harness-mode-catalog.ts';
 import { describeHarnessUiSurface, listHarnessUiSurfaces, openHarnessUiSurface, totalHarnessUiSurfaces } from './agent-harness-ui-surface-metadata.ts';
-import { AGENT_WORKSPACE_CATEGORIES, allWorkspaceActions, buildWorkspaceEditorContext, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActions, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
+import { AGENT_WORKSPACE_CATEGORIES, allWorkspaceActions, buildWorkspaceEditorContext, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActionsPage, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
 import { connectedHostSummary, describeConnectedHostCapability, settingsPolicySummary } from './agent-harness-metadata.ts';
 import { countHarnessSettingCatalog, formatHarnessError, resolveEffectiveHarnessSetting } from '../agent/harness-control.ts';
 import { harnessSettingsCatalog, isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
@@ -735,10 +735,11 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           });
         }
         if (dispatchMode === 'workspace_actions') {
-          const actions = await listWorkspaceActions(deps.commandContext, args, catalogOptions);
+          const page = await listWorkspaceActionsPage(deps.commandContext, args, catalogOptions, CATALOG_PAGE_SIZE, CATALOG_PAGE_MAX);
           for (const guard of publicationGuards ?? []) { guard(); retainPublicationCurrent(guard); }
           assertCatalogExecution();
-          return output(catalogEnvelope('actions', actions, allWorkspaceActions().length, catalogFilters(args, CQ.workspace_actions.filters), CQ.workspace_actions.discovery));
+          return output(catalogEnvelope('actions', page.actions, allWorkspaceActions().length, catalogFilters(args, CQ.workspace_actions.filters), CQ.workspace_actions.discovery,
+            { offset: page.offset, matched: page.matched }));
         }
         if (dispatchMode === 'workspace_action') {
           const resolved = await resolveWorkspaceActionDetail(args, catalogOptions);

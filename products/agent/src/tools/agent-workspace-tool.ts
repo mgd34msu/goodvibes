@@ -51,6 +51,7 @@ interface AgentWorkspaceToolArgs {
   readonly value?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
+  readonly offset?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
 }
@@ -135,6 +136,7 @@ function workspaceDiscoveryArgs(args: AgentWorkspaceToolArgs): Record<string, un
     target: args.target,
     query: args.query,
     limit: args.limit,
+    offset: args.offset,
     includeParameters: args.includeParameters,
   });
 }
@@ -252,7 +254,8 @@ export function createAgentWorkspaceTool(deps: AgentWorkspaceToolDeps): Tool {
           key: { type: 'string', description: 'Keybinding lookup key.' },
           value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }], description: 'Keybinding value such as Ctrl+G.' },
           includeParameters: { type: 'boolean', description: 'Include detailed schemas or route metadata.' },
-          limit: { type: 'number', description: 'Maximum rows returned for catalog actions.' },
+          limit: { type: 'number', description: 'Maximum rows returned for catalog actions (action:actions pages 50 by default, at most 100).' },
+          offset: { type: 'number', description: 'Row to start an action:actions page at; a short page names the next offset.' },
           confirm: confirmParameter(),
           explicitUserRequest: requestParameter(),
         },

@@ -35,6 +35,8 @@ export interface HarnessSettingFilters {
   readonly query?: string;
   readonly includeHidden?: boolean;
   readonly limit?: number;
+  /** The first matching row the page holds (0 when absent). */
+  readonly offset?: number;
 }
 
 export type HarnessSettingLookupSource = 'key' | 'target' | 'query';
@@ -198,6 +200,10 @@ function previewText(value: string, maxLength = 56): string {
 function pageSize(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   return Math.max(1, Math.trunc(value));
+}
+
+function pageStart(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
 
 function findSetting(configManager: AgentSettingsCatalog, rawKey: string): AgentConfigSetting | null {
@@ -476,6 +482,7 @@ export function listHarnessSettings(
   filters: HarnessSettingFilters = {},
   options: { readonly includeParameters?: boolean; readonly view?: EffectiveConfigView } = {},
 ): readonly (HarnessSettingDescriptor | HarnessSettingSummary)[] {
+  const start = pageStart(filters.offset);
   const limit = pageSize(filters.limit);
   const view = options.view;
 
@@ -483,7 +490,7 @@ export function listHarnessSettings(
     .map((setting) => options.includeParameters
       ? describeHarnessSetting(configManager, setting, { ...(view ? { view } : {}) })
       : describeHarnessSettingSummary(configManager, setting, { ...(view ? { view } : {}) }))
-    .slice(0, limit);
+    .slice(start, limit === undefined ? undefined : start + limit);
 }
 
 /**
@@ -514,7 +521,9 @@ export async function listEffectiveHarnessSettingsPage(
   selected.assertCurrent();
   const view = await openEffectiveConfigView(configManager, { homeDir: home ?? undefined, ...routing });
   selected.assertCurrent();
-  const settings = selected.matches.slice(0, pageSize(filters.limit)).map(({ entry, judgment }) => ({
+  const start = pageStart(filters.offset);
+  const limit = pageSize(filters.limit);
+  const settings = selected.matches.slice(start, limit === undefined ? undefined : start + limit).map(({ entry, judgment }) => ({
     ...(includeParameters ? describeHarnessSetting(configManager, entry, { view }) : describeHarnessSettingSummary(configManager, entry, { view })),
     ...(judgment ? { judgment } : {}),
   }));

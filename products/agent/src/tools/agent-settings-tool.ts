@@ -24,6 +24,7 @@ interface AgentSettingsToolArgs {
   readonly includeHidden?: unknown;
   readonly includeParameters?: unknown;
   readonly limit?: unknown;
+  readonly offset?: unknown;
   readonly confirm?: unknown;
 }
 
@@ -70,6 +71,7 @@ function settingsListArgs(args: AgentSettingsToolArgs): Record<string, unknown> 
     includeHidden: args.includeHidden,
     includeParameters: args.includeParameters,
     limit: args.limit,
+    offset: args.offset,
   });
 }
 
@@ -128,7 +130,8 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
           value: { description: 'Value for action:set.' },
           includeHidden: { type: 'boolean', description: 'Include scriptable or hidden settings.' },
           includeParameters: { type: 'boolean', description: 'Include full setting metadata.' },
-          limit: { type: 'number', description: 'Maximum settings to return.' },
+          limit: { type: 'number', description: 'Settings per page (default 50, at most 100).' },
+          offset: { type: 'number', description: 'Row to start the page at; a short page names the next offset.' },
           confirm: confirmParameter(),
         },
         additionalProperties: false,

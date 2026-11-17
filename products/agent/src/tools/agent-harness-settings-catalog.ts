@@ -7,7 +7,7 @@ import { listEffectiveHarnessSettingsPage } from '../agent/harness-control.ts';
 import { settingDomainRelatedCommand } from '../config/settings-search-vocabulary.ts';
 import { settingsPolicySummary } from './agent-harness-metadata.ts';
 import { CATALOG_QUERIES } from './agent-harness-catalog-filters.ts';
-import { catalogEnvelope, catalogFilters, readLimit, readString } from './agent-harness-tool-utils.ts';
+import { CATALOG_PAGE_MAX, CATALOG_PAGE_SIZE, catalogEnvelope, catalogFilters, readLimit, readOffset, readString } from './agent-harness-tool-utils.ts';
 import type { AgentHarnessToolArgs } from './agent-harness-tool-types.ts';
 
 /** Exact catalog identities do not require semantic source projection. */
@@ -24,10 +24,12 @@ export function isHarnessSettingsQuery(input: Record<string, unknown>, config?: 
 /**
  * The `settings` catalog page, with the count of what matched beside it.
  *
- * There is no page ceiling: a page that stopped at one was indistinguishable
- * from the complete catalog, so a real setting past the cut read as a setting
- * that does not exist. The page goes out through {@link catalogEnvelope}, which
- * states in words when it is short of `total` and how to ask for the rest.
+ * A page is {@link CATALOG_PAGE_SIZE} rows unless the caller names a `limit`
+ * (at most {@link CATALOG_PAGE_MAX}), starting at `offset`. The whole catalog
+ * would pass the cut every tool result gets and arrive as a document cut
+ * mid-array; a page goes out through {@link catalogEnvelope}, which puts
+ * `returned`, `total`, `matched` and `nextOffset` before the rows and says in
+ * words that the page is short and how to ask for the next one.
  *
  * `total` is the size of the catalog the filters name, NOT the number that
  * matched the query. It used to be the latter, which is how a search for
@@ -46,8 +48,8 @@ export async function harnessSettingsCatalog(
     ...(readString(args.prefix) ? { prefix: readString(args.prefix) } : {}),
     ...(readString(args.query) ? { query: readString(args.query) } : {}),
     includeHidden: args.includeHidden === true,
-    // No page size unless the caller names one: the catalog is listed whole.
-    ...(args.limit === undefined || args.limit === null || args.limit === '' ? {} : { limit: readLimit(args.limit, 1, Number.MAX_SAFE_INTEGER) }),
+    limit: readLimit(args.limit, CATALOG_PAGE_SIZE, CATALOG_PAGE_MAX),
+    offset: readOffset(args.offset),
   };
   // Ownership-aware: daemon-owned keys carry the DAEMON's live value.
   const page = await listEffectiveHarnessSettingsPage(configManager, filters, {
@@ -64,6 +66,7 @@ export async function harnessSettingsCatalog(
       page.total,
       catalogFilters(args, CATALOG_QUERIES.settings.filters),
       CATALOG_QUERIES.settings.discovery,
+      { offset: filters.offset, matched: page.matched },
     ),
     ...(related.length > 0 ? { relatedCommands: related } : {}),
     policy: settingsPolicySummary(),

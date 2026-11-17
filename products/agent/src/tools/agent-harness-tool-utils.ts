@@ -41,6 +41,29 @@ export function readLimit(value: unknown, fallback: number, max = 500): number {
   return Math.max(1, Math.min(max, Math.trunc(parsed)));
 }
 
+/**
+ * The page a large catalog (settings, workspace actions, operator methods)
+ * returns when the caller names no `limit`. A whole catalog runs to hundreds
+ * of thousands of characters, past the cut every tool result gets, and a cut
+ * document loses its own `returned`/`total`; a page that says where the next
+ * one starts never reaches that cut.
+ */
+export const CATALOG_PAGE_SIZE = 50;
+
+/** The largest page a caller can ask a large catalog for; it stays under the tool-result cut. */
+export const CATALOG_PAGE_MAX = 100;
+
+/** Reads a caller-supplied starting row: a whole number from 0, 0 when absent or unreadable. */
+export function readOffset(value: unknown): number {
+  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
+  return typeof parsed === 'number' && Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+}
+
+/** Where a paged catalog page starts, and how many rows matched in all. */
+export interface CatalogPage {
+  readonly offset: number;
+  readonly matched: number;
+}
 
 export function readFieldMap(value: unknown): Readonly<Record<string, string>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
@@ -67,6 +90,8 @@ export type CatalogFilters = Readonly<Record<string, string | undefined>>;
  * @param total    - How many entries exist in the whole catalog.
  * @param filters  - Filter arguments that were applied, by argument name.
  * @param discovery - Route that lists everything, quoted in the guidance.
+ * @param page     - For a paged catalog: where the page starts and how many
+ *                   matched, so the envelope names `nextOffset`.
  */
 /**
  * Collects the named filter arguments a catalog query received, dropping the
@@ -104,6 +129,7 @@ export function catalogEnvelope(
   total: number,
   filters: CatalogFilters = {},
   discovery?: string,
+  page?: CatalogPage,
 ): Record<string, unknown> {
   const applied = Object.entries(filters)
     .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length > 0);
@@ -112,12 +138,20 @@ export function catalogEnvelope(
   const elsewhere = searched
     ? ` A capability may live on another surface: ${SIBLING_CATALOG_ROUTES} each search a different one.`
     : '';
+  const nextOffset = page && page.offset + items.length < page.matched ? page.offset + items.length : undefined;
 
+  // The counts, the next page and the note come before the rows, so a reader
+  // that sees only the start of the answer still knows what it holds.
   const envelope: Record<string, unknown> = {
-    [key]: items,
     returned: items.length,
     total,
+    ...(page ? { matched: page.matched, offset: page.offset } : {}),
+    ...(nextOffset !== undefined ? { nextOffset } : {}),
     ...(applied.length > 0 ? { appliedFilters: Object.fromEntries(applied) } : {}),
+  };
+  const withRows = (): Record<string, unknown> => {
+    envelope[key] = items;
+    return envelope;
   };
 
   // An empty catalog still owes the reader a sentence, and that sentence is not
@@ -128,17 +162,21 @@ export function catalogEnvelope(
   // shape a reader takes for "this platform cannot do that".
   if (total === 0) {
     envelope.note = `This catalog holds no ${key} at all, so no argument emptied this page.${elsewhere}`;
-    return envelope;
+    return withRows();
   }
 
   // A shortened or emptied page says so, in the one wording every list uses.
+  const context = [
+    ...(nextOffset !== undefined ? [`More match: repeat the same call with offset:${String(nextOffset)} for the next page.`] : []),
+    ...(items.length === 0 && elsewhere ? [elsewhere.trim()] : []),
+  ];
   const disclosure = inventoryDisclosure({
     subject: key, returned: items.length, total, filters: Object.fromEntries(applied),
     listAllRoute: discovery ?? 'the same call without filters or limit',
-    ...(items.length === 0 && elsewhere ? { context: [elsewhere.trim()] } : {}),
+    ...(context.length > 0 ? { context } : {}),
   });
   if (disclosure) { envelope.note = disclosure.note; envelope.listAllRoute = disclosure.listAllRoute; }
-  return envelope;
+  return withRows();
 }
 
 /**

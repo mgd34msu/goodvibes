@@ -5,8 +5,10 @@
  * - A `"` or `'` at the start of a word opens a quote that the same character
  *   closes; inside it spaces are kept exactly, and a backslash keeps the next
  *   quote character or backslash.
- * - Outside a quote, a backslash keeps a following space, quote or backslash;
- *   any other backslash is an ordinary character (`C:\dir`, `pa\ss\word`).
+ * - Outside a quote a backslash is an ordinary character, kept exactly as
+ *   typed (`C:\dir`, `pa\ss\word`, `ab\\cd`): a typed value such as a
+ *   secret reaches the command with the characters the person typed. Spaces
+ *   in a word are written by quoting it.
  * - A quote character inside a word is ordinary (`it's`).
  * - A quote left open refuses the whole line: nothing is closed for the person.
  * - A command can take the rest of the line untouched from a given word on
@@ -82,11 +84,6 @@ function scanWords(line: string, stopAfter?: (words: readonly string[]) => boole
           index++;
         }
         if (!closed) return { words, starts, emptyQuoted, unclosedQuote: true };
-        continue;
-      }
-      if (char === '\\' && index + 1 < length && (/\s/.test(line[index + 1]!) || QUOTES.has(line[index + 1]!) || line[index + 1] === '\\')) {
-        word += line[index + 1];
-        index += 2;
         continue;
       }
       word += char;

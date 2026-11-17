@@ -185,10 +185,11 @@ export function createSecretsCommand<Context extends SecretsCommandContext>(
           });
           return;
         }
-        // A value is one word, stored exactly as typed. Several words would have
-        // to be re-joined with guessed spacing, so they are refused instead.
+        // A value is one word, stored exactly as typed (a backslash outside
+        // quotes is an ordinary character). Several words would have to be
+        // re-joined with guessed spacing, so they are refused instead.
         if (parts.length > 1) {
-          context.print(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly.\nUsage: ${mutationUsage(subcommand)}`);
+          context.print(`[secrets] Nothing was stored: the value for ${key} is more than one word. Put it in quotes ("…") to keep its spaces exactly; inside the quotes write \\\\ for a backslash and \\" for a quote, or run /secrets set ${key}${suffix} with no value to type it masked where that is offered.\nUsage: ${mutationUsage(subcommand)}`);
           return;
         }
         const value = parts[0] ?? '';

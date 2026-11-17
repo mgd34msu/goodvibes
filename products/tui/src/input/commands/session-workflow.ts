@@ -248,8 +248,9 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
           if ((meta.returnContext.worktreePaths?.length ?? 0) > 0) {
             ctx.print(`  Worktree re-entry: /worktree review`);
           }
-          if (returnContextMode === 'assisted') {
-            const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
+          // The runtime's one helper route: its spend is recorded like any other helper call.
+          const helperModel = providerApi.helperModel;
+          if (returnContextMode === 'assisted' && helperModel) {
             const resumedSessionId = ctx.session.runtime.sessionId;
             void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then((assisted) => {
               if (!assisted.assistedNarrative) return;

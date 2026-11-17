@@ -1,5 +1,5 @@
 import type { DiscoveredServer } from '../discovery/index.js';
-import { HelperModel, type HelperModelDeps } from '../config/helper-model.js';
+import type { HelperModel } from '../config/helper-model.js';
 import {
   compositeScore,
   getQualityTier,
@@ -168,7 +168,12 @@ export interface ProviderApi {
   recordModelUsage(registryKey: string, ownership?: FavoritesUsageRestriction): Promise<ProviderApiFavoritesSnapshot>;
   listBenchmarks(query?: ProviderApiBenchmarkQuery): Promise<readonly ProviderApiBenchmarkRecord[]>;
   queryRuntimeMetadata(query: ProviderApiRuntimeQuery): Promise<ProviderApiRuntimeQueryResult>;
-  createHelperModel(configManager: HelperModelDeps['configManager']): HelperModel;
+  /**
+   * The runtime's one helper route for supporting work (absent when this API
+   * was built without the runtime services). Its spend reaches the cost
+   * totals, as the orchestrator's compaction summaries do.
+   */
+  readonly helperModel?: HelperModel | undefined;
 }
 
 export interface ProviderApiRegistry {
@@ -206,6 +211,8 @@ export interface ProviderApiDependencies {
   readonly providerRegistry: ProviderApiRegistry;
   readonly favoritesStore: ProviderApiFavoritesStore;
   readonly benchmarkStore: ProviderApiBenchmarkStore;
+  /** The runtime's one helper route, handed out as {@link ProviderApi.helperModel}. */
+  readonly helperModel?: HelperModel | undefined;
 }
 
 function cloneFavoritesData(data: FavoritesData): FavoritesData {
@@ -612,12 +619,7 @@ export function createProviderApi(deps: ProviderApiDependencies): ProviderApi {
       };
     },
 
-    createHelperModel(configManager: HelperModelDeps['configManager']): HelperModel {
-      return new HelperModel({
-        configManager,
-        providerRegistry: deps.providerRegistry,
-      });
-    },
+    ...(deps.helperModel ? { helperModel: deps.helperModel } : {}),
   };
 }
 

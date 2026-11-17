@@ -321,6 +321,26 @@ async function llmExtract(
   work.assertCurrent();
   if (!prompt.trim()) return null;
 
+  // A dedicated helper route takes the summary; it answers null when none is
+  // configured, and the extraction model below answers instead.
+  const helper = ctx.helperModel;
+  if (helper) {
+    let answer: string | null;
+    try {
+      answer = await work.wait(() => helper.chat('compaction', prompt, { helperOnly: true, signal: ctx.signal, timeoutMs: 0 }));
+    } catch {
+      work.assertCurrent();
+      logger.warn(`Compaction: helper model extraction failed for ${label}`);
+      return null;
+    }
+    work.assertCurrent();
+    if (answer !== null) {
+      const text = answer.trim();
+      if (!text) logger.warn(`Compaction: helper model returned empty response for ${label}`);
+      return text || null;
+    }
+  }
+
   let provider: LLMProvider;
   let providerModelId: string;
   try {

@@ -72,6 +72,7 @@ import type { SecretsManager } from '../config/secrets.js';
 import { ServiceRegistry } from '../config/service-registry.js';
 import { SubscriptionManager, sharedSubscriptionsPath } from '../config/subscriptions.js';
 import type { ToolLLM } from '../config/tool-llm.js';
+import type { HelperModel } from '../config/helper-model.js';
 import { createRuntimeSecretsManager } from './secrets-composition.js';
 import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
 import { composeJudgment, type JudgmentServices } from './judgment-services.js';
@@ -217,6 +218,8 @@ export interface ClientRuntimeServices {
   readonly benchmarkStore: BenchmarkStore;
   readonly modelLimitsService: ModelLimitsService;
   readonly toolLLM: ToolLLM;
+  /** The one helper route for supporting work; the orchestrator, resume summaries and titles share it. */
+  readonly helperModel: HelperModel;
 
   // The loop.
   readonly archetypeLoader: ArchetypeLoader;
@@ -721,6 +724,7 @@ function composeClientRuntimeServices(
     benchmarkStore: providers.benchmarkStore,
     modelLimitsService: providers.modelLimitsService,
     toolLLM: providers.toolLLM,
+    helperModel: providers.helperModel,
     archetypeLoader: agents.archetypeLoader,
     agentManager: agents.agentManager,
     agentMessageBus: agents.agentMessageBus,

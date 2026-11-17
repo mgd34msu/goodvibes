@@ -84,6 +84,7 @@ import type { AdaptivePlanner } from '../core/adaptive-planner.js';
 import type { IdempotencyStore } from './idempotency/index.js';
 import type { OverflowHandler } from '../tools/shared/overflow.js';
 import type { ToolLLM } from '../config/tool-llm.js';
+import type { HelperModel } from '../config/helper-model.js';
 import type { RuntimeHealthAggregator } from './health/aggregator.js';
 import type { WorktreeRegistry } from './worktree/registry.js';
 import type { SandboxSessionRegistry } from './sandbox/session-registry.js';
@@ -429,6 +430,8 @@ export interface RuntimeServices {
   readonly modelLimitsService: ModelLimitsService;
   readonly providerRegistry: ProviderRegistry;
   readonly toolLLM: ToolLLM;
+  /** The one helper route for supporting work; the orchestrator, resume summaries and titles share it. */
+  readonly helperModel: HelperModel;
   readonly distributedRuntime: DistributedRuntimeManager;
   readonly remoteRunnerRegistry: RemoteRunnerRegistry;
   readonly remoteSupervisor: RemoteSupervisor;

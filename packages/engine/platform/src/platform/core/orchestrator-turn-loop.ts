@@ -784,6 +784,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       });
     }
 
+    // The helper outlives the turn, so its counters run across turns: each turn
+    // reports what was used since the last report (a compaction in this turn,
+    // a title or resume summary between turns) and starts the count again.
     const helperUsage = helperModel.getUsage();
     if (helperUsage.calls > 0 && context.runtimeBus) {
       emitOpsHelperUsage(context.runtimeBus, context.emitterContext(context.turnId), {
@@ -791,6 +794,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         outputTokens: helperUsage.outputTokens,
         calls: helperUsage.calls,
       });
+      helperModel.resetUsage();
     }
 
     const hitRateThreshold = context.configManager.get('cache.hitRateWarningThreshold');

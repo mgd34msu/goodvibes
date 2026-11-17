@@ -268,7 +268,7 @@ export function getConfiguredSystemPrompt(configManager: Pick<ConfigManager, 'ge
 export { getConfiguredApiKeys, resolveApiKeys } from './api-keys.js';
 export { createOAuthLocalListener } from './oauth-local-listener.js';
 export type { OAuthLocalListener, OAuthLocalListenerConfig } from './oauth-local-listener.js';
-export { HelperModel, HelperModelUnavailableError, HelperRouter } from './helper-model.js';
+export { HelperModel, HelperRouter } from './helper-model.js';
 export type {
   HelperChatOptions,
   HelperModelDeps,

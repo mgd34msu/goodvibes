@@ -28,7 +28,7 @@ import type { FleetUnionReadModel } from './client/fleet-union.ts';
 import type { RuntimeHealthAggregator } from '@goodvibes-jev/engine/platform/platform/runtime/observability';
 import type { ApprovalRaiser, ClientRuntimeServicesOptions } from '@goodvibes-jev/engine/platform/platform/runtime/client-services';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { ConfigManager, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, HelperModel, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.ts';
 import type { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { ChannelDeliveryRouter, ChannelPolicyManager, ChannelPluginRegistry, RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
@@ -247,6 +247,8 @@ export interface RuntimeServices {
   readonly modelLimitsService: ModelLimitsService;
   readonly providerRegistry: ProviderRegistry;
   readonly toolLLM: ToolLLM;
+  /** The one helper route for supporting work; the orchestrator, resume summaries and titles share it. */
+  readonly helperModel: HelperModel;
   readonly distributedRuntime: DistributedRuntimeManager;
   readonly remoteRunnerRegistry: RemoteRunnerRegistry;
   readonly remoteSupervisor: RemoteSupervisor;

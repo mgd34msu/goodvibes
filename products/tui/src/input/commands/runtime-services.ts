@@ -191,6 +191,8 @@ export async function compactConversation(context: CommandContext): Promise<Comp
     trigger: 'manual',
     extractionModelId: context.session.runtime.model,
     extractionProvider: context.session.runtime.provider,
+    // A dedicated helper route writes the summary when one is configured, as in an automatic compaction.
+    helperModel: context.clients?.providerApi?.helperModel,
   };
   const receipt = await conversationManager.compact(
     providerRegistry,

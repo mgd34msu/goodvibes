@@ -16,6 +16,7 @@ export type OrchestratorCoreServicesSource = Pick<
   | 'memorySpine'
   | 'codeIndexStore'
   | 'codeIndexReindexScheduler'
+  | 'helperModel'
 >;
 
 /**
@@ -55,6 +56,8 @@ export function buildSharedOrchestratorCoreServices(input: {
   return {
     ...projectOrchestratorCoreServices({ configManager, providerRegistry, services }),
     memoryRegistry: { getAll: () => services.memorySpine.recallSnapshot().records },
+    // The process's one helper route: compaction summaries, titles and resume summaries share its spend.
+    helperModel: services.helperModel,
     // Main-session code auto-injection + tool-site reindex. Injection is
     // additionally gated by the default-off `agent-passive-code-injection` flag inside the
     // platform; here we supply the source, the live storage.codeIndexEnabled predicate, and the

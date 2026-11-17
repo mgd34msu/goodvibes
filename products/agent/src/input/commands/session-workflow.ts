@@ -176,8 +176,9 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
               '  Worktree re-entry. Open GoodVibes TUI in the target workspace; delegate explicit build/fix/review recovery from Agent.',
             );
           }
-          if (returnContextMode === 'assisted') {
-            const helperModel = requireProviderApi(ctx).createHelperModel(ctx.platform.configManager);
+          // The runtime's one helper route: its spend is recorded like any other helper call.
+          const helperModel = requireProviderApi(ctx).helperModel;
+          if (returnContextMode === 'assisted' && helperModel) {
             const resumedSessionId = ctx.session.runtime.sessionId;
             void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then(
               (assisted) => {

@@ -1,8 +1,7 @@
 import type { SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { SharedSessionBroker } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import type { HookDispatcher } from '@goodvibes-jev/engine/platform/platform/hooks';
-import { HelperModel, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
+import type { ConfigManager, HelperModel } from '@goodvibes-jev/engine/platform/platform/config';
 import {
   formatReturnContextForDisplay,
   getReturnContextMode,
@@ -15,7 +14,8 @@ interface ResumePublicationOptions {
   readonly runtime: { readonly sessionId: string };
   readonly conversation: { readonly title: string; log(message: string, options: { fg: string }): void };
   readonly configManager: Pick<ConfigManager, 'get' | 'getCategory'>;
-  readonly providerRegistry: Pick<ProviderRegistry, 'get' | 'getCurrentModel' | 'getForModel' | 'require' | 'resolveModelPricing'>;
+  /** The runtime's one helper route; the assisted summary's spend is recorded with every other helper call. */
+  readonly helperModel: Pick<HelperModel, 'chat'>;
   readonly onSessionIdChanged?: ((sessionId: string) => void) | undefined;
   readonly writeLastSessionPointer: (sessionId: string) => void;
   readonly sharedSessionBroker: Pick<SharedSessionBroker, 'reopenSession'>;
@@ -66,8 +66,7 @@ export function publishResumedSession(
       options.conversation.log(`Resume: ${line}`, { fg: activeTokens().textMuted });
     for (const line of policy.reentry(meta.returnContext)) options.conversation.log(line, { fg: activeTokens().textMuted });
     if (returnContextMode === 'assisted') {
-      const helperModel = new HelperModel({ configManager: options.configManager, providerRegistry: options.providerRegistry });
-      void maybeAssistReturnContextSummary(options.configManager, helperModel, meta.returnContext)
+      void maybeAssistReturnContextSummary(options.configManager, options.helperModel, meta.returnContext)
         .then((assisted) => {
           if (!assisted.assistedNarrative || options.runtime.sessionId !== sessionId) return;
           options.conversation.log(`Resume: ${assisted.assistedNarrative}`, { fg: activeTokens().textMuted });

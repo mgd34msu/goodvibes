@@ -10,6 +10,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 import type { ContractView } from '../contract/types.js';
 import type { ExecutionPlan } from './execution-plan.js';
 import type { CompactionQualityScore } from '../runtime/compaction/quality-score.js';
+import type { HelperModel } from '../config/helper-model.js';
 
 /**
  * Which conversation-compaction strategy produces the handoff.
@@ -139,6 +140,13 @@ export interface CompactionContext {
 
   /** Optional provider name for extraction model disambiguation. */
   extractionProvider?: string | undefined;
+
+  /**
+   * The session's helper route. When a dedicated helper model is configured,
+   * the compaction summary is asked of it (its spend is recorded as helper
+   * usage); otherwise the extraction model above answers.
+   */
+  helperModel?: Pick<HelperModel, 'chat'> | undefined;
 
   /**
    * The standing system instruction chain to re-include at the compaction

@@ -198,6 +198,7 @@ async function main() {
     sessionMemoryStore: ctx.services.sessionMemoryStore,
     sessionLineageTracker: ctx.services.sessionLineageTracker,
     idempotencyStore: ctx.services.idempotencyStore,
+    helperModel: ctx.services.helperModel,
   });
   let activeConversationWidth = getTerminalSize(stdout).width;
   conversation.setWidthProvider(() => activeConversationWidth);

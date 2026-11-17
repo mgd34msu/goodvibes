@@ -205,13 +205,22 @@ export async function distillConversation(
 
   let brief: string;
   try {
-    const response = await work.wait(() => resolved.provider.chat({
-      messages: [{ role: 'user', content: prompt }],
-      model: resolved.providerModelId,
-      signal: ctx.signal,
-    }));
+    // A dedicated helper route writes the brief when one is configured (null otherwise).
+    const helper = ctx.helperModel;
+    const helped = helper
+      ? await work.wait(() => helper.chat('compaction', prompt, { helperOnly: true, signal: ctx.signal, timeoutMs: 0 }))
+      : null;
     work.assertCurrent();
-    brief = response.content?.trim() ?? '';
+    if (helped !== null) brief = helped.trim();
+    else {
+      const response = await work.wait(() => resolved.provider.chat({
+        messages: [{ role: 'user', content: prompt }],
+        model: resolved.providerModelId,
+        signal: ctx.signal,
+      }));
+      work.assertCurrent();
+      brief = response.content?.trim() ?? '';
+    }
   } catch (err) {
     work.assertCurrent();
     throw new DistillerUnavailableError(`Distiller model call failed: ${summarizeError(err)}`);

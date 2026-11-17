@@ -1,7 +1,9 @@
 /**
  * Helper Model, the route for supporting work (a resumed session's summary,
- * and the other {@link HelperTask} kinds), so a cheaper model can do it in
- * place of the main one.
+ * a compaction's summary, a session's title), so a cheaper model can do it in
+ * place of the main one. The orchestrator owns one instance per session
+ * (`Orchestrator.helperModel`), wired to the runtime bus, so every helper
+ * call's spend reaches the cost totals and the turn's helper-usage event.
  *
  * Resolution order:
  *   1. Per-provider helper (helper.providers.{currentProvider}.provider + model)
@@ -33,8 +35,7 @@ import { summarizeError } from '../utils/error-display.js';
 export type HelperTask =
   | 'resume_summary'     // One-line summary shown when a session is resumed
   | 'compaction'         // Summarize prior context for compaction
-  | 'session_title'      // Title a session from its first exchange
-  | 'tool_summarize';    // Condense large tool output
+  | 'session_title';     // Title a session from its first exchange
 
 /** Resolved helper model: provider instance + model ID. */
 export interface ResolvedHelper {
@@ -77,13 +78,6 @@ export interface HelperModelDeps {
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
   /** Optional session identity stamped on emitted usage events. */
   readonly sessionId?: (() => string | undefined) | undefined;
-}
-
-export class HelperModelUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'HelperModelUnavailableError';
-  }
 }
 
 function readOptionalString(value: unknown): string {

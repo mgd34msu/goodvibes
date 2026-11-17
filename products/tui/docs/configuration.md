@@ -97,9 +97,9 @@ for it to read when it starts.
 | `cache.enabled` | `true` | Enable provider-aware prompt caching |
 | `cache.stableTtl` | `1h` | TTL for stable content (system prompt + tools) |
 | `cache.monitorHitRate` | `true` | Track and warn on low cache hit rates |
-| `helper.enabled` | `false` | Send supporting work (compaction summaries, session titles, resume summaries) to a cheaper helper model; off, that work runs on the main model |
-| `helper.globalProvider` | `` | Helper model provider (e.g., `ollama`); empty means the main model does the supporting work |
-| `helper.globalModel` | `` | Helper model ID (e.g., `llama3.2:3b`); empty means the main model does the supporting work |
+| `helper.enabled` | `false` | Send supporting work (compaction and resume summaries, session titles) to a cheaper helper model; off, it stays on the main model (titles on the tool LLM) |
+| `helper.globalProvider` | `` | Helper model provider (e.g., `ollama`); empty means the tool LLM when it is enabled, else the main model |
+| `helper.globalModel` | `` | Helper model ID (e.g., `llama3.2:3b`); empty means the tool LLM when it is enabled, else the main model |
 
 ## Permission modes
 
@@ -239,7 +239,7 @@ Listed in Settings under Behavior.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `session.autoTitle` | boolean | `false` | Auto-title an untitled session using the helper model (`helper.*`; with none set, the tool LLM when it is enabled, else the main model) after the first turn completes. Off by default because it spends a small model call. Only ever sets a system title (a title you set yourself is never overwritten), and it runs at most once per session. |
+| `session.autoTitle` | boolean | `false` | Auto-title an untitled session using the helper model when `helper.enabled` is on and a helper route is set, otherwise the configured tool LLM (`/config` → tools), after the first turn completes. Off by default because it spends a small model call. Only ever sets a system title (a title you set yourself is never overwritten), and it runs at most once per session. |
 
 ```json
 {

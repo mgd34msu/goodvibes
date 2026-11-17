@@ -76,11 +76,28 @@ export function requireMemoryGovernor(context: CommandContext) {
 
 /** The compaction receipt, or undefined when nothing was compacted. */
 export async function compactConversation(context: CommandContext) {
-  return await context.session.conversationManager.compact(
+  const conversation = context.session.conversationManager;
+  const helperModel = context.clients?.providerApi?.helperModel;
+  return await conversation.compact(
     context.provider.providerRegistry,
     context.session.runtime.model,
     'manual',
     context.session.runtime.provider,
+    // A dedicated helper route writes the summary when one is configured, as in an automatic compaction.
+    helperModel ? {
+      messages: conversation.getMessagesForLLM(),
+      trigger: 'manual',
+      extractionModelId: context.session.runtime.model,
+      extractionProvider: context.session.runtime.provider,
+      helperModel,
+      sessionMemories: [],
+      agents: [],
+      contracts: [],
+      activePlan: null,
+      lineageEntries: [],
+      compactionCount: 0,
+      contextWindow: 0,
+    } : undefined,
   );
 }
 

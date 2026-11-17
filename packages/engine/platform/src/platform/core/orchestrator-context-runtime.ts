@@ -19,6 +19,7 @@ import { CompactionQualityError } from './compaction-types.js';
 import { summarizeError } from '../utils/error-display.js';
 import { lifecycleStrategyFor, lifecycleTriggerFor, routeConversationCompaction } from './compaction-lifecycle-route.js';
 import type { CompactionLifecycleOwner } from './compaction-lifecycle-route.js';
+import type { HelperModel } from '../config/helper-model.js';
 
 type EmitterContextFactoryLike = { runtimeBus: RuntimeEventBus | null; emitterContext: EmitterContextFactory; sessionId: string };
 
@@ -121,6 +122,8 @@ type AutoCompactionDeps = {
    * distiller gate). Absent → the structured default.
    */
   getCompactionStrategy?: (() => CompactionStrategyChoice) | undefined;
+  /** The session's helper route, asked for the compaction summary when a dedicated helper is configured. */
+  helperModel?: Pick<HelperModel, 'chat'> | undefined;
 };
 
 /**
@@ -182,6 +185,7 @@ async function buildAutoCompactionContext(
     trigger: 'auto',
     extractionModelId: params.extractionModelId,
     extractionProvider: params.extractionProvider,
+    helperModel: deps.helperModel,
     instructionChain,
     activeSkillFrontmatter,
     strategy: deps.getCompactionStrategy?.() ?? 'structured',
@@ -212,6 +216,8 @@ export type PreflightDeps = {
   getCompactionStrategy?: (() => CompactionStrategyChoice) | undefined;
   /** The session's CompactionManager; each compaction's lifecycle runs through it. */
   compactionManager?: CompactionLifecycleOwner | null | undefined;
+  /** The session's helper route for the compaction summary. */
+  helperModel?: Pick<HelperModel, 'chat'> | undefined;
 };
 
 export async function checkContextWindowPreflight(
@@ -491,6 +497,8 @@ export type PostTurnContextDeps = {
   getCompactionStrategy?: (() => CompactionStrategyChoice) | undefined;
   /** The session's CompactionManager; each compaction's lifecycle runs through it. */
   compactionManager?: CompactionLifecycleOwner | null | undefined;
+  /** The session's helper route for the compaction summary. */
+  helperModel?: Pick<HelperModel, 'chat'> | undefined;
 };
 
 export async function handlePostTurnContextMaintenance(

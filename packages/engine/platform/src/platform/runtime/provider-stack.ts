@@ -24,6 +24,7 @@ import type { SecretsManager } from '../config/secrets.js';
 import type { ServiceRegistry } from '../config/service-registry.js';
 import type { SubscriptionManager } from '../config/subscriptions.js';
 import { ToolLLM } from '../config/tool-llm.js';
+import { HelperModel } from '../config/helper-model.js';
 import { CacheHitTracker } from '../providers/cache-strategy.js';
 import { ProviderCapabilityRegistry } from '../providers/capabilities.js';
 import { FavoritesStore } from '../providers/favorites.js';
@@ -84,6 +85,8 @@ export interface ProviderStack {
   readonly modelLimitsService: ModelLimitsService;
   readonly providerRegistry: ProviderRegistry;
   readonly toolLLM: ToolLLM;
+  /** The one helper route for supporting work (compaction and resume summaries, titles), with its spend on the bus. */
+  readonly helperModel: HelperModel;
   readonly providerOptimizer: ProviderOptimizer;
 }
 
@@ -165,6 +168,11 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     providerRegistry,
     runtimeBus: options.runtimeBus,
   });
+  const helperModel = new HelperModel({
+    configManager,
+    providerRegistry,
+    runtimeBus: options.runtimeBus,
+  });
   const providerOptimizer = new ProviderOptimizer(providerRegistry, providerCapabilityRegistry, false);
   // The two optimizer settings decide its state at start and on every later change.
   const unbindOptimizerConfig = bindProviderOptimizerConfig(configManager, providerOptimizer);
@@ -184,6 +192,7 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     modelLimitsService,
     providerRegistry,
     toolLLM,
+    helperModel,
     providerOptimizer,
   };
 }

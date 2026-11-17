@@ -49,8 +49,15 @@ export function wireSessionAmbience(deps: SessionAmbienceDeps): SessionAmbience 
   const scriptableStatusline = createScriptableStatusline({
     configManager, cwd: deps.workingDir, turns: deps.events.turns, onChange: () => render(),
   });
+  // Titles are supporting work: a dedicated helper route writes them when one is configured, and
+  // their spend is reported with the session's other helper calls; otherwise the tool LLM does.
+  const titleModel = {
+    chat: async (prompt: string, options?: { maxTokens?: number; systemPrompt?: string }): Promise<string> =>
+      (await deps.orchestrator.helperModel.chat('session_title', prompt, { ...options, helperOnly: true }))
+        ?? await deps.toolLLM.chat(prompt, options),
+  };
   const sessionAutoTitler = createSessionAutoTitler({
-    conversation: deps.conversation, model: deps.toolLLM, configManager, turns: deps.events.turns,
+    conversation: deps.conversation, model: titleModel, configManager, turns: deps.events.turns,
     getSessionId: deps.getSessionId, isActive: deps.isActive,
     onTitled: (title) => notifyAndPaint(`[Session] Auto-titled: "${title}"`),
   });

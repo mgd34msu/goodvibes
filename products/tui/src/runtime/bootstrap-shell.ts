@@ -156,7 +156,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
         confirm: () => commandContext.confirm,
       }),
     configManager,
-    providerRegistry: services.providerRegistry,
+    helperModel: services.helperModel,
     hydrateSessionUsage,
     selectModel: (model) => providerApi.selectModel(model),
   });

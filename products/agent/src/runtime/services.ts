@@ -99,7 +99,7 @@ import { FileStateCache } from '@goodvibes-jev/engine/platform/platform/state';
 import { ProjectIndex } from '@goodvibes-jev/engine/platform/platform/state';
 import { IdempotencyStore } from '@/runtime/index.ts';
 import { OverflowHandler } from '@goodvibes-jev/engine/platform/platform/tools';
-import { ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import { HelperModel, ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
 import { SandboxSessionRegistry } from '@/runtime/index.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { type SessionSurface } from '@/runtime/index.ts';
@@ -573,6 +573,8 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   readonly modelLimitsService: ModelLimitsService;
   readonly providerRegistry: ProviderRegistry;
   readonly toolLLM: ToolLLM;
+  /** The one helper route for supporting work; the orchestrator, resume summaries and titles share it. */
+  readonly helperModel: HelperModel;
   readonly distributedRuntime: DistributedRuntimeManager;
   readonly remoteRunnerRegistry: RemoteRunnerRegistry;
   readonly remoteSupervisor: RemoteSupervisor;

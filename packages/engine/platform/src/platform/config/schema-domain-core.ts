@@ -762,19 +762,19 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     key: 'helper.enabled',
     type: 'boolean',
     default: false,
-    description: 'Enable helper model routing for grunt-work tasks',
+    description: 'Send supporting work (compaction and resume summaries, session titles) to the helper route below; off, it stays on the main model (titles on the tool LLM)',
   },
   {
     key: 'helper.globalProvider',
     type: 'string',
     default: '',
-    description: 'Provider for the global helper model (empty = disabled)',
+    description: 'Provider for the global helper model (empty = the tool LLM when enabled, else the main model)',
   },
   {
     key: 'helper.globalModel',
     type: 'string',
     default: '',
-    description: 'Model ID for the global helper model (empty = disabled)',
+    description: 'Model ID for the global helper model (empty = the tool LLM when enabled, else the main model)',
   },
   {
     key: 'behavior.suggestAlternativeOnProviderFail',

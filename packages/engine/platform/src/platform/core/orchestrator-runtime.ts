@@ -12,12 +12,15 @@ import type { FavoritesStore } from '../providers/favorites.js';
 import type { TurnKnowledgeRegistrySource, TurnCodeIndexSource } from '../agents/turn-knowledge-injection.js';
 import type { CodeIndexReindexScheduler } from '../state/code-index-reindex.js';
 import type { ContractSessionHooks } from './orchestrator-turn-helpers.js';
+import type { HelperModel } from '../config/helper-model.js';
 
 export type OrchestratorCoreServices = {
   /** The contract runner's hooks: a session-mode contract's unit is worked by this session's turns (contract runner design 6.6). */
   contractHooks?: ContractSessionHooks | undefined;
   configManager?: Pick<ConfigManager, 'get' | 'getCategory' | 'getWorkingDirectory'> | undefined;
   providerRegistry?: ProviderRegistry | undefined;
+  /** The process's one helper route; without it the orchestrator builds its own on first use. */
+  helperModel?: HelperModel | undefined;
   cacheHitTracker?: Pick<CacheHitTracker, 'getMetrics'> | undefined;
   sessionLineageTracker?: SessionLineageTracker | undefined;
   idempotencyStore?: IdempotencyStore | undefined;

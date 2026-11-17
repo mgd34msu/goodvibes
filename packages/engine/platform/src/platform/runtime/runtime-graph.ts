@@ -226,6 +226,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     modelLimitsService,
     providerRegistry,
     toolLLM,
+    helperModel,
     providerOptimizer,
   } = createProviderStack({
     configManager,
@@ -955,6 +956,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     modelLimitsService,
     providerRegistry,
     toolLLM,
+    helperModel,
     distributedRuntime,
     remoteRunnerRegistry,
     remoteSupervisor,

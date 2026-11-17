@@ -296,6 +296,23 @@ export class Orchestrator {
   private readonly resolveSessionId: (() => string) | undefined;
   private get currentSessionId(): string { return this.resolveSessionId?.() ?? this.sessionId; }
 
+  private ownedHelperModel: HelperModel | null = null;
+  /**
+   * The helper route for supporting work: a compaction's summary, a session
+   * title, a resumed session's summary. The runtime's one instance when the
+   * core services carry it, else one built on first use; either is wired to
+   * the runtime bus, so each call's spend is recorded and the turn reports
+   * helper usage. An unset helper route inherits the main model.
+   */
+  get helperModel(): HelperModel {
+    return this.coreServices.helperModel ?? (this.ownedHelperModel ??= new HelperModel({
+      configManager: requireConfigManager(this.coreServices),
+      providerRegistry: requireProviderRegistry(this.coreServices),
+      runtimeBus: this.runtimeBus,
+      sessionId: () => this.currentSessionId,
+    }));
+  }
+
   /**
    * Submission key for the active turn: generated per runTurn, used as the
    * idempotency key of the turn-level dedup fence (a duplicate in-flight
@@ -1132,7 +1149,7 @@ export class Orchestrator {
       providerRegistry,
       favoritesStore: this.coreServices.favoritesStore,
       cacheHitTracker: getCacheHitTracker(this.coreServices, this.ownedCacheHitTracker),
-      helperModel: new HelperModel({ configManager, providerRegistry, runtimeBus: this.runtimeBus, sessionId: () => this.currentSessionId }),
+      helperModel: this.helperModel,
       sessionId: this.currentSessionId,
       planManager: isNativeConversationTurn() ? null : this.coreServices.planManager ?? null,
       text,
@@ -1245,6 +1262,7 @@ export class Orchestrator {
       getSystemPrompt: this.getSystemPrompt,
       signal: this.abortController?.signal,
       compactionManager: this.getCompactionManager(),
+      helperModel: this.helperModel,
       // Both compaction entry points (the pre-request check and the post-turn one) honour the strategy setting.
       getCompactionStrategy: () => resolveCompactionStrategy(
         configManager.get('behavior.compactionStrategy'),

@@ -280,7 +280,7 @@ export class KnowledgeStore {
   private readonly declareSemanticSourceFormat: (() => void) | undefined;
   private readonly ledgerStorage = new Map<string, KnowledgeWorkLedgerStorage>();
   private initPromise: Promise<void> | null = null;
-  /** SQLite's count of other connections' commits at the last refreshIfChanged(). */
+  /** SQLite's count of other connections' commits at open or at the last refreshIfChanged(). */
   private seenDataVersion = -1;
   // The SQLite file is the one owner of every row. Each table reads it and
   // keeps only a decode memo checked against the stored row, so a row another
@@ -512,13 +512,14 @@ export class KnowledgeStore {
 
   /**
    * Resolves true when another process committed to the knowledge file since
-   * the previous call. Nothing is loaded: every read already asks the file, so
-   * such a commit is seen by the next read anyway. One statement.
+   * the store opened or the previous call. Nothing is loaded: every read
+   * already asks the file, so such a commit is seen by the next read anyway.
+   * One statement.
    */
   refreshIfChanged(): Promise<boolean> {
     if (!this.ready || this.closed) return Promise.resolve(false);
     const version = this.sqlite.dataVersion();
-    const changed = this.seenDataVersion !== -1 && version !== this.seenDataVersion;
+    const changed = version !== this.seenDataVersion;
     this.seenDataVersion = version;
     return Promise.resolve(changed);
   }
@@ -2056,6 +2057,7 @@ export class KnowledgeStore {
       const pruned = this.pruneJobRuns(MAX_RETAINED_JOB_RUNS) + this.pruneConsolidationReports(MAX_RETAINED_CONSOLIDATION_REPORTS) + trimKnowledgeEdgeChanges(this.sqlite) + pruneOrphanScopeVerdicts(this.sqlite)
         + pruneSettledNativeWork(this.sqlite);
       if (pruned > 0 || verdictTableCreated) await this.sqlite.save();
+      this.seenDataVersion = this.sqlite.dataVersion();
       this.ready = true;
     } catch (error) {
       // No caller mutation can pass init yet. A failed initialization must not

@@ -276,6 +276,8 @@ export interface ContractReapSummary {
   readonly quarantineExpired: number;
   readonly quarantineOverCap: number;
   readonly staleTempRemoved: number;
+  /** Retry-key records (contracts.start Idempotency-Key) whose contract no longer exists. */
+  readonly retryKeysRemoved: number;
   readonly bytesReclaimed: number;
   readonly total: number;
   /** Ids of the terminal contracts whose files were removed. */
@@ -472,6 +474,33 @@ export class ContractStore {
   /** Records what a retry key started; the name is published exclusively, so the first record stands. */
   recordIdempotentStart(scope: string, record: IdempotentStartRecord): void {
     publishInitialContractCheckpoint(contractIdempotencyDir(this.projectRoot), idempotencyFileId(scope), JSON.stringify(record), () => {});
+  }
+
+  /**
+   * Removes retry-key records whose contract is gone (ended and reaped, or
+   * removed), so the directory is bounded like the contracts it points to. A
+   * record younger than an hour is kept: it is written before its contract's
+   * first checkpoint is published. One listing and one small read per record.
+   */
+  private reapRetryKeys(now: number): { readonly removed: number; readonly bytes: number } {
+    const dir = contractIdempotencyDir(this.projectRoot);
+    let names: string[];
+    try { names = readdirSync(dir); } catch { return { removed: 0, bytes: 0 }; }
+    let removed = 0, bytes = 0;
+    for (const name of names) {
+      if (!name.startsWith('idem-') || !name.endsWith(JSON_SUFFIX)) continue;
+      const path = join(dir, name);
+      let contractId: unknown;
+      // An unreadable record is left: readIdempotentStart names it to the caller that uses its key.
+      try { contractId = (JSON.parse(readFileSync(path, 'utf8')) as { readonly contractId?: unknown }).contractId; } catch { continue; }
+      if (typeof contractId !== 'string' || !isContractId(contractId)) continue;
+      if (this.contracts.has(contractId) || this.endedSummary(contractId) !== undefined
+        || existsSync(contractPath(this.projectRoot, contractId)) || existsSync(historicalContractPath(this.projectRoot, contractId))) continue;
+      try { if (now - statSync(path).mtimeMs < STALE_TEMP_MAX_AGE_MS) continue; } catch { continue; }
+      bytes += removeFile(path);
+      removed += 1;
+    }
+    return { removed, bytes };
   }
 
   /** Drops a retry-key record whose contract no longer exists, so the key can start a new one. */
@@ -811,7 +840,7 @@ export class ContractStore {
   reap(): ContractReapSummary {
     const empty: ContractReapSummary = {
       terminalExpired: 0, terminalOverCap: 0, quarantineExpired: 0, quarantineOverCap: 0,
-      staleTempRemoved: 0, bytesReclaimed: 0, total: 0, reapedIds: [],
+      staleTempRemoved: 0, retryKeysRemoved: 0, bytesReclaimed: 0, total: 0, reapedIds: [],
     };
     const entries: { dir: string; entry: string }[] = [];
     for (const dir of [contractCheckpointsDir(this.projectRoot), contractsDir(this.projectRoot)]) {
@@ -819,8 +848,11 @@ export class ContractStore {
       try { for (const entry of readdirSync(dir)) entries.push({ dir, entry }); }
       catch (error) { logger.warn('contract store: failed to list the contract directory for housekeeping', { dir, error: summarizeError(error) }); }
     }
-    if (entries.length === 0) return empty;
     const now = this.now();
+    if (entries.length === 0) {
+      const keys = this.reapRetryKeys(now);
+      return { ...empty, retryKeysRemoved: keys.removed, bytesReclaimed: keys.bytes, total: keys.removed };
+    }
     const terminal: DatedFile[] = [];
     let staleTempRemoved = 0;
     let bytesReclaimed = 0;
@@ -884,13 +916,17 @@ export class ContractStore {
     const quarantine = this.reapQuarantines(now);
     const quarantineExpired = quarantine.expired;
     bytesReclaimed += quarantine.bytesReclaimed;
-    const total = terminalExpired + terminalExcess.length + quarantine.reaped + staleTempRemoved;
+    // After the terminal pass, so the keys of contracts removed just now go in this pass too.
+    const keys = this.reapRetryKeys(now);
+    bytesReclaimed += keys.bytes;
+    const total = terminalExpired + terminalExcess.length + quarantine.reaped + staleTempRemoved + keys.removed;
     const summary: ContractReapSummary = {
       terminalExpired,
       terminalOverCap: terminalExcess.length,
       quarantineExpired,
       quarantineOverCap: quarantine.overCap,
       staleTempRemoved,
+      retryKeysRemoved: keys.removed,
       bytesReclaimed,
       total,
       reapedIds,

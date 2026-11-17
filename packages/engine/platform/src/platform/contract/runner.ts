@@ -1048,11 +1048,13 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     }
   }
 
-  function start(input: StartContractInput, options: ContractStartOptions = {}): Promise<StartedContract> {
+  /** `reserved` hears the new contract's id before anything is prepared or published (the retry key is recorded there). */
+  function start(input: StartContractInput, options: ContractStartOptions = {}, reserved?: (contractId: string) => void): Promise<StartedContract> {
     requireDecisionFeature('autonomous contract planning and acceptance');
     if (disposed) throw new Error('Contract runner is disposed');
     const captured = captureStartInput(input);
     const id = newContractId(), creation = reserveCreation(id);
+    reserved?.(id);
     return (async () => {
       let owner: AgentRecord | undefined;
       try {
@@ -1086,10 +1088,21 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       deps.store.forgetIdempotentStart(scope);
     }
     const operation = (async () => {
-      const started = await start(input, options);
-      // The contract is running; a key that could not be recorded only means a retry would not find it.
-      try { deps.store.recordIdempotentStart(scope, { contractId: started.contract.id, fingerprint }); }
-      catch (error) { logger.warn('contract runner: the retry key for a started contract was not recorded', { contractId: started.contract.id, error: summarizeError(error) }); }
+      // The key is recorded with the reserved id before the first checkpoint is published, so a daemon
+      // that stops after creating the contract finds it on the retry; a record whose contract was never
+      // published reads as absent above. A key that could not be recorded only means a retry would not find it.
+      let recorded = false;
+      const record = (contractId: string): void => {
+        try { deps.store.recordIdempotentStart(scope, { contractId, fingerprint }); recorded = true; }
+        catch (error) { logger.warn('contract runner: the retry key for a starting contract was not recorded', { contractId, error: summarizeError(error) }); }
+      };
+      let started: StartedContract;
+      try { started = await start(input, options, record); }
+      catch (error) {
+        // Nothing started: the key is free for the retry.
+        if (recorded) { try { deps.store.forgetIdempotentStart(scope); } catch { /* reads as absent anyway */ } }
+        throw error;
+      }
       return { fingerprint, started: { contract: started.contract, ownerAgentId: started.owner.id, replayed: false } };
     })();
     idempotentStarts.set(scope, operation);

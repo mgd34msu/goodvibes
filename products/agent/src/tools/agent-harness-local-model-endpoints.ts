@@ -1,22 +1,12 @@
-import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
-import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { types as nodeTypes } from 'node:util';
-import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { redactText } from '@goodvibes-jev/engine/terminal-shell';
-import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureModelReadModelData, captureModelProviderReadingFacts, captureModelReadingInput, captureModelReadingSnapshotGuard, assertModelReadingInputCurrent, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
-import { protectPersonalOpsData } from './agent-harness-personal-ops-source.ts';
-import { readLocalServingBoolean, readLocalServingStatus, readLocalResourcePressure, readLocalServingSchemaStatus } from './agent-harness-local-model-readings.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { LocalModelDetection, LocalModelEndpointSource, LocalModelServerDefaultEndpoint, LocalModelServerDiagnosticsPublication, LocalModelServerEndpoint, LocalModelServerHealthMap, LocalModelServerServingDiagnostics, MutableLocalModelServerEndpoint } from './agent-harness-model-routing-types.ts';
+import type { LocalModelDetection, LocalModelEndpointSource, LocalModelLastSmoke, LocalModelServerDefaultEndpoint, LocalModelServerEndpoint, LocalModelServerHealthMap, MutableLocalModelServerEndpoint } from './agent-harness-model-routing-types.ts';
+import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { listProviderRegistryProviders, listRegistryModels, modelProviderId, modelRegistryKey, readProviderModels } from './agent-harness-model-catalog.ts';
-import { previewHarnessText } from './agent-harness-text.ts';
-import { readLimit, readRecord, readString } from './agent-harness-model-routing-utils.ts';
-import { extractUrls, isPrivateOrLocalUrl, localStackFor, modelsUrlFor, normalizeLocalBaseUrl, parseUrlCandidate, stripUrlCredentials } from './agent-harness-local-model-url.ts';
+import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
+import { extractUrls, localStackFor, modelsUrlFor, normalizeLocalBaseUrl } from './agent-harness-local-model-url.ts';
 
 export type { LocalModelStack } from './agent-harness-local-model-url.ts';
-export { cleanUrlCandidate, extractUrls, isPrivateOrLocalHost, isPrivateOrLocalUrl, localStackFor, modelsUrlFor, normalizeLocalBaseUrl, parseUrlCandidate } from './agent-harness-local-model-url.ts';
+export { cleanUrlCandidate, extractUrls, isPrivateOrLocalHost, isPrivateOrLocalUrl, localStackFor, localStackForProvider, modelsUrlFor, normalizeLocalBaseUrl, parseUrlCandidate } from './agent-harness-local-model-url.ts';
 
 export function localProviderNameFor(providerId: string | null, stack: string | null, fallback: string): string {
   const seed = providerId || stack || fallback;
@@ -63,528 +53,29 @@ export function localEndpointDiagnostics(endpoint: MutableLocalModelServerEndpoi
   };
 }
 
-interface LocalModelServingReadModelSource {
-  readonly path: string;
-  readonly source: unknown;
+/**
+ * The last confirmed smoke of each local endpoint in this Agent process, by
+ * normalized base URL. A smoke is the one live fact the product has about a
+ * local server (reachable, HTTP status, model ids, latency), so it is kept
+ * and shown as that endpoint's diagnostics until the next smoke replaces it.
+ */
+const lastSmokes = new Map<string, LocalModelLastSmoke>();
+
+/** Called by `runLocalModelServerSmoke` for every endpoint it actually probed. */
+export function recordLocalModelSmoke(baseUrl: string, smoke: LocalModelLastSmoke): void {
+  lastSmokes.set(normalizeLocalBaseUrl(baseUrl) ?? baseUrl, smoke);
 }
 
-interface LocalModelServingDiagnosticRecord extends LocalModelServerServingDiagnostics {
-  readonly baseUrl: string | null;
-  readonly modelsUrl: string | null;
-  readonly providerId: string | null;
-  readonly stack: string | null;
-}
-
-interface LocalModelServingDiagnosticIndex {
-  readonly records: readonly LocalModelServingDiagnosticRecord[];
-  readonly publication: Omit<LocalModelServerDiagnosticsPublication, 'matchedEndpointCount'>;
-  readonly assertCurrent: () => void;
-}
-
-const LOCAL_MODEL_SERVING_READ_MODEL_PATHS = [
-  'context.platform.readModels.localModelServers',
-  'context.platform.readModels.localModelServing',
-  'context.platform.readModels.localModelDiagnostics',
-  'context.platform.readModels.models.localServers',
-  'context.platform.readModels.models.servingDiagnostics',
-  'context.platform.readModels.localModels.servingDiagnostics',
-  'context.platform.readModels.ollama.servingDiagnostics',
-  'context.platform.readModels.llamaCpp.servingDiagnostics',
-  'context.platform.readModels.vllm.servingDiagnostics',
-  'context.platform.readModels.localAi.servingDiagnostics',
-  'context.platform.readModels.openAiCompatible.servingDiagnostics',
-  'context.platform.localModelServing',
-  'context.clients.operator.models.servingDiagnostics',
-  'context.clients.operator.localModelServingDiagnostics',
-] as const;
-
-function readNumber(value: unknown): number | null {
-  const parsed = typeof value === 'string' && value.trim() ? Number(value) : value;
-  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null;
-}
-
-function readStringArray(value: unknown): readonly string[] {
-  const values = Array.isArray(value) ? value : [];
-  return [...new Set(values.map((entry) => {
-    if (typeof entry === 'string') return entry.trim();
-    const record = readRecord(entry);
-    return readString(record.id) || readString(record.name) || readString(record.model) || readString(record.modelId);
-  }).filter(Boolean))].slice(0, 12);
-}
-
-function firstString(record: Record<string, unknown>, keys: readonly string[]): string {
-  for (const key of keys) {
-    const value = readString(record[key]);
-    if (value) return value;
-  }
-  return '';
-}
-
-function firstNumber(record: Record<string, unknown>, keys: readonly string[]): number | null {
-  for (const key of keys) {
-    const value = readNumber(record[key]);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
-async function firstBoolean(record: Record<string, unknown>, keys: readonly string[], options: ModelReadingOptions): Promise<boolean | null> {
-  for (const key of keys) {
-    const value = await readLocalServingBoolean(record[key], key, record, options);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
-function isoFromDiagnosticValue(value: unknown): string | null {
-  const timestamp = typeof value === 'number' && Number.isFinite(value)
-    ? value
-    : typeof value === 'string' && value.trim()
-      ? Date.parse(value)
-      : Number.NaN;
-  if (Number.isNaN(timestamp)) return null;
-  // A number outside the Date range (a nanosecond epoch) makes toISOString throw, which would drop the whole source.
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-async function localServingStatus(record: Record<string, unknown>, options: ModelReadingOptions): Promise<LocalModelServerServingDiagnostics['status']> {
-  return readLocalServingStatus(firstString(record, ['status', 'healthStatus', 'state', 'result', 'outcome']), record, options);
-}
-
-async function localResourcePressure(record: Record<string, unknown>, options: ModelReadingOptions): Promise<LocalModelServerServingDiagnostics['resourcePressure']> {
-  const value = firstString(record, ['resourcePressure', 'pressure', 'memoryPressure', 'vramPressure']);
-  if (value) {
-    const pressure = await readLocalResourcePressure(value, record, options);
-    if (!isClassicOperation() || pressure !== 'unknown') return pressure;
-  }
-  const usage = firstNumber(record, ['memoryUsagePercent', 'memoryPercent', 'vramUsagePercent', 'gpuMemoryPercent']);
-  if (usage !== null) return usage >= 90 ? 'high' : usage >= 70 ? 'moderate' : 'low';
-  return 'unknown';
-}
-
-async function localResourceSummary(record: Record<string, unknown>, pressure: LocalModelServerServingDiagnostics['resourcePressure'], options: ModelReadingOptions): Promise<string | undefined> {
-  const explicit = firstString(record, ['resourceSummary', 'resources', 'resourceDetail']);
-  if (explicit) return previewHarnessText(await redactText(explicit, options), 180);
-  const parts = [
-    firstNumber(record, ['memoryUsagePercent', 'memoryPercent']) !== null ? `memory ${firstNumber(record, ['memoryUsagePercent', 'memoryPercent'])}%` : '',
-    firstNumber(record, ['vramUsagePercent', 'gpuMemoryPercent']) !== null ? `vram ${firstNumber(record, ['vramUsagePercent', 'gpuMemoryPercent'])}%` : '',
-    firstNumber(record, ['cpuPercent', 'cpuUsagePercent']) !== null ? `cpu ${firstNumber(record, ['cpuPercent', 'cpuUsagePercent'])}%` : '',
-  ].filter(Boolean);
-  if (parts.length > 0) return `${pressure} pressure; ${parts.join(', ')}.`;
-  return undefined;
-}
-
-function firstStringFromRecords(records: readonly Record<string, unknown>[], keys: readonly string[]): string {
-  for (const record of records) {
-    const value = firstString(record, keys);
-    if (value) return value;
-  }
-  return '';
-}
-
-async function localServingSchemaStatus(record: Record<string, unknown>, options: ModelReadingOptions): Promise<LocalModelServerServingDiagnostics['schemaStatus']> {
-  if (isClassicOperation()) return 'not-evaluated';
-  const records = [record, readRecord(record.schema), readRecord(record.contract), readRecord(record.receipt)];
-  const explicit = firstStringFromRecords(records, ['schemaStatus', 'receiptSchemaStatus', 'certificationStatus']);
-  if (explicit) {
-    const certified = await readLocalServingSchemaStatus(explicit, record, options);
-    return certified === null ? 'not-evaluated' : certified ? 'certified' : 'legacy';
-  }
-  const schemaVersion = firstStringFromRecords(records, ['schemaVersion', 'receiptSchemaVersion', 'contractVersion']);
-  const provenance = firstStringFromRecords(records, ['methodId', 'sourceTool', 'actionId']);
-  const publicationGuarantee = firstStringFromRecords(records, ['publicationGuarantee', 'hostPublicationGuarantee', 'servingPublicationGuarantee']);
-  return schemaVersion && provenance && publicationGuarantee ? 'certified' : 'legacy';
-}
-
-async function routeTextFromDiagnosticValue(value: unknown, options: ModelReadingOptions): Promise<string> {
-  const direct = readString(value);
-  if (direct) return previewHarnessText(await redactText(direct, options), 260);
-  const record = readRecord(value);
-  const route = firstString(record, ['route', 'modelRoute', 'operatorRoute', 'methodRoute', 'commandRoute']);
-  return route ? previewHarnessText(await redactText(route, options), 260) : '';
-}
-
-async function diagnosticRouteFromRecord(record: Record<string, unknown>, keys: readonly string[], options: ModelReadingOptions): Promise<string> {
-  for (const key of keys) {
-    const route = await routeTextFromDiagnosticValue(record[key], options);
-    if (route) return route;
-  }
-  for (const nestedKey of ['routes', 'actions', 'controls', 'operatorRoutes', 'hostRoutes', 'receiptRoutes']) {
-    const nested = readRecord(record[nestedKey]);
-    for (const key of keys) {
-      const route = await routeTextFromDiagnosticValue(nested[key], options);
-      if (route) return route;
-    }
-  }
-  return '';
-}
-
-async function diagnosticPublicationGuarantee(record: Record<string, unknown>, options: ModelReadingOptions): Promise<string> {
-  const value = firstStringFromRecords(
-    [record, readRecord(record.schema), readRecord(record.contract), readRecord(record.receipt)],
-    ['publicationGuarantee', 'hostPublicationGuarantee', 'servingPublicationGuarantee'],
-  );
-  return value ? previewHarnessText(await redactText(value, options), 220) : '';
-}
-
-async function localServingProvenance(
-  record: Record<string, unknown>,
-  startRoute: string,
-  repairRoute: string,
-  options: ModelReadingOptions,
-): Promise<readonly string[]> {
-  const explicit = readStringArray(record.provenance);
-  const values = [
-    ...explicit,
-    firstStringFromRecords([record, readRecord(record.receipt)], ['methodId']) ? `method ${firstStringFromRecords([record, readRecord(record.receipt)], ['methodId'])}` : '',
-    firstString(record, ['actionId']) ? `action ${firstString(record, ['actionId'])}` : '',
-    firstString(record, ['sourceTool']) ? `sourceTool ${firstString(record, ['sourceTool'])}` : '',
-    startRoute ? `start ${startRoute}` : '',
-    repairRoute ? `repair ${repairRoute}` : '',
-  ];
-  const redacted = await Promise.all(values.filter(Boolean).map(async (entry) => previewHarnessText(await redactText(entry, options), 220)));
-  return [...new Set(redacted.filter(Boolean))].slice(0, 8);
-}
-
-function setupServingReadModelSources(context: CommandContext): readonly LocalModelServingReadModelSource[] {
-  return LOCAL_MODEL_SERVING_READ_MODEL_PATHS.map(path => ({
-    path, source: modelReadingServicePath(context, path.split('.').slice(1)),
-  }));
-}
-
-/** A local model source is the program's own service: checked to be an object, its methods not re-checked. */
-function sourceMethods(source: unknown, _keys: readonly string[]): () => void {
-  if (source !== null && source !== undefined && typeof source !== 'object') throw new Error('Unsupported local model source.');
-  return sourceUnchanged;
-}
-const sourceUnchanged = (): void => {};
-
-const SERVING_SNAPSHOT_METHODS = ['getSnapshot', 'snapshot', 'list', 'listDiagnostics', 'listServingDiagnostics', 'listLocalServers', 'listServers', 'readSnapshot'] as const;
-const SERVING_COLLECTION_KEYS = ['localModelServers', 'localServers', 'servingDiagnostics', 'diagnostics', 'servers', 'endpoints', 'records', 'items', 'entries'] as const;
-
-/** Native Map keys are record identities, not arbitrary object field roles.
- * Preserve each key and complete original record in declared envelope fields. */
-function servingSnapshotData(original: unknown, captured: unknown): unknown {
-  const isMap = (value: unknown): value is Map<string, unknown> => value instanceof Map;
-  const rows = (value: unknown) => Object.entries(readRecord(value)).map(([recordId, metadata]) => ({
-    id: readString(readRecord(metadata).id) || recordId, recordId, metadata,
-  }));
-  if (isMap(original)) return { records: rows(readRecord(captured).records) };
-  if (captured === null || typeof captured !== 'object' || Array.isArray(captured)) return captured;
-  const snapshot = readRecord(captured), fields = original !== null && typeof original === 'object'
-    ? original as Record<string, unknown> : {};
-  return Object.fromEntries(Object.entries(snapshot).map(([key, value]) => [key,
-    SERVING_COLLECTION_KEYS.some(collection => collection === key) && isMap(fields[key]) ? rows(value) : value]));
-}
-
-function captureServingSource(context: CommandContext, entry: LocalModelServingReadModelSource): {
-  readonly data: unknown; readonly assertCurrent: () => void;
-} {
-  const source = entry.source;
-  const methods = typeof source === 'function' ? () => {} : sourceMethods(source, SERVING_SNAPSHOT_METHODS);
-  const read = typeof source === 'function' ? source : SERVING_SNAPSHOT_METHODS
-    .map(key => modelReadingServicePath(source, [key])).find(method => typeof method === 'function');
-  const acquire = () => {
-    methods();
-    const value: unknown = typeof read === 'function' ? read.call(source) : source;
-    if (nodeTypes.isPromise(value)) {
-      void value.then(undefined, () => {});
-      throw new Error('Local serving diagnostics must publish synchronous native snapshots.');
-    }
-    methods(); return value;
-  };
-  const original = acquire(), captured = captureModelReadModelData(original, false);
-  const data = servingSnapshotData(original, captured), serialized = JSON.stringify(captured);
-  const assertCurrent = () => {
-    if (modelReadingServicePath(context, entry.path.split('.').slice(1)) !== source) throw new Error('Local serving diagnostic source changed.');
-    methods();
-    assertModelReadingInputCurrent(captureModelReadModelData(original, false), serialized);
-    assertModelReadingInputCurrent(captureModelReadModelData(acquire(), false), serialized);
-    methods();
-  };
-  assertCurrent(); return { data, assertCurrent };
-}
-
-function diagnosticEntriesFromSnapshot(snapshot: unknown): readonly unknown[] {
-  if (Array.isArray(snapshot)) return snapshot;
-  if (snapshot instanceof Map) return [...snapshot.entries()].map(([id, entry]) => {
-    const entryRecord = readRecord(entry);
-    return Object.keys(entryRecord).length > 0 && !readString(entryRecord.id) ? { ...entryRecord, id } : entry;
-  });
-  const record = readRecord(snapshot);
-  for (const key of SERVING_COLLECTION_KEYS) {
-    const value = record[key];
-    if (value instanceof Map) return [...value.entries()].map(([id, entry]) => {
-      const entryRecord = readRecord(entry);
-      return Object.keys(entryRecord).length > 0 && !readString(entryRecord.id) ? { ...entryRecord, id } : entry;
-    });
-    if (Array.isArray(value)) return value;
-    const valueRecord = readRecord(value);
-    if (Object.keys(valueRecord).length > 0) {
-      return Object.entries(valueRecord).map(([id, entry]) => {
-        const entryRecord = readRecord(entry);
-        return Object.keys(entryRecord).length > 0 && !readString(entryRecord.id) ? { ...entryRecord, id } : entry;
-      });
-    }
-  }
-  return Object.keys(record).length > 0 ? [record] : [];
-}
-
-function isLocalServingDiagnosticRecord(record: Record<string, unknown>): boolean {
-  const base = firstString(record, ['baseUrl', 'baseURL', 'endpoint', 'url', 'modelsUrl', 'serverUrl']);
-  const providerId = firstString(record, ['providerId', 'provider', 'providerName']);
-  if (!base && !providerId) return false;
-  return Boolean(
-    firstString(record, ['serverVersion', 'version', 'resourcePressure', 'status', 'healthStatus', 'startReceiptId', 'repairReceiptId', 'receiptId'])
-      || readStringArray(record.loadedModels).length > 0
-      || readStringArray(record.models).length > 0
-      || firstNumber(record, ['loadedModelCount', 'modelCount', 'contextWindowTokens', 'memoryUsagePercent', 'vramUsagePercent']) !== null,
-  );
-}
-
-async function normalizeServingDiagnosticRecord(value: unknown, source: string, options: ModelReadingOptions): Promise<LocalModelServingDiagnosticRecord | null> {
-  const record = {
-    ...readRecord(readRecord(value).metadata),
-    ...readRecord(value),
-  };
-  if (!isLocalServingDiagnosticRecord(record)) return null;
-  const stack = await localStackFor(firstString(record, ['stack', 'serverType', 'backend']) || JSON.stringify(record), options, record);
-  const rawBaseUrl = firstString(record, ['baseUrl', 'baseURL', 'endpoint', 'url', 'serverUrl']);
-  const rawModelsUrl = firstString(record, ['modelsUrl', 'modelListUrl']);
-  const baseUrl = rawBaseUrl
-    ? normalizeLocalBaseUrl(rawBaseUrl, stack)
-    : rawModelsUrl
-      ? normalizeLocalBaseUrl(rawModelsUrl, stack)
-      : null;
-  const modelsUrl = rawModelsUrl
-    ? modelsUrlFor(normalizeLocalBaseUrl(rawModelsUrl, stack) ?? stripUrlCredentials(rawModelsUrl).replace(/\/models\/?$/i, ''))
-    : baseUrl
-      ? modelsUrlFor(baseUrl)
-      : null;
-  const loadedModels = readStringArray(record.loadedModels).length > 0
-    ? readStringArray(record.loadedModels)
-    : readStringArray(record.models).length > 0
-      ? readStringArray(record.models)
-      : readStringArray(record.modelIds);
-  const loadedModelCount = firstNumber(record, ['loadedModelCount', 'modelCount']) ?? loadedModels.length;
-  const status = await localServingStatus(record, options);
-  const resourcePressure = await localResourcePressure(record, options);
-  const summary = await redactText(firstString(record, ['summary', 'detail', 'message']), options)
-    || `${providerIdLabel(firstString(record, ['providerId', 'provider', 'providerName']))} local serving diagnostics are ${status}.`;
-  const serverVersion = firstString(record, ['serverVersion', 'version']);
-  const contextWindowTokens = firstNumber(record, ['contextWindowTokens', 'contextWindow', 'maxContextTokens']);
-  const toolSupport = await firstBoolean(record, ['toolSupport', 'toolCalling', 'supportsTools', 'supportsToolCalling'], options);
-  const startReceiptId = firstString(record, ['startReceiptId', 'startupReceiptId']);
-  const repairReceiptId = firstString(record, ['repairReceiptId', 'restartReceiptId']);
-  const receiptStatus = firstString(record, ['receiptStatus', 'receiptOutcome']);
-  let schemaStatus = await localServingSchemaStatus(record, options);
-  const schemaVersion = firstStringFromRecords(
-    [record, readRecord(record.schema), readRecord(record.contract), readRecord(record.receipt)],
-    ['schemaVersion', 'receiptSchemaVersion', 'contractVersion'],
-  );
-  const publicationGuarantee = await diagnosticPublicationGuarantee(record, options);
-  const publisher = firstString(record, ['publisher', 'publisherId', 'daemonId', 'hostId']);
-  const startRoute = await diagnosticRouteFromRecord(record, ['startRoute', 'startupRoute', 'startModelServerRoute', 'startServerRoute', 'startActionRoute', 'startCommandRoute'], options);
-  const repairRoute = await diagnosticRouteFromRecord(record, ['repairRoute', 'restartRoute', 'restartServerRoute', 'repairModelServerRoute', 'repairActionRoute', 'repairCommandRoute'], options);
-  const provenance = await localServingProvenance(record, startRoute, repairRoute, options);
-  const resourceSummary = await localResourceSummary(record, resourcePressure, options);
-  if (isClassicOperation()) schemaStatus = 'not-evaluated';
-  const missingSignals = [
-    ...(schemaStatus === 'certified' ? [] : [schemaStatus === 'not-evaluated'
-      ? 'Schema certification is not assessed during Classic operation.' : 'Certified local serving diagnostics schema is not published.']),
-    ...(serverVersion ? [] : ['Server version is not published.']),
-    ...(loadedModelCount > 0 ? [] : ['Loaded model detail is not published.']),
-    ...(contextWindowTokens !== null ? [] : ['Context-window support is not published.']),
-    ...(toolSupport !== null ? [] : ['Tool-support capability is not published.']),
-    ...(resourcePressure !== 'unknown' ? [] : ['Resource pressure is not published.']),
-    ...(startReceiptId || repairReceiptId ? [] : ['Start/repair receipt ids are not published.']),
-    ...(startRoute || repairRoute ? [] : ['Host-published start/repair execution routes are not published.']),
-  ];
-  return {
-    status,
-    source,
-    summary: previewHarnessText(summary, 220),
-    schemaStatus,
-    ...(schemaVersion ? { schemaVersion: previewHarnessText(await redactText(schemaVersion, options), 80) } : {}),
-    ...(provenance.length > 0 ? { provenance } : {}),
-    ...(publicationGuarantee ? { publicationGuarantee } : {}),
-    ...(publisher ? { publisher: previewHarnessText(await redactText(publisher, options), 80) } : {}),
-    ...(serverVersion ? { serverVersion: previewHarnessText(serverVersion, 80) } : {}),
-    ...(loadedModelCount > 0 ? { loadedModelCount } : {}),
-    loadedModels: loadedModels.map((model) => previewHarnessText(model, 96)),
-    ...(contextWindowTokens !== null ? { contextWindowTokens } : {}),
-    ...(toolSupport !== null ? { toolSupport } : {}),
-    resourcePressure,
-    ...(resourceSummary ? { resourceSummary } : {}),
-    lastCheckedAt: isoFromDiagnosticValue(firstString(record, ['lastCheckedAt', 'checkedAt', 'updatedAt', 'timestamp']) || record.lastCheckedAt || record.checkedAt || record.updatedAt || record.timestamp),
-    ...(startReceiptId ? { startReceiptId } : {}),
-    ...(repairReceiptId ? { repairReceiptId } : {}),
-    ...(receiptStatus ? { receiptStatus } : {}),
-    ...(startRoute ? { startRoute } : {}),
-    ...(repairRoute ? { repairRoute } : {}),
-    inspectRoute: firstString(record, ['inspectRoute', 'modelRoute', 'route']) || 'models action:"local" includeParameters:true',
-    missingSignals,
-    policy: isClassicOperation() ? 'Classic read-only publisher facts. Exact declared values are retained; semantic readiness and schema certification are not evaluated. Execution routes still require their own owner admission.' : 'Read-only daemon-published local serving diagnostics. Agent consumes certified version/model/capability/resource/receipt metadata when present, and surfaces start/repair routes only when the host publishes exact confirmed routes; provider edits, refresh, smoke, benchmark, and route changes remain separate visible confirmed actions.',
-    baseUrl,
-    modelsUrl,
-    providerId: firstString(record, ['providerId', 'provider', 'providerName']) || null,
-    stack,
-  };
-}
-
-function providerIdLabel(providerId: string): string {
-  return providerId || 'Detected';
-}
-
-async function localServingDiagnosticsIndex(context: CommandContext, options: ModelReadingOptions): Promise<LocalModelServingDiagnosticIndex> {
-  const signal = options.signal, callerCurrent = options.assertCurrent;
-  const retained: Array<() => void> = [];
-  let owner: JudgmentPortCapture | undefined;
-  let portCurrent: (() => void) | undefined;
-  let activeReading = false;
-  const sourceCurrent = () => {
-    signal?.throwIfAborted();
-    if (options.signal !== signal || options.assertCurrent !== callerCurrent) throw new Error('Local serving diagnostic owner changed.');
-  };
-  const assertSource = () => {
-    sourceCurrent();
-    assertProjectionCurrent(callerCurrent);
-    sourceCurrent();
-  };
-  options.retainCurrent?.(sourceCurrent, 'agent.local-serving-diagnostics.owner');
-  const assertLocalCurrent = () => { assertSource(); for (const guard of retained) guard(); };
-  const assertCurrent = () => {
-    // The active port already invokes the complete local restriction. Once it
-    // is consumed, its pure observation guard is joined with that restriction.
-    if (!activeReading || isClassicOperation()) assertLocalCurrent();
-    if (!isClassicOperation()) portCurrent?.();
-  };
-  assertCurrent();
-  const records: LocalModelServingDiagnosticRecord[] = [];
-  const sourcePaths = new Set<string>();
-  let sawSource = false;
-  let sawError = false;
-  const failedSources: string[] = [];
-  const noteSourceFailure = (path: string, error: unknown) => {
-    sawError = true;
-    failedSources.push(`${path} (${error instanceof Error && error.name ? error.name : 'unreadable'})`);
-    logger.warn('Local serving diagnostics source could not be read', { path, error: summarizeError(error) });
-  };
-  const observations: Array<{ readonly entry: LocalModelServingReadModelSource; readonly observation: ReturnType<typeof captureServingSource> }> = [];
-  for (const entry of setupServingReadModelSources(context)) {
-    if (entry.source === undefined || entry.source === null) continue;
-    sawSource = true;
-    try {
-      const observation = captureServingSource(context, entry);
-      retained.push(observation.assertCurrent);
-      options.retainCurrent?.(observation.assertCurrent, `agent.local-serving-diagnostics.source:${entry.path}`);
-      observations.push({ entry, observation });
-    } catch (error) { noteSourceFailure(entry.path, error); }
-  }
-  assertCurrent();
-  for (const { entry, observation } of observations) {
-    try {
-      await decisionOrClassic(async () => {
-        owner ??= captureJudgmentPort('agent.local-serving-diagnostics', { ...options, assertCurrent: assertLocalCurrent });
-        portCurrent = owner.assertCurrent; activeReading = true;
-      }, () => { portCurrent = undefined; activeReading = false; assertLocalCurrent(); });
-      const reading = { ...options, signal: isClassicOperation() ? signal : owner?.signal ?? signal, assertCurrent };
-      const protectedSnapshot = await protectPersonalOpsData(observation.data, reading);
-      // Schema, status and identity readings require the complete original
-      // diagnostic. A redacted display cannot stand in for its native facts.
-      captureModelReadingSnapshotGuard(observation.data)(protectedSnapshot);
-      const sourceRecords = await withModelReadingSource(protectedSnapshot, reading, async (snapshot, scoped) => {
-        const normalized: LocalModelServingDiagnosticRecord[] = [];
-        for (const value of diagnosticEntriesFromSnapshot(snapshot)) {
-          const record = await normalizeServingDiagnosticRecord(value, entry.path, scoped);
-          if (record) normalized.push(record);
-        }
-        scoped.assertCurrent?.(); return normalized;
-      });
-      assertCurrent();
-      if (sourceRecords.length > 0) sourcePaths.add(entry.path);
-      records.push(...sourceRecords);
-    } catch (error) {
-      activateClassicFallback(error);
-      noteSourceFailure(entry.path, error);
-    }
-  }
-  assertCurrent();
-  const status = records.length > 0
-    ? 'published-read-model'
-    : sawError
-      ? 'read-model-error'
-      : sawSource
-        ? 'read-model-empty'
-        : 'not-published';
-  const failureSignal = failedSources.length > 0
-    ? `Local serving diagnostics could not be read from: ${failedSources.join(', ')}.${records.length > 0 ? ' The records shown are from the remaining sources only.' : ''}`
-    : null;
-  const missingSignals = [
-    ...(records.length > 0 || sawError ? [] : ['No daemon-published local serving diagnostics read model is available to Agent yet.']),
-    ...(failureSignal ? [failureSignal] : []),
-  ];
-  if (owner && !isClassicOperation()) {
-    const restriction = owner.consumeObservation();
-    const semanticCurrent = () => { if (!isClassicOperation()) restriction.assertCurrent(); };
-    portCurrent = semanticCurrent; activeReading = false;
-    options.retainCurrent?.(semanticCurrent, 'agent.local-serving-diagnostics.port');
-  } else { portCurrent = undefined; activeReading = false; }
-  assertCurrent();
-  return {
-    records,
-    assertCurrent,
-    publication: {
-      status,
-      requiredPaths: LOCAL_MODEL_SERVING_READ_MODEL_PATHS,
-      sourcePaths: [...sourcePaths],
-      recordCount: records.length,
-      missingSignals,
-      policy: 'Agent reads local serving diagnostics only from platform/daemon read models. It does not probe local servers until the user confirms models action:"smoke".',
-    },
-  };
-}
-
-function servingDiagnosticForEndpoint(
-  records: readonly LocalModelServingDiagnosticRecord[],
-  endpoint: MutableLocalModelServerEndpoint,
-): LocalModelServingDiagnosticRecord | null {
-  return records.find((record) => record.baseUrl === endpoint.baseUrl || record.modelsUrl === modelsUrlFor(endpoint.baseUrl))
-    ?? records.find((record) => Boolean(record.providerId && endpoint.providerId && record.providerId === endpoint.providerId))
-    ?? null;
-}
-
-function localModelInspectionOptions(context: CommandContext, options: ModelReadingOptions): ModelReadingOptions {
-  const signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertOptions = () => { signal?.throwIfAborted(); };
-  const assertCaller = () => {
-    assertOptions();
-    assertProjectionCurrent(callerCurrent);
-    assertOptions();
-  };
-  assertCaller();
-  const native = captureLocalModelRegistry(context);
-  const assertCurrent = () => { assertCaller(); native.assertCurrent(); };
-  options.retainCurrent?.(assertOptions, 'agent.local-model.inspection-owner');
-  options.retainCurrent?.(native.assertCurrent, 'agent.local-model.inspection-registry');
-  assertCurrent(); return { ...options, assertCurrent };
+export function lastLocalModelSmoke(baseUrl: string): LocalModelLastSmoke | undefined {
+  return lastSmokes.get(normalizeLocalBaseUrl(baseUrl) ?? baseUrl);
 }
 
 export async function localModelServerEndpoints(
   context: CommandContext,
   includeParameters: boolean,
-  options: ModelReadingOptions = {},
+  _options: ModelReadingOptions = {},
 ): Promise<readonly LocalModelServerEndpoint[]> {
-  const reading = localModelInspectionOptions(context, options);
-  const servingDiagnostics = await localServingDiagnosticsIndex(context, reading);
-  const endpoints = (await readLocalServerEndpointCandidates(context, reading)).map((endpoint) => describeLocalServerEndpoint(
-    endpoint,
-    includeParameters,
-    servingDiagnosticForEndpoint(servingDiagnostics.records, endpoint),
-  ));
-  servingDiagnostics.assertCurrent();
-  return endpoints;
+  return collectLocalServerEndpointCandidates(context).map(endpoint => describeLocalServerEndpoint(endpoint, includeParameters));
 }
 
 export function localModelServerDefaults(): readonly LocalModelServerDefaultEndpoint[] {
@@ -626,22 +117,6 @@ export function localModelServerDefaults(): readonly LocalModelServerDefaultEndp
   }));
 }
 
-export function localModelDetection(context: CommandContext): LocalModelDetection {
-  const endpoints = collectLocalServerEndpointCandidates(context);
-  return {
-    providerIds: [...new Set(endpoints.flatMap(endpoint => endpoint.providerId ? [endpoint.providerId] : []))].sort(),
-    modelRoutes: [...new Set(endpoints.flatMap(endpoint => [...endpoint.modelRoutes]))].sort(),
-    stacks: [], // Registry wording is read only by explicit asynchronous inspection.
-  };
-}
-
-interface LocalModelRegistrySnapshot {
-  readonly providers: readonly unknown[];
-  readonly models: readonly unknown[];
-  readonly providerIds: readonly string[];
-  readonly environment: readonly { readonly key: string; readonly value: string; readonly stack: string; readonly note: string }[];
-}
-
 const LOCAL_MODEL_ENV_HINTS = [
   { key: 'OLLAMA_BASE_URL', stack: 'ollama', note: 'Environment override for the Ollama base URL.' },
   { key: 'OLLAMA_HOST', stack: 'ollama', note: 'Environment override for the Ollama host.' },
@@ -653,153 +128,77 @@ const LOCAL_MODEL_ENV_HINTS = [
   { key: 'LITELLM_BASE_URL', stack: 'openai-compatible', note: 'Environment override for LiteLLM or a local gateway.' },
 ] as const;
 
-export function captureLocalModelRegistry(context: CommandContext): {
-  readonly data: LocalModelRegistrySnapshot; readonly assertCurrent: () => void;
-} {
-  const registry = modelReadingServicePath(context, ['provider', 'providerRegistry']);
-  const api = modelReadingServicePath(context, ['clients', 'providerApi']);
-  const registryMethods = sourceMethods(registry, ['listProviders', 'listModels']);
-  const apiMethods = sourceMethods(api, ['listProviderIds']);
-  const providerList = registry == null ? undefined : modelReadingServicePath(registry, ['listProviders']);
-  const modelList = registry == null ? undefined : modelReadingServicePath(registry, ['listModels']);
-  const providerIdsList = api == null ? undefined : modelReadingServicePath(api, ['listProviderIds']);
-  const originalArrays: Array<() => void> = [];
-  const acquireList = (method: unknown, receiver: unknown, retain: boolean): readonly unknown[] => {
-    registryMethods(); apiMethods();
-    if (method === undefined) return [];
-    if (typeof method !== 'function') throw new Error('Local model registry list method unavailable.');
-    const result: unknown = method.call(receiver);
-    registryMethods(); apiMethods();
-    if (nodeTypes.isPromise(result)) {
-      void result.then(undefined, () => {});
-      throw new Error('Local model registry must publish synchronous native arrays.');
-    }
-    if (!Array.isArray(result)) throw new Error('Local model registry must publish native arrays.');
-    if (result.length > 20_000) throw new Error('Unsupported complete local model registry array layout.');
-    const length = result.length;
-    const assertArray = () => { if (result.length !== length) throw new Error('Local model registry array layout changed.'); };
-    if (retain) originalArrays.push(assertArray);
-    return Object.freeze([...result]);
-  };
-  const snapshot = (retain = false): LocalModelRegistrySnapshot => {
-    const providers = acquireList(providerList, registry, retain), models = acquireList(modelList, registry, retain);
-    const providerIds = acquireList(providerIdsList, api, retain);
-    if (!providerIds.every((id): id is string => typeof id === 'string')) throw new Error('Invalid local provider ID inventory.');
-    return { providers, models, providerIds,
-      environment: LOCAL_MODEL_ENV_HINTS.map(hint => ({ ...hint, value: readString(process.env[hint.key]) })) };
-  };
-  const original = snapshot(true);
-  const providers = [...original.providers], models = [...original.models];
-  const providerGuards = providers.map(provider => {
-    if (provider === null || typeof provider !== 'object') throw new Error('Unsupported native provider adapter.');
-    // The provider's model list is replaced, not edited, when it changes.
-    const modelList = (provider as { readonly models?: unknown }).models;
-    return () => {
-      if ((provider as { readonly models?: unknown }).models !== modelList) throw new Error('Native provider model metadata changed.');
-    };
-  });
-  const metadataSnapshot = (native: LocalModelRegistrySnapshot, initial = true): LocalModelRegistrySnapshot => {
-    for (const guard of providerGuards) guard();
-    const facts = native.providers.map(provider => captureModelProviderReadingFacts(provider, initial));
-    for (const guard of providerGuards) guard();
-    return { ...native, providers: facts };
-  };
-  const data = captureModelReadingInput(metadataSnapshot(original));
-  const assertMetadata = captureModelReadingSnapshotGuard(data);
-  const assertCurrent = () => {
-    for (const guard of originalArrays) guard();
-    if (modelReadingServicePath(context, ['provider', 'providerRegistry']) !== registry
-      || modelReadingServicePath(context, ['clients', 'providerApi']) !== api) throw new Error('Local model registry owner changed.');
-    registryMethods(); apiMethods();
-    assertMetadata(metadataSnapshot(original, false));
-    const fresh = snapshot();
-    if (fresh.providers.length !== providers.length || fresh.models.length !== models.length
-      || fresh.providers.some((provider, index) => provider !== providers[index]) || fresh.models.some((model, index) => model !== models[index])) throw new Error('Local model registration changed.');
-    assertMetadata(metadataSnapshot(fresh, false));
-    registryMethods(); apiMethods();
-  };
-  assertCurrent(); return { data, assertCurrent };
-}
-
-interface LocalModelRegistryReading {
+/** What one registry pass found: the local endpoints and which providers, routes and stacks they serve. */
+export interface LocalModelRegistryReading {
   readonly detection: LocalModelDetection;
-}
-const localRegistryReadings = new WeakMap<LocalModelRegistryReading, {
-  readonly context: CommandContext; readonly options: ModelReadingOptions; readonly assertCurrent: () => void;
   readonly endpoints: readonly MutableLocalModelServerEndpoint[];
-}>();
-const getRegistryReading = localRegistryReadings.get.bind(localRegistryReadings);
-const setRegistryReading = localRegistryReadings.set.bind(localRegistryReadings);
-const deleteRegistryReading = localRegistryReadings.delete.bind(localRegistryReadings);
+}
 
-/** A single protected registry interpretation can feed detection and endpoint views. */
-export async function withLocalModelRegistry<T>(context: CommandContext, options: ModelReadingOptions, consume: (reading: LocalModelRegistryReading) => Promise<T>): Promise<T> {
-  const signal = options.signal, callerCurrent = options.assertCurrent;
-  const assertOptions = () => { signal?.throwIfAborted(); };
-  const assertCaller = () => {
-    assertOptions();
-    assertProjectionCurrent(callerCurrent);
-    assertOptions();
-  };
-  assertCaller();
-  const native = captureLocalModelRegistry(context);
-  const assertCurrent = () => { assertCaller(); native.assertCurrent(); };
-  options.retainCurrent?.(assertOptions, 'agent.local-model.registry-owner');
-  options.retainCurrent?.(native.assertCurrent, 'agent.local-model.registry-source');
-  return withModelReadingSource(native.data, { ...options, assertCurrent }, async (snapshot, scoped) => {
-    const providerIds = new Set<string>(), modelRoutes = new Set<string>(), stacks = new Set<string>();
-    const endpoints = new Map<string, MutableLocalModelServerEndpoint>();
-    for (const providerId of snapshot.providerIds) {
-      const stack = await localStackFor(providerId, scoped, { providerId, providers: snapshot.providers, models: snapshot.models });
-      if (stack) { providerIds.add(providerId); stacks.add(stack); }
-    }
-    for (const provider of snapshot.providers) {
-      const record = readRecord(provider);
-      const providerId = firstString(record, ['name', 'id', 'providerId', 'provider']);
-      const stack = await localStackFor(JSON.stringify(record), scoped, record);
-      if (stack) { if (providerId) providerIds.add(providerId); stacks.add(stack); }
-      const routes = readProviderModels(record.models, providerId);
-      for (const baseUrl of providerEndpointUrls(record)) addLocalServerEndpoint(endpoints, { baseUrl, providerId: providerId || null, stack,
+/**
+ * One synchronous pass over the provider registry, the model registry and the
+ * environment hints. A provider or model is local when one of its endpoint URLs
+ * is loopback or private; its stack is decided in code (`localStackFor`), and
+ * a model inherits its provider's answer. No model is asked.
+ */
+export function readLocalModelRegistry(context: CommandContext): LocalModelRegistryReading {
+  const endpoints = new Map<string, MutableLocalModelServerEndpoint>();
+  const providerIds = new Set<string>(), modelRoutes = new Set<string>(), stacks = new Set<string>();
+  const localProviders = new Set<string>();
+  for (const provider of listProviderRegistryProviders(context)) {
+    const record = readRecord(provider);
+    const providerId = readString(record.name) || readString(record.id) || readString(record.providerId) || readString(record.provider);
+    const routes = readProviderModels(record.models, providerId);
+    for (const baseUrl of providerEndpointUrls(record)) {
+      const stack = localStackFor(baseUrl, providerId);
+      if (!stack) continue;
+      if (providerId) { providerIds.add(providerId); localProviders.add(providerId); }
+      stacks.add(stack);
+      addLocalServerEndpoint(endpoints, { baseUrl, providerId: providerId || null, stack,
         source: 'provider-registry', sourceDetail: providerId ? `provider:${providerId}` : 'provider-registry',
         modelRoutes: routes, notes: providerId ? ['Provider already exists in the registry.'] : [] });
     }
-    for (const model of snapshot.models) {
-      const record = readRecord(model), providerId = modelProviderId(model), registryKey = modelRegistryKey(model);
-      const stack = await localStackFor(JSON.stringify(record), scoped, record);
-      if (stack) { if (providerId) providerIds.add(providerId); if (registryKey) modelRoutes.add(registryKey); stacks.add(stack); }
-      for (const baseUrl of modelEndpointUrls(record)) addLocalServerEndpoint(endpoints, { baseUrl, providerId: providerId || null, stack,
+  }
+  for (const model of listRegistryModels(context)) {
+    const record = readRecord(model), providerId = modelProviderId(model), registryKey = modelRegistryKey(model);
+    if (providerId && localProviders.has(providerId) && registryKey) modelRoutes.add(registryKey);
+    for (const baseUrl of modelEndpointUrls(record)) {
+      const stack = localStackFor(baseUrl, providerId);
+      if (!stack) continue;
+      if (providerId) providerIds.add(providerId);
+      if (registryKey) modelRoutes.add(registryKey);
+      stacks.add(stack);
+      addLocalServerEndpoint(endpoints, { baseUrl, providerId: providerId || null, stack,
         source: 'model-registry', sourceDetail: registryKey ? `model:${registryKey}` : 'model-registry', modelRoutes: registryKey ? [registryKey] : [],
         notes: registryKey ? ['At least one model route is already registered for this endpoint.'] : [] });
     }
-    for (const hint of snapshot.environment) if (hint.value) {
-      addLocalServerEndpoint(endpoints, { baseUrl: hint.value, stack: hint.stack, source: 'environment', sourceDetail: `env:${hint.key}`, notes: [hint.note] });
-    }
-    scoped.assertCurrent?.();
-    const captured = captureModelReadingInput({ detection: {
-      providerIds: [...providerIds].sort(), modelRoutes: [...modelRoutes].sort(), stacks: [...stacks].sort(),
-    } });
-    // Retain the original screening receipt for the entire composition. The
-    // private endpoint accumulators cannot be reused after this scope exits.
-    setRegistryReading(captured, { context, options, assertCurrent: () => { scoped.assertCurrent?.(); },
-      endpoints: [...endpoints.values()].sort((left, right) => left.baseUrl.localeCompare(right.baseUrl)) });
-    try { return await consume(captured); }
-    finally { deleteRegistryReading(captured); }
-  });
+  }
+  for (const hint of LOCAL_MODEL_ENV_HINTS) {
+    const value = readString(process.env[hint.key]);
+    if (value) addLocalServerEndpoint(endpoints, { baseUrl: value, stack: hint.stack, source: 'environment', sourceDetail: `env:${hint.key}`, notes: [hint.note] });
+  }
+  return {
+    detection: { providerIds: [...providerIds].sort(), modelRoutes: [...modelRoutes].sort(), stacks: [...stacks].sort() },
+    endpoints: [...endpoints.values()].sort((left, right) => left.baseUrl.localeCompare(right.baseUrl)),
+  };
 }
 
-export async function readLocalModelDetection(context: CommandContext, options: ModelReadingOptions): Promise<LocalModelDetection> {
-  return withLocalModelRegistry(context, options, async reading => reading.detection);
-}
-export async function readLocalServerEndpointCandidates(context: CommandContext, options: ModelReadingOptions): Promise<readonly MutableLocalModelServerEndpoint[]> {
-  return withLocalModelRegistry(context, options, async result => {
-    const binding = getRegistryReading(result)!;
-    binding.assertCurrent();
-    return binding.endpoints.map(endpoint => ({ ...endpoint, sources: new Set(endpoint.sources),
-      sourceDetails: new Set(endpoint.sourceDetails), modelRoutes: new Set(endpoint.modelRoutes), notes: new Set(endpoint.notes) }));
-  });
+export function localModelDetection(context: CommandContext): LocalModelDetection {
+  return readLocalModelRegistry(context).detection;
 }
 
-/** Every URL a provider record names, from its endpoint fields or anywhere in its body. The startup snapshot and the explicit inspection both use this, so their endpoint counts agree. */
+/** The registry reading handed to a caller that feeds detection and endpoint views from the same pass. */
+export async function withLocalModelRegistry<T>(context: CommandContext, _options: ModelReadingOptions, consume: (reading: LocalModelRegistryReading) => Promise<T>): Promise<T> {
+  return consume(readLocalModelRegistry(context));
+}
+
+export async function readLocalModelDetection(context: CommandContext, _options: ModelReadingOptions): Promise<LocalModelDetection> {
+  return localModelDetection(context);
+}
+export async function readLocalServerEndpointCandidates(context: CommandContext, _options: ModelReadingOptions): Promise<readonly MutableLocalModelServerEndpoint[]> {
+  return collectLocalServerEndpointCandidates(context);
+}
+
+/** Every URL a provider record names, from its endpoint fields or anywhere in its body. */
 function providerEndpointUrls(record: Record<string, unknown>): readonly string[] {
   return [readString(record.baseURL), readString(record.baseUrl), readString(record.endpoint), ...extractUrls(JSON.stringify(record))].filter(Boolean);
 }
@@ -845,62 +244,12 @@ export function addLocalServerEndpoint(
 }
 
 export function collectLocalServerEndpointCandidates(context: CommandContext): readonly MutableLocalModelServerEndpoint[] {
-  const endpoints = new Map<string, MutableLocalModelServerEndpoint>();
-  for (const provider of listProviderRegistryProviders(context)) {
-    const record = readRecord(provider);
-    const providerId = readString(record.name) || readString(record.id) || readString(record.providerId) || readString(record.provider);
-    const stack = null;
-    const routes = readProviderModels(record.models, providerId);
-    for (const baseUrl of providerEndpointUrls(record)) {
-      addLocalServerEndpoint(endpoints, {
-        baseUrl,
-        providerId: providerId || null,
-        stack,
-        source: 'provider-registry',
-        sourceDetail: providerId ? `provider:${providerId}` : 'provider-registry',
-        modelRoutes: routes,
-        notes: providerId ? ['Provider already exists in the registry.'] : [],
-      });
-    }
-  }
-
-  for (const model of listRegistryModels(context)) {
-    const record = readRecord(model);
-    const providerId = modelProviderId(model);
-    const registryKey = modelRegistryKey(model);
-    const stack = null;
-    for (const baseUrl of modelEndpointUrls(record)) {
-      addLocalServerEndpoint(endpoints, {
-        baseUrl,
-        providerId: providerId || null,
-        stack,
-        source: 'model-registry',
-        sourceDetail: registryKey ? `model:${registryKey}` : 'model-registry',
-        modelRoutes: registryKey ? [registryKey] : [],
-        notes: registryKey ? ['At least one model route is already registered for this endpoint.'] : [],
-      });
-    }
-  }
-
-  for (const hint of LOCAL_MODEL_ENV_HINTS) {
-    const value = readString(process.env[hint.key]);
-    if (!value) continue;
-    addLocalServerEndpoint(endpoints, {
-      baseUrl: value,
-      stack: hint.stack,
-      source: 'environment',
-      sourceDetail: `env:${hint.key}`,
-      notes: [hint.note],
-    });
-  }
-
-  return [...endpoints.values()].sort((left, right) => left.baseUrl.localeCompare(right.baseUrl));
+  return readLocalModelRegistry(context).endpoints;
 }
 
 export function describeLocalServerEndpoint(
   endpoint: MutableLocalModelServerEndpoint,
   includeParameters = false,
-  servingDiagnostics?: LocalModelServerServingDiagnostics | null,
 ): LocalModelServerEndpoint {
   const modelsUrl = modelsUrlFor(endpoint.baseUrl);
   const providerExists = Boolean(endpoint.providerId) || endpoint.modelRoutes.size > 0;
@@ -912,6 +261,7 @@ export function describeLocalServerEndpoint(
     notes.add('No registered model route was found for this endpoint yet.');
   }
   const id = localEndpointId(endpoint.baseUrl);
+  const lastSmoke = lastLocalModelSmoke(endpoint.baseUrl);
   return {
     kind: 'local-server-endpoint',
     id,
@@ -929,7 +279,7 @@ export function describeLocalServerEndpoint(
     refreshRoute: 'agent_harness mode:"run_command" command:"/refresh-models" explicitUserRequest:"<the user request, in their own words>"',
     addProviderRoute: providerExists ? null : localProviderAddRoute(endpoint.providerId, endpoint.stack, endpoint.baseUrl),
     notes: [...notes],
-    ...(servingDiagnostics ? { servingDiagnostics } : {}),
+    ...(lastSmoke ? { lastSmoke } : {}),
     ...(includeParameters ? { diagnostics: localEndpointDiagnostics(endpoint, providerExists) } : {}),
   };
 }
@@ -937,58 +287,24 @@ export function describeLocalServerEndpoint(
 export async function localModelServerHealthMap(
   context: CommandContext,
   includeParameters: boolean,
-  options: ModelReadingOptions = {},
+  _options: ModelReadingOptions = {},
   registryReading?: LocalModelRegistryReading,
 ): Promise<LocalModelServerHealthMap> {
-  const reading = localModelInspectionOptions(context, options);
-  if (!registryReading) return withLocalModelRegistry(context, reading,
-    registry => localModelServerHealthMap(context, includeParameters, reading, registry));
-  const binding = getRegistryReading(registryReading);
-  if (!binding || binding.context !== context || binding.options.sourceOwner !== reading.sourceOwner
-    || binding.options.signal !== reading.signal) throw new ToolInputProjectionError('held');
-  binding.assertCurrent();
-  const servingDiagnostics = await localServingDiagnosticsIndex(context, reading);
-  binding.assertCurrent();
-  const rawEndpoints = binding.endpoints;
-  const matchedEndpointCount = rawEndpoints
-    .filter((endpoint) => Boolean(servingDiagnosticForEndpoint(servingDiagnostics.records, endpoint)))
-    .length;
-  const endpoints = rawEndpoints.map((endpoint) => describeLocalServerEndpoint(
-    endpoint,
-    includeParameters,
-    servingDiagnosticForEndpoint(servingDiagnostics.records, endpoint),
-  ));
-  const facts = localModelEndpointFacts(endpoints, includeParameters);
-  const hasMatchedDiagnostics = matchedEndpointCount > 0;
-  servingDiagnostics.assertCurrent(); binding.assertCurrent();
-  return {
-    ...facts,
-    daemonDiagnostics: {
-      ...servingDiagnostics.publication,
-      matchedEndpointCount,
-      // A source that failed to read stays reported even when another source matched, so a partial result is not shown as complete.
-      missingSignals: hasMatchedDiagnostics
-        ? servingDiagnostics.publication.missingSignals.filter((signal) => signal.startsWith('Local serving diagnostics could not be read'))
-        : servingDiagnostics.publication.missingSignals,
-    },
-    nextActions: [
-      ...(hasMatchedDiagnostics ? ['Review published local serving diagnostics before smoke, refresh, benchmark, or provider changes.'] : []),
-      ...facts.nextActions,
-    ],
-    policy: 'Read-only local endpoint map with canonical redacted daemon-published serving diagnostics. Probes, installs, downloads, provider edits, refresh, benchmarks, and route changes remain confirmed actions.',
-  };
+  const endpoints = (registryReading ?? readLocalModelRegistry(context)).endpoints;
+  return localModelEndpointFacts(endpoints.map(endpoint => describeLocalServerEndpoint(endpoint, includeParameters)), includeParameters);
 }
 
-/** Startup snapshots contain registry facts and static hints; daemon prose is read only by explicit inspection. */
-export function localModelServerFacts(context: CommandContext, includeParameters: boolean): Omit<LocalModelServerHealthMap, 'daemonDiagnostics'> {
+/** The local endpoint map: registry and environment facts plus each endpoint's last confirmed smoke. */
+export function localModelServerFacts(context: CommandContext, includeParameters: boolean): LocalModelServerHealthMap {
   return localModelEndpointFacts(collectLocalServerEndpointCandidates(context)
     .map(endpoint => describeLocalServerEndpoint(endpoint, includeParameters)), includeParameters);
 }
 
-function localModelEndpointFacts(endpoints: readonly LocalModelServerEndpoint[], includeParameters: boolean): Omit<LocalModelServerHealthMap, 'daemonDiagnostics'> {
+function localModelEndpointFacts(endpoints: readonly LocalModelServerEndpoint[], includeParameters: boolean): LocalModelServerHealthMap {
   const returned = endpoints.slice(0, includeParameters ? 8 : 3);
   const suggestedDefaults = localModelServerDefaults().slice(0, includeParameters ? 4 : 2);
   const first = returned[0];
+  const smoked = endpoints.filter(endpoint => endpoint.lastSmoke);
   return {
     status: endpoints.length > 0 ? 'candidate-endpoints' : 'no-local-endpoints',
     liveProbe: 'not-run',
@@ -998,7 +314,9 @@ function localModelEndpointFacts(endpoints: readonly LocalModelServerEndpoint[],
     suggestedDefaults,
     nextActions: endpoints.length > 0
       ? [
-        `Smoke test ${first?.modelsUrl ?? 'the detected model-list endpoint'} before benchmark or route changes.`,
+        smoked.length > 0
+          ? `Last smoke: ${smoked.map(endpoint => `${endpoint.modelsUrl} ${endpoint.lastSmoke?.status} at ${endpoint.lastSmoke?.checkedAt}`).slice(0, 3).join('; ')}. Smoke again before benchmark or route changes if the server may have changed.`
+          : `Smoke test ${first?.modelsUrl ?? 'the detected model-list endpoint'} before benchmark or route changes.`,
         'Refresh the model catalog after the local server is running and reachable.',
         'Run the local benchmark comparison before making a local route the default.',
       ]
@@ -1007,6 +325,6 @@ function localModelEndpointFacts(endpoints: readonly LocalModelServerEndpoint[],
         'Add or select the provider route only after the server is reachable.',
         'Refresh models and run the local benchmark before changing the default route.',
       ],
-    policy: 'Read-only local endpoint facts from registry and environment metadata. Serving diagnostics are deferred until explicit inspection. Probes, installs, downloads, provider edits, refresh, benchmarks, and route changes remain confirmed actions.',
+    policy: 'Read-only local endpoint facts from registry and environment metadata, with the last confirmed smoke of each endpoint in this session. Probes, installs, downloads, provider edits, refresh, benchmarks, and route changes remain confirmed actions.',
   };
 }

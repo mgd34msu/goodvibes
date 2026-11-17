@@ -148,7 +148,12 @@ async function buildVoiceInteractionWorkflows(
   const speechInputRegistered = hasRegisteredVoiceFeature(readiness, ['stt', 'realtime']);
   const selectedTtsReady = readiness.selectedTtsProviderStatus === 'ready';
   const spokenReady = spokenTurnRuntime && selectedTtsReady && readiness.ttsVoiceConfigured;
-  const spokenAttention = spokenTurnRuntime && (readiness.selectedTtsProviderStatus === 'ready-agent-env' || (selectedTtsReady && !readiness.ttsVoiceConfigured));
+  // Two different gaps leave spoken output short of ready; each gets its own sentence and step.
+  const ttsKeyInAgentOnly = readiness.selectedTtsProviderStatus === 'ready-agent-env';
+  const ttsVoiceMissing = selectedTtsReady && !readiness.ttsVoiceConfigured;
+  const spokenAttention = spokenTurnRuntime && (ttsKeyInAgentOnly || ttsVoiceMissing);
+  const selectedTtsKeys = readiness.voiceProviders.find((provider) => provider.selected)?.configuredSecretKeys ?? [];
+  const ttsKeyNames = selectedTtsKeys.length > 0 ? selectedTtsKeys.join(' or ') : 'its API key';
   const pushToTalkReady = voiceEnabled && spokenTurnRuntime && speechInputReady;
   const pushToTalkAttention = voiceEnabled && (spokenTurnRuntime || speechInputRegistered);
   const transcriptionReady = transcribeRuntime && speechInputReady;
@@ -216,12 +221,18 @@ async function buildVoiceInteractionWorkflows(
       userOutcome: 'Play an assistant answer aloud with a predictable TTS provider and voice.',
       summary: spokenReady
         ? 'Spoken-turn runtime, selected TTS provider, and voice setting are ready.'
-        : spokenAttention
-          ? 'Spoken-turn runtime and provider are ready, but the exact voice is not configured.'
-          : 'Spoken responses need a ready selected TTS provider and runtime spoken-turn route.',
+        : spokenAttention && ttsKeyInAgentOnly
+          ? `The selected TTS provider${readiness.selectedTtsProviderLabel ? ` (${readiness.selectedTtsProviderLabel})` : ''} has ${ttsKeyNames} only in this Agent's environment; the connected GoodVibes host reads its own environment and secret store, which are not visible from here, so spoken turns may not reach the provider.`
+          : spokenAttention
+            ? 'Spoken-turn runtime and provider are ready, but the exact voice is not configured.'
+            : 'Spoken responses need a ready selected TTS provider and runtime spoken-turn route.',
       nextStep: spokenReady
         ? 'Use /tts only when the user asks for spoken output.'
-        : 'Choose a ready TTS provider and voice, then verify the runtime exposes submitSpokenInput.',
+        : spokenAttention && ttsKeyInAgentOnly
+          ? `Tell the user the provider key must be stored where the host reads it: they type /secrets set ${selectedTtsKeys[0] ?? '<KEY>'} and enter the value (a credential is theirs to enter), which files it where the host reads it.`
+          : spokenAttention
+            ? 'When the user asks, open the tts-voice-picker surface (setupRoutes) so they can pick the voice.'
+            : 'Choose a ready TTS provider and voice, then verify the runtime exposes submitSpokenInput.',
       capabilities: ['tts', 'spoken answer', 'stop spoken output'],
       modelRoute: 'agent_harness mode:"media_posture" query:"spoken responses" includeParameters:true',
       userRoute: '/tts <prompt>',
@@ -262,12 +273,13 @@ async function buildVoiceInteractionWorkflows(
       nextStep: wake.blockers.length > 0
         ? `Tell the user which row refuses to start wake capture: ${wake.blockers[0]?.key ?? 'the blocking row'}. Its written reason is in blockedRowDetails; changing that setting is their decision.`
         : wake.active
-          ? 'Wake capture is live; confirm the pinned models verify on disk and report the result rather than asking anyone to check.'
-          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the surface row moves with it). Turning it on does not fetch models: a host missing them reports not-provisioned and names the command that fetches them.',
+          ? 'Wake capture is live; run agent_harness mode:"run_command" command:"/voice wake status" to confirm the pinned models verify on disk, and report its result rather than asking anyone to check.'
+          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the first setupRoutes entry; the surface row moves with it). Turning it on does not fetch models: agent_harness mode:"run_command" command:"/voice wake status" then reports not-provisioned for a missing model and names the command that fetches it.',
       capabilities: ['wake word', 'always listening', 'permission repair'],
       modelRoute: 'agent_harness mode:"media_posture" query:"wake word" includeParameters:true',
       setupRoutes: [
-        'settings action:"set" key:"voice.wake.surfaces.agent" value:"true" explicitUserRequest:"<the user request, in their own words>"',
+        'settings action:"set" key:"voice.wake.enabled" value:"true" explicitUserRequest:"<the user request, in their own words>"',
+        'agent_harness mode:"run_command" command:"/voice wake status"',
         'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
         'agent_harness mode:"pairing_posture" query:"device" includeParameters:true',
       ],
@@ -399,31 +411,22 @@ function providersFrom(readiness: ReturnType<typeof buildReadiness>, runtimeStat
   ];
 }
 
+/** Counts only: the provider readiness and the four workflow rows are local facts, so no reading is made. */
 export async function mediaPostureCatalogStatus(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
-  const native = captureCatalogNativeFacts(context, 'media');
-  const caller = captureAsyncHarnessInput({}, options, true, [native.assertCurrent]);
-  const childOptions = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
+  options.signal?.throwIfAborted();
   const readiness = buildReadiness(context);
-  const source = captureAsyncHarnessInput(readiness, childOptions, true);
-  const voiceWorkflows = await buildVoiceInteractionWorkflows(context, readiness, childOptions);
-  source.assertCurrent(); caller.assertCurrent();
-  source.retainSourceCurrent('agent.media.readiness');
-  const result = await withModelReadingSource({ ...readiness, voiceWorkflows, nativeProviderEvidence: native.providerEvidence }, childOptions, async (captured, current) => {
-    current.assertCurrent?.();
-    return {
-      modes: ['media_posture', 'media_provider'], voiceProviders: captured.voiceProviders.length,
-      mediaProviders: captured.mediaProviders.length, readyVoiceProviders: captured.readyVoiceProviderCount,
-      readyMediaProviders: captured.readyMediaProviderCount, voiceWorkflowSummary: voiceWorkflowSummary(captured.voiceWorkflows), readOnly: true,
-    };
-  });
-  caller.retainSourceCurrent('agent.media.sources');
-  return result;
+  const voiceWorkflows = await buildVoiceInteractionWorkflows(context, readiness, options);
+  return {
+    modes: ['media_posture', 'media_provider'], voiceProviders: readiness.voiceProviders.length,
+    mediaProviders: readiness.mediaProviders.length, readyVoiceProviders: readiness.readyVoiceProviderCount,
+    readyMediaProviders: readiness.readyMediaProviderCount, voiceWorkflowSummary: voiceWorkflowSummary(voiceWorkflows), readOnly: true,
+  };
 }
 
 export async function mediaPostureSummary(context: CommandContext, rawArgs: AgentHarnessMediaArgs,
   options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const native = captureCatalogNativeFacts(context, 'media');
-  const caller = captureAsyncHarnessInput(rawArgs, options, true, [native.assertCurrent]);
+  const caller = captureAsyncHarnessInput(rawArgs, options, true);
   const childOptions = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
   const args = caller.args;
   const readinessInput = buildReadiness(context);
@@ -495,7 +498,7 @@ export async function mediaPostureSummary(context: CommandContext, rawArgs: Agen
 export async function describeHarnessMediaProvider(context: CommandContext, rawArgs: AgentHarnessMediaArgs,
   options: CatalogRankingOptions = {}): Promise<MediaProviderResolution> {
   const native = captureCatalogNativeFacts(context, 'media');
-  const caller = captureAsyncHarnessInput(rawArgs, options, true, [native.assertCurrent]);
+  const caller = captureAsyncHarnessInput(rawArgs, options, true);
   const childOptions = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
   const result = await withModelReadingSource(caller.args, childOptions, async (args, inputOptions): Promise<MediaProviderResolution> => {
     const mediaProviderId = readString(args.mediaProviderId), target = readString(args.target), query = readString(args.query);

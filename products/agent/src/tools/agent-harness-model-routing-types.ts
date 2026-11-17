@@ -101,44 +101,22 @@ export interface ModelReadinessDimension {
   readonly summary: string;
 }
 
+/** What this Agent process measured on its own calls to a provider route (the engine's LLM call metrics). */
 export interface ModelProviderHealthSignal {
-  readonly status: 'not-reachable-in-command-context' | 'read-model-empty' | 'read-model-error' | 'record-found';
+  readonly status: 'measured' | 'not-measured';
   readonly providerId: string;
   readonly modelRouteId?: string;
-  readonly sourceRecordId?: string;
+  /** Set when the measurement is of this exact model, not of the provider as a whole. */
   readonly measuredRouteId?: string;
   readonly measuredProviderId?: string;
   readonly measurementRecordedAt?: string | null;
-  readonly engineContract: {
-    readonly providerHealthTypes: 'available';
-    readonly importSurface: string;
-    readonly note: string;
-  };
-  readonly daemonPublication: {
-    readonly status: 'not-published' | 'published-read-model';
-    readonly requiredPath: string;
-    readonly evidence: string;
-  };
-  readonly agentConsumption: {
-    readonly status: 'waiting-for-published-feed' | 'consumed';
-    readonly readModelPath: string | null;
-    readonly evidence: string;
-  };
-  readonly healthStatus?: string;
-  readonly isConfigured?: boolean;
-  readonly isActive?: boolean;
+  readonly source: 'agent-provider-calls';
+  readonly successCalls?: number;
+  readonly errorCalls?: number;
+  readonly errorRate?: number;
   readonly avgLatencyMs?: number;
   readonly minLatencyMs?: number;
   readonly maxLatencyMs?: number;
-  readonly lastSuccessAt?: string | null;
-  readonly lastErrorAt?: string | null;
-  readonly lastErrorMessage?: string;
-  readonly errorRate?: number;
-  readonly consecutiveErrors?: number;
-  readonly lastCheckedAt?: string | null;
-  readonly rateLimitResetAt?: string | null;
-  readonly rateLimitRemaining?: number;
-  readonly rateLimitLimit?: number;
   readonly missingSignals: readonly string[];
   readonly policy: string;
 }
@@ -230,7 +208,8 @@ export interface LocalModelServerEndpoint {
   readonly refreshRoute: string;
   readonly addProviderRoute: string | null;
   readonly notes: readonly string[];
-  readonly servingDiagnostics?: LocalModelServerServingDiagnostics;
+  /** The last confirmed smoke of this endpoint in this session; absent until `models action:"smoke"` probes it. */
+  readonly lastSmoke?: LocalModelLastSmoke;
   readonly diagnostics?: {
     readonly liveProbe: 'not-run';
     readonly successCriteria: readonly string[];
@@ -240,41 +219,15 @@ export interface LocalModelServerEndpoint {
   };
 }
 
-export interface LocalModelServerServingDiagnostics {
-  readonly status: 'ready' | 'attention' | 'blocked' | 'unknown';
-  readonly source: string;
-  readonly summary: string;
-  readonly schemaStatus?: 'certified' | 'legacy' | 'not-evaluated';
-  readonly schemaVersion?: string;
-  readonly provenance?: readonly string[];
-  readonly publicationGuarantee?: string;
-  readonly publisher?: string;
-  readonly serverVersion?: string;
-  readonly loadedModelCount?: number;
-  readonly loadedModels: readonly string[];
-  readonly contextWindowTokens?: number;
-  readonly toolSupport?: boolean;
-  readonly resourcePressure: 'low' | 'moderate' | 'high' | 'unknown';
-  readonly resourceSummary?: string;
-  readonly lastCheckedAt?: string | null;
-  readonly startReceiptId?: string;
-  readonly repairReceiptId?: string;
-  readonly receiptStatus?: string;
-  readonly startRoute?: string;
-  readonly repairRoute?: string;
-  readonly inspectRoute: string;
-  readonly missingSignals: readonly string[];
-  readonly policy: string;
-}
-
-export interface LocalModelServerDiagnosticsPublication {
-  readonly status: 'not-published' | 'published-read-model' | 'read-model-empty' | 'read-model-error';
-  readonly requiredPaths: readonly string[];
-  readonly sourcePaths: readonly string[];
-  readonly recordCount: number;
-  readonly matchedEndpointCount: number;
-  readonly missingSignals: readonly string[];
-  readonly policy: string;
+/** The last confirmed smoke of an endpoint in this Agent process: what the probe actually saw. */
+export interface LocalModelLastSmoke {
+  readonly status: 'passed' | 'http-error' | 'invalid-json' | 'no-models' | 'timeout' | 'unreachable' | 'blocked';
+  readonly reachable: boolean;
+  readonly httpStatus: number | null;
+  readonly modelCount: number;
+  readonly sampleModelIds: readonly string[];
+  readonly elapsedMs: number | null;
+  readonly checkedAt: string;
 }
 
 export interface LocalModelServerDefaultEndpoint {
@@ -295,7 +248,6 @@ export interface LocalModelServerHealthMap {
   readonly returnedEndpoints: number;
   readonly endpoints: readonly LocalModelServerEndpoint[];
   readonly suggestedDefaults: readonly LocalModelServerDefaultEndpoint[];
-  readonly daemonDiagnostics: LocalModelServerDiagnosticsPublication;
   readonly nextActions: readonly string[];
   readonly policy: string;
 }

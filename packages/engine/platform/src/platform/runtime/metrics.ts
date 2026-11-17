@@ -97,6 +97,8 @@ export interface RolledUpGauge extends Gauge {
 export interface RolledUpHistogram extends Histogram {
   /** Count/sum/min/max merged over every label set that contains `filter` (all of them when omitted). */
   merged(filter?: MetricLabels): HistogramSnapshot;
+  /** Epoch ms of the newest observation among label sets that contain `filter`, or null when there is none. */
+  lastRecordedAt(filter?: MetricLabels): number | null;
 }
 
 function rolledUpCounter(inner: Counter): RolledUpCounter {
@@ -138,13 +140,14 @@ function rolledUpGauge(inner: Gauge): RolledUpGauge {
 }
 
 function rolledUpHistogram(inner: Histogram): RolledUpHistogram {
-  const entries = new Map<string, { labels: MetricLabels; count: number; sum: number; min: number; max: number }>();
+  const entries = new Map<string, { labels: MetricLabels; count: number; sum: number; min: number; max: number; at: number }>();
   rollupResets.push(() => entries.clear());
   return {
     record(value, labels) {
       inner.record(value, labels);
       const key = rollupKey(labels);
       const entry = entries.get(key);
+      const at = Date.now();
       if (!entry) {
         entries.set(key, {
           labels: labels ? (filterMetricLabels(labels) as MetricLabels) : {},
@@ -152,6 +155,7 @@ function rolledUpHistogram(inner: Histogram): RolledUpHistogram {
           sum: value,
           min: value,
           max: value,
+          at,
         });
         return;
       }
@@ -159,6 +163,7 @@ function rolledUpHistogram(inner: Histogram): RolledUpHistogram {
       entry.sum += value;
       if (value < entry.min) entry.min = value;
       if (value > entry.max) entry.max = value;
+      entry.at = at;
     },
     snapshot: (labels) => inner.snapshot(labels),
     merged(filter) {
@@ -175,6 +180,13 @@ function rolledUpHistogram(inner: Histogram): RolledUpHistogram {
       }
       if (count === 0) return { count: 0, sum: 0, min: 0, max: 0, mean: 0 };
       return { count, sum, min, max, mean: sum / count };
+    },
+    lastRecordedAt(filter) {
+      let newest: number | null = null;
+      for (const entry of entries.values()) {
+        if (containsLabels(entry.labels, filter) && (newest === null || entry.at > newest)) newest = entry.at;
+      }
+      return newest;
     },
   };
 }
@@ -206,6 +218,39 @@ export const llmRequestsStarted = platformMeter.counter('llm.requests.started');
 export const llmRequestsTotal = rolledUpCounter(platformMeter.counter('llm.requests.total'));
 /** Histogram: LLM request latency in ms by provider, model. */
 export const llmRequestDurationMs = rolledUpHistogram(platformMeter.histogram('llm.request.duration_ms'));
+/** What this process measured for one provider, or one model of it: calls, outcomes and latency. */
+export interface LlmRouteMeasurement {
+  readonly provider: string;
+  readonly model: string | null;
+  readonly successCalls: number;
+  readonly errorCalls: number;
+  readonly avgLatencyMs: number | null;
+  readonly minLatencyMs: number | null;
+  readonly maxLatencyMs: number | null;
+  /** Epoch ms of the newest measured call (a failed call is measured too), or null when there is none. */
+  readonly lastMeasuredAt: number | null;
+}
+
+/**
+ * The live provider-health fact: every provider call this process made is
+ * recorded by `instrumentedLlmCall` with its provider and model labels, so a
+ * route's latency and outcomes are a lookup here, not a separate store.
+ */
+export function measureLlmRoute(provider: string, model?: string): LlmRouteMeasurement {
+  const filter: MetricLabels = model ? { provider, model } : { provider };
+  const latency = llmRequestDurationMs.merged(filter);
+  const measured = latency.count > 0;
+  return {
+    provider,
+    model: model ?? null,
+    successCalls: llmRequestsTotal.total({ ...filter, status: 'success' }),
+    errorCalls: llmRequestsTotal.total({ ...filter, status: 'error' }),
+    avgLatencyMs: measured ? latency.mean : null,
+    minLatencyMs: measured ? latency.min : null,
+    maxLatencyMs: measured ? latency.max : null,
+    lastMeasuredAt: llmRequestDurationMs.lastRecordedAt(filter),
+  };
+}
 /** Histogram: LLM input token counts by provider, model. */
 export const llmTokensInput = rolledUpHistogram(platformMeter.histogram('llm.tokens.input'));
 /** Histogram: LLM output token counts by provider, model. */

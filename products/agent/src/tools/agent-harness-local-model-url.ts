@@ -1,9 +1,30 @@
-import { readLocalModelStack, type LocalModelStack } from './agent-harness-local-model-readings.ts';
-import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
-export type { LocalModelStack } from './agent-harness-local-model-readings.ts';
+import type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
+export type { ClassicModelStack as LocalModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
 
-export async function localStackFor(value: string, options: ModelReadingOptions, evidence: unknown = value): Promise<LocalModelStack | null> {
-  return readLocalModelStack(value, evidence, options);
+/** Serving stacks by provider id: the built-in local adapters and the usual names of local servers. */
+const PROVIDER_STACKS: Readonly<Record<string, LocalModelStack>> = {
+  ollama: 'ollama', 'llama.cpp': 'llama.cpp', llamacpp: 'llama.cpp', 'llama-cpp': 'llama.cpp', 'llama-server': 'llama.cpp',
+  vllm: 'vllm', 'lm-studio': 'openai-compatible', lmstudio: 'openai-compatible', localai: 'openai-compatible', 'openai-compatible': 'openai-compatible',
+};
+/** The default ports of the local servers in the cookbook's suggested defaults. */
+const PORT_STACKS: Readonly<Record<string, LocalModelStack>> = { '11434': 'ollama', '1234': 'openai-compatible', '8080': 'llama.cpp', '8000': 'vllm' };
+
+/** The serving stack a provider id (or a `provider:model` route) names, or null when its name says none. */
+export function localStackForProvider(providerOrRoute: string): LocalModelStack | null {
+  const id = (providerOrRoute.split(':')[0] ?? '').trim().toLowerCase();
+  return PROVIDER_STACKS[id] ?? null;
+}
+
+/**
+ * The serving stack of an endpoint, decided in code: null when the URL is not
+ * loopback or private (not a local server at all), else the stack the
+ * provider's id names, else the default-port table, else OpenAI-compatible.
+ */
+export function localStackFor(baseUrl: string, providerId?: string | null): LocalModelStack | null {
+  if (!isPrivateOrLocalUrl(baseUrl)) return null;
+  const named = providerId ? localStackForProvider(providerId) : null;
+  if (named) return named;
+  return PORT_STACKS[parseUrlCandidate(baseUrl)?.port ?? ''] ?? 'openai-compatible';
 }
 
 export function cleanUrlCandidate(value: string): string {

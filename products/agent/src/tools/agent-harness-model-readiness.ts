@@ -92,7 +92,7 @@ function retainReadinessAuthority(authority: ReturnType<typeof captureJudgmentPo
   semanticCurrent();
 }
 
-/** Acquire neither a battery nor a port until full-source screening settles. */
+/** The judged dimensions of a route: latency adequacy, privacy and cloud transfer. Every other dimension is a typed fact. */
 async function readRoute(source: unknown, options: ModelReadingOptions) {
   return withModelReadingSource(source, options, async (state, scoped) => {
     scoped.assertCurrent?.();
@@ -104,7 +104,7 @@ async function readRoute(source: unknown, options: ModelReadingOptions) {
       try {
         const run = await battery.run(authority.port, state as unknown as Parameters<typeof battery.run>[1], {
           site: battery.name, signal: authority.signal, beforeAttempt: authority.assertCurrent,
-          only: ['latency', 'contextWindow', 'toolSupport', 'vision', 'cost', 'privacy', 'cloudTransfer'],
+          only: ['latency', 'privacy', 'cloudTransfer'],
         });
         authority.assertCurrent();
         const result = routeReadinessFrom(run);
@@ -114,40 +114,74 @@ async function readRoute(source: unknown, options: ModelReadingOptions) {
   });
 }
 
-function described(reading: ReturnType<typeof routeReadinessFrom>, missing: ReadonlyMap<ModelReadinessDimension['id'], string>): ModelReadinessScore {
-  const dimensions: ModelReadinessDimension[] = reading.dimensions.map(dimension => ({
-    ...dimension, ...(missing.has(dimension.id) ? { score: null, normalized: null, outcome: 'deferred' as const, confidence: null } : {}),
-    summary: missing.get(dimension.id) ?? dimension.reason ?? 'Settled rubric reading.',
-  }));
-  const settled = reading.outcome === 'ready' && missing.size === 0;
-  return { ...reading, confidence: settled ? reading.confidence : null, score: settled ? reading.score : null, normalized: settled ? reading.normalized : null, level: settled ? reading.level : null,
-    cloudTransfer: missing.has('privacy') ? { ...reading.cloudTransfer, value: null, probability: null, confidence: null, outcome: 'deferred' } : reading.cloudTransfer,
-    outcome: reading.outcome === 'ready' && !settled ? 'deferred' : reading.outcome,
-    dimensions, missingSignals: [...missing.values()], nextStep: NEXT_STEP };
+type FactDimension = Exclude<ModelReadinessDimension['id'], 'latency' | 'privacy'>;
+interface FactScore { readonly normalized: number; readonly summary: string }
+
+/** Context window on the rubric's scale: sustained interactive work with project context. */
+function contextWindowScore(tokens: number): FactScore {
+  const normalized = tokens >= 200_000 ? 1 : tokens >= 128_000 ? 0.9 : tokens >= 64_000 ? 0.75 : tokens >= 32_000 ? 0.6 : tokens >= 16_000 ? 0.4 : 0.2;
+  return { normalized, summary: `Context window ${tokens.toLocaleString('en-US')} tokens.` };
+}
+/** Cost from the registry's tier: what the owner pays per request on this route. */
+const TIER_COST: Readonly<Record<string, number>> = { free: 1, subscription: 0.85, standard: 0.6, paid: 0.5, premium: 0.35 };
+
+/** The four dimensions the model record states, scored by code; null when the record does not state it. */
+function factDimensions(model: ModelCandidate): ReadonlyMap<FactDimension, FactScore | null> {
+  const tools = capabilityEnabled(model.capabilities, 'toolCalling');
+  const vision = capabilityEnabled(model.capabilities, 'multimodal');
+  const cost = model.tier ? TIER_COST[model.tier] : undefined;
+  return new Map<FactDimension, FactScore | null>([
+    ['context-window', model.contextWindow != null && model.contextWindow > 0 ? contextWindowScore(model.contextWindow) : null],
+    ['tool-support', tools === null ? null : { normalized: tools ? 1 : 0, summary: tools ? 'Tool calling is supported.' : 'Tool calling is not supported.' }],
+    // Image input is occasional in the rubric, so a text-only model keeps half the weight.
+    ['vision', vision === null ? null : { normalized: vision ? 1 : 0.5, summary: vision ? 'Image input is supported.' : 'Text input only.' }],
+    ['cost', cost === undefined ? null : { normalized: cost, summary: `Cost tier ${model.tier}.` }],
+  ]);
+}
+
+/** The composite over all six dimensions: code-scored facts plus the judged latency and privacy. */
+function composed(reading: ReturnType<typeof routeReadinessFrom>, facts: ReadonlyMap<FactDimension, FactScore | null>): ModelReadinessScore {
+  const dimensions: ModelReadinessDimension[] = routeReadiness.composite.dimensions.map(({ id, label, weight }) => {
+    const fact = id === 'latency' || id === 'privacy' ? undefined : facts.get(id);
+    if (fact) return { id, label, weight, score: Math.round(fact.normalized * 100), normalized: fact.normalized, confidence: 1, outcome: 'ready' as const, summary: fact.summary };
+    const judged = reading.dimensions.find(dimension => dimension.id === id);
+    return { ...judged, id, label, weight, score: judged?.score ?? null, confidence: judged?.confidence ?? null,
+      outcome: judged?.outcome ?? 'unavailable', summary: judged?.reason ?? 'Settled rubric reading.' };
+  });
+  const unsettled = dimensions.find(dimension => dimension.outcome !== 'ready');
+  const totalWeight = dimensions.reduce((sum, dimension) => sum + dimension.weight, 0);
+  const normalized = unsettled ? null : dimensions.reduce((sum, dimension) => sum + dimension.weight * (dimension.score ?? 0) / 100, 0) / totalWeight;
+  const judgedConfidence = dimensions.filter(dimension => dimension.id === 'latency' || dimension.id === 'privacy').map(dimension => dimension.confidence);
+  const confidence = normalized === null || judgedConfidence.some(value => value === null) ? null : Math.min(...judgedConfidence as number[]);
+  return {
+    score: normalized === null ? null : Math.round(normalized * 100), normalized,
+    level: normalized === null ? null : routeReadiness.composite.levels.find(entry => normalized >= entry.at)!.level,
+    outcome: unsettled?.outcome ?? 'ready', confidence, decisionId: reading.decisionId, provenance: reading.provenance,
+    cloudTransfer: reading.cloudTransfer, dimensions, missingSignals: unsettled ? [unsettled.summary] : [], nextStep: NEXT_STEP,
+  };
 }
 
 export async function modelReadinessScore(context: CommandContext, model: ModelCandidate, options: ModelReadingOptions = {}): Promise<ModelRouteReadinessScore> {
-  const rawHealth = readProviderHealthSignal(context, model.providerId, model.registryKey);
-  // Freeform error previews are not semantic evidence. Complete originals are
-  // screened by the invocation owner; these fields are omitted from the rubric.
-  const { lastErrorMessage: _lastErrorMessage, ...providerHealth } = rawHealth;
+  const providerHealth = readProviderHealthSignal(model.providerId, model.registryKey, model.modelId);
   const provider = listProviderRegistryProviders(context).find(value => {
     const facts = readRecord(value); return facts.id === model.providerId || facts.providerId === model.providerId || facts.name === model.providerId;
   }) ?? null;
-  const healthLatency = providerHealth.status === 'record-found' && ['healthy', 'degraded'].includes(providerHealth.healthStatus ?? '') && providerHealth.measuredRouteId === model.registryKey && providerHealth.measuredProviderId === model.providerId
-    && typeof providerHealth.avgLatencyMs === 'number' && providerHealth.avgLatencyMs >= 0 && providerHealth.measurementRecordedAt && Number.isFinite(Date.parse(providerHealth.measurementRecordedAt))
-    ? { milliseconds: providerHealth.avgLatencyMs, routeId: providerHealth.measuredRouteId, recordedAt: providerHealth.measurementRecordedAt, sourceRecordId: providerHealth.sourceRecordId, source: 'provider-health' } : null;
+  const healthLatency = providerHealth.status === 'measured' && providerHealth.measuredRouteId === model.registryKey
+    && typeof providerHealth.avgLatencyMs === 'number' && providerHealth.measurementRecordedAt
+    ? { milliseconds: providerHealth.avgLatencyMs, routeId: providerHealth.measuredRouteId, recordedAt: providerHealth.measurementRecordedAt,
+      calls: (providerHealth.successCalls ?? 0) + (providerHealth.errorCalls ?? 0), errorRate: providerHealth.errorRate ?? null, source: 'agent-provider-calls' } : null;
   const benchmark = model.localBenchmarkLatency;
   const benchmarkLatency = benchmark && benchmark.registryKey === model.registryKey && benchmark.providerId === model.providerId
     && benchmark.status === 'completed' && Number.isFinite(benchmark.latencyMs) && benchmark.latencyMs >= 0
     && benchmark.createdAt && Number.isFinite(Date.parse(benchmark.createdAt)) ? benchmark : null;
   const latency = healthLatency ?? benchmarkLatency;
+  const facts = factDimensions(model);
   const missing = new Map<ModelReadinessDimension['id'], string>();
-  if (!latency) missing.set('latency', 'No successful route-specific latency measurement with a timestamp is available.');
-  if (model.contextWindow == null || model.contextWindow <= 0) missing.set('context-window', 'Context-window metadata is missing.');
-  if (capabilityEnabled(model.capabilities, 'toolCalling') == null) missing.set('tool-support', 'Tool-calling capability is unknown.');
-  if (capabilityEnabled(model.capabilities, 'multimodal') == null) missing.set('vision', 'Vision capability is unknown.');
-  if (!model.tier) missing.set('cost', 'Cost evidence is missing.');
+  if (!latency) missing.set('latency', 'No latency measurement for this exact route: neither a call in this session nor a saved local benchmark. One turn on the route, or a model comparison, measures it.');
+  if (!facts.get('context-window')) missing.set('context-window', 'Context-window metadata is missing.');
+  if (!facts.get('tool-support')) missing.set('tool-support', 'Tool-calling capability is unknown.');
+  if (!facts.get('vision')) missing.set('vision', 'Vision capability is unknown.');
+  if (!facts.get('cost')) missing.set('cost', model.tier ? `Cost tier "${model.tier}" is not one the rubric scores.` : 'Cost evidence is missing.');
   const providerFacts = readRecord(provider);
   const providerConfig = readRecord(providerFacts.config);
   const hasEndpointFacts = [providerFacts.baseUrl, providerFacts.baseURL, providerFacts.api, providerFacts.endpoint, providerConfig.baseUrl, providerConfig.baseURL].some(value => {
@@ -156,56 +190,44 @@ export async function modelReadinessScore(context: CommandContext, model: ModelC
   });
   const hasHostingFacts = hasEndpointFacts || [providerFacts.hosting, providerFacts.documentation, providerFacts.setupDescription, providerFacts.anonymousDetail].some(value => typeof value === 'string' && value.trim().length > 0);
   if (!hasHostingFacts) missing.set('privacy', 'Provider and endpoint facts are missing; a route name is not hosting evidence.');
-  const explicitlyUnavailable = model.available === false || model.configured === false || providerHealth.isConfigured === false
+  const explicitlyUnavailable = model.available === false || model.configured === false
     || providerFacts.available === false || providerFacts.isAvailable === false || providerFacts.configured === false || providerFacts.isConfigured === false;
-  const classic = (): ModelRouteReadinessScore => {
-    const deferred = classicReadiness(options);
-    return { ...deferred, ...(explicitlyUnavailable ? { outcome: 'unavailable' as const,
-      missingSignals: [...deferred.missingSignals, 'This provider or model is unavailable or unconfigured.'] } : {}), providerHealth };
-  };
-  if (isClassicOperation()) return classic();
-  if (!options.sourceOwner) return { ...deferredModelReadiness('Readiness source screening is unavailable.'), outcome: 'unavailable', providerHealth };
-  const reading = await readRoute({ subject: model, rubric: RUBRIC, capabilities: model.capabilities, contextWindow: model.contextWindow,
-    cost: { tier: model.tier ?? null }, provider, measuredLatency: latency, benchmarkQuality: model.benchmarkCompositeScore ?? null,
-    providerHealth, missingSignals: [...missing.values()] }, options);
-  if (isClassicOperation()) return classic();
-  const result = described(reading, missing);
-  if (explicitlyUnavailable) {
-    return { ...result, score: null, normalized: null, level: null, confidence: null, outcome: 'unavailable',
-      missingSignals: [...result.missingSignals, 'This provider or model is unavailable or unconfigured.'], providerHealth };
-  }
-  return { ...result, providerHealth };
+  const unavailable = (score: ModelReadinessScore): ModelRouteReadinessScore => explicitlyUnavailable
+    ? { ...score, score: null, normalized: null, level: null, confidence: null, outcome: 'unavailable',
+      missingSignals: [...score.missingSignals, 'This provider or model is unavailable or unconfigured.'], providerHealth }
+    : { ...score, providerHealth };
+  if (isClassicOperation()) return unavailable(classicReadiness(options));
+  // A score needs all six dimensions; with any evidence missing nothing is asked.
+  if (missing.size > 0) return unavailable({ ...deferredModelReadiness(), missingSignals: [...missing.values()] });
+  const reading = await readRoute({ subject: model, rubric: RUBRIC, provider, measuredLatency: latency, benchmarkQuality: model.benchmarkCompositeScore ?? null,
+    providerHealth }, options);
+  if (isClassicOperation()) return unavailable(classicReadiness(options));
+  return unavailable(composed(reading, facts));
 }
 
-export async function localRecipeReadinessScore(recipe: LocalModelRecipe, fit: LocalModelRecipeFit, detected: boolean,
-  evidence: LocalModelBenchmarkEvidence, options: ModelReadingOptions = {}): Promise<ModelReadinessScore> {
-  if (isClassicOperation()) return classicReadiness(options);
-  if (!options.sourceOwner) return deferredModelReadiness();
-  // These are names only: no capability evidence exists to send to a reader.
-  // Keep the missing evidence explicit in the compound readiness input.
+/**
+ * Recipe examples are names: no exact route, measured latency, context window,
+ * tool support, cost or endpoint exists for them, so a recipe's route
+ * readiness is stated as deferred with the evidence each dimension needs.
+ */
+export function localRecipeReadinessScore(recipe: LocalModelRecipe): ModelReadinessScore {
   const exampleVision = recipe.modelExamples.map(example => ({
     example, value: null, probability: null, confidence: null, decisionId: null, provenance: null, outcome: 'deferred',
     reason: 'No advertised capability or documentation is supplied for this example.',
   }));
-  const reading = await readRoute({ subject: recipe, rubric: RUBRIC, detected, benchmarkEvidence: evidence,
-    localFit: fit.outcome === 'ready' ? fit : null, exampleVision, provider: null,
-    capabilities: null, contextWindow: null, measuredLatency: null, cost: null }, options);
-  if (isClassicOperation()) return { ...classicReadiness(options), exampleVision };
-  const missing = new Map<ModelReadinessDimension['id'], string>([
-    ['latency', 'Recipe examples have no measured latency for an exact configured route.'],
-    ['context-window', 'Verify the context window of the exact model served.'],
-    ['tool-support', 'Verify tool calling on the exact model and server.'],
-    ['vision', 'Example names do not establish advertised vision capability.'],
-    ['cost', 'Recipe identity does not establish the cost of a configured route.'],
-    ['privacy', 'Recipe identity does not establish the endpoint or prompt-data transfer policy.'],
-  ]);
-  return { ...described(reading, missing), exampleVision };
+  return { ...deferredModelReadiness(), exampleVision, missingSignals: [
+    'Recipe examples have no measured latency for an exact configured route.',
+    'Verify the context window of the exact model served.',
+    'Verify tool calling on the exact model and server.',
+    'Example names do not establish advertised vision capability.',
+    'Recipe identity does not establish the cost of a configured route.',
+    'Recipe identity does not establish the endpoint or prompt-data transfer policy.',
+  ] };
 }
 
 export async function scoreLocalModelRecipe(recipe: LocalModelRecipe, hardware: LocalModelHardwareProfile, detection: LocalModelDetection,
   options: ModelReadingOptions = {}): Promise<LocalModelRecipeFit> {
   if (isClassicOperation()) return classicFit(options);
-  if (!options.sourceOwner) return deferredRecipeFit();
   return withModelReadingSource({ recipe, hardware, detection, rubric: RUBRIC }, options, async (state, scoped) => {
     return decisionOrClassic(async () => {
       const decision = routingRegistry.get('agent.models.local-recipe-fit');

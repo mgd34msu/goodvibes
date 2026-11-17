@@ -8,7 +8,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import type { ArtifactDescriptor, ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { hasPurpose, PURPOSE_MODEL_COMPARE_JUDGMENT } from './agent-review-packet-presets-core.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { localStackFor } from './agent-harness-local-model-endpoints.ts';
+import { localStackForProvider } from './agent-harness-local-model-url.ts';
 import type { LocalModelBenchmarkEvidence, LocalModelBenchmarkPlan, LocalModelBenchmarkRouteLatency, LocalModelBenchmarkWinner, LocalModelRecipe, ArtifactListLike } from './agent-harness-model-routing-types.ts';
 import { assertModelReadingInputCurrent, captureModelArtifactClockSource, captureModelArtifactClockSources, captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
@@ -446,15 +446,8 @@ async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactCo
   for (const artifact of judgments) {
     const winnerModel = readString(artifact.metadata.winnerModel);
     if (!winnerModel) continue;
-    if (isClassicOperation()) {
-      stacks.push({ artifactId: artifact.id, stack: declaredClassicModelStack(readString(artifact.metadata.winnerStack)) });
-      assertCurrent(); continue;
-    }
-    if (!options.sourceOwner) continue;
-    const source = await load(artifact); assertCurrent();
-    if (!source) { stacks.push({ artifactId: artifact.id, stack: null }); continue; }
-    const stack = await localStackFor(winnerModel, { ...options, assertCurrent }, benchmarkReadingSource(source)); assertCurrent();
-    stacks.push({ artifactId: artifact.id, stack });
+    // The winner's stack is a fact of its provider's name, decided in code; no reading is made.
+    stacks.push({ artifactId: artifact.id, stack: declaredClassicModelStack(readString(artifact.metadata.winnerStack)) ?? localStackForProvider(winnerModel) });
   }
   // Every descriptor is the detached native snapshot already screened through
   // its typed clock projection. Keep raw epochs for native consumers without

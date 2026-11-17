@@ -222,17 +222,12 @@ async function describeRoute(route: RouteCandidate, options: { readonly context:
 function compactProviderHealthSignal(signal: ModelProviderHealthSignal): Record<string, unknown> {
   return {
     status: signal.status,
-    engineContract: signal.engineContract,
-    daemonPublication: signal.daemonPublication,
-    agentConsumption: signal.agentConsumption,
-    ...(signal.healthStatus ? { healthStatus: signal.healthStatus } : {}),
-    ...(signal.modelRouteId ? { modelRouteId: signal.modelRouteId } : {}),
-    ...(signal.sourceRecordId ? { sourceRecordId: signal.sourceRecordId } : {}),
+    source: signal.source,
+    ...(signal.measuredRouteId ? { measuredRouteId: signal.measuredRouteId } : {}),
+    ...(signal.successCalls !== undefined ? { successCalls: signal.successCalls, errorCalls: signal.errorCalls ?? 0 } : {}),
     ...(signal.avgLatencyMs !== undefined ? { avgLatencyMs: signal.avgLatencyMs } : {}),
-    ...(signal.rateLimitRemaining !== undefined ? { rateLimitRemaining: signal.rateLimitRemaining } : {}),
-    ...(signal.rateLimitResetAt ? { rateLimitResetAt: signal.rateLimitResetAt } : {}),
+    ...(signal.measurementRecordedAt ? { measuredAt: signal.measurementRecordedAt } : {}),
     missingSignals: signal.missingSignals,
-    policy: signal.policy,
   };
 }
 

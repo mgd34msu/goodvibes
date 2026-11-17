@@ -1,7 +1,7 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import { estimateModelBytes, fitAssessment, fitVerdictLabel, readHardwareProfileSync, REPRESENTATIVE_7B_PARAMS } from '../core/hardware-profile.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
-import { withLocalModelRegistry, localModelDetection, localModelServerFacts, localModelServerHealthMap } from './agent-harness-local-model-endpoints.ts';
+import { readLocalModelRegistry, localModelDetection, localModelServerFacts, localModelServerHealthMap } from './agent-harness-local-model-endpoints.ts';
 import { deferredModelReadiness, deferredRecipeFit, localHardwareProfile, localRecipeReadinessScore, localRecipeStackId, scoreLocalModelRecipe } from './agent-harness-model-readiness.ts';
 import { localModelBenchmarkHistory, localModelBenchmarkHistoryFrom, localModelBenchmarkPlan, readLocalModelBenchmarkSnapshot, type LocalModelBenchmarkSnapshot, type LocalModelBenchmarkHistory } from './agent-harness-local-model-benchmarks.ts';
 import type { LocalModelDetection, LocalModelHardwareProfile, LocalModelRecipe, LocalModelRecipeFit, LocalModelSetupPlan, LocalModelBenchmarkEvidence, LocalModelServerHealthMap, ModelReadinessScore } from './agent-harness-model-routing-types.ts';
@@ -219,7 +219,7 @@ export function localModelCookbook(context: CommandContext, includeParameters: b
 }
 
 function cookbookSnapshot(context: CommandContext, includeParameters: boolean, enriched?: readonly Record<string, unknown>[], hardware?: LocalModelHardwareProfile,
-  localServerHealth: Omit<LocalModelServerHealthMap, 'daemonDiagnostics'> = localModelServerFacts(context, includeParameters),
+  localServerHealth: LocalModelServerHealthMap = localModelServerFacts(context, includeParameters),
   detection: LocalModelDetection = localModelDetection(context),
   benchmarkHistory: LocalModelBenchmarkHistory = localModelBenchmarkHistory(context, includeParameters)): Record<string, unknown> {
   const hardwareProfile = hardware ?? localHardwareProfile();
@@ -264,37 +264,29 @@ function cookbookSnapshot(context: CommandContext, includeParameters: boolean, e
   };
 }
 
-/** Explicit inspection may enrich facts; startup and setup snapshots never ask a model. */
+/**
+ * Explicit inspection adds the hardware-fit reading of each recipe (one
+ * judgment per recipe); detection, endpoints and route readiness are code
+ * facts read once from the registry.
+ */
 export async function readLocalModelCookbook(context: CommandContext, includeParameters: boolean, options: ModelReadingOptions, benchmarkSnapshot?: LocalModelBenchmarkSnapshot): Promise<Record<string, unknown>> {
-  if (!options.sourceOwner) {
-    const health = await localModelServerHealthMap(context, includeParameters, options);
-    const result = cookbookSnapshot(context, includeParameters, undefined, undefined, health);
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    return result;
+  const registry = readLocalModelRegistry(context);
+  const detection = registry.detection;
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const snapshot = benchmarkSnapshot ?? await readLocalModelBenchmarkSnapshot(context, options);
+  options.signal?.throwIfAborted(); options.assertCurrent?.();
+  const history = localModelBenchmarkHistoryFrom(snapshot, true);
+  const displayHistory = localModelBenchmarkHistoryFrom(snapshot, includeParameters);
+  const recipes = localModelRecipes(), hardware = localHardwareProfile(), evidence = history.evidence;
+  const enriched: Record<string, unknown>[] = [];
+  for (const recipe of recipes) {
+    const fit = await scoreLocalModelRecipe(recipe, hardware, detection, options);
+    options.assertCurrent?.();
+    enriched.push(describeLocalModelRecipe(recipe, detection, hardware, evidence, includeParameters, fit, localRecipeReadinessScore(recipe)));
   }
-  return withLocalModelRegistry(context, options, async registry => {
-    const detection = registry.detection;
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    const snapshot = benchmarkSnapshot ?? await readLocalModelBenchmarkSnapshot(context, options);
-    options.signal?.throwIfAborted(); options.assertCurrent?.();
-    const history = localModelBenchmarkHistoryFrom(snapshot, true);
-    const displayHistory = localModelBenchmarkHistoryFrom(snapshot, includeParameters);
-    const recipes = localModelRecipes(), hardware = localHardwareProfile(), evidence = history.evidence;
-    return withModelReadingSource({ recipes, hardware, detection, evidence, displayHistory }, options, async (facts, scoped) => {
-      const enriched: Record<string, unknown>[] = [];
-      for (const recipe of facts.recipes) {
-        const fit = await scoreLocalModelRecipe(recipe, facts.hardware, facts.detection, scoped);
-        scoped.assertCurrent?.();
-        const readiness = await localRecipeReadinessScore(recipe, fit, facts.detection.stacks.includes(localRecipeStackId(recipe)), facts.evidence, scoped);
-        scoped.assertCurrent?.();
-        enriched.push(describeLocalModelRecipe(recipe, facts.detection, facts.hardware, facts.evidence, includeParameters, fit, readiness));
-      }
-      // Explicit null handling: missing scores stay at the end and never become zero.
-      enriched.sort((a, b) => typeof a.fitScore !== 'number' ? typeof b.fitScore !== 'number' ? 0 : 1
-        : typeof b.fitScore !== 'number' ? -1 : b.fitScore - a.fitScore);
-      const health = await localModelServerHealthMap(context, includeParameters, scoped, registry);
-      const result = cookbookSnapshot(context, includeParameters, enriched, facts.hardware, health, facts.detection, facts.displayHistory);
-      scoped.assertCurrent?.(); return result;
-    });
-  });
+  // Explicit null handling: missing scores stay at the end and never become zero.
+  enriched.sort((a, b) => typeof a.fitScore !== 'number' ? typeof b.fitScore !== 'number' ? 0 : 1
+    : typeof b.fitScore !== 'number' ? -1 : b.fitScore - a.fitScore);
+  const health = await localModelServerHealthMap(context, includeParameters, options, registry);
+  return cookbookSnapshot(context, includeParameters, enriched, hardware, health, detection, displayHistory);
 }

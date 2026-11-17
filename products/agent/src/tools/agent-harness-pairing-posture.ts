@@ -1,7 +1,5 @@
 import { relative } from 'node:path';
 import * as nativeOs from 'node:os';
-import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointConfigReader } from '../cli/endpoints.ts';
@@ -127,29 +125,20 @@ function readConfigStringArray(context: CommandContext, key: string): readonly s
 
 /** Bind the original local interface observation before the route's first await.
  * This is an observed address, not a claim about future OS publications. */
-export function capturePairingAdvertisement(config: RuntimeEndpointConfigReader, assertNativeCurrent: () => void) {
-  const readInterfaces = nativeOs.networkInterfaces;
-  const assertSource = (): void => { assertProjectionCurrent(assertNativeCurrent); };
-  const get: RuntimeEndpointConfigReader['get'] = key => {
-    assertSource(); const value = config.get(key); assertSource(); return value;
-  };
-  const controlPlane = resolveRuntimeEndpointBinding({ get }, 'controlPlane');
-  const web = resolveRuntimeEndpointBinding({ get }, 'web');
-  let original: ReturnType<typeof nativeOs.networkInterfaces> | undefined;
+/** The address a pairing QR advertises, read once: a wildcard bind advertises the first external IPv4 address. */
+export function capturePairingAdvertisement(config: RuntimeEndpointConfigReader) {
+  const controlPlane = resolveRuntimeEndpointBinding(config, 'controlPlane');
+  const web = resolveRuntimeEndpointBinding(config, 'web');
+  let interfaces: ReturnType<typeof nativeOs.networkInterfaces> | undefined;
   if ([controlPlane.host, web.host].some(host => host === '0.0.0.0' || host === '::')) {
-    assertSource();
-    try { original = readInterfaces(); } catch { original = undefined; }
-    assertSource();
+    try { interfaces = nativeOs.networkInterfaces(); } catch { interfaces = undefined; }
   }
-  const interfaces = captureCatalogSnapshot(original);
   let address = '127.0.0.1';
-  for (const entries of Object.values(interfaces.captured ?? {})) {
+  for (const entries of Object.values(interfaces ?? {})) {
     const selected = entries?.find(entry => entry.family === 'IPv4' && !entry.internal);
     if (selected) { address = selected.address; break; }
   }
-  const assertCurrent = (): void => { assertSource(); interfaces.assertCurrent(original); assertSource(); };
-  assertCurrent();
-  return Object.freeze({ address, source: interfaces.captured, assertCurrent });
+  return Object.freeze({ address, source: interfaces ?? null });
 }
 
 function urlHostForBindHost(host: string, networkAddress: string): string {
@@ -423,23 +412,32 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       id: 'companion-pairing',
       label: 'Companion pairing',
       domain: 'companion',
-      status: hasToken ? 'ready' : 'setup-needed',
+      // The QR leads the phone to the control plane: a token alone pairs to a listener that is not running.
+      status: controlPlaneReady ? 'ready' : hasToken && endpointEnabledUnknown(state) ? 'attention' : 'setup-needed',
       userOutcome: 'Pair a phone or companion surface without exposing the raw operator token in chat.',
-      summary: hasToken
-        ? 'A connected-host operator token is present; QR and manual setup are owner-terminal flows the user starts with /pair.'
-        : 'No connected-host operator token is present, so companion pairing needs local token provisioning first.',
-      nextStep: hasToken
+      summary: controlPlaneReady
+        ? 'A connected-host operator token is present and the control plane is enabled; QR and manual setup are owner-terminal flows the user starts with /pair.'
+        : !hasToken
+          ? 'No connected-host operator token is present, so companion pairing needs local token provisioning first.'
+          : endpointEnabledUnknown(state)
+            ? 'A connected-host operator token is present, but the control-plane setting could not be read, so the pairing QR may point at a listener that is not running.'
+            : 'A connected-host operator token is present, but the control plane is disabled, so a pairing QR would point at a listener that is not running.',
+      nextStep: controlPlaneReady
         ? 'Ask the user to type /pair in the live Agent terminal when they want to pair a companion.'
-        : 'Provision connected-host auth, then return to QR pairing.',
+        : !hasToken
+          ? 'Provision connected-host auth (setupRoutes), then enable the control plane before QR pairing.'
+          : 'Enable the control plane (host action:"service" endpointId:"controlPlane"), then ask the user to type /pair.',
       capabilities: ['QR pairing', 'manual setup fallback', 'token-safe handoff'],
       modelRoute: 'agent_harness mode:"pairing_route" pairingRouteId:"qr-pairing"',
       userRoute: '/pair',
       setupRoutes: [
         'setup action:"item" setupItemId:"connected-host-auth"',
         'setup action:"token" setupItemId:"connected-host-auth" confirm:true explicitUserRequest:"..."',
+        'host action:"service" endpointId:"controlPlane"',
       ],
       evidence: {
         tokenPresent: hasToken,
+        controlPlaneEnabled: endpointEnabledUnknown(state) ? null : endpointEnabled(state),
         rawTokenReturned: false,
       },
       policy: 'Pairing display and the raw-token fallback are owner-terminal flows; a model invocation of /pair is refused.',
@@ -658,10 +656,9 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
 
 export async function pairingPostureCatalogStatus(context: CommandContext, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const native = captureCatalogNativeFacts(context, 'pairing');
-  const caller = captureAsyncHarnessInput({}, options, true, [native.assertCurrent]);
+  const caller = captureAsyncHarnessInput({}, options, true);
   const childOptions = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
-  const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager, native.assertCurrent);
-  childOptions.retainCurrent(advertisement.assertCurrent, 'agent.pairing.native-advertisement');
+  const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager);
   const browserPosture = await browserControlPosture(context, context.extensions?.toolRegistry, childOptions);
   caller.assertCurrent();
   const deviceMap = await buildDeviceCapabilityMap(context, browserPosture, childOptions, advertisement.address);
@@ -684,10 +681,9 @@ export async function pairingPostureCatalogStatus(context: CommandContext, optio
 
 export async function pairingPostureSummary(context: CommandContext, rawArgs: AgentHarnessPairingArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   const native = captureCatalogNativeFacts(context, 'pairing');
-  const caller = captureAsyncHarnessInput(rawArgs, options, true, [native.assertCurrent]), args = caller.args;
+  const caller = captureAsyncHarnessInput(rawArgs, options, true), args = caller.args;
   const childOptions = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
-  const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager, native.assertCurrent);
-  childOptions.retainCurrent(advertisement.assertCurrent, 'agent.pairing.native-advertisement');
+  const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager);
   const browserPosture = await browserControlPosture(context, context.extensions?.toolRegistry, childOptions);
   caller.assertCurrent();
   const query = readString(args.query);
@@ -738,24 +734,21 @@ export async function pairingPostureSummary(context: CommandContext, rawArgs: Ag
 
 export async function describeHarnessPairingRoute(context: CommandContext, rawArgs: AgentHarnessPairingArgs,
   options: CatalogRankingOptions = {}): Promise<PairingResolution> {
-  const native = captureCatalogNativeFacts(context, 'pairing');
-  const caller = captureAsyncHarnessInput(rawArgs, options, true, [native.assertCurrent]);
-  const childOptions = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
-  const result = await withModelReadingSource({ args: caller.args, nativeProviders: native.providerEvidence }, childOptions, async ({ args }, current): Promise<PairingResolution> => {
-    const lookup = lookupFromArgs(args);
+  const caller = captureAsyncHarnessInput(rawArgs, options, true);
+  const current = { ...caller.options, assertCurrent: caller.assertCallerCurrent };
+  // The routes are constants: an id is a lookup, and only a free-text query is ranked.
+  const result = await (async (): Promise<PairingResolution> => {
+    const lookup = lookupFromArgs(caller.args);
     if (!lookup) return { status: 'missing_lookup', usage: 'pairing_route requires pairingRouteId, target, or query. Use mode:"pairing_posture" to inspect pairing route ids.' };
     const routes = pairingRoutes();
     const found = async (route: PairingRoute, resolvedBy: string): Promise<PairingResolution> => {
       let deviceCapabilityMap: DeviceCapabilityMap | undefined;
       if (route.id === 'device-capability-map') {
-        const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager, native.assertCurrent);
-        childOptions.retainCurrent(advertisement.assertCurrent, 'agent.pairing.native-advertisement');
+        const advertisement = capturePairingAdvertisement(requirePlatform(context).configManager);
         const browserPosture = await browserControlPosture(context, context.extensions?.toolRegistry, current);
         current.assertCurrent?.();
-        const acquiredMap = await buildDeviceCapabilityMap(context, browserPosture, current, advertisement.address);
+        deviceCapabilityMap = await buildDeviceCapabilityMap(context, browserPosture, current, advertisement.address);
         current.assertCurrent?.();
-        deviceCapabilityMap = await withModelReadingSource({ acquiredMap, advertisementSource: advertisement.source }, current,
-          async (captured, reading) => { reading.assertCurrent?.(); return captured.acquiredMap; });
       }
       const result: PairingResolution = { status: 'found', route: describeRoute(route, { includeParameters: true,
         lookup: { ...lookup, resolvedBy }, ...(deviceCapabilityMap ? { deviceCapabilityMap } : {}),
@@ -775,7 +768,7 @@ export async function describeHarnessPairingRoute(context: CommandContext, rawAr
     if (searched.length === 1 && searched[0]) return found(searched[0], 'rank-band');
     if (searched.length > 1) return { status: 'ambiguous', input: lookup.input, candidates: searched.slice(0, 8).map(describeCandidate) };
     return { status: 'missing_lookup', usage: `Unknown pairing route ${lookup.input}. Use mode:"pairing_posture" to inspect pairing route ids.` };
-  });
+  })();
   caller.retainSourceCurrent('agent.pairing.sources');
   return result;
 }

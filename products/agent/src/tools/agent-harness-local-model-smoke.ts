@@ -2,9 +2,10 @@ import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentHarnessModelRoutingArgs, LocalModelServerDefaultEndpoint, LocalModelServerEndpoint, LocalModelSmokeTarget } from './agent-harness-model-routing-types.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { readLimit, readRecord, readString } from './agent-harness-model-routing-utils.ts';
-import { captureLocalModelRegistry, readLocalServerEndpointCandidates, describeLocalServerEndpoint, isPrivateOrLocalUrl, localEndpointSmokeRoute, localModelServerDefaults, parseUrlCandidate } from './agent-harness-local-model-endpoints.ts';
-import { captureCatalogData, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
+import { readLocalServerEndpointCandidates, describeLocalServerEndpoint, isPrivateOrLocalUrl, localEndpointSmokeRoute, localModelServerDefaults, parseUrlCandidate, recordLocalModelSmoke } from './agent-harness-local-model-endpoints.ts';
+import type { LocalModelLastSmoke } from './agent-harness-model-routing-types.ts';
+import { rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
 
 function localModelSmokeTargetFromEndpoint(endpoint: LocalModelServerEndpoint): LocalModelSmokeTarget {
   return {
@@ -301,18 +302,9 @@ export async function runLocalModelServerSmoke(context: CommandContext, args: Ag
     signal?.throwIfAborted();
   };
   assertCaller();
-  const source = JSON.stringify(captureCatalogData(args));
-  const endpoints = captureLocalModelRegistry(context);
-  const assertSourceCurrent = () => {
-    signal?.throwIfAborted();
-    if (JSON.stringify(captureCatalogData(args)) !== source) throw new ToolInputProjectionError('stale');
-    endpoints.assertCurrent();
-  };
-  options.retainCurrent?.(assertSourceCurrent, 'agent.local-model-smoke.endpoint.sources');
-  const assertCurrent = () => { assertSourceCurrent(); assertCaller(); assertSourceCurrent(); };
-  const reading = { ...options, assertCurrent };
+  const reading = { ...options, assertCurrent: assertCaller };
   const selection = await localModelSmokeTargets(context, args, reading);
-  assertCurrent();
+  assertCaller();
   if ('unresolved' in selection) {
     return {
       kind: 'local-model-smoke',
@@ -336,7 +328,18 @@ export async function runLocalModelServerSmoke(context: CommandContext, args: Ag
   const timeoutMs = readSmokeTimeoutMs(args.timeoutMs);
   const checkedAt = new Date().toISOString();
   const results = await Promise.all(targets.map((target) => smokeOneLocalModelTarget(target, timeoutMs, reading)));
-  assertCurrent();
+  assertCaller();
+  // Each probe is the endpoint's live diagnostics until the next smoke; a blocked target was not probed.
+  for (const result of results) {
+    const status = result.status as LocalModelLastSmoke['status'];
+    if (status === 'blocked' || typeof result.baseUrl !== 'string') continue;
+    recordLocalModelSmoke(result.baseUrl, {
+      status, reachable: typeof result.httpStatus === 'number', httpStatus: typeof result.httpStatus === 'number' ? result.httpStatus : null,
+      modelCount: typeof result.modelCount === 'number' ? result.modelCount : 0,
+      sampleModelIds: Array.isArray(result.sampleModelIds) ? result.sampleModelIds.filter((id): id is string => typeof id === 'string') : [],
+      elapsedMs: typeof result.elapsedMs === 'number' ? result.elapsedMs : null, checkedAt,
+    });
+  }
   const passed = results.filter((result) => result.success === true);
   const blocked = results.filter((result) => result.status === 'blocked');
   const probed = results.length - blocked.length;

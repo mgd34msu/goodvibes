@@ -157,8 +157,8 @@ export type { SecuritySettingReport, SecuritySettingsReader } from './security-s
 // and telemetry/tool-format-telemetry.ts. Reachable on the wire via the
 // `runtime.metrics.get` operator method; exported here for a consumer that
 // wants the same accessor and its typed shape directly.
-export { snapshotMetrics } from './metrics.js';
-export type { RuntimeMetricsSnapshot, RuntimeMetricsBucket } from './metrics.js';
+export { snapshotMetrics, measureLlmRoute } from './metrics.js';
+export type { RuntimeMetricsSnapshot, RuntimeMetricsBucket, LlmRouteMeasurement } from './metrics.js';
 export type { ToolFormatFailureClass } from './telemetry/tool-format-telemetry.js';
 export type { ComponentConfig as PanelConfig } from './diagnostics/types.js';
 export { DEFAULT_COMPONENT_CONFIG as DEFAULT_PANEL_CONFIG } from './diagnostics/types.js';

@@ -61,7 +61,8 @@ export interface ControlRouteContext {
   readonly sessionCookieName: string;
   readonly controlPlaneGateway: ControlPlaneGatewayLike;
   readonly extractAuthToken: (req: Request) => string;
-  readonly resolveAuthenticatedPrincipal: (req: Request) => AuthenticatedPrincipal | null;
+  /** `expiresAt`: when a sign-in session ends unless it is used again (the daemon extends it on use). */
+  readonly resolveAuthenticatedPrincipal: (req: Request) => (AuthenticatedPrincipal & { readonly expiresAt?: number | undefined }) | null;
   readonly gatewayMethods: GatewayMethodCatalogLike;
   readonly getOperatorContract: () => unknown;
   readonly invokeGatewayMethodCall: (input: {
@@ -297,6 +298,9 @@ export function createDaemonControlRouteHandlers(
         scopes: principal?.scopes ?? [],
         // A token credential has no login roles; its role is what its grant makes it.
         roles: session?.roles ?? (principal ? (principal.admin ? ['admin'] : []) : []),
+        // The session's current end, moved forward each time it is used; a client keeps this
+        // instead of the end it was given at sign-in. Null for a credential that does not expire.
+        expiresAt: session ? principal?.expiresAt ?? null : null,
       };
 
       return Response.json(snapshot);

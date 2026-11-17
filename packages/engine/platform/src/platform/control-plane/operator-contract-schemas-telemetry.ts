@@ -65,6 +65,7 @@ export const CONTROL_AUTH_CURRENT_RESPONSE_SCHEMA = objectSchema({
   admin: BOOLEAN_SCHEMA,
   scopes: STRING_LIST_SCHEMA,
   roles: STRING_LIST_SCHEMA,
+  expiresAt: nullableSchema(NUMBER_SCHEMA),
 }, [
   'authenticated',
   'authMode',

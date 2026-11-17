@@ -2,7 +2,11 @@ import { createBrowserTokenStore } from '@goodvibes-jev/engine/platform/auth';
 
 export const WEBUI_TOKEN_STORE_KEY = 'goodvibes.webui.token';
 export const RELAY_PAIRING_STORAGE_KEY = 'goodvibes.webui.relayPairing';
-const identityKeys = [WEBUI_TOKEN_STORE_KEY, `${WEBUI_TOKEN_STORE_KEY}.expiresAt`, RELAY_PAIRING_STORAGE_KEY];
+// The token and the relay pairing are the identity. The token's expiry is not: the daemon
+// extends a sign-in session while it is used, and moving the stored expiry of the same token
+// must not start a new generation (that would drop every cache and in-flight action).
+const identityKeys = [WEBUI_TOKEN_STORE_KEY, RELAY_PAIRING_STORAGE_KEY];
+const EXPIRY_KEY = `${WEBUI_TOKEN_STORE_KEY}.expiresAt`;
 
 /** Local generation only. Credentials and pairing material never leave this module. */
 export interface ClientLifetime { readonly revision: number }
@@ -14,14 +18,21 @@ const identity = (): readonly (string | null)[] | undefined => {
     return storage ? identityKeys.map((key) => storage.getItem(key)) : undefined;
   } catch { return undefined; }
 };
+const readExpiry = (): string | null | undefined => {
+  try {
+    const storage = globalThis.localStorage;
+    return storage ? storage.getItem(EXPIRY_KEY) : undefined;
+  } catch { return undefined; }
+};
 let observed = identity();
+let observedExpiry = readExpiry();
 // The platform stores optional expiresAt as Unix milliseconds beside the token.
 // Absence is supported for pasted tokens; malformed or elapsed expiry cannot
 // support a semantic action. This does not assert that a token is authorized.
 function canObserveCurrentIdentity(): boolean {
-  if (observed === undefined) return false;
-  if (observed[1] === null) return true;
-  const expiry = Number(observed[1]);
+  if (observed === undefined || observedExpiry === undefined) return false;
+  if (observedExpiry === null) return true;
+  const expiry = Number(observedExpiry);
   return Number.isFinite(expiry) && expiry > 0 && Date.now() < expiry;
 }
 let observable = canObserveCurrentIdentity();
@@ -30,7 +41,7 @@ let expiryTimer: ReturnType<typeof setTimeout> | undefined;
 function watchExpiry(): void {
   if (expiryTimer !== undefined) clearTimeout(expiryTimer);
   expiryTimer = undefined;
-  const expiry = Number(observed?.[1]);
+  const expiry = Number(observedExpiry);
   if (!observable || !Number.isFinite(expiry) || expiry <= Date.now()) return;
   const scheduledFor = lifetime;
   expiryTimer = setTimeout(() => {
@@ -48,6 +59,7 @@ function watchExpiry(): void {
 export function invalidateClientLifetime(): void {
   lifetime = Object.freeze({ revision: lifetime.revision + 1 });
   observed = identity();
+  observedExpiry = readExpiry();
   observable = canObserveCurrentIdentity();
   watchExpiry();
   for (const listener of listeners) {
@@ -55,11 +67,24 @@ export function invalidateClientLifetime(): void {
   }
 }
 
+/**
+ * The same credential's stored expiry moved. Only a change in whether the credential can be
+ * used starts a new generation; an extended session keeps the current one.
+ */
+function reobserveExpiry(): void {
+  observedExpiry = readExpiry();
+  const wasObservable = observable;
+  observable = canObserveCurrentIdentity();
+  if (observable !== wasObservable) invalidateClientLifetime();
+  else watchExpiry();
+}
+
 /** Reconcile direct storage changes as well as the observed token-store writes. */
 export function getClientLifetime(): ClientLifetime {
   const current = identity();
   if (current === undefined ? observed !== undefined
     : observed === undefined || current.some((value, index) => value !== observed?.[index])) invalidateClientLifetime();
+  else if (readExpiry() !== observedExpiry) reobserveExpiry();
   // Background tabs can delay timers. Adoption and execution always check the
   // clock synchronously, including exactly at the expiry boundary.
   else if (observable && !canObserveCurrentIdentity()) invalidateClientLifetime();
@@ -82,19 +107,26 @@ export const tokenStore = createBrowserTokenStore({ key: WEBUI_TOKEN_STORE_KEY, 
   setItem(key, value) {
     const before = globalThis.localStorage.getItem(key);
     globalThis.localStorage.setItem(key, value);
-    if (before !== value) invalidateClientLifetime();
+    if (before !== value) {
+      if (key === EXPIRY_KEY) reobserveExpiry();
+      else invalidateClientLifetime();
+    }
   },
   removeItem(key) {
     const before = globalThis.localStorage.getItem(key);
     globalThis.localStorage.removeItem(key);
-    if (before !== null) invalidateClientLifetime();
+    if (before !== null) {
+      if (key === EXPIRY_KEY) reobserveExpiry();
+      else invalidateClientLifetime();
+    }
   },
 } });
 
 if (typeof window !== 'undefined') window.addEventListener('storage', (event) => {
-  if (event.key !== null && !identityKeys.includes(event.key)) return;
+  if (event.key !== null && event.key !== EXPIRY_KEY && !identityKeys.includes(event.key)) return;
   try { if (event.storageArea !== null && event.storageArea !== window.localStorage) return; }
   catch { /* An unobservable storage identity must invalidate existing readings. */ }
-  invalidateClientLifetime();
+  if (event.key === EXPIRY_KEY) reobserveExpiry();
+  else invalidateClientLifetime();
 });
 watchExpiry();

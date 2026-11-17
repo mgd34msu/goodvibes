@@ -7,7 +7,7 @@ import {
 } from '@goodvibes-jev/engine/platform/browser/knowledge';
 import type { BrowserKnowledgeMethodId } from '@goodvibes-jev/engine/platform/browser/knowledge';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { getClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
+import { getClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STORE_KEY, type ClientLifetime } from './client-lifetime';
 export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { routedFetch } from './relay-connection';
@@ -1929,6 +1929,7 @@ export async function getCurrentAuth(): Promise<unknown> {
   // instead of the honest one-shot handoff to sign-in. Reject on `authenticated !==
   // true` with a 401/authentication error (NOT network/status-0, so it is treated as
   // unauthorized, sign-in front door, not as a daemon-unreachable outage).
+  const lifetime = getClientLifetime();
   const snapshot = await client.auth.current();
   const record = asRecord(snapshot);
   if ('authenticated' in record && record.authenticated !== true) {
@@ -1938,7 +1939,23 @@ export async function getCurrentAuth(): Promise<unknown> {
       authMode: record.authMode,
     });
   }
+  await adoptSessionExpiry(record.expiresAt, lifetime);
   return snapshot;
+}
+
+/**
+ * The daemon extends a sign-in session each time it is used and reports the session's current
+ * end on every auth read. The stored end is the one given at sign-in; keeping it would drop a
+ * session in use when that time passes. Only a later end for the same stored credential is
+ * kept, and a credential stored without an end (a pasted token) stays without one.
+ */
+async function adoptSessionExpiry(expiresAt: unknown, readUnder: ClientLifetime): Promise<void> {
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
+  if (!isClientLifetimeCurrent(readUnder)) return;
+  const stored = await tokenStore.getTokenEntry();
+  if (!stored.token || stored.expiresAt === undefined || expiresAt <= stored.expiresAt) return;
+  if (!isClientLifetimeCurrent(readUnder)) return;
+  await tokenStore.setTokenEntry(stored.token, expiresAt);
 }
 
 /**

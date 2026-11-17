@@ -15,7 +15,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { createCredentialStatusProvider } from '../../config/credential-status.js';
 import { buildAutomationEmptyState } from '../../runtime/feature-announcements.js';
 import type { UserAuthManager } from '../../security/user-auth.js';
-import { OPERATOR_SESSION_COOKIE_NAME, type CredentialRefusal } from '../../security/http-auth.js';
+import { OPERATOR_SESSION_COOKIE_NAME, buildOperatorSessionCookie, extractOperatorAuthToken, type CredentialRefusal } from '../../security/http-auth.js';
 import { webAppLink } from '../web-app-link.js';
 import type { AgentManager } from '../../tools/agent/index.js';
 import {
@@ -87,7 +87,7 @@ import { jsonErrorResponse, serviceFailureStatus } from './error-response.js';
 import { missingScopeRefusal } from '@goodvibes-jev/engine/daemon-api/error-response';
 import { VERSION } from '../../version.js';
 import type { CompanionChatManager } from '../../companion/companion-chat-manager.js';
-import { principalHasScope, type AuthenticatedPrincipal, type RequestContext } from '../http-policy.js';
+import { principalHasScope, type RequestContext, type RequestPrincipal } from '../http-policy.js';
 import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companion/companion-chat-routes.js';
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
@@ -503,7 +503,7 @@ export class DaemonHttpRouter {
     }
     if (url.pathname === '/api/control-plane/auth' && req.method === 'GET') {
       const apiResponse = await this.requests.dispatch(req);
-      if (apiResponse) return apiResponse;
+      if (apiResponse) return this.renewSessionCookie(req, apiResponse);
     }
 
     return null;
@@ -521,8 +521,26 @@ export class DaemonHttpRouter {
     return refusal ? jsonErrorResponse(refusal, { status: 403 }) : null;
   }
 
+  /**
+   * A sign-in session is extended while it is used, but the browser drops its cookie at the
+   * end it was given at sign-in. When the session arrived as that cookie, the auth status read
+   * gives the cookie the session's current end, so a session in use stays signed in.
+   */
+  private renewSessionCookie(req: Request, response: Response): Response {
+    if (!response.ok || req.headers.get('authorization')?.trim()) return response;
+    const token = extractOperatorAuthToken(req);
+    const principal = token ? this.context.authenticateRequest(req)?.principal : undefined;
+    if (!principal || principal.credentialKind !== 'user-session' || principal.expiresAt === undefined) return response;
+    response.headers.append('Set-Cookie', buildOperatorSessionCookie(token, {
+      req,
+      expiresAt: principal.expiresAt,
+      trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
+    }));
+    return response;
+  }
+
   /** The request's authenticated principal, or null. */
-  private principalOf(req: Request): AuthenticatedPrincipal | null {
+  private principalOf(req: Request): RequestPrincipal | null {
     return this.context.authenticateRequest(req)?.principal ?? null;
   }
 

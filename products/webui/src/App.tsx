@@ -58,6 +58,13 @@ import {
 } from './lib/companion-sessions-state';
 import { formatError, isDaemonUnreachableError, isMethodUnavailableError, isSessionNotFoundError } from './lib/errors';
 
+/** Read the auth status two minutes before a session's reported end; false for a credential with no end. */
+function sessionEndRereadDelay(snapshot: unknown): number | false {
+  const expiresAt = asRecord(snapshot).expiresAt;
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return false;
+  return Math.min(2_147_483_647, Math.max(30_000, expiresAt - Date.now() - 120_000));
+}
+
 export default function App() {
   const queryClient = useQueryClient();
   const { view, setView, setTab, tab, session: activeChatSessionId, setSession, setUrlState, settings: settingsSection, chatSelection } = useUrlState();
@@ -93,7 +100,10 @@ export default function App() {
     // Auto-recovery: while the daemon is unreachable, keep re-probing so the shell
     // reveals itself the moment the daemon answers again. A 401 (genuinely signed out)
     // is NOT an unreachable error, so this does not busy-poll the sign-in front door.
-    refetchInterval: (query) => (isDaemonUnreachableError(query.state.error) ? 5_000 : false),
+    // Signed in with a session that ends: read again shortly before that end, so the end the
+    // daemon has moved forward while the app was used replaces the stored one (getCurrentAuth).
+    refetchInterval: (query) => (isDaemonUnreachableError(query.state.error) ? 5_000 : sessionEndRereadDelay(query.state.data)),
+    refetchIntervalInBackground: true,
   });
   // D-WEBUI-3: auth.current only re-probes once it has ALREADY errored (see
   // refetchInterval above), while healthy it never re-runs on its own, so a daemon

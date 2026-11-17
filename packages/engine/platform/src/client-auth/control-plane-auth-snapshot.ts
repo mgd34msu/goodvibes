@@ -34,4 +34,10 @@ export interface ControlPlaneAuthSnapshot {
   readonly scopes: readonly string[];
   /** Role identifiers assigned to the principal. */
   readonly roles: readonly string[];
+  /**
+   * When a sign-in session ends (Unix ms) unless it is used again; the daemon moves it forward
+   * on use, so a client keeps this value instead of the one it was given at sign-in. `null` for
+   * a credential that does not expire; absent from daemons that do not report it.
+   */
+  readonly expiresAt?: number | null | undefined;
 }

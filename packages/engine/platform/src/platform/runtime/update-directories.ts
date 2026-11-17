@@ -258,17 +258,22 @@ function claimTarget(selected: string, options: NativeDirectoryPreparationOption
   const claimPath = `${targetPath}.directory-update.lock`;
   const release = tryAcquireCrossProcessLock(claimPath, { assertCurrent: () => parentOwner.assertCurrent() });
   if (!release) throw new Error('Another native directory update owns this target');
-  const claim = physical(fs.lstatSync(claimPath, { bigint: true }));
 
   const originalRoot = proof.root;
-  const previousRoot = rootIdentity(previousPath);
-  const previousVersion = previousRoot === undefined ? undefined : releaseVersionOf(previousPath);
-  if (!staging && (originalRoot === undefined || previousRoot === undefined)) {
-    release();
-    throw new Error('Native directory rollback requires live and previous trees');
-  }
+  let claim: ReturnType<typeof physical>;
+  let previousRoot: ReturnType<typeof rootIdentity>;
+  let previousVersion: ReturnType<typeof releaseVersionOf> | undefined;
   let workPath: string;
+  // Until the work directory exists every read can throw (a `.previous` that is
+  // a link or a file, an unreadable marker); the claim is released with it, or
+  // every later update of this directory is refused until the process restarts.
   try {
+    claim = physical(fs.lstatSync(claimPath, { bigint: true }));
+    previousRoot = rootIdentity(previousPath);
+    previousVersion = previousRoot === undefined ? undefined : releaseVersionOf(previousPath);
+    if (!staging && (originalRoot === undefined || previousRoot === undefined)) {
+      throw new Error('Native directory rollback requires live and previous trees');
+    }
     workPath = fs.mkdtempSync(join(parent, `.${basename(targetPath)}.update-`));
   } catch (error) {
     release();

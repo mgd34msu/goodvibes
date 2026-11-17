@@ -7,7 +7,7 @@ export const SESSION_SUBCOMMAND_ARG_HINTS: Record<string, string> = {
   rename: '<name>',
   resume: '<id|name>',
   fork: '[name]',
-  save: '[name]',
+  save: '[name] [--replace] [--switch]',
   info: '[id]',
   export: '<id|.> [markdown|text]',
   search: '<query>',

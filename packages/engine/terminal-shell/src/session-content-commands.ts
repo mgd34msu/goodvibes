@@ -147,53 +147,6 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
   return { exportCommand, titleCommand, retryCommand };
 }
 
-/** Explicit user saves remain exempt from automatic transcript retention. */
-export function createSessionSaveCommand<Context extends ContentContext>(policy: {
-  readonly manager: (context: Context) => import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager;
-  readonly messages: (context: Context) => object[];
-  readonly extraMeta: (context: Context) => Partial<import('@goodvibes-jev/engine/platform/platform/sessions').SessionMeta>;
-  readonly records: (
-    context: Context,
-  ) => Parameters<import('@goodvibes-jev/engine/platform/platform/sessions').SessionManager['save']>[3] | null;
-  readonly description: string;
-  readonly saved: (rawName: string, result: { readonly filePath: string; readonly sanitizedName: string }, records: number) => string;
-  readonly failed: (error: unknown) => string;
-}): TerminalSlashCommand<Context> {
-  return {
-    name: 'save',
-    effect: 'session-lifecycle',
-    description: policy.description,
-    usage: '[name] [--replace]',
-    argsHint: '[name]',
-    handler(args, ctx) {
-      const manager = policy.manager(ctx);
-      const replace = args.includes('--replace');
-      // Every word is the name: "/save my notes" saves "my notes".
-      const typedName = args.filter((arg) => arg !== '--replace').join(' ').trim();
-      const rawName = typedName || ctx.session.conversationManager.title || `session-${Date.now()}`;
-      const messages = policy.messages(ctx);
-      const meta = {
-        title: ctx.session.conversationManager.title,
-        model: ctx.session.runtime.model,
-        provider: ctx.session.runtime.provider,
-        timestamp: Date.now(),
-        ...policy.extraMeta(ctx),
-        saveSource: 'user' as const,
-        // Which conversation the file holds, so a second conversation cannot silently replace it.
-        conversationId: ctx.session.runtime.sessionId,
-      };
-      try {
-        const records = policy.records(ctx);
-        if (records === null) return;
-        const result = manager.save(rawName, messages, meta, records, undefined, ctx.session.conversationManager.branchState?.(), { replace });
-        ctx.print(policy.saved(rawName, result, records?.length ?? 0));
-      } catch (error) {
-        throw commandRefusal(policy.failed(error));
-      }
-    },
-  };
-}
-
 export function createSessionListCommand<
   Context extends ContentContext & {
     readonly openSelection?: import('./selection-modal.js').OpenSelection | undefined;

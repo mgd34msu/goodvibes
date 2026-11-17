@@ -123,7 +123,7 @@ interface SessionExportData {
   readonly returnContext?: SessionReturnContextSummary;
 }
 
-export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
+export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
   headingSuffix: ':',
   detailSeparator: ': ',
   postureSeparator: '=',
@@ -162,8 +162,14 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
     moveLiveSessionArtifacts(requireSurface(ctx), source, destination);
   },
   afterSwitch: () => {},
-  saved: (name, sanitized, path) =>
-    'Session saved: ' + name + (sanitized !== name ? ' (saved as "' + sanitized + '")' : '') + '\n  → ' + path,
+  saved: (name, sanitized, path, records, switched) =>
+    'Session saved: ' + name + (sanitized !== name ? ' (saved as "' + sanitized + '")' : '')
+    + (records > 0 ? ' [' + records + ' agent records]' : '')
+    + '\n  → ' + path
+    + (switched ? '\n  Later turns are saved to ' + sanitized + '.' : ''),
+  saveDescription: 'Save current session to .goodvibes/tui/sessions/ (--switch continues in the saved copy)',
+  // Agent records go with the session when this runtime has an agent manager.
+  records: (ctx) => ctx.ops.agentManager?.exportState(),
   forked: (id, name, source, title, count) =>
     'Session forked:\n  New ID: ' + id + '\n  Name:   ' + name + '\n  From:   ' + (title || source) + '\n  Messages: ' + count,
   async productCommand(args, ctx, sm, sub) {

@@ -409,9 +409,12 @@ export class SessionManager {
     // Different names can still reduce to one file name ("My Chat" and "my-chat"). A file
     // that recorded the name it was saved under is never overwritten by a different name;
     // files from before the name was recorded cannot be told apart and keep their overwrite behaviour.
+    // The file's own stem (what list() shows, what an opened session's id is) always
+    // addresses it, as it does for reads: such a save keeps the name the file recorded.
     const existing = this._readExistingMetaRecord(filePath);
     const existingName = existing?.name;
-    if (typeof existingName === 'string' && existingName !== name) {
+    const addressedByStem = name === sanitizedName;
+    if (typeof existingName === 'string' && existingName !== name && !addressedByStem) {
       throw new Error(
         `Session name "${name}" maps to the same file as the existing session "${existingName}" (${sanitizedName}.jsonl). `
         + 'Nothing was saved; choose a name that differs in more than case, spacing or punctuation.',
@@ -434,7 +437,7 @@ export class SessionManager {
     // First line: meta record
     const metaRecord = {
       type: 'meta' as const,
-      name,
+      name: addressedByStem && typeof existingName === 'string' ? existingName : name,
       schemaVersion: CURRENT_SESSION_SCHEMA_VERSION,
       timestamp: meta.timestamp,
       title: meta.title,

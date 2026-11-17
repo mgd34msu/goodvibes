@@ -82,7 +82,7 @@ function conversationMessageContentText(message: ConversationMessageSnapshot): s
 // src/test/input/session-single-registration.test.ts for the regression
 // guard.
 
-export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
+export const { handleSessionWorkflowCommand, saveCommand } = createSessionWorkflowCommands<CommandContext>(requireSessionManager, {
   headingSuffix: '',
   detailSeparator: ' ',
   postureSeparator: ' ',
@@ -120,8 +120,15 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
   afterSwitch: (ctx, operation, destination) => {
     if (operation === 'fork') ctx.session.writeLastSessionPointer?.(destination);
   },
-  saved: (name, sanitized, path) =>
-    ['Session saved', '  name ' + name, ...(sanitized !== name ? ['  saved as ' + sanitized] : []), '  path ' + path].join('\n'),
+  saved: (name, sanitized, path, _records, switched) =>
+    [
+      'Session saved',
+      '  name ' + name,
+      ...(sanitized !== name ? ['  saved as ' + sanitized] : []),
+      '  path ' + path,
+      ...(switched ? ['  later turns are saved to ' + sanitized] : []),
+    ].join('\n'),
+  saveDescription: 'Save current session to .goodvibes/agent/sessions/ (--switch continues in the saved copy)',
   forked: (id, name, source, title, count) =>
     ['Session forked', '  id ' + id, '  name ' + name, '  from ' + (title || source), '  messages ' + count].join('\n'),
   async productCommand(args, ctx, sm, sub) {

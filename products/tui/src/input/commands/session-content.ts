@@ -1,5 +1,4 @@
 import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
-import { createSessionSaveCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import { unlinkSync } from 'node:fs';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -9,6 +8,7 @@ import { RefusalError, formatRefusal, readRefusal } from '@goodvibes-jev/engine/
 import { requireSessionManager, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { sessionCommand } from './session.ts';
+import { saveCommand } from './session-workflow.ts';
 import { describeSessionLoad, loadSessionWithAgents } from './session-load.ts';
 import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
 
@@ -370,24 +370,6 @@ const contentCommands = createSessionContentCommands<CommandContext, Record<stri
   titleSet: (title) => `Title set to: ${title}`,
   retryDescription: 'Retry the last request while retaining completed work',
   retryRemovesLastTurn: false,
-});
-
-const saveCommand = createSessionSaveCommand<CommandContext>({
-  manager: requireSessionManager,
-  messages: (ctx) => (ctx.session.conversationManager.toJSON() as { messages?: object[] }).messages ?? [],
-  extraMeta: () => ({}),
-  records: (ctx) => {
-    const manager = ctx.ops.agentManager;
-    if (!manager) {
-      ctx.print('Agent manager is not available in this runtime.');
-      return null;
-    }
-    return manager.exportState();
-  },
-  description: 'Save current session to .goodvibes/tui/sessions/',
-  saved: (rawName, { filePath, sanitizedName }, records) =>
-    `Session saved: ${rawName}${sanitizedName !== rawName ? ` (saved as "${sanitizedName}")` : ''}${records > 0 ? ` [${records} agent records]` : ''}\n  → ${filePath}`,
-  failed: (error) => 'Failed to save session: ' + summarizeError(error),
 });
 
 const sessionsCommand = createSessionListCommand<CommandContext>({

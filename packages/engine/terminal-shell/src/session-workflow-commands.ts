@@ -11,6 +11,7 @@ import {
 import { describeUnknownTranscriptKind, readTranscriptKind } from './transcript-kinds.js';
 import { createTranscriptReviewFormatter, readTranscriptReviewArguments } from './transcript-review.js';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import type { TerminalSlashCommand } from './command-registry.js';
 export interface SessionWorkflowContext extends TranscriptCommandContext<TerminalConversationManager> {
   readonly session: {
     readonly sessionManager?: unknown;
@@ -41,16 +42,83 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     readonly copySidecars: (context: Context, source: string, destination: string) => void;
     readonly beforeSwitch: (context: Context, operation: 'fork' | 'save', source: string, destination: string) => void;
     readonly afterSwitch: (context: Context, operation: 'fork' | 'save', destination: string) => void;
-    readonly saved: (name: string, sanitizedName: string, path: string) => string;
+    /** What `/save` and `/session save` print; `records` is how many agent records went with it, `switched` whether the live session moved to the saved name. */
+    readonly saved: (name: string, sanitizedName: string, path: string, records: number, switched: boolean) => string;
+    /** The `/save` command's description (it names where sessions are stored). */
+    readonly saveDescription: string;
+    /** Agent records saved with the session; null refuses the save (the product has said why), undefined saves none. */
+    readonly records?: ((context: Context) => Parameters<SessionManager['save']>[3] | null) | undefined;
     readonly forked: (id: string, name: string, source: string, title: string, count: number) => string;
     readonly productCommand: (args: string[], context: Context, manager: SessionManager, sub: string) => Promise<boolean>;
   },
 ) {
   const { buildTranscriptReviewLines } = createTranscriptReviewFormatter(policy.reviewSeparator, policy.reviewDetailSeparator);
+
+  /**
+   * The one save behind `/save` and `/session save`. It writes the conversation
+   * under the name and stays in the live session; `--switch` also makes the
+   * saved name the live session id (later turns are saved there). The manager
+   * refuses a name that holds another conversation unless `--replace` (or `--yes`).
+   */
+  function saveSession(args: readonly string[], ctx: Context): void {
+    const sm = requireSessionManager(ctx);
+    const confirmation = stripYesFlag([...args]);
+    const replace = confirmation.yes || confirmation.rest.includes('--replace');
+    const switchTo = confirmation.rest.includes('--switch');
+    if (switchTo && ctx.isGenerating?.()) {
+      throw commandRefusal('A turn is still running, so the session was not changed.', 'Stop it with Esc or let it finish, then run the command again.');
+    }
+    const source = ctx.session.runtime.sessionId;
+    // Every word is the name: "/save my notes" saves "my notes".
+    const requested = confirmation.rest.filter((arg) => arg !== '--replace' && arg !== '--switch').join(' ').trim();
+    const currentTitle = ctx.session.conversationManager.title;
+    const name = requested || currentTitle || source;
+    const records = policy.records?.(ctx);
+    if (records === null) return;
+    const snapshot = policy.captureSession(ctx);
+    const metadata: SessionMeta = {
+      title: currentTitle,
+      model: ctx.session.runtime.model,
+      provider: ctx.session.runtime.provider,
+      timestamp: Date.now(),
+      ...snapshot.metadata,
+      saveSource: 'user',
+      // The file records the id the conversation continues under: the saved name
+      // when the live session moves there, else the live session's own id.
+      conversationId: switchTo ? sm.sanitizeName(name) : source,
+    };
+    try {
+      const result = sm.save(name, snapshot.messages, metadata, records, undefined, ctx.session.conversationManager.branchState(),
+        { replace, savingConversationId: source });
+      if (switchTo) {
+        const destination = result.sanitizedName;
+        policy.copySidecars(ctx, source, destination);
+        policy.beforeSwitch(ctx, 'save', source, destination);
+        ctx.session.runtime.sessionId = destination;
+        policy.afterSwitch(ctx, 'save', destination);
+      }
+      ctx.print(policy.saved(name, result.sanitizedName, result.filePath, records?.length ?? 0, switchTo));
+    } catch (error) {
+      throw commandRefusal(policy.failed('save', error));
+    }
+  }
+
+  /** `/save [name] [--replace] [--switch]`: the same save as `/session save`. */
+  const saveCommand: TerminalSlashCommand<Context> = {
+    name: 'save',
+    effect: 'session-lifecycle',
+    description: policy.saveDescription,
+    usage: '[name] [--replace] [--switch]',
+    argsHint: '[name] [--replace] [--switch]',
+    handler(args, ctx) {
+      saveSession(args, ctx);
+    },
+  };
+
   async function handleSessionWorkflowCommand(args: string[], ctx: Context): Promise<boolean> {
     const sm = requireSessionManager(ctx);
     const sub = args[0];
-    if (['resume', 'save', 'fork'].includes(sub ?? '') && ctx.isGenerating?.()) {
+    if (['resume', 'fork'].includes(sub ?? '') && ctx.isGenerating?.()) {
       throw commandRefusal('A turn is still running, so the session was not changed.', 'Stop it with Esc or let it finish, then run the command again.');
     }
 
@@ -131,43 +199,37 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       return true;
     }
 
-    if (sub === 'fork' || sub === 'save') {
-      const operation = sub;
+    if (sub === 'save') {
+      saveSession(args.slice(1), ctx);
+      return true;
+    }
+
+    if (sub === 'fork') {
       const source = ctx.session.runtime.sessionId;
-      const newId = sub === 'fork' ? 'user-' + randomBytes(4).toString('hex') : undefined;
-      // `--replace` (or `--yes`) lets a save replace another conversation's save.
-      const confirmation = sub === 'save' ? stripYesFlag(args.slice(1)) : { rest: args.slice(1), yes: false };
-      const replace = confirmation.yes || confirmation.rest.includes('--replace');
-      const requested = confirmation.rest.filter((arg) => arg !== '--replace').join(' ').trim();
+      const newId = 'user-' + randomBytes(4).toString('hex');
+      const requested = args.slice(1).join(' ').trim();
       const currentTitle = ctx.session.conversationManager.title;
-      const name = requested || (sub === 'fork' ? 'fork-of-' + source.slice(0, 8) : currentTitle || source);
+      const name = requested || 'fork-of-' + source.slice(0, 8);
       const snapshot = policy.captureSession(ctx);
       const metadata: SessionMeta = {
-        title: sub === 'fork' ? name : currentTitle,
+        title: name,
         model: ctx.session.runtime.model,
         provider: ctx.session.runtime.provider,
         timestamp: Date.now(),
         ...snapshot.metadata,
         saveSource: 'user',
-        // The session manager refuses a name that holds another conversation (same rule as /save);
-        // the file records the id the conversation continues under.
-        ...(sub === 'save' ? { conversationId: sm.sanitizeName(name) } : {}),
       };
       try {
-        const result = sm.save(newId ?? name, snapshot.messages, metadata, undefined, undefined, ctx.session.conversationManager.branchState(),
-          sub === 'save' ? { replace, savingConversationId: source } : {});
-        const destination = newId ?? result.sanitizedName;
-        policy.copySidecars(ctx, source, destination);
-        policy.beforeSwitch(ctx, operation, source, destination);
-        ctx.session.runtime.sessionId = destination;
-        policy.afterSwitch(ctx, operation, destination);
-        if (sub === 'fork') {
-          ctx.session.conversationManager.title = name;
-          ctx.renderRequest();
-          ctx.print(policy.forked(destination, name, source, currentTitle, snapshot.messages.length));
-        } else ctx.print(policy.saved(name, result.sanitizedName, result.filePath));
+        sm.save(newId, snapshot.messages, metadata, undefined, undefined, ctx.session.conversationManager.branchState());
+        policy.copySidecars(ctx, source, newId);
+        policy.beforeSwitch(ctx, 'fork', source, newId);
+        ctx.session.runtime.sessionId = newId;
+        policy.afterSwitch(ctx, 'fork', newId);
+        ctx.session.conversationManager.title = name;
+        ctx.renderRequest();
+        ctx.print(policy.forked(newId, name, source, currentTitle, snapshot.messages.length));
       } catch (error) {
-        throw commandRefusal(policy.failed(operation, error));
+        throw commandRefusal(policy.failed('fork', error));
       }
       return true;
     }
@@ -282,5 +344,5 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     }
     return policy.productCommand(args, ctx, sm, sub ?? '');
   }
-  return { handleSessionWorkflowCommand };
+  return { handleSessionWorkflowCommand, saveCommand };
 }

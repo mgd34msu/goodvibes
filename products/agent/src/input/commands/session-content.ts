@@ -1,5 +1,4 @@
 import { createSessionListCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
-import { createSessionSaveCommand } from '@goodvibes-jev/engine/terminal-shell/session-content-commands';
 import { join } from 'path';
 import 'node:fs';
 import 'node:fs/promises';
@@ -8,6 +7,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { extractText } from '@goodvibes-jev/engine/platform/platform/export';
 import { requireSessionManager, requireShellPaths } from './runtime-services.ts';
 import { sessionCommand } from './session.ts';
+import { saveCommand } from './session-workflow.ts';
 import { loadSavedSessionIntoLive } from './session-load.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import './confirmation.ts';
@@ -148,22 +148,6 @@ const contentCommands = createSessionContentCommands<CommandContext, ReturnType<
   titleSet: (title) => `Title set\n  title ${title}`,
   retryDescription: 'Re-send the last user message',
   retryRemovesLastTurn: true,
-});
-
-const saveCommand = createSessionSaveCommand<CommandContext>({
-  manager: requireSessionManager,
-  messages: (ctx) => ctx.session.conversationManager.getMessageSnapshot(),
-  extraMeta: (ctx) => ({ titleSource: ctx.session.conversationManager.getTitleSource() }),
-  records: () => undefined,
-  description: 'Save current session to .goodvibes/agent/sessions/',
-  saved: (rawName, { filePath, sanitizedName }) =>
-    [
-      'Session saved',
-      `  name ${rawName}`,
-      ...(sanitizedName !== rawName ? [`  saved as ${sanitizedName}`] : []),
-      `  path ${filePath}`,
-    ].join('\n'),
-  failed: (error) => formatSessionFailure('save session', error),
 });
 
 const sessionsCommand = createSessionListCommand<CommandContext>({

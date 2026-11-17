@@ -227,7 +227,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
 
         ctx.renderRequest();
         ctx.print(
-          `Resumed session: ${found.name}\n  Name: ${meta.title || '(untitled)'}\n  Messages: ${resumedMessageCount}\n  Model: ${meta.model || ctx.session.runtime.model}`,
+          `Resumed session: ${found.name}\n  Name: ${meta.title || '(untitled)'}\n  Messages: ${resumedMessageCount}\n  Model: ${ctx.session.runtime.model || meta.model}`,
         );
         if (restoredAnchorCount > 0) {
           ctx.print(`  Rewind: restored ${restoredAnchorCount} turn anchor(s); /rewind is available for this resumed session.`);

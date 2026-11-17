@@ -1,34 +1,48 @@
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import { restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewind';
 import {
+  describeResumeShortfalls,
   loadSavedSessionIntoLive as loadSavedSession,
   type LoadedSavedSession,
+  type SessionAgentRecordSink,
 } from '@goodvibes-jev/engine/terminal-shell/session-resume';
 import type { CommandContext } from '../command-registry.ts';
 
 export type { LoadedSavedSession } from '@goodvibes-jev/engine/terminal-shell/session-resume';
 
 /**
- * The shared restore with turn anchors read from the workspace's session
- * surface, for a context that has no resume routine wired (a test harness).
+ * The shared resume routine for a context that has no terminal resume handler
+ * wired (a test harness): same journal replay, model re-resolution, rewind
+ * anchors and agent records, without the publication only a running terminal does.
  */
 export function loadSavedSessionIntoLive(
-  ctx: Pick<CommandContext, 'session' | 'workspace'>,
-  sessionManager: Pick<SessionManager, 'load'>,
+  ctx: Pick<CommandContext, 'session' | 'workspace'> & Partial<Pick<CommandContext, 'clients' | 'isGenerating'>>,
+  sessionManager: Pick<SessionManager, 'load' | 'save'>,
   name: string,
-): LoadedSavedSession {
-  const surface = ctx.workspace.surface;
+  agents?: SessionAgentRecordSink,
+): Promise<LoadedSavedSession> {
+  const providerApi = ctx.clients?.providerApi;
   return loadSavedSession({
     conversation: ctx.session.conversationManager,
     runtime: ctx.session.runtime,
-    surface,
-    restoreTurnAnchors: surface ? (sessionId) => restoreTurnAnchors(sessionId, surface) : undefined,
+    surface: ctx.workspace.surface,
+    selectModel: providerApi ? (model) => providerApi.selectModel(model) : undefined,
+    hydrateSessionUsage: ctx.session.hydrateSessionUsage,
+    isGenerating: ctx.isGenerating,
+    agents,
   }, sessionManager, name);
 }
 
 /** What `/load` and Enter in `/sessions` print. */
 export type SessionLoadResult =
-  | { readonly ok: true; readonly messageCount: number; readonly agentRecordsRestored: number; readonly notices: readonly string[] }
+  | {
+    readonly ok: true;
+    readonly messageCount: number;
+    readonly agentRecordsRestored: number;
+    /** Turns that existed only in the transcript journal and were put back. */
+    readonly journalReplayed: number;
+    /** What the load left out or could not recover. */
+    readonly notices: readonly string[];
+  }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -54,15 +68,17 @@ export async function loadSessionWithAgents(ctx: CommandContext, sessionManager:
     };
   }
   try {
-    if (ctx.resumeSession) {
-      const resumed = await ctx.resumeSession(name, { quiet: true, agents: agentManager });
-      if (!resumed) return { ok: false, message: `Not loaded: ${name}. Nothing changed.` };
-      return { ok: true, messageCount: resumed.resumedMessageCount, agentRecordsRestored: resumed.agentRecordsRestored, notices: resumed.notices };
-    }
-    const loaded = loadSavedSessionIntoLive(ctx, sessionManager, name);
-    agentManager.clear();
-    if (loaded.agentRecords.length > 0) agentManager.importState(loaded.agentRecords);
-    return { ok: true, messageCount: loaded.messageCount, agentRecordsRestored: loaded.agentRecords.length, notices: loaded.notices };
+    const resumed = ctx.resumeSession
+      ? await ctx.resumeSession(name, { quiet: true, agents: agentManager })
+      : await loadSavedSessionIntoLive(ctx, sessionManager, name, agentManager);
+    if (!resumed) return { ok: false, message: `Not loaded: ${name}. Nothing changed.` };
+    return {
+      ok: true,
+      messageCount: resumed.resumedMessageCount,
+      agentRecordsRestored: resumed.agentRecordsRestored,
+      journalReplayed: resumed.journalReplay.replayed,
+      notices: describeResumeShortfalls(resumed),
+    };
   } catch (error) {
     return { ok: false, message: `Failed to load session: ${error instanceof Error ? error.message : String(error)}` };
   }
@@ -72,6 +88,9 @@ export async function loadSessionWithAgents(ctx: CommandContext, sessionManager:
 export function describeSessionLoad(name: string, result: Extract<SessionLoadResult, { ok: true }>): string {
   return [
     `Session loaded: ${name} (${result.messageCount} messages)${result.agentRecordsRestored > 0 ? ` [${result.agentRecordsRestored} agent records restored]` : ''}`,
+    ...(result.journalReplayed > 0
+      ? [`  recovered ${result.journalReplayed} turn record${result.journalReplayed === 1 ? '' : 's'} written after the last save`]
+      : []),
     ...result.notices.map((line) => `  ${line}`),
   ].join('\n');
 }

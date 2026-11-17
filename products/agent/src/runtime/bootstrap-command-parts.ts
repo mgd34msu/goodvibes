@@ -132,8 +132,6 @@ export interface BootstrapCommandSectionOptions {
   readonly sessionLineageTracker?: import('@goodvibes-jev/engine/platform/platform/core').SessionLineageTracker;
   readonly changeTracker?: import('@goodvibes-jev/engine/platform/platform/sessions').SessionChangeTracker;
   readonly writeLastSessionPointer?: (sessionId: string) => void;
-  /** Reload a resumed session's persisted rewind anchors. Bound at bootstrap to the runtime's SessionSurface; returns how many were restored. */
-  readonly restoreTurnAnchors?: (sessionId: string) => number;
   readonly announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
   readonly surface?: import('@/runtime/index.ts').SessionSurface;
   readonly hydrateSessionUsage?: () => void;
@@ -238,7 +236,6 @@ export function createBootstrapCommandSessionSection(
     | 'sessionLineageTracker'
     | 'changeTracker'
     | 'writeLastSessionPointer'
-    | 'restoreTurnAnchors'
     | 'announceSessionResumed'
     | 'surface'
     | 'hydrateSessionUsage'
@@ -247,7 +244,6 @@ export function createBootstrapCommandSessionSection(
   return {
     ...projectCommandSessionSection(options),
     writeLastSessionPointer: options.writeLastSessionPointer,
-    restoreTurnAnchors: options.restoreTurnAnchors,
     announceSessionResumed: options.announceSessionResumed,
     surface: options.surface,
   };

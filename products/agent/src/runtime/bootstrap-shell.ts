@@ -51,7 +51,6 @@ export interface BootstrapShellOptions {
   readonly requestRender: () => void;
   readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
   readonly writeLastSessionPointer: (sessionId: string) => void;
-  readonly restoreTurnAnchors: (sessionId: string) => number;
   readonly announceSessionResumed: (resumedSessionId: string, turnCount: number) => void;
   readonly getControlPlaneRecentEvents: (limit: number) => readonly ControlPlaneRecentEvent[];
   readonly toolRegistry: ToolRegistry;
@@ -113,7 +112,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     requestRender,
     permissionPromptRef,
     writeLastSessionPointer,
-    restoreTurnAnchors,
     announceSessionResumed,
     getControlPlaneRecentEvents,
     toolRegistry,
@@ -221,7 +219,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       });
     },
     writeLastSessionPointer,
-    restoreTurnAnchors,
     announceSessionResumed,
   });
   commandContextRef = commandContext;

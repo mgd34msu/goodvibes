@@ -64,7 +64,7 @@ export function resumeSessionAndRender<Context>(
  */
 export async function restoreHeadlessSession(
   flags: { readonly continueLast?: boolean | undefined; readonly resume?: string | undefined; readonly session?: string | undefined },
-  ports: SessionResumeDeps,
+  ports: SessionResumeDeps & { readonly surface: NonNullable<SessionResumeDeps['surface']> },
   signal: AbortSignal,
 ): Promise<void> {
   signal.throwIfAborted();

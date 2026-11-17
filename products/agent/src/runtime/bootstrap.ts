@@ -60,7 +60,7 @@ import { foldLegacySpineStore } from '@goodvibes-jev/engine/platform/platform/ru
 import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '../agent/prompt-context-receipts.ts';
-import { bindRestoreTurnAnchorsToSurface, recordCompletedTurnAnchor, startAnchorDurabilityHousekeeping } from './rewind-anchor-wiring.ts';
+import { recordCompletedTurnAnchor, startAnchorDurabilityHousekeeping } from './rewind-anchor-wiring.ts';
 import { createMemoryUsageTracker } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
 import { watchOccasionAnnouncements } from './client/occasion-announcements.ts';
@@ -421,7 +421,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // Surface-bound closure, not the raw multi-arg platform function, see
   // the platform's bindWriteLastSessionPointerToSurface for why that matters.
   const writeLastSessionPointerForSurface = bindWriteLastSessionPointerToSurface(services.surface);
-  const restoreTurnAnchorsForSurface = bindRestoreTurnAnchorsToSurface(services.surface);
 
   const shell = createBootstrapShell({
     configManager,
@@ -434,7 +433,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     requestRender,
     permissionPromptRef,
     writeLastSessionPointer: writeLastSessionPointerForSurface,
-    restoreTurnAnchors: restoreTurnAnchorsForSurface,
     announceSessionResumed: (resumedSessionId, turnCount) => {
       emitSessionResumed(
         runtimeBus,

@@ -1,30 +1,17 @@
 /**
- * session-resume-core.ts, the ONE resume routine both resume seams call.
+ * The one way a saved session replaces the live conversation.
  *
- * Two independent call sites used to duplicate (and diverge from) this
- * sequence: `/session resume` (session-workflow.ts) and the session-browser
- * resume (bootstrap-hook-bridge.ts's `createResumeSessionHandler`).
- * Divergences found by audit:
- *   - the session-browser seam skipped `restoreTurnAnchors` (message-anchored
- *     /rewind silently had no anchors after a session-browser resume)
- *   - the session-browser seam skipped `conversation.resetAll()` before
- *     `fromJSON()`
- *   - the session-browser seam skipped the `selectModel` reselection fallback
- *     (it set `runtime.model` straight from the saved meta, never re-resolving
- *     through the live provider registry)
- *   - the session-browser seam reopened saved views without the modal
- *     redirect, so a saved view id could pop a modal mid-resume (saved views
- *     are no longer reopened at all)
+ * `resumeSessionCore` is the routine: every command that opens a saved session
+ * (`/session resume`, `/load`, Enter in `/sessions`, the session picker and
+ * browser, the start-up resume flags) runs it, so the turns that exist only in
+ * the transcript journal come back, the saved model is re-resolved through the
+ * live provider registry, rewind anchors and footer usage are restored and the
+ * session's agent records replace the live list, whichever command was typed.
+ * `loadSavedSessionIntoLive` is the same routine behind the refusals a command
+ * needs (a running turn, a session another terminal holds open).
  *
- * Both seams now call this module so those behaviors are guaranteed
- * identical by construction, not by copy-paste discipline between two files.
- *
- * Callers own everything ABOVE and AROUND this core sequence: printing or
- * logging the outcome in their own idiom (`ctx.print` vs `conversation.log`),
- * and any extra plumbing that only one seam performs (hookDispatcher.fire,
- * sessionSpine.reopen, sharedSessionBroker.reopenSession,
- * writeLastSessionPointer, all bootstrap-hook-bridge-only, pre-existing
- * asymmetries out of this module's scope).
+ * Callers own what is theirs alone: printing the outcome, and the publication
+ * of the resumed session (last-session pointer, shared session, hooks).
  */
 import type { SessionBranches, SessionManager, SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -53,9 +40,10 @@ export interface SessionResumeDeps {
    * SAME one the runtime writes through, so the anchor sidecar and the
    * transcript journal this routine reads are guaranteed to be the files the
    * live session actually wrote, the scope can no longer be re-guessed per
-   * seam.
+   * seam. A shell with no session storage (a test harness) omits it; nothing
+   * is read from sidecars or the journal then.
    */
-  readonly surface: SessionSurface;
+  readonly surface?: SessionSurface | undefined;
   /**
    * Reselects the saved model through the live provider registry, falling
    * back to the raw saved id on failure (a saved model may no longer exist
@@ -75,9 +63,28 @@ export interface SessionResumeDeps {
    * when the resume is refused (revoking a pending offer, for example).
    */
   readonly beforeRestore?: (() => void) | undefined;
+  /**
+   * The live agent list. When given, the session's saved agent records replace
+   * it once the transcript is committed, so every command that opens a session
+   * brings its agents back the same way.
+   */
+  readonly agents?: SessionAgentRecordSink | undefined;
+}
+/** The agent records saved with a session. */
+export type SavedAgentRecords = ReturnType<SessionManager['load']>['agentRecords'];
+/** What the resume needs from the agent manager to restore a session's agent records. */
+export interface SessionAgentRecordSink {
+  clear(): void;
+  importState(records: SavedAgentRecords): void;
 }
 export interface SessionResumeOutcome {
   readonly meta: SessionMeta;
+  /** Messages in the saved snapshot, before any journal replay. */
+  readonly savedMessageCount: number;
+  /** The agent records saved with the session. */
+  readonly agentRecords: SavedAgentRecords;
+  /** How many of them replaced the live agent list (0 when no agent list was given). */
+  readonly agentRecordsRestored: number;
   readonly resumedMessageCount: number;
   readonly restoredAnchorCount: number;
   readonly journalReplay: ReplayIntoConversationResult;
@@ -88,8 +95,8 @@ export interface SessionResumeOutcome {
 }
 /**
  * The canonical resume sequence: load, reset + restore the conversation,
- * restore rewind anchors, replay any post-snapshot journal records, hydrate
- * footer usage and reselect the model.
+ * restore rewind anchors and agent records, replay any post-snapshot journal
+ * records, reselect the model and hydrate footer usage.
  *
  * Sessions saved by an older TUI can carry a legacy pane list in their
  * return context (`returnContext.openPanels` plus an "Open panels: ..."
@@ -98,32 +105,16 @@ export interface SessionResumeOutcome {
  * below writes the session back without them.
  */
 export async function resumeSessionCore(sessionId: string, deps: SessionResumeDeps): Promise<SessionResumeOutcome> {
-  const sourceSessionId = deps.runtime.sessionId;
   if (deps.canResume?.() === false) throw new Error('A turn is still running. Wait before resuming a session.');
-  const { meta, messages, branches } = deps.sessionManager.load(sessionId);
-  let model = meta.model;
-  let provider = meta.provider;
-  if (model && deps.selectModel) {
-    try {
-      const selected = await deps.selectModel(model);
-      model = selected.registryKey;
-      provider = selected.providerId;
-    } catch {
-      /* A saved model may no longer exist locally. */
-    }
-  }
-  // Model lookup may yield to a new turn or another resume. Commit the
-  // transcript and its identity together only while the source is still idle.
-  if (deps.runtime.sessionId !== sourceSessionId || deps.canResume?.() === false) {
-    throw new Error('The active session changed or a turn started while resuming. Try again when idle.');
-  }
+  const { meta, messages, branches, agentRecords } = deps.sessionManager.load(sessionId);
+  // Nothing below yields until the transcript and its identity are committed,
+  // so no turn or other resume can slip in between the check and the commit.
   deps.beforeRestore?.();
   const leftOut = restoreSessionConversation(sessionId, { meta, messages, ...(branches ? { branches } : {}) }, deps.conversation, deps.runtime, deps.surface);
-  // The transcript and its identity are committed above, so the model and
-  // provider move with them; the sidecar steps below are recoveries that must
-  // not leave the new transcript running on the old model.
-  if (provider) deps.runtime.provider = provider;
-  if (model) deps.runtime.model = model;
+  // The model and provider move with the committed transcript; the sidecar
+  // steps below are recoveries that must not leave it running on the old model.
+  if (meta.provider) deps.runtime.provider = meta.provider;
+  if (meta.model) deps.runtime.model = meta.model;
   const warnings: string[] = [];
   const attempt = <Result>(what: string, run: () => Result, fallback: (message: string) => Result): Result => {
     try {
@@ -139,13 +130,22 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
   // so /rewind works identically before and after the resume, the in-memory
   // registry is process-local, so a fresh process starts with none for the
   // loaded session.
-  const restoredAnchorCount = attempt('restoring rewind anchors', () => restoreTurnAnchors(sessionId, deps.surface), () => 0);
+  const surface = deps.surface;
+  const restoredAnchorCount = surface ? attempt('restoring rewind anchors', () => restoreTurnAnchors(sessionId, surface), () => 0) : 0;
+  // The session's agent records replace the live list with the transcript.
+  const agentRecordsRestored = deps.agents
+    ? attempt('restoring agent records', () => {
+        deps.agents?.clear();
+        if (agentRecords.length > 0) deps.agents?.importState(agentRecords);
+        return agentRecords.length;
+      }, () => 0)
+    : 0;
   // Journal replay: recover turns that post-date the loaded snapshot.
-  const journalReplay = attempt(
+  const journalReplay: ReplayIntoConversationResult = !surface ? { replayed: 0, hadCorruptTail: false } : attempt(
     'replaying the transcript journal',
     () =>
       replayJournalForSession({
-        surface: deps.surface,
+        surface,
         sessionId,
         snapshotTimestamp: meta.timestamp ?? 0,
         conversation: deps.conversation,
@@ -167,11 +167,28 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
       }),
     (failed): ReplayIntoConversationResult => ({ replayed: 0, hadCorruptTail: false, failed }),
   );
+  // The saved model is re-resolved through the live provider registry only now:
+  // selecting it changes the registry's current model, which a refused resume
+  // must never do. It applies only while the resumed session is still the live one.
+  if (meta.model && deps.selectModel) {
+    try {
+      const selected = await deps.selectModel(meta.model);
+      if (deps.runtime.sessionId === sessionId) {
+        deps.runtime.model = selected.registryKey;
+        deps.runtime.provider = selected.providerId;
+      }
+    } catch {
+      /* A saved model may no longer exist locally; the saved id stands. */
+    }
+  }
   // Hydrate the footer's token counters from the resumed (+ journal-replayed)
   // history now, before the caller renders.
   attempt('restoring footer usage', () => deps.hydrateSessionUsage?.(), () => undefined);
   return {
     meta,
+    savedMessageCount: messages.length,
+    agentRecords,
+    agentRecordsRestored,
     resumedMessageCount: deps.conversation.getMessageCount(),
     restoredAnchorCount,
     journalReplay,
@@ -185,30 +202,6 @@ import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor 
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
 import { readConversationMessageSnapshots } from './conversation-message-snapshot.js';
 import type { ConversationMessageSnapshot } from '@goodvibes-jev/engine/platform/platform/core';
-/** Restore both resume entry points from the same clean conversation boundary. */
-export function restoreLoadedSession(
-  sessionId: string,
-  loaded: {
-    messages: readonly object[];
-    meta: SessionMeta;
-    branches?: SessionBranches | undefined;
-  },
-  deps: {
-    conversation: ConversationManager;
-    surface?: SessionSurface | undefined;
-    runtime: {
-      sessionId: string;
-      model: string;
-      provider: string;
-    };
-    restoreTurnAnchors?: ((sessionId: string) => number) | undefined;
-  },
-): { readonly restoredAnchorCount: number; readonly leftOutBranches: readonly LeftOutBranch[] } {
-  const leftOutBranches = restoreSessionConversation(sessionId, loaded, deps.conversation, deps.runtime, deps.surface);
-  if (loaded.meta.model) deps.runtime.model = loaded.meta.model;
-  if (loaded.meta.provider) deps.runtime.provider = loaded.meta.provider;
-  return { restoredAnchorCount: deps.restoreTurnAnchors?.(sessionId) ?? 0, leftOutBranches };
-}
 export function copySessionSidecars(
   source: string,
   destination: string,
@@ -258,6 +251,22 @@ export function describeLeftOutBranches(leftOut: readonly LeftOutBranch[]): stri
     `Side branch "${name}" was left out of the restore because it could not be read (${reason}). `
       + 'The rest of the session was restored; the next save of this session is written without that branch.');
 }
+
+/**
+ * What a resume left out or could not recover, one line each, worded the same
+ * in every command that opens a saved session: damaged side branches, recovery
+ * steps that failed after the transcript was committed, and journal turns that
+ * could not be put back. Empty when the resume restored everything.
+ */
+export function describeResumeShortfalls(outcome: Pick<SessionResumeOutcome, 'notices' | 'warnings' | 'journalReplay'>): string[] {
+  return [
+    ...outcome.notices,
+    ...(outcome.warnings ?? []).map((warning) => `${warning}; the loaded conversation stands.`),
+    ...(outcome.journalReplay.failed !== undefined
+      ? [`The turns written since the last save could not be put back (${outcome.journalReplay.failed}); the journal file was kept and is read again at the next resume.`]
+      : []),
+  ];
+}
 function restoreSessionConversation(
   sessionId: string,
   loaded: {
@@ -270,9 +279,12 @@ function restoreSessionConversation(
   surface?: SessionSurface | undefined,
 ): readonly LeftOutBranch[] {
   const saved = loaded.branches ? readSavedBranches(sessionId, loaded.branches) : undefined;
+  // Read before the live conversation is cleared: a saved message this build
+  // cannot read refuses the restore with the live conversation untouched.
+  const messages = readConversationMessageSnapshots(loaded.messages);
   conversation.resetAll();
   conversation.fromJSON({
-    messages: readConversationMessageSnapshots(loaded.messages),
+    messages,
     title: loaded.meta.title,
     titleSource: loaded.meta.titleSource,
     ...(saved && loaded.branches ? { branches: saved.branches, currentBranch: loaded.branches.currentBranch } : {}),
@@ -360,21 +372,21 @@ export interface LoadSavedSessionDeps {
   readonly conversation: ConversationManager;
   readonly runtime: SessionResumeRuntime;
   readonly surface?: SessionSurface | undefined;
-  readonly restoreTurnAnchors?: ((sessionId: string) => number) | undefined;
+  /** Re-resolves the saved model through the live provider registry; see {@link SessionResumeDeps.selectModel}. */
+  readonly selectModel?: SessionResumeDeps['selectModel'];
+  readonly hydrateSessionUsage?: (() => void) | undefined;
+  /** The live agent list the session's saved agent records replace. */
+  readonly agents?: SessionAgentRecordSink | undefined;
   /** True while a turn is still appending to the live conversation; a load is refused then. */
   readonly isGenerating?: (() => boolean) | undefined;
   /** Runs after the live conversation and identity moved to the loaded session. */
   readonly afterSwitch?: ((sessionId: string) => void) | undefined;
 }
 
-export interface LoadedSavedSession {
+export interface LoadedSavedSession extends SessionResumeOutcome {
   readonly name: string;
-  readonly meta: SessionMeta;
+  /** Messages now in the conversation: the saved snapshot plus any turns recovered from the journal. */
   readonly messageCount: number;
-  readonly agentRecords: ReturnType<SessionManager['load']>['agentRecords'];
-  readonly restoredAnchorCount: number;
-  /** Lines for the person about what the load left out (a damaged side branch); empty when nothing was. */
-  readonly notices: readonly string[];
 }
 
 /** Options of {@link loadSavedSessionIntoLive}. */
@@ -384,22 +396,22 @@ export interface LoadSavedSessionOptions {
 }
 
 /**
- * The one way a saved session replaces the live conversation (`/session resume`, `/load`,
- * the `/sessions` list, the session picker). It refuses while a turn runs, reads and
- * validates the saved messages before touching the live conversation, and then switches the
- * session identity the same way a resume does, so later autosaves go to the loaded session
- * instead of overwriting the one that was open. A session another running terminal has marked
- * open is refused (`/session resume <name> --force` is the explicit way to take it over), and
- * the liveness marker moves with the identity (moveLiveSessionArtifacts) so a second terminal
- * sees the new session as open right away. Throws with the reason when the load does not happen; the live conversation is
+ * `resumeSessionCore` behind the refusals a command needs (`/session resume`, `/load`,
+ * the `/sessions` list, the session picker). It refuses while a turn runs and refuses a
+ * session another running terminal has marked open (`/session resume <name> --force` is
+ * the explicit way to take it over); the routine then reads and validates the saved
+ * messages before touching the live conversation and switches the session identity, so
+ * later autosaves go to the loaded session. The liveness marker moves with the identity
+ * (moveLiveSessionArtifacts) so a second terminal sees the new session as open right away.
+ * Throws with the reason when the load does not happen; the live conversation is
  * untouched then.
  */
-export function loadSavedSessionIntoLive(
+export async function loadSavedSessionIntoLive(
   deps: LoadSavedSessionDeps,
-  sessionManager: Pick<SessionManager, 'load'>,
+  sessionManager: Pick<SessionManager, 'load' | 'save'>,
   name: string,
   options: LoadSavedSessionOptions = {},
-): LoadedSavedSession {
+): Promise<LoadedSavedSession> {
   if (deps.isGenerating?.()) {
     throw new Error('A turn is still running. Stop it with Esc or let it finish, then load the session.');
   }
@@ -414,13 +426,16 @@ export function loadSavedSessionIntoLive(
       );
     }
   }
-  const { meta, messages, agentRecords, branches } = sessionManager.load(name);
-  readConversationMessageSnapshots(messages);
-  const { restoredAnchorCount, leftOutBranches } = restoreLoadedSession(
-    name,
-    { meta, messages, ...(branches ? { branches } : {}) },
-    { conversation: deps.conversation, runtime: deps.runtime, surface, restoreTurnAnchors: deps.restoreTurnAnchors },
-  );
+  const outcome = await resumeSessionCore(name, {
+    sessionManager,
+    conversation: deps.conversation,
+    runtime: deps.runtime,
+    surface,
+    selectModel: deps.selectModel,
+    hydrateSessionUsage: deps.hydrateSessionUsage,
+    canResume: () => !deps.isGenerating?.(),
+    agents: deps.agents,
+  });
   deps.afterSwitch?.(name);
-  return { name, meta, messageCount: messages.length, agentRecords, restoredAnchorCount, notices: describeLeftOutBranches(leftOutBranches) };
+  return { ...outcome, name, messageCount: outcome.resumedMessageCount };
 }

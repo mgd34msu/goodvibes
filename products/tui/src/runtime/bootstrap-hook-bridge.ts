@@ -13,7 +13,7 @@ import type { SessionSpineClient } from '@goodvibes-jev/engine/platform/platform
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { resumeSessionCore, type SessionResumeOutcome } from '../core/session-resume-core.ts';
+import { resumeSessionCore, type SessionAgentRecordSink, type SessionResumeOutcome } from '../core/session-resume-core.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 
 export interface ResumeSessionOptions {
@@ -45,10 +45,8 @@ export interface ResumeSessionOptions {
   readonly hydrateSessionUsage?: () => void;
   /**
    * Reselects the resumed session's saved model through the live provider
-   * registry (matches session-workflow.ts's `/session resume` reselection
-   * fallback, see core/session-resume-core.ts). Optional so a caller without
-   * a provider API wired still gets the direct-assignment behavior this seam
-   * always had.
+   * registry once the transcript is committed. Optional so a caller without a
+   * provider API wired keeps the saved model id as it is.
    */
   readonly selectModel?: (model: string) => Promise<{ readonly registryKey: string; readonly providerId: string }>;
   readonly isGenerating?: () => boolean;
@@ -65,14 +63,11 @@ export interface ResumeSessionCallOptions {
   /** The caller already decided about a session open in another terminal (`--force`, or its own check). */
   readonly liveChecked?: boolean | undefined;
   /** Replace the live agent list with the session's saved agent records (`/load`, `/sessions`). */
-  readonly agents?: { clear(): void; importState(records: ReturnType<SessionManager['load']>['agentRecords']): void } | undefined;
+  readonly agents?: SessionAgentRecordSink | undefined;
 }
 
 /** What a resume did, for a caller that prints its own lines. */
-export interface ResumedSession extends SessionResumeOutcome {
-  /** Agent records restored from the session (0 when `agents` was not given or the session had none). */
-  readonly agentRecordsRestored: number;
-}
+export type ResumedSession = SessionResumeOutcome;
 
 /**
  * The terminal app's one resume routine: `/session resume` (and the
@@ -81,13 +76,10 @@ export interface ResumedSession extends SessionResumeOutcome {
  * writes the last-session pointer, reopens the shared session and the daemon
  * spine, fires the `Lifecycle:session:load` hook and announces the resume.
  *
- * Delegates the mechanical resume sequence to resumeSessionCore (the same
- * routine session-workflow.ts's `/session resume` calls) so the two seams
- * cannot diverge on restoreTurnAnchors, resetAll-before-fromJSON, model
- * reselection, see
- * core/session-resume-core.ts's header doc for the full list of divergences
- * this closes. Everything below the resumeSessionCore call is plumbing only
- * this seam performs (hook fire, session-spine mirror, shared-broker
+ * The restore itself (transcript, journal replay, model, rewind anchors, agent
+ * records, footer usage) is resumeSessionCore, the routine every terminal app
+ * and the headless start-up share. Everything after it is the publication only
+ * a running terminal does (hook fire, session-spine mirror, shared-broker
  * reopen, last-session pointer) plus this seam's own log/render idiom.
  */
 export function createResumeSessionHandler(options: ResumeSessionOptions): (sessionId: string, call?: ResumeSessionCallOptions) => Promise<ResumedSession | undefined> {
@@ -106,13 +98,7 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         options.requestRender();
         return undefined;
       }
-      // Pre-read purely for the emitSessionResumed announcement's turnCount,
-      // which reports the raw saved-snapshot size, resumeSessionCore performs
-      // its own load() right after this (SessionManager.load is a cheap JSONL
-      // parse; the tiny duplicate read keeps this announcement's meaning
-      // unchanged rather than repurposing it to a post-replay count).
       restoring = true;
-      const { messages: rawMessages, agentRecords } = options.sessionManager.load(sessionId);
       // The session this process was running leaves the daemon's live list once a
       // resume replaces it; left open it would keep being kept alive until the
       // daemon's reaper retired it.
@@ -129,6 +115,7 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         // revoked offer must land while it still belongs to the old session, and
         // a refused resume must leave it standing.
         beforeRestore: () => options.cancelPendingRecovery?.(),
+        agents: call.agents,
       });
       const { meta } = outcome;
       // Announced only once the resume happened: a refused one must not tell
@@ -142,14 +129,10 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         },
         {
           sessionId,
-          turnCount: rawMessages.length,
+          // The saved snapshot's size, before any journal replay.
+          turnCount: outcome.savedMessageCount,
         },
       );
-
-      if (call.agents) {
-        call.agents.clear();
-        if (agentRecords.length > 0) call.agents.importState(agentRecords);
-      }
       publishResumedSession(options, sessionId, meta, {
         announce: !call.quiet,
         reopen: () => {
@@ -166,7 +149,7 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         hookError: 'Hook bridge fire error',
       });
       options.requestRender();
-      return { ...outcome, agentRecordsRestored: call.agents ? agentRecords.length : 0 };
+      return outcome;
     } catch (error) {
       const reason = summarizeError(error);
       logger.debug('resumeSession failed', { error: reason });

@@ -51,14 +51,14 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     description: 'Load a saved session',
     usage: '<name>',
     argsHint: '<name>',
-    handler(args, ctx) {
+    async handler(args, ctx) {
       if (!args[0]) {
         ctx.print('Usage: /load <session-name>\nRun /sessions to list available sessions.');
         return;
       }
       const sessionManager = requireSessionManager(ctx);
       try {
-        const loaded = loadSavedSessionIntoLive(ctx, sessionManager, args[0]);
+        const loaded = await loadSavedSessionIntoLive(ctx, sessionManager, args[0]);
         ctx.renderRequest();
         ctx.print(
           [
@@ -66,7 +66,9 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
             `  id ${args[0]}`,
             `  messages ${loaded.messageCount}`,
             ...(loaded.agentRecordCount > 0 ? [`  ignored connected-host records ${loaded.agentRecordCount}`] : []),
+            ...(loaded.journalReplayed > 0 ? [`  recovered ${loaded.journalReplayed} turn record${loaded.journalReplayed === 1 ? '' : 's'} written after the last save`] : []),
             ...(loaded.restoredAnchorCount > 0 ? [`  rewind points ${loaded.restoredAnchorCount} restored`] : []),
+            ...loaded.notices.map((line) => `  ${line}`),
           ].join('\n'),
         );
       } catch (e) {
@@ -172,13 +174,12 @@ const sessionsCommand = createSessionListCommand<CommandContext>({
   options: { allowSearch: true },
   selected: (ctx, sessionManager, _sessions, result) => {
     if (!result) return;
-    try {
-      const loaded = loadSavedSessionIntoLive(ctx, sessionManager, result.item.id);
+    void loadSavedSessionIntoLive(ctx, sessionManager, result.item.id).then((loaded) => {
       ctx.renderRequest();
-      ctx.print(['Session loaded', `  id ${result.item.id}`, `  messages ${loaded.messageCount}`].join('\n'));
-    } catch (e) {
+      ctx.print(['Session loaded', `  id ${result.item.id}`, `  messages ${loaded.messageCount}`, ...loaded.notices.map((line) => `  ${line}`)].join('\n'));
+    }, (e: unknown) => {
       ctx.print(formatSessionFailure('load session', e));
-    }
+    });
   },
   heading: 'Saved sessions',
 });

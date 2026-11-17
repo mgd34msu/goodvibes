@@ -17,7 +17,7 @@
  * Every path is best-effort. A missed anchor must never break the turn that
  * produced it, and a sweep must never break boot.
  */
-import { persistTurnAnchors, recordTurnAnchor, restoreTurnAnchors, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
+import { persistTurnAnchors, recordTurnAnchor, summarizeTurnLabel } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { startDurabilityHousekeeping } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
@@ -78,14 +78,6 @@ function tellOnceThatAnchorWasNotSaved(
   } catch {
     // The notice is a courtesy; the warning already carries the cause.
   }
-}
-
-/**
- * The reload half, bound to one surface: `/session resume` calls it with the
- * session it just loaded and reports how many rewind points came back.
- */
-export function bindRestoreTurnAnchorsToSurface(surface: SessionSurface): (sessionId: string) => number {
-  return (sessionId: string): number => restoreTurnAnchors(sessionId, surface);
 }
 
 /**

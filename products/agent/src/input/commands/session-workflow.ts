@@ -141,25 +141,11 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
       }
       try {
         // The one load: refuses while a turn runs or while another terminal holds the
-        // session (unless --force), moves the liveness marker and the last-session pointer.
-        const loaded = loadSavedSessionIntoLive(ctx, sm, found.name, { force });
+        // session (unless --force), moves the liveness marker and the last-session pointer,
+        // replays the journal, re-resolves the model and announces the resume.
+        const loaded = await loadSavedSessionIntoLive(ctx, sm, found.name, { force });
         const { meta } = loaded;
-        const providerApi = requireProviderApi(ctx);
-        // The saved model is reselected after the conversation was replaced, so a refused
-        // resume never changes the model.
-        if (meta.model) {
-          try {
-            const selected = await providerApi.selectModel(meta.model);
-            if (ctx.session.runtime.sessionId === found.name) {
-              ctx.session.runtime.model = selected.registryKey;
-              ctx.session.runtime.provider = selected.providerId;
-            }
-          } catch {
-            /* The saved model may no longer exist locally; the saved id stands. */
-          }
-        }
         const restoredAnchorCount = loaded.restoredAnchorCount;
-        ctx.session.announceSessionResumed?.(found.name, loaded.messageCount);
         ctx.renderRequest();
         ctx.print(
           [
@@ -167,7 +153,8 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
             `  id ${found.name}`,
             `  name ${meta.title || '(untitled)'}`,
             `  messages ${loaded.messageCount}`,
-            `  model ${meta.model || ctx.session.runtime.model}`,
+            `  model ${ctx.session.runtime.model || meta.model}`,
+            ...(loaded.journalReplayed > 0 ? [`  recovered ${loaded.journalReplayed} turn record${loaded.journalReplayed === 1 ? '' : 's'} written after the last save`] : []),
             ...(restoredAnchorCount > 0 ? [`  rewind points ${restoredAnchorCount} restored from before the resume`] : []),
             ...loaded.notices.map((line) => `  ${line}`),
           ].join('\n'),
@@ -188,7 +175,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
             );
           }
           if (returnContextMode === 'assisted') {
-            const helperModel = providerApi.createHelperModel(ctx.platform.configManager);
+            const helperModel = requireProviderApi(ctx).createHelperModel(ctx.platform.configManager);
             const resumedSessionId = ctx.session.runtime.sessionId;
             void maybeAssistReturnContextSummary(ctx.platform.configManager, helperModel, meta.returnContext).then(
               (assisted) => {

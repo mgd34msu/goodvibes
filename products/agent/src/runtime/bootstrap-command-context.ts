@@ -133,7 +133,6 @@ export type CreateBootstrapCommandContextOptions = {
   sessionLineageTracker?: import('@goodvibes-jev/engine/platform/platform/core').SessionLineageTracker;
   componentHealthMonitor: import('@/runtime/index.ts').ComponentHealthMonitor;
   writeLastSessionPointer?: (sessionId: string) => void;
-  restoreTurnAnchors?: (sessionId: string) => number;
   announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
   surface?: import('@/runtime/index.ts').SessionSurface;
   hydrateSessionUsage?: () => void;
@@ -217,7 +216,6 @@ export function createBootstrapCommandContext(options: CreateBootstrapCommandCon
       'componentHealthMonitor',
       'memoryConsolidationScheduler',
       'writeLastSessionPointer',
-      'restoreTurnAnchors',
       'announceSessionResumed',
       'surface',
       'hydrateSessionUsage',

@@ -140,8 +140,6 @@ export interface CommandSessionServices extends TerminalCommandSessionServices {
    * stale pointer.
    */
   readonly writeLastSessionPointer?: (sessionId: string) => void;
-  /** Reload a resumed session's persisted rewind anchors. Bound at bootstrap to the runtime's SessionSurface; returns how many were restored. */
-  readonly restoreTurnAnchors?: (sessionId: string) => number;
   /** Tell the runtime bus (and so the SessionResumed hook) that this process finished resuming a session. Called once the resume happened, never for a refused one. */
   readonly announceSessionResumed?: (resumedSessionId: string, turnCount: number) => void;
   /**

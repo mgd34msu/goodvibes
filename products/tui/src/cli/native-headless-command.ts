@@ -48,7 +48,12 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           await restoreHeadlessSession(cli.flags, {
             surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
             conversation: ctx.conversation, runtime: ctx.runtime,
-            selectModel: ctx.commandContext.clients?.providerApi?.selectModel,
+            // Called as a method: the provider API's selectModel reads `this`.
+            selectModel: (model: string) => {
+              const api = ctx.commandContext.clients?.providerApi;
+              if (!api) throw new Error('No provider API in this run; the saved model id stands.');
+              return api.selectModel(model);
+            },
             canResume: () => !ctx.commandContext.isGenerating?.(),
           }, signal);
           sessionReady = true;

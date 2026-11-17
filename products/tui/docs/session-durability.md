@@ -41,7 +41,9 @@ A kill at any moment loses at most the streaming text of the turn in flight and 
 that turn that had not finished. A completed turn is never lost.
 
 Journals written by earlier versions (`transcript-<sessionId>.journal`) are still replayed once
-when their session is resumed; nothing writes new ones.
+when their session is opened, whichever way it is opened (`/session resume`, `/load`, Enter in
+`/sessions`, the session picker or browser, `--continue`, `--resume`, and the same commands in
+`goodvibes-agent`); the load says how many turns it recovered. Nothing writes new ones.
 
 ## Side branches left out of a restore
 

@@ -50,17 +50,18 @@ export class SessionPickerModal extends SavedSessionPickerState {
 
   /**
    * Load the currently selected session into the live conversation through the
-   * one loader `/load` uses: it refuses while a turn runs, reads the saved
-   * messages before touching the live conversation, and moves the session
-   * identity. Returns true on success, false on error or refusal; the live
-   * conversation is untouched in that case.
+   * one resume routine `/load` and `/session resume` use: it refuses while a
+   * turn runs, reads the saved messages before touching the live conversation,
+   * puts back turns that exist only in the journal, re-resolves the saved model
+   * and moves the session identity. Resolves true on success, false on error or
+   * refusal; the live conversation is untouched in that case.
    */
-  loadSelected(context: CommandContext): boolean {
+  async loadSelected(context: CommandContext): Promise<boolean> {
     const session = this.getSelected();
     if (!session) return false;
 
     try {
-      const loaded = loadSavedSessionIntoLive(context, this.sessionManager, session.name);
+      const loaded = await loadSavedSessionIntoLive(context, this.sessionManager, session.name);
       this.statusMessage = sessionLoadedMessage(session.name, loaded.messageCount);
       return true;
     } catch (e) {

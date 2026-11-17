@@ -11,7 +11,7 @@
  */
 
 import { type Line, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, wrapText } from '@goodvibes-jev/engine/platform/platform/utils';
+import { getDisplayWidth, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils';
 
 const USER_MESSAGE_BAR_X = 2;
 const USER_MESSAGE_FILL_X = 3;
@@ -24,7 +24,8 @@ export interface UserMessageStyle {
   readonly strikethrough?: (boolean) | undefined;
 }
 
-function row(width: number, style: UserMessageStyle): Line {
+// Everything left of the text column (margin, bar, fill) is chrome: a copy holds the message only.
+function row(width: number, style: UserMessageStyle, join?: string | undefined): Line {
   const line = createEmptyLine(width);
   for (const cell of line) cell.bg = '';
   if (width > USER_MESSAGE_BAR_X) {
@@ -33,15 +34,22 @@ function row(width: number, style: UserMessageStyle): Line {
   for (let x = USER_MESSAGE_FILL_X; x <= width - 3; x++) {
     line[x] = { char: ' ', fg: style.text, bg: style.bg, bold: false, dim: false, underline: false, italic: false, strikethrough: false };
   }
+  for (let x = 0; x < USER_MESSAGE_TEXT_X && x < width; x++) line[x] = { ...line[x]!, chrome: true };
+  if (join !== undefined && width > 0) line[0] = { ...line[0]!, wrapJoin: join };
   return line;
+}
+
+/** A padding row above or below the text: all decoration. */
+function paddingRow(width: number, style: UserMessageStyle): Line {
+  return row(width, style).map((cell) => ({ ...cell, chrome: true }));
 }
 
 export function renderUserMessage(text: string, width: number, style: UserMessageStyle): Line[] {
   const textWidth = Math.max(1, width - 9);
-  const wrapped = wrapText(text, textWidth);
-  const lines: Line[] = [row(width, style)];
-  for (const content of wrapped.length > 0 ? wrapped : ['']) {
-    const line = row(width, style);
+  const wrapped = wrapTextRows(text, textWidth);
+  const lines: Line[] = [paddingRow(width, style)];
+  for (const { text: content, join } of wrapped.length > 0 ? wrapped : [{ text: '' }]) {
+    const line = row(width, style, join);
     let x = USER_MESSAGE_TEXT_X;
     for (const ch of content) {
       const w = getDisplayWidth(ch);
@@ -53,6 +61,6 @@ export function renderUserMessage(text: string, width: number, style: UserMessag
     }
     lines.push(line);
   }
-  lines.push(row(width, style));
+  lines.push(paddingRow(width, style));
   return lines;
 }

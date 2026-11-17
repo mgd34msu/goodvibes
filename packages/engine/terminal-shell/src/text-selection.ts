@@ -1,5 +1,4 @@
 import type { InfiniteBuffer } from './conversation-history.js';
-import type { Cell } from '@goodvibes-jev/engine/platform/platform/types';
 
 export interface SelectionPoint {
   col: number;
@@ -49,6 +48,13 @@ export class SelectionManager {
     return this.anchor.row !== this.focus.row || this.anchor.col !== this.focus.col;
   }
 
+  /**
+   * The selected text as it was written, not as it was laid out: cells the
+   * renderer marked as chrome (gutters, bars, lane marks, padding) are left
+   * out, a row that continues the row above (a soft wrap) is joined to it with
+   * what the wrap took out, and a code row keeps its indentation. Other rows
+   * lose the layout margin around them.
+   */
   public getSelectedText(history: InfiniteBuffer): string {
     if (!this.anchor || !this.focus) return '';
 
@@ -61,60 +67,36 @@ export class SelectionManager {
 
     const lines: string[] = [];
     const allLines = history.getAllLines();
+    let previousVerbatim = false;
 
     for (let r = Math.max(0, start.row); r <= Math.min(allLines.length - 1, end.row); r++) {
       const line = allLines[r];
       if (!line) continue;
+      // A row drawn entirely by the renderer (a code block's frame) holds no text.
+      if (line.length > 0 && line.every((cell) => cell.chrome === true)) continue;
 
       const startCol = r === start.row ? start.col : 0;
       const endCol = r === end.row ? end.col : line.length;
-      const gutterEnd = this.findLineNumberGutterEnd(line);
-      const effectiveStartCol = startCol < gutterEnd ? gutterEnd : startCol;
-
-      let lineText = '';
-      for (let c = Math.max(0, effectiveStartCol); c < Math.min(line.length, endCol); c++) {
+      let text = '';
+      for (let c = Math.max(0, startCol); c < Math.min(line.length, endCol); c++) {
         const cell = line[c];
-        if (cell && cell.char !== '') lineText += cell.char;
+        if (cell && cell.chrome !== true && cell.char !== '') text += cell.char;
       }
-
-      lines.push(this.stripDecorativePrefix(lineText));
+      const head = line[0];
+      const verbatim = head?.verbatim === true;
+      const join = r > start.row ? head?.wrapJoin : undefined;
+      if (join !== undefined && lines.length > 0) {
+        const previous = lines[lines.length - 1]!;
+        lines[lines.length - 1] = previousVerbatim && verbatim
+          ? previous + join + text
+          : previous.trimEnd() + join + text.trimStart();
+      } else {
+        lines.push(verbatim ? text : text.trimStart());
+      }
+      previousVerbatim = verbatim;
     }
 
-    return lines.join('\n');
-  }
-
-  private findLineNumberGutterEnd(line: Cell[]): number {
-    let i = 0;
-    while (i < line.length) {
-      const cell = line[i];
-      if (cell?.char === ' ' && !cell?.dim && (cell?.bg ?? '') === '') {
-        i++;
-        continue;
-      }
-      break;
-    }
-    const start = i;
-    let sawDigit = false;
-    while (i < line.length) {
-      const cell = line[i];
-      const ch = cell?.char ?? '';
-      if (cell?.dim && ch !== '' && /[0-9 │]/.test(ch)) {
-        if (/[0-9]/.test(ch)) sawDigit = true;
-        i++;
-        continue;
-      }
-      break;
-    }
-    if (!sawDigit) return start;
-    if (i < line.length && line[i]?.char === ' ') i++;
-    return i > start ? i : start;
-  }
-
-  private stripDecorativePrefix(text: string): string {
-    return text
-      .replace(/^(\s*)(?:[▸▾▶►●○◆▲△▼▽•✕✓▌]\s+)+/u, '$1')
-      .replace(/^(\s*)\[(?:x|~| )\]\s+/u, '$1')
-      .trimEnd();
+    return lines.map((line) => line.trimEnd()).join('\n');
   }
 
   public isCellSelected(col: number, absoluteRow: number): boolean {

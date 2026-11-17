@@ -11,6 +11,16 @@ export interface Cell {
   italic: boolean;
   strikethrough: boolean;
   link?: string | undefined;
+  /** Drawn by the renderer around the content (a gutter, a bar, a lane mark, padding): shown, never copied. */
+  chrome?: boolean | undefined;
+  /**
+   * On a row's first cell: the row continues the row above (the renderer
+   * wrapped one logical line), and this is what the wrap took out between
+   * them (a space, the source's spaces, or nothing), so a copy joins them.
+   */
+  wrapJoin?: string | undefined;
+  /** On a row's first cell: the row's whitespace is content (code), so a copy keeps its indentation. */
+  verbatim?: boolean | undefined;
 }
 
 /**
@@ -45,4 +55,7 @@ export const createStyledCell = (char: string, overrides: Partial<Omit<Cell, 'ch
   italic: overrides.italic ?? false,
   strikethrough: overrides.strikethrough ?? false,
   link: overrides.link,
+  ...(overrides.chrome ? { chrome: true } : {}),
+  ...(overrides.verbatim ? { verbatim: true } : {}),
+  ...(overrides.wrapJoin !== undefined ? { wrapJoin: overrides.wrapJoin } : {}),
 });

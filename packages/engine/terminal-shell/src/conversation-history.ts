@@ -24,12 +24,18 @@ export interface CompactLine {
 
 const styles = new Map<string, CellStyle>();
 function internStyle(cell: Cell): CellStyle {
-  const key = `${cell.fg}\u0000${cell.bg}\u0000${cell.bold ? 1 : 0}${cell.dim ? 1 : 0}${cell.underline ? 1 : 0}${cell.italic ? 1 : 0}${cell.strikethrough ? 1 : 0}\u0000${cell.link ?? ''}`;
+  // The copy facts (chrome, a soft wrap's join, verbatim whitespace) are part of
+  // the style, so a compacted row hands them back to the selection unchanged.
+  const key = `${cell.fg}\u0000${cell.bg}\u0000${cell.bold ? 1 : 0}${cell.dim ? 1 : 0}${cell.underline ? 1 : 0}${cell.italic ? 1 : 0}${cell.strikethrough ? 1 : 0}\u0000${cell.link ?? ''}`
+    + `\u0000${cell.chrome ? 1 : 0}${cell.verbatim ? 1 : 0}\u0000${cell.wrapJoin ?? '\u0001'}`;
   let style = styles.get(key);
   if (!style) {
     style = Object.freeze({
       fg: cell.fg, bg: cell.bg, bold: cell.bold, dim: cell.dim, underline: cell.underline,
       italic: cell.italic, strikethrough: cell.strikethrough, link: cell.link,
+      ...(cell.chrome ? { chrome: true } : {}),
+      ...(cell.verbatim ? { verbatim: true } : {}),
+      ...(cell.wrapJoin !== undefined ? { wrapJoin: cell.wrapJoin } : {}),
     });
     styles.set(key, style);
   }

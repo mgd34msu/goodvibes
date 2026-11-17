@@ -300,6 +300,8 @@ function compositeInlineLine(
 
   let lineChars: StyledChar[] = [];
   let lineW = 0;
+  // What the wrap took out before the next row: a break space, or nothing inside a long word.
+  let pendingJoin = ' ';
 
   const flushLine = (isFirst: boolean) => {
     const line = new Array(width).fill(null).map(() => createStyledCell(' ')) as Cell[];
@@ -320,6 +322,13 @@ function compositeInlineLine(
         line[x] = createStyledCell(' ');
       }
     }
+    // A wrapped row continues the logical line above: its prefix (a quote's bar,
+    // the indent) is decoration, and the copy joins it with what the wrap took out.
+    if (!isFirst) {
+      for (let x = 0; x < textStartX && x < width; x++) line[x] = { ...requireDefined(line[x]), chrome: true };
+      if (width > 0) line[0] = { ...requireDefined(line[0]), wrapJoin: pendingJoin };
+    }
+    pendingJoin = ' ';
     // Write content chars
     let cx = textStartX;
     for (const sc of lineChars) {
@@ -350,7 +359,10 @@ function compositeInlineLine(
       for (const sc of wordChars) {
         const cw = getDisplayWidth(sc.char);
         if (lineW + cw > availW && lineW > 0) {
+          // The next row goes on inside the word: nothing was taken out.
+          const breaksWord = lineChars.length > 0 && lineChars[lineChars.length - 1]!.char !== ' ';
           flushLine(isFirstLine);
+          if (breaksWord) pendingJoin = '';
           isFirstLine = false;
         }
         lineChars.push(sc);

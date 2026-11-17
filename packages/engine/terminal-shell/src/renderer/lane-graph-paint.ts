@@ -15,10 +15,10 @@
  */
 import { createEmptyLine, createStyledCell, type Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { activeTokens } from './theme.js';
-import { expandTabs, getDisplayWidth, truncateDisplay, wrapPreservingIndent } from '@goodvibes-jev/engine/platform/platform/utils';
+import { expandTabs, getDisplayWidth, truncateDisplay, wrapPreservingIndent, wrapPreservingIndentRows } from '@goodvibes-jev/engine/platform/platform/utils';
 import { SurfaceCanvas } from './surface-kit.js';
 import { inset, type KitInset } from './surface-kit-parts.js';
-import { buildDiffRows, drawDiffRow, semanticChips, type DiffRow } from './diff-rows.js';
+import { DIFF_GUTTER, buildDiffRows, drawDiffRow, semanticChips, type DiffRow } from './diff-rows.js';
 import { highlightCodeLines } from './code-block.js';
 import { languageForPath, parseChanges } from '../changes-model.js';
 import type { SemanticDiff } from '../semantic-diff.js';
@@ -153,11 +153,11 @@ export function paintGutter(line: Line, row: GutterRow, p: GraphPaint, beadStatu
         const bg = line[x]!.bg;
         if (cell.role === 'bead') {
             const mark = beadMark(beadStatus ?? 'ok', p.glyphs, lane, p.frame);
-            line[x] = createStyledCell(mark.char, { fg: mark.fg, bg, bold: true });
+            line[x] = createStyledCell(mark.char, { fg: mark.fg, bg, bold: true, chrome: true });
             continue;
         }
         const isMark = cell.role === 'folded' || cell.role === 'turn';
-        line[x] = createStyledCell(p.glyphs.role[cell.role], { fg: lane, bg, bold: isMark });
+        line[x] = createStyledCell(p.glyphs.role[cell.role], { fg: lane, bg, bold: isMark, chrome: true });
     }
 }
 /** The fill and ┃ of the focused row (and of every row of its opened body's frame). */
@@ -168,8 +168,10 @@ export function applyFocus(line: Line, width: number, glyphs: LaneGlyphs): void 
         if (cell.bg === '')
             line[x] = { ...cell, bg: t.backgroundPanel };
     }
-    if (line.length > 0)
-        line[0] = createStyledCell(glyphs.focus, { fg: t.brand, bold: true });
+    if (line.length > 0) {
+        const head = line[0]!;
+        line[0] = createStyledCell(glyphs.focus, { fg: t.brand, bold: true, chrome: true, verbatim: head.verbatim, wrapJoin: head.wrapJoin });
+    }
 }
 /** Right side of a row: the summary ending SUMMARY_GAP columns left of the time, and the time. Returns the column the left text must stop before. */
 function paintRight(line: Line, p: GraphPaint, summary: BeadSummary | null, summaryMark: string | undefined, time: string | undefined, timeFg: string): number {
@@ -203,8 +205,10 @@ export function paintBeadRow(gutter: GutterRow, spec: BeadRowSpec, p: GraphPaint
     const line = createEmptyLine(p.width);
     paintGutter(line, gutter, p, spec.status);
     const x = textColumn(p);
-    if (spec.hasBody)
+    if (spec.hasBody) {
         putText(line, x - 2, x - 1, spec.open ? p.glyphs.opened : p.glyphs.closed, { fg: spec.open ? t.textMuted : t.textFaint });
+        markChrome(line, x - 2, x - 1);
+    }
     const limit = paintRight(line, p, spec.summary, undefined, spec.time, spec.status === 'run' ? spec.laneColor : t.textFaint);
     const cancelled = spec.status === 'cancel';
     const nameFg = spec.status === 'run' || spec.status === 'wait' ? t.text : spec.status === 'err' ? t.error : t.textMuted;
@@ -281,8 +285,10 @@ export function paintHeadRow(gutter: GutterRow, text: string, folded: boolean, p
     const x = textColumn(p);
     const limit = timeEnd(p.width) + 1;
     let cx = x;
-    if (!folded)
+    if (!folded) {
         cx = putText(line, cx, limit, `${p.glyphs.role.turn} `, { fg: t.brand, bold: true });
+        markChrome(line, x, cx);
+    }
     cx = putText(line, cx, limit - (folded ? 2 : 0), tx(p, truncateDisplay(text, Math.max(0, limit - cx - (folded ? 2 : 0)), p.glyphs.ellipsis)), { fg: t.textFaint });
     if (folded)
         putText(line, cx + 1, limit, p.glyphs.closed, { fg: t.textMuted });
@@ -301,9 +307,39 @@ export function shiftUnderGutter(source: Line, shift: number, gutter: GutterRow 
             break;
         line[target] = source[i]!;
     }
+    // The columns the shift opened are layout, and the row's copy facts
+    // (a soft wrap's join, verbatim code) stay on its first cell.
+    markChrome(line, 0, Math.min(shift, line.length));
+    const head = source[0];
+    if (head && line.length > 0 && (head.wrapJoin !== undefined || head.verbatim))
+        line[0] = { ...line[0]!, ...(head.wrapJoin !== undefined ? { wrapJoin: head.wrapJoin } : {}), ...(head.verbatim ? { verbatim: true } : {}) };
     if (gutter)
         paintGutter(line, gutter, p);
     return line;
+}
+/** Mark columns [from, to) of `line` as chrome: drawn, never copied. */
+function markChrome(line: Line, from: number, to: number): void {
+    for (let x = Math.max(0, from); x < to && x < line.length; x++)
+        if (!line[x]!.chrome)
+            line[x] = { ...line[x]!, chrome: true };
+}
+/**
+ * The copy facts of a body's drawn rows: the frame rows and everything left of
+ * the text are chrome, each text row's whitespace is content (file text,
+ * command output), and a wrapped row continues the row above.
+ */
+function markBodyRows(lines: Line[], left: number, rows: ReadonlyArray<{ readonly y: number; readonly join?: string | undefined; readonly text: boolean; readonly left?: number | undefined }>): void {
+    const text = new Map(rows.filter((row) => row.text).map((row) => [row.y, row.left ?? left] as const));
+    lines.forEach((line, y) => {
+        const textLeft = text.get(y);
+        markChrome(line, 0, textLeft ?? line.length);
+    });
+    for (const row of rows) {
+        const line = lines[row.y];
+        if (!row.text || !line || line.length === 0)
+            continue;
+        line[0] = { ...line[0]!, verbatim: true, ...(row.join !== undefined ? { wrapJoin: row.join } : {}) };
+    }
 }
 // ---------------------------------------------------------------------------
 // Bodies
@@ -333,15 +369,17 @@ function wrapAll(lines: ReadonlyArray<{
 }>, width: number): Array<{
     text: string;
     fg: string;
+    join?: string | undefined;
 }> {
     const out: Array<{
         text: string;
         fg: string;
+        join?: string | undefined;
     }> = [];
     for (const line of lines) {
-        const parts = wrapPreservingIndent(line.text, Math.max(8, width));
-        for (const part of parts.length > 0 ? parts : [''])
-            out.push({ text: part, fg: line.fg });
+        const parts = wrapPreservingIndentRows(line.text, Math.max(8, width));
+        for (const part of parts.length > 0 ? parts : [{ text: '' }])
+            out.push({ text: part.text, fg: line.fg, ...(part.join !== undefined ? { join: part.join } : {}) });
     }
     return out;
 }
@@ -357,11 +395,11 @@ type ReadRow = ReadonlyArray<{
  * as two spaces, and each line wrapped the way a command's output wraps
  * (indentation kept, continuation rows indented like the first).
  */
-function readRows(file: ReadBodyFile, width: number): ReadRow[] {
+function readRows(file: ReadBodyFile, width: number): Array<{ readonly runs: ReadRow; readonly join?: string | undefined }> {
     const t = activeTokens();
     const lines = file.lines.map(expandTabs);
     const tokens = highlightCodeLines(lines, file.path ? languageForPath(file.path) : '');
-    const rows: ReadRow[] = [];
+    const rows: Array<{ readonly runs: ReadRow; readonly join?: string | undefined }> = [];
     lines.forEach((line, i) => {
         const chars = Array.from(line);
         // Each character's style, from the line's tokens (plain when they do not spell the line).
@@ -381,7 +419,7 @@ function readRows(file: ReadBodyFile, width: number): ReadRow[] {
                 styles.push({ fg: t.text });
         }
         let cursor = 0;
-        for (const part of wrapPreservingIndent(line, Math.max(8, width))) {
+        for (const { text: part, join } of wrapPreservingIndentRows(line, Math.max(8, width))) {
             const pc = Array.from(part);
             let lead = 0;
             while (pc[lead] === ' ')
@@ -405,7 +443,7 @@ function readRows(file: ReadBodyFile, width: number): ReadRow[] {
                 else
                     runs.push({ text: pc[k]!, ...style });
             }
-            rows.push(runs);
+            rows.push(join === undefined ? { runs } : { runs, join });
         }
     });
     return rows;
@@ -427,6 +465,7 @@ function paintReadBody(files: readonly ReadBodyFile[], p: GraphPaint, options: B
     type Drawn = {
         kind: 'row';
         row: ReadRow;
+        join?: string | undefined;
     } | {
         kind: 'header';
         file: ReadBodyFile;
@@ -454,11 +493,13 @@ function paintReadBody(files: readonly ReadBodyFile[], p: GraphPaint, options: B
         }
         const rows = readRows(file, innerWidth);
         // Trailing blank rows say nothing.
-        while (rows.length > 0 && rows[rows.length - 1]!.length === 0)
+        while (rows.length > 0 && rows[rows.length - 1]!.runs.length === 0)
             rows.pop();
         const cap = options.expanded ? rows.length : Math.min(rows.length, perFile);
-        for (let k = 0; k < cap; k++)
-            drawn.push({ kind: 'row', row: rows[k]! });
+        for (let k = 0; k < cap; k++) {
+            const { runs, join } = rows[k]!;
+            drawn.push(join === undefined ? { kind: 'row', row: runs } : { kind: 'row', row: runs, join });
+        }
         if (rows.length > cap) {
             capped = true;
             drawn.push({ kind: 'more', hidden: rows.length - cap });
@@ -494,6 +535,11 @@ function paintReadBody(files: readonly ReadBodyFile[], p: GraphPaint, options: B
             canvas.put(pn.l, y, truncateDisplay(item.text, innerWidth, p.glyphs.ellipsis), { fg: t.error });
         }
     });
+    markBodyRows(canvas.lines, pn.l, drawn.map((item, k) => ({
+        y: 1 + k,
+        text: item.kind === 'row' || item.kind === 'error',
+        ...(item.kind === 'row' && item.join !== undefined ? { join: item.join } : {}),
+    })));
     return { lines: canvas.lines, capped };
 }
 /**
@@ -536,6 +582,18 @@ export function paintBody(body: BeadBody, p: GraphPaint, options: BodyPaintOptio
             drawDiffRow(canvas, pn, y + k, rows[k]!, -1, { lineNumbers: body.numbered });
         if (hidden > 0)
             canvas.put(pn.l, y + cap, moreText(hidden, 'lines', p), { fg: t.textFaint });
+        // A code row copies from its sign (the line number is chrome); a wrapped
+        // code row continues the one above where the wrap cut it.
+        const gutterEnd = pn.l + DIFF_GUTTER - 1;
+        markBodyRows(canvas.lines, pn.l, rows.slice(0, cap).map((row, k) => {
+            const code = row.kind === 'line' && row.line.kind !== 'note';
+            return {
+                y: y + k,
+                text: row.kind === 'file' || code,
+                ...(code ? { left: row.first ? gutterEnd + 2 : gutterEnd + 4 } : {}),
+                ...(code && !row.first ? { join: '' } : {}),
+            };
+        }));
         return { lines: canvas.lines, capped: hidden > 0 };
     }
     if (body.kind === 'error') {
@@ -544,6 +602,7 @@ export function paintBody(body: BeadBody, p: GraphPaint, options: BodyPaintOptio
         const canvas = new SurfaceCanvas(p.width, height);
         const pn = bodyInset(canvas, p, height, t.backgroundError);
         wrapped.forEach((row, k) => canvas.put(pn.l, 1 + k, row.text, { fg: row.fg }));
+        markBodyRows(canvas.lines, pn.l, wrapped.map((row, k) => ({ y: 1 + k, text: true, ...(row.join !== undefined ? { join: row.join } : {}) })));
         return { lines: canvas.lines, capped: false };
     }
     if (body.kind === 'read')
@@ -551,6 +610,7 @@ export function paintBody(body: BeadBody, p: GraphPaint, options: BodyPaintOptio
     let rows: Array<{
         text: string;
         fg: string;
+        join?: string | undefined;
     }>;
     let footer: string | undefined;
     if (body.kind === 'output') {
@@ -587,5 +647,9 @@ export function paintBody(body: BeadBody, p: GraphPaint, options: BodyPaintOptio
         canvas.fill(pn.l, 1 + cap, innerWidth, 1, t.backgroundPanel);
         canvas.put(pn.l, 1 + cap, moreText(hidden, '', p), { fg: t.textFaint });
     }
+    markBodyRows(canvas.lines, pn.l, [
+        ...rows.slice(0, cap).map((row, k) => ({ y: 1 + k, text: true, ...(row.join !== undefined ? { join: row.join } : {}) })),
+        ...(footer ? [{ y: y, text: true }] : []),
+    ]);
     return { lines: canvas.lines, capped: hidden > 0 };
 }

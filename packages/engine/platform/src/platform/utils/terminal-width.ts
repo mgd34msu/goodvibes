@@ -263,26 +263,47 @@ export function fitDisplay(text: string, width: number, ellipsis = '…'): strin
   return padDisplayEnd(truncateDisplay(text, width, ellipsis), width);
 }
 
+/** One wrapped row; `join` is set on a row that continues the row above: what the wrap took out between them. */
+export interface WrappedRow {
+  readonly text: string;
+  readonly join?: string | undefined;
+}
+
 export function wrapText(text: string, width: number): string[] {
-  if (width <= 0) return [text];
-  const lines: string[] = [];
+  return wrapTextRows(text, width).map((row) => row.text);
+}
+
+/**
+ * `wrapText`, saying for each row whether it continues the row above and what
+ * the wrap took out there (the space it broke at, or nothing inside a long
+ * word), so a copy of the rows can give back the original line.
+ */
+export function wrapTextRows(text: string, width: number): WrappedRow[] {
+  if (width <= 0) return [{ text }];
+  const rows: WrappedRow[] = [];
   const paragraphs = text.split('\n');
 
   for (const paragraph of paragraphs) {
     if (paragraph.length === 0) {
-      lines.push('');
+      rows.push({ text: '' });
       continue;
     }
 
     const words = paragraph.split(' ');
     let currentLine = '';
+    // The join of the row being built: undefined for the paragraph's first row.
+    let join: string | undefined;
+    const push = (row: string, nextJoin: string): void => {
+      rows.push(join === undefined ? { text: row } : { text: row, join });
+      join = nextJoin;
+    };
 
     for (const word of words) {
       const wordWidth = getDisplayWidth(word);
       const currentLineWidth = getDisplayWidth(currentLine);
 
       if (wordWidth > width) {
-        if (currentLine) lines.push(currentLine);
+        if (currentLine) push(currentLine, ' ');
         let remaining = word;
         while (getDisplayWidth(remaining) > width) {
           const codePoints = [...remaining];
@@ -299,7 +320,7 @@ export function wrapText(text: string, width: number): string[] {
           // at width===1). Without this guard splitIdx stays 0, remaining
           // never shrinks, and the while-loop hangs.
           if (splitIdx === 0) splitIdx = codePoints[0]!.length;
-          lines.push(remaining.slice(0, splitIdx));
+          push(remaining.slice(0, splitIdx), '');
           remaining = remaining.slice(splitIdx);
         }
         currentLine = remaining;
@@ -309,15 +330,15 @@ export function wrapText(text: string, width: number): string[] {
       if ((currentLineWidth + wordWidth + (currentLine ? 1 : 0)) <= width) {
         currentLine += `${currentLine ? ' ' : ''}${word}`;
       } else {
-        lines.push(currentLine);
+        push(currentLine, ' ');
         currentLine = word;
       }
     }
 
-    if (currentLine) lines.push(currentLine);
+    if (currentLine) push(currentLine, '');
   }
 
-  return lines;
+  return rows;
 }
 
 /** Columns one tab takes in a drawn body; the same two spaces a diff body uses (changes-modal.ts wrapTokens). */
@@ -337,15 +358,25 @@ export function expandTabs(text: string): string {
  * at most `width` cells.
  */
 export function wrapPreservingIndent(text: string, width: number): string[] {
-  const out: string[] = [];
+  return wrapPreservingIndentRows(text, width).map((row) => row.text);
+}
+
+/**
+ * `wrapPreservingIndent`, saying for each continuation row the whitespace the
+ * wrap took out at the break (the re-added indent is not part of the text), so
+ * a copy gives back the source line exactly.
+ */
+export function wrapPreservingIndentRows(text: string, width: number): WrappedRow[] {
+  const out: WrappedRow[] = [];
   for (const raw of expandTabs(text).split('\n')) {
     const line = raw.replace(/\s+$/, '');
-    if (getDisplayWidth(line) <= width) { out.push(line); continue; }
+    if (getDisplayWidth(line) <= width) { out.push({ text: line }); continue; }
     const indentText = /^ */.exec(line)![0];
     // Deep indentation leaves no room: continuation rows start at the left edge.
     const indent = indentText.length <= Math.floor(width / 2) ? indentText : '';
     let rest = Array.from(line.slice(indentText.length));
     let prefix = indentText.length <= width - 1 ? indentText : '';
+    let join: string | undefined;
     while (rest.length > 0) {
       const avail = Math.max(1, width - prefix.length);
       // Longest run of `rest` that fits, preferring to break after a space.
@@ -360,9 +391,14 @@ export function wrapPreservingIndent(text: string, width: number): string[] {
         if (rest[i] === ' ') lastSpace = i + 1;
       }
       const at = cut === rest.length ? cut : lastSpace > 0 ? lastSpace : Math.max(1, cut);
-      out.push((prefix + rest.slice(0, at).join('')).replace(/\s+$/, ''));
+      const taken = rest.slice(0, at).join('');
+      const kept = taken.replace(/\s+$/, '');
+      const row = (prefix + kept).replace(/\s+$/, '');
+      out.push(join === undefined ? { text: row } : { text: row, join });
+      let dropped = taken.slice(kept.length);
       rest = rest.slice(at);
-      while (rest[0] === ' ') rest.shift();
+      while (rest[0] === ' ') { rest.shift(); dropped += ' '; }
+      join = dropped;
       prefix = indent;
     }
   }

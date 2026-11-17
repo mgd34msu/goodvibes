@@ -1,5 +1,5 @@
 import { type Line, createEmptyLine, createStyledCell } from '@goodvibes-jev/engine/platform/platform/types';
-import { getDisplayWidth, truncateDisplay, wrapText } from '@goodvibes-jev/engine/platform/platform/utils';
+import { getDisplayWidth, truncateDisplay, wrapText, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils';
 import { LAYOUT } from './layout.js';
 import { GLYPHS } from '@goodvibes-jev/engine/platform/platform/presentation';
 import { foldPreviewText } from '@goodvibes-jev/engine/terminal-shell';
@@ -77,11 +77,16 @@ export function renderConversationNotice(content: string, width: number, palette
     const borderCol = LAYOUT.LEFT_MARGIN - 1;
     const textStartCol = LAYOUT.LEFT_MARGIN + 1;
     const textWidth = Math.max(1, width - textStartCol - LAYOUT.RIGHT_MARGIN);
-    const wrapped = wrapText(content, textWidth);
+    const wrapped = wrapTextRows(content, textWidth);
     const lines: Line[] = [];
-    for (const text of wrapped) {
+    for (const { text, join } of wrapped) {
         const line = createEmptyLine(width);
         line[borderCol] = createStyledCell(marker, { fg: palette.accent, bg: palette.bodyBg ?? '' });
+        // The marker and the margin before the text are decoration, not part of the notice.
+        for (let x = 0; x < textStartCol && x < width; x++)
+            line[x] = { ...line[x]!, chrome: true };
+        if (join !== undefined && width > 0)
+            line[0] = { ...line[0]!, wrapJoin: join };
         writeText(line, textStartCol, width - LAYOUT.RIGHT_MARGIN, text, palette.text, {
             bg: palette.bodyBg,
             dim: palette.dim ?? false,

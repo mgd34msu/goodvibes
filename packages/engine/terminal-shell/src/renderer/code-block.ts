@@ -1,6 +1,6 @@
 import { requireDefined } from '@goodvibes-jev/engine/platform/platform/utils';
 import { type Line, type Cell, createStyledCell, createEmptyLine } from '@goodvibes-jev/engine/platform/platform/types';
-import { BODY_TAB_WIDTH, getDisplayWidth, wrapPreservingIndent } from '@goodvibes-jev/engine/platform/platform/utils';
+import { BODY_TAB_WIDTH, getDisplayWidth, wrapPreservingIndentRows, type WrappedRow } from '@goodvibes-jev/engine/platform/platform/utils';
 import { TRANSCRIPT_LAYOUT as LAYOUT } from '../transcript-layout.js';
 import { SyntaxHighlighter, type SyntaxToken as HLToken } from './syntax-highlighter.js';
 import { activeTokens } from './theme.js';
@@ -390,9 +390,13 @@ export function renderCodeBlock(
   // No header bar: the language (when the fence names one) sits muted on the
   // right of the first code row, and only when the code leaves room for it.
   const langLabel = lang;
+  // Only the code's own characters are text: margins, padding, the line-number
+  // gutter, the language label and the blank rows framing the block are chrome,
+  // so a copy of the block is the code as written.
+  const asChrome = (line: Line): Line => line.map((cell) => (cell.chrome ? cell : { ...cell, chrome: true }));
   const padLine = createEmptyLine(width);
   for (let px = leftMargin; px < effectiveWidth; px++) padLine[px] = createStyledCell(' ', { bg: BG });
-  lines.push(padLine);
+  lines.push(asChrome(padLine));
 
   // Code lines. A line wider than the text column wraps the way an opened
   // read or command output does (wrapPreservingIndent: indentation kept,
@@ -405,7 +409,7 @@ export function renderCodeBlock(
     const line: Cell[] = createEmptyLine(width);
     // Paint only the code-block body band so body rows match the header/footer width.
     for (let x = leftMargin; x < effectiveWidth; x++) line[x] = createStyledCell(' ', { bg: BG });
-    return line;
+    return asChrome(line);
   };
   for (let i = 0; i < codeLines.length; i++) {
     // Tokens are read from the line with every control character as one
@@ -441,19 +445,23 @@ export function renderCodeBlock(
     });
     const rawLine = chars.join('');
 
-    const parts = getDisplayWidth(rawLine.replace(/\s+$/, '')) <= textWidth ? [rawLine] : wrapPreservingIndent(rawLine, textWidth);
+    const parts: WrappedRow[] = getDisplayWidth(rawLine.replace(/\s+$/, '')) <= textWidth ? [{ text: rawLine }] : wrapPreservingIndentRows(rawLine, textWidth);
     let cursor = 0;
-    parts.forEach((part, partIndex) => {
+    parts.forEach(({ text: part, join }, partIndex) => {
       const line = bodyRow();
+      // The code's whitespace is content; a wrapped row continues the code line above.
+      line[0] = { ...requireDefined(line[0]), verbatim: true, ...(join !== undefined ? { wrapJoin: join } : {}) };
       let cx = leftMargin + PAD;
       if (showLineNumbers) {
         const label = partIndex === 0 ? lineNum : ' '.repeat(lineNumW);
         for (const ch of label) {
           if (cx >= contentStartX) break;
-          line[cx++] = createStyledCell(ch, { fg: LINE_NUM_FG, bg: BG });
+          line[cx++] = createStyledCell(ch, { fg: LINE_NUM_FG, bg: BG, chrome: true });
         }
-        line[cx++] = createStyledCell(' ', { bg: BG });
+        line[cx++] = createStyledCell(' ', { bg: BG, chrome: true });
       }
+      // An empty code line is still a line of the code.
+      if (part.length === 0 && cx < line.length) line[cx] = createStyledCell(' ', { bg: BG });
       // A continuation row: the wrap dropped the spaces it broke at and
       // re-added the indent, so the next source character is the first
       // non-space after the cursor.
@@ -482,7 +490,7 @@ export function renderCodeBlock(
         const labelX = textEnd - getDisplayWidth(langLabel);
         if (labelX > cx + 1) {
           let lx = labelX;
-          for (const ch of langLabel) line[lx++] = createStyledCell(ch, { fg: palette.textMuted, bg: BG });
+          for (const ch of langLabel) line[lx++] = createStyledCell(ch, { fg: palette.textMuted, bg: BG, chrome: true });
         }
       }
       lines.push(line);
@@ -494,7 +502,7 @@ export function renderCodeBlock(
   for (let fx = leftMargin; fx < effectiveWidth; fx++) {
     footerLine[fx] = createStyledCell(' ', { bg: BG });
   }
-  lines.push(footerLine);
+  lines.push(asChrome(footerLine));
 
   return lines;
 }

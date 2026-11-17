@@ -5,7 +5,7 @@ import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
 import { renderSystemMessage } from './renderer/system-message.js';
 import { createEmptyLine, type Line, type Cell } from '@goodvibes-jev/engine/platform/platform/types';
 import { SPLASH_GRADIENT, type SplashOptions } from './splash-lines.js';
-import { interpolateColor, getDisplayWidth, wrapText } from '@goodvibes-jev/engine/platform/platform/utils';
+import { interpolateColor, getDisplayWidth, wrapTextRows } from '@goodvibes-jev/engine/platform/platform/utils';
 import { LAYOUT } from './renderer/layout.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import { renderCompactionContinuationMessage } from './conversation-compaction-render.js';
@@ -263,10 +263,16 @@ export function createConversationRenderer(presentation: ConversationPresentatio
     }
     function conversationTextToLines(text: string, width: number, style: Partial<Cell> = {}): Line[] {
         const contentWidth = LAYOUT.contentWidth(width);
-        const wrapped = wrapText(text, contentWidth);
-        return wrapped.map((line, index) => {
+        const wrapped = wrapTextRows(text, contentWidth);
+        return wrapped.map(({ text: row, join }, index) => {
             const prefix = index === 0 ? '>' + ' '.repeat(LAYOUT.LEFT_MARGIN - 1) : ' '.repeat(LAYOUT.LEFT_MARGIN);
-            return stringToLine(prefix + line, width, style);
+            const line = stringToLine(prefix + row, width, style);
+            // The `>` and the margin are decoration; a wrapped row continues the one above.
+            for (let x = 0; x < LAYOUT.LEFT_MARGIN && x < line.length; x++)
+                line[x] = { ...line[x]!, chrome: true };
+            if (join !== undefined && line.length > 0)
+                line[0] = { ...line[0]!, wrapJoin: join };
+            return line;
         });
     }
     function logConversationText(context: Pick<ConversationRenderContext, 'history'>, width: number, text: string, style: Partial<Cell> = {}, indent = ' '.repeat(LAYOUT.LEFT_MARGIN)): void {

@@ -1,5 +1,4 @@
 import type { TelegramSourceAccountReader } from '../channels/telegram/source-account.js';
-import type { WorkspaceSwapManagerLike } from './http/system-route-types.js';
 /** Real paired-owner command path and daemon adapter composition; no default grant. */
 import { DelegatedTelegramIntake } from './delegated-telegram-intake.js';
 import type { ResolvedDaemonFacadeRuntime } from './facade-types.js';
@@ -98,7 +97,7 @@ export function registerDelegatedTelegramCommands(catalog: GatewayMethodCatalog,
  * this process, so the intake's workspace stays current for its whole life; the
  * swap manager argument is accepted and not needed.
  */
-export function composeDelegatedTelegramIntake(runtime: ResolvedDaemonFacadeRuntime, accounts: TelegramSourceAccountReader, _swapManager: WorkspaceSwapManagerLike | null = null): DelegatedTelegramIntake {
+export function composeDelegatedTelegramIntake(runtime: ResolvedDaemonFacadeRuntime, accounts: TelegramSourceAccountReader): DelegatedTelegramIntake {
   const host = new DelegatedTelegramIntake({ broker: runtime.sessionBroker, approvals: runtime.approvalBroker, routes: runtime.routeBindings,
     accounts, workspaceRoot: runtime.runtimeServices.workingDirectory,
     beforeReviewOwnerWrite: () => runtime.runtimeServices.nativeDataWriter?.declare('delegated-review-owner-v2'),

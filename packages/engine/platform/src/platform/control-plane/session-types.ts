@@ -140,6 +140,13 @@ export interface SharedSessionRecord {
   readonly participants: readonly SharedSessionParticipant[];
   readonly activeAgentId?: string | undefined;
   readonly lastAgentId?: string | undefined;
+  /**
+   * The model the session's latest agent runs on: the one its spawn asked for
+   * (a channel profile's model included) once bound, the one its run actually
+   * used once it ended. Absent while the agent runs on the host default and
+   * has not ended yet.
+   */
+  readonly lastAgentModel?: string | undefined;
   readonly lastError?: string | undefined;
   readonly metadata: Record<string, unknown>;
 }

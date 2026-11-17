@@ -96,7 +96,7 @@ function indexedFields(record: SharedSessionRecord): string {
   const {
     updatedAt: _updatedAt, lastActivityAt: _lastActivityAt, lastMessageAt: _lastMessageAt, messageCount: _messageCount,
     retainedMessageCount: _retained, pendingInputCount: _pending, activeAgentId: _active, lastAgentId: _lastAgent,
-    lastError: _lastError, participants, ...listed
+    lastAgentModel: _lastAgentModel, lastError: _lastError, participants, ...listed
   } = record;
   return JSON.stringify({ ...listed, participants: participants.map(({ lastSeenAt: _seen, ...participant }) => participant) });
 }
@@ -106,15 +106,20 @@ function deriveAgentFacts(
   record: SharedSessionRecord,
   messages: readonly SharedSessionMessage[],
   inputs: readonly SharedSessionInputRecord[],
-): Pick<SharedSessionRecord, 'lastAgentId' | 'lastError'> {
+): Pick<SharedSessionRecord, 'lastAgentId' | 'lastAgentModel' | 'lastError'> {
   let lastAgentId = record.lastAgentId;
+  let lastAgentModel = record.lastAgentModel;
   let lastAgentAt = -Infinity;
   let lastError = record.lastError;
   let errorSettled = false;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
     if (!message.agentId) continue;
-    if (message.createdAt > lastAgentAt) { lastAgentId = message.agentId; lastAgentAt = message.createdAt; }
+    if (message.createdAt > lastAgentAt) {
+      lastAgentId = message.agentId; lastAgentAt = message.createdAt;
+      const model = message.metadata?.['model'];
+      lastAgentModel = typeof model === 'string' && model ? model : undefined;
+    }
     const status = message.metadata?.['status'];
     if (!errorSettled && (status === 'failed' || status === 'completed')) {
       lastError = status === 'failed' ? message.body : undefined;
@@ -123,9 +128,13 @@ function deriveAgentFacts(
     if (errorSettled) break;
   }
   for (const input of inputs) {
-    if (input.activeAgentId && input.updatedAt > lastAgentAt) { lastAgentId = input.activeAgentId; lastAgentAt = input.updatedAt; }
+    if (input.activeAgentId && input.updatedAt > lastAgentAt) {
+      // A newer agent than the last completion: its model is not in the log yet.
+      if (input.activeAgentId !== lastAgentId) lastAgentModel = undefined;
+      lastAgentId = input.activeAgentId; lastAgentAt = input.updatedAt;
+    }
   }
-  return { ...(lastAgentId ? { lastAgentId } : {}), ...(lastError ? { lastError } : {}) };
+  return { ...(lastAgentId ? { lastAgentId } : {}), ...(lastAgentModel ? { lastAgentModel } : {}), ...(lastError ? { lastError } : {}) };
 }
 
 /** A record with what its loaded messages and inputs state about it. */
@@ -137,7 +146,7 @@ export function withLoggedFacts(
   const lastMessage = messages.at(-1);
   const latestInputAt = inputs.reduce((latest, input) => Math.max(latest, input.updatedAt), 0);
   const lastMessageAt = Math.max(record.lastMessageAt ?? 0, lastMessage?.createdAt ?? 0);
-  const { lastAgentId: _a, lastError: _e, retainedMessageCount, ...rest } = record;
+  const { lastAgentId: _a, lastAgentModel: _m, lastError: _e, retainedMessageCount, ...rest } = record;
   const messageCount = Math.max(record.messageCount, messages.length);
   return {
     ...rest,

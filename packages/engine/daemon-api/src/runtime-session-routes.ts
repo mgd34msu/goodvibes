@@ -106,6 +106,8 @@ export type SharedSessionRecordResponse = {
   readonly participants: readonly SharedSessionParticipantResponse[];
   readonly activeAgentId?: string | undefined;
   readonly lastAgentId?: string | undefined;
+  /** The model the latest agent runs on (asked for at spawn) or ran on (once it ended). */
+  readonly lastAgentModel?: string | undefined;
   readonly lastError?: string | undefined;
   readonly metadata: Record<string, unknown>;
 };
@@ -171,6 +173,7 @@ export function toSharedSessionRecordResponse(
   const status = readSessionStatus(record.status) ?? options.status;
   const activeAgentId = readNonEmptyString(record.activeAgentId);
   const lastAgentId = readNonEmptyString(record.lastAgentId);
+  const lastAgentModel = readNonEmptyString(record.lastAgentModel);
   const lastError = readNonEmptyString(record.lastError);
   const messageCount = readFiniteNumber(record.messageCount) ?? options.messageCount;
   const pendingInputCount = readFiniteNumber(record.pendingInputCount);
@@ -198,6 +201,7 @@ export function toSharedSessionRecordResponse(
     participants: readParticipants(record.participants),
     ...(activeAgentId ? { activeAgentId } : {}),
     ...(lastAgentId ? { lastAgentId } : {}),
+    ...(lastAgentModel ? { lastAgentModel } : {}),
     ...(lastError ? { lastError } : {}),
     metadata: isJsonRecord(record.metadata) ? record.metadata : {},
   };

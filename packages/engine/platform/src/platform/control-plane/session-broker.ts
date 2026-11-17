@@ -790,7 +790,7 @@ export class SharedSessionBroker {
       logger.warn('An agent was not bound to a closed session', { sessionId, agentId });
       return session;
     }
-    const updated = bindSharedSessionAgent(session, agentId);
+    const updated = bindSharedSessionAgent(session, agentId, this.agentStatusProvider.getStatus(agentId)?.model);
     this.sessions.set(sessionId, updated);
     this.spawnsInFlight.delete(sessionId);
     const claimed = claimNextQueuedSessionInput(this.sessionInputStore(), sessionId, agentId, inputId);
@@ -909,8 +909,11 @@ export class SharedSessionBroker {
     // finds the answer stored, the session released and no row left to settle:
     // nothing is written and no event is published again.
     const role = metadata.status === 'failed' || metadata.status === 'cancelled' ? 'system' : 'assistant';
+    // The model the run actually used (its route, after any fallback); kept on
+    // the completion message so the session's log states it after a restart.
+    const model = typeof metadata.model === 'string' && metadata.model ? metadata.model : this.agentStatusProvider.getStatus(agentId)?.model;
     if (shouldStoreAgentCompletion(this.messageStore(), sessionId, agentId)) {
-      await this.appendMessage(sessionId, { role, body, agentId, metadata });
+      await this.appendMessage(sessionId, { role, body, agentId, metadata: model ? { ...metadata, model } : metadata });
     } else if (session.activeAgentId !== agentId && !(this.inputs.get(sessionId) ?? []).some((entry) => !isDelegatedSessionInput(entry)
       && entry.activeAgentId === agentId && (entry.state === 'delivered' || entry.state === 'spawned'))) {
       return { session };
@@ -923,6 +926,7 @@ export class SharedSessionBroker {
       ...current,
       activeAgentId: current.activeAgentId === agentId ? undefined : current.activeAgentId,
       lastAgentId: agentId,
+      ...(model ? { lastAgentModel: model } : current.lastAgentId === agentId ? {} : { lastAgentModel: undefined }),
       updatedAt: now,
       lastActivityAt: now,
       // A later successful run clears the previous failure; a cancel leaves it as it was.

@@ -272,12 +272,15 @@ export function reopenSharedSessionRecord(session: SharedSessionRecord): SharedS
   };
 }
 
-export function bindSharedSessionAgent(session: SharedSessionRecord, agentId: string): SharedSessionRecord {
+export function bindSharedSessionAgent(session: SharedSessionRecord, agentId: string, model?: string): SharedSessionRecord {
   const now = Date.now();
+  const { lastAgentModel: _previousModel, ...rest } = session;
   return {
-    ...session,
+    ...rest,
     activeAgentId: agentId,
     lastAgentId: agentId,
+    // A different agent's model says nothing about this one; the same agent keeps what is known.
+    ...(model ? { lastAgentModel: model } : session.lastAgentId === agentId && session.lastAgentModel ? { lastAgentModel: session.lastAgentModel } : {}),
     updatedAt: now,
     lastActivityAt: now,
   };

@@ -150,6 +150,7 @@ export const SHARED_SESSION_RECORD_SCHEMA = objectSchema({
   participants: arraySchema(SHARED_SESSION_PARTICIPANT_SCHEMA),
   activeAgentId: STRING_SCHEMA,
   lastAgentId: STRING_SCHEMA,
+  lastAgentModel: STRING_SCHEMA,
   lastError: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
 }, ['id', 'kind', 'title', 'status', 'createdAt', 'updatedAt', 'lastActivityAt', 'messageCount', 'pendingInputCount', 'routeIds', 'surfaceKinds', 'participants', 'metadata']);

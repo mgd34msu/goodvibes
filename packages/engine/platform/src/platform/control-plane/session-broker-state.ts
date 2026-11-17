@@ -49,6 +49,7 @@ function hasSessionRecordPayload(value: Record<string, unknown>): boolean {
     'closedAt',
     'activeAgentId',
     'lastAgentId',
+    'lastAgentModel',
     'lastError',
     'routeIds',
     'surfaceKinds',
@@ -109,6 +110,7 @@ function normalizeSessionRecord(
   validateOptionalNumber(value['closedAt']);
   validateOptionalString(value['activeAgentId']);
   validateOptionalString(value['lastAgentId']);
+  validateOptionalString(value['lastAgentModel']);
   validateOptionalString(value['lastError']);
   const channelPermissionMode = value['channelPermissionMode'];
   validateOptionalNumber(value['channelPermissionModeRevision']);
@@ -150,6 +152,7 @@ function normalizeSessionRecord(
     : Math.max(updatedAt, lastMessageAt ?? 0, latestInputAt ?? 0);
   const activeAgentId = typeof value['activeAgentId'] === 'string' ? value['activeAgentId'] : undefined;
   const lastAgentId = typeof value['lastAgentId'] === 'string' ? value['lastAgentId'] : undefined;
+  const lastAgentModel = typeof value['lastAgentModel'] === 'string' ? value['lastAgentModel'] : undefined;
   const lastError = typeof value['lastError'] === 'string' ? value['lastError'] : undefined;
   const closedAt = isFiniteNumber(value['closedAt']) ? value['closedAt'] : undefined;
   return {
@@ -179,6 +182,7 @@ function normalizeSessionRecord(
     participants,
     ...(activeAgentId ? { activeAgentId } : {}),
     ...(lastAgentId ? { lastAgentId } : {}),
+    ...(lastAgentModel ? { lastAgentModel } : {}),
     ...(lastError ? { lastError } : {}),
     metadata: isRecord(value['metadata']) ? value['metadata'] : {},
   };

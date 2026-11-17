@@ -11,6 +11,8 @@ export interface SharedSessionStoreSnapshot extends Record<string, unknown> {
 export type SharedSessionAgentStatus = {
   readonly id: string;
   readonly status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  /** The model the agent was asked for at spawn, then the one its run actually used. */
+  readonly model?: string | undefined;
 };
 
 export type SharedSessionAgentStatusProvider = {

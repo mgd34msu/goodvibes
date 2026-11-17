@@ -4,6 +4,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { CodeIntelligence } from '@goodvibes-jev/engine/platform/platform/intelligence';
 import type { DocumentSymbol, LookupResult } from '@goodvibes-jev/engine/platform/platform/intelligence';
 import type { SymbolInfo } from '@goodvibes-jev/engine/platform/platform/intelligence';
+import { runLanguageServerInstall } from '@goodvibes-jev/engine/terminal-shell';
 import { openCommandView, requireReadModels, requireShellPaths } from './runtime-services.ts';
 
 function resolveTargetPath(pathArg: string, ctx: CommandContext): string {
@@ -207,26 +208,12 @@ export function registerIntelligenceRuntimeCommands(registry: CommandRegistry, o
       }
 
       if (sub === 'install') {
-        const target = args[1];
-        if (!target) {
-          ctx.print('Intelligence Install\n  Usage: /intelligence install <file|language>  (installs the language server for that language into your GoodVibes bin directory)');
-          return;
-        }
-        const hold = holdIntelligence(ctx);
-        try {
-          const subject = target.includes('.') || target.includes('/') ? resolveTargetPath(target, ctx) : target;
-          ctx.print(`Intelligence Install: ${target}\n  installing (up to 3 minutes)...`);
-          const outcome = await hold.intelligence.installLanguageServer(subject);
-          ctx.print([
-            `Intelligence Install: ${outcome.langId}`,
-            `  ${outcome.status}: ${outcome.reason}`,
-            ...(outcome.path ? [`  path: ${outcome.path}`] : []),
-            ...(outcome.status === 'installed' || outcome.status === 'already-installed'
-              ? ['  next: /intelligence references <file> <line> <column>'] : []),
-          ].join('\n'));
-        } finally {
-          await hold.release();
-        }
+        await runLanguageServerInstall(args[1], {
+          print: (text) => ctx.print(text),
+          resolvePath: (target) => resolveTargetPath(target, ctx),
+          hold: () => holdIntelligence(ctx),
+          nextAfterInstall: '/intelligence references <file> <line> <column>',
+        });
         return;
       }
 

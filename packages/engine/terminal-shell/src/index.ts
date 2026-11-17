@@ -349,3 +349,9 @@ export {
   runWorkstreamCommand,
   type WorkstreamCommandDeps,
 } from './workstream-command.js';
+export {
+  LANGUAGE_SERVER_INSTALL_USAGE,
+  languageServerInstallLines,
+  runLanguageServerInstall,
+  type LanguageServerInstallDeps,
+} from './language-server-install.js';

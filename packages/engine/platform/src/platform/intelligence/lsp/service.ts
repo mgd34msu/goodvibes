@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { logger } from '../../utils/logger.js';
@@ -22,6 +22,35 @@ const ENGINE_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..
 
 /** A server nobody has asked anything for this long is stopped; the next lookup starts it again. */
 const DEFAULT_IDLE_STOP_MS = 10 * 60_000;
+
+/**
+ * A server that failed to start is not spawned again on every lookup, but a
+ * failure is not kept for the life of the process either: a slow machine or a
+ * dependency still installing can fail one start. After this long, or as soon
+ * as the server program found on disk changes, the next lookup tries again.
+ */
+const START_RETRY_AFTER_MS = 60_000;
+
+/** What a start failure was judged against: when, and the program it ran. */
+interface StartFailure {
+  readonly reason: string;
+  readonly at: number;
+  /** The located program and its modification time, so a reinstall or upgrade retries at once. */
+  readonly program: string;
+}
+
+function programStamp(path: string | null): string {
+  if (!path) return '';
+  try {
+    return `${path}@${statSync(path).mtimeMs}`;
+  } catch {
+    return path;
+  }
+}
+
+function startRetryStep(command: string): string {
+  return `Check that ${command} runs from a terminal; the next lookup after a minute, or after ${command} is reinstalled, tries it again.`;
+}
 
 // A server binary inside the opened repository is never chosen: opening a repo
 // must not let it pick the program the editor runs. Only the engine install,
@@ -104,8 +133,8 @@ export class LspService {
   private clients: Map<string, LspClient> = new Map();
   private starting: Map<string, Promise<LspClientResolution>> = new Map();
   private readonly idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Start failures, so a server that cannot start is not spawned again on every lookup. */
-  private readonly startFailures = new Map<string, string>();
+  /** Start failures, so a server that cannot start is not spawned again on every lookup (see {@link START_RETRY_AFTER_MS}). */
+  private readonly startFailures = new Map<string, StartFailure>();
   /** Languages whose missing server was already logged. */
   private readonly missingNoted = new Set<string>();
   private installOutcomes: Map<string, LanguageServerInstallOutcome> | null = null;
@@ -149,8 +178,8 @@ export class LspService {
     }
     if (existing) this.clients.delete(key);
 
-    const failure = this.startFailures.get(key);
-    if (failure) return { status: 'failed', reason: failure, next: [`Check that ${config.command} runs from a terminal, then start a new session.`] };
+    const failure = this.currentStartFailure(key, config);
+    if (failure) return { status: 'failed', reason: failure.reason, next: [startRetryStep(config.command)] };
 
     const inFlight = this.starting.get(key);
     if (inFlight) return inFlight;
@@ -161,6 +190,22 @@ export class LspService {
     } finally {
       this.starting.delete(key);
     }
+  }
+
+  /**
+   * The start failure that still holds for a server, or undefined. One expires
+   * after {@link START_RETRY_AFTER_MS}, or when the program it ran is no longer
+   * the one found on disk (reinstalled, upgraded or newly on PATH).
+   */
+  private currentStartFailure(key: string, config: LspServerConfig): StartFailure | undefined {
+    const failure = this.startFailures.get(key);
+    if (!failure) return undefined;
+    if (Date.now() - failure.at >= START_RETRY_AFTER_MS
+      || programStamp(locateCommand(config.command, this.userBinaryDir())) !== failure.program) {
+      this.startFailures.delete(key);
+      return undefined;
+    }
+    return failure;
   }
 
   /** The client for a language when its server is already running; never starts one. */
@@ -198,7 +243,7 @@ export class LspService {
     } catch (err) {
       const stderr = client.recentStderr;
       const reason = `The ${config.command} language server did not start: ${summarizeError(err)}${stderr ? ` (${stderr.split('\n').slice(-3).join(' ')})` : ''}`;
-      this.startFailures.set(key, reason);
+      this.startFailures.set(key, { reason, at: Date.now(), program: programStamp(resolvedCommand) });
       logger.error('LspService: failed to start server', { langId, err: summarizeError(err) });
       try {
         await client.stop();
@@ -208,7 +253,7 @@ export class LspService {
           error: summarizeError(stopError),
         });
       }
-      return { status: 'failed', reason, next: [`Check that ${config.command} runs from a terminal, then start a new session.`] };
+      return { status: 'failed', reason, next: [startRetryStep(config.command)] };
     }
   }
 
@@ -221,7 +266,7 @@ export class LspService {
     const hint = manualInstallHint(command);
     const next = [
       ...(hint ? [`Install it: ${hint}`] : [`Install ${command} and put it on PATH`]),
-      ...(isInstallableServer(command) ? [`Or let GoodVibes install it into ${this.userBinaryDir()} (in goodvibes: /intelligence install ${langId})`] : []),
+      ...(isInstallableServer(command) ? [`Or let GoodVibes install it into ${this.userBinaryDir()}: type /intelligence install ${langId} in goodvibes or goodvibes-agent`] : []),
     ];
     const lastAttempt = last && last.status !== 'installed' && last.status !== 'already-installed'
       ? ` The last install attempt (${new Date(last.at).toISOString()}) did not succeed: ${last.reason}.` : '';
@@ -360,14 +405,15 @@ export class LspService {
 
   /**
    * Each configured language and its server's state now: `running`, `failed`
-   * (it could not start; it is not tried again this session) or `idle` (it
-   * starts on the first lookup). Reads only what this service holds.
+   * (it could not start in the last minute; a later lookup tries again) or
+   * `idle` (it starts on the first lookup). Reads only what this service holds.
    */
   languageStates(): ReadonlyMap<string, 'running' | 'failed' | 'idle'> {
     const states = new Map<string, 'running' | 'failed' | 'idle'>();
     for (const [langId, config] of this.configs) {
       const key = serverKey(config);
-      states.set(langId, this.clients.get(key)?.isRunning ? 'running' : this.startFailures.has(key) ? 'failed' : 'idle');
+      const failed = (this.startFailures.get(key)?.at ?? -Infinity) > Date.now() - START_RETRY_AFTER_MS;
+      states.set(langId, this.clients.get(key)?.isRunning ? 'running' : failed ? 'failed' : 'idle');
     }
     return states;
   }

@@ -50,6 +50,7 @@ import { registerOperatorActionRuntimeCommands } from './commands/operator-actio
 import { registerConnectedHostAdminCommands } from './commands/connected-host-admin-runtime.ts';
 import { registerOwnerInboxCommands } from './commands/owner-inbox-runtime.ts';
 import { registerHeldCallsCommands } from './commands/held-calls-runtime.ts';
+import { registerIntelligenceRuntimeCommands } from './commands/intelligence-runtime.ts';
 import { registerEmailRuntimeCommands } from './commands/email-runtime.ts';
 import { registerCalendarRuntimeCommands } from './commands/calendar-runtime.ts';
 import { registerGoogleRuntimeCommands } from './commands/google-runtime.ts';
@@ -97,6 +98,7 @@ export function registerBuiltinCommands(
   registerConnectedHostAdminCommands(registry);
   registerOwnerInboxCommands(registry);
   registerHeldCallsCommands(registry);
+  registerIntelligenceRuntimeCommands(registry);
   registerCalendarRuntimeCommands(registry);
   registerAgentRuntimeProfileRuntimeCommands(registry);
   registerVibeRuntimeCommands(registry);

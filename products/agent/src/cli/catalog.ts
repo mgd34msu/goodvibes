@@ -340,7 +340,8 @@ export const AGENT_CLI_CATALOG: CliCatalog<GoodVibesCliCommand, FlagField, GoodV
       errors.push('Conflicting session lifecycle flags: --continue and --resume. Use only one of --continue or --resume.');
     }
     if ((flags.port !== undefined || flags.hostname !== undefined) && command !== 'pair' && command !== 'unknown') {
-      errors.push(`${flags.port !== undefined ? '--port' : '--hostname'} only applies to the pair command.`);
+      const given = [flags.port !== undefined ? '--port' : '', flags.hostname !== undefined ? '--hostname' : ''].filter(Boolean).join(' and ');
+      errors.push(`${given} only ${given.includes(' and ') ? 'apply' : 'applies'} to the pair command; nothing else reads ${given.includes(' and ') ? 'them' : 'it'}. Remove ${given.includes(' and ') ? 'them' : 'it'}, or run pair with ${given.includes(' and ') ? 'them' : 'it'}.`);
     }
     if (command === 'unknown' && result.rawCommand !== undefined) {
       const key = result.rawCommand.toLowerCase();

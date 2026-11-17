@@ -429,6 +429,7 @@ export class DaemonServer {
       // The continuation reaches the same gate the inbound message did.
       surfaceActionHelper: this.surfaceActionHelper,
       configReader: this.configManager,
+      hasFreeAgentSlot: () => this.agentManager.hasFleetCapacity(),
     });
 
     this.distributedRuntime.attachRuntime({

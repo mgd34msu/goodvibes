@@ -121,6 +121,12 @@ function attachedFacts(session: SharedSessionRecord): string {
 const SPAWN_IN_FLIGHT_MS = 30_000;
 /** Input metadata marking a message that waits for a free agent; it survives a restart with the row. */
 const WAITING_FOR_CAPACITY_KEY = 'waitingForCapacitySince';
+/**
+ * Input metadata keeping what the message was read as on arrival (`work`,
+ * `conversation` or `unsure`) while it waits for a free agent, so starting it
+ * later acts on that reading instead of reading the message again.
+ */
+export const ARRIVAL_INTENT_KEY = 'arrivalIntent';
 
 /**
  * Every session, message and input change replaces a map entry (records are
@@ -312,15 +318,22 @@ export class SharedSessionBroker {
    * time, `already` when it was waiting, null when the row is not a queued
    * input of this session.
    */
-  async holdForCapacity(sessionId: string, inputId: string): Promise<'held' | 'already' | null> {
+  async holdForCapacity(sessionId: string, inputId: string, arrivalIntent?: string): Promise<'held' | 'already' | null> {
     await this.start();
     const row = this.inputs.get(sessionId)?.find((entry) => entry.id === inputId);
     if (!row || row.state !== 'queued') return null;
     if (this.capacityWaiting.has(inputId)) return 'already';
     this.capacityWaiting.set(inputId, sessionId);
-    if (typeof row.metadata[WAITING_FOR_CAPACITY_KEY] !== 'number') {
+    const keepIntent = arrivalIntent !== undefined && row.metadata[ARRIVAL_INTENT_KEY] === undefined;
+    if (typeof row.metadata[WAITING_FOR_CAPACITY_KEY] !== 'number' || keepIntent) {
+      // One write marks the wait and keeps the arrival reading together.
       updateSharedSessionInput(this.sessionInputStore(), sessionId, inputId, (current) => ({
-        ...current, metadata: { ...current.metadata, [WAITING_FOR_CAPACITY_KEY]: Date.now() },
+        ...current,
+        metadata: {
+          ...current.metadata,
+          ...(typeof current.metadata[WAITING_FOR_CAPACITY_KEY] === 'number' ? {} : { [WAITING_FOR_CAPACITY_KEY]: Date.now() }),
+          ...(keepIntent ? { [ARRIVAL_INTENT_KEY]: arrivalIntent } : {}),
+        },
       }));
       await this.persist();
     }

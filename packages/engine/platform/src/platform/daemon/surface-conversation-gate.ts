@@ -303,7 +303,8 @@ async function spawnOrSettle(
   const spawned = deps.trySpawnAgent(input, logLabel, sessionId);
   if (!(spawned instanceof Response)) return spawned;
   const held = spawned.status === 429 && sessionId ? findHeldInput(deps, origin, sessionId) : undefined;
-  const waiting = held && sessionId ? await deps.sessionBroker.holdForCapacity?.(sessionId, held.id) : null;
+  // The arrival reading waits with the row, so starting it later reads nothing again.
+  const waiting = held && sessionId ? await deps.sessionBroker.holdForCapacity?.(sessionId, held.id, origin?.intent) : null;
   if (held && waiting) {
     if (waiting === 'held') {
       void deps.deliverSurfaceNotice?.(resolveOriginBinding(deps, origin, sessionId), WAITING_FOR_CAPACITY_NOTICE)

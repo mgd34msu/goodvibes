@@ -117,24 +117,6 @@ const STEP_UP: Loosening = {
 // The direction of a change to these cannot be told from the values, so any change counts.
 const PINNED: Loosening = { loosening: 'change a safety-gate setting', loosens: changes };
 
-function stringEntries(value: unknown): string[] | undefined {
-  return Array.isArray(value) && value.every(entry => typeof entry === 'string')
-    ? value.map(entry => entry.trim())
-    : undefined;
-}
-/** A list that grants: adding an entry widens it, removing one only narrows it. */
-function widensList(loosening: string): Loosening {
-  return {
-    loosening,
-    loosens: (prev, next) => {
-      const proposed = stringEntries(next);
-      if (proposed === undefined) return changes(prev, next);
-      const had = new Set(stringEntries(prev) ?? []);
-      return proposed.some(entry => !had.has(entry));
-    },
-  };
-}
-
 /** Switches that open a listener or a destination; turning one on loosens security. */
 const OPENING_SWITCHES: readonly string[] = [
   'danger.httpListener', 'controlPlane.trustProxy', 'fetch.allowLocalhost',
@@ -154,6 +136,7 @@ const PINNED_NETWORK: readonly string[] = [
   'network.remoteFetch.allowPrivateHosts', 'network.outboundTls.', 'fetch.trustedHosts', 'fetch.sanitizeMode',
   'controlPlane.host', 'controlPlane.hostMode', 'controlPlane.cors.allowedOrigins',
   'httpListener.host', 'httpListener.hostMode', 'httpListener.trustProxy', 'httpListener.trustCloudflare',
+  'sandbox.egressAllowlist', 'sandbox.workspaceWritable',
 ];
 /** An enum value that hands a decision the owner would make to code or a model. */
 const becomes = (value: string): ((prev: unknown, next: unknown) => boolean) => (prev, next) => next === value && prev !== value;
@@ -170,8 +153,6 @@ function declareLoosening(keyOrPrefix: string, loosening: Loosening): void {
 declareLoosening('permissions.mode', PERMISSION_MODE);
 declareLoosening('behavior.autoApprove', AUTO_APPROVE);
 declareLoosening('sandbox.enabled', SANDBOX);
-declareLoosening('sandbox.egressAllowlist', widensList('let another command reach the network from the sandbox'));
-declareLoosening('sandbox.workspaceWritable', widensList('let sandboxed commands write another path'));
 declareLoosening('permissions.tools.', TOOL_PERMISSION);
 for (const key of OPENING_SWITCHES) declareLoosening(key, OPENING);
 declareLoosening('fetch.blockedHosts', BLOCKED_HOSTS);

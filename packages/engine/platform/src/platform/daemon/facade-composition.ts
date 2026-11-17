@@ -25,6 +25,7 @@ import {
 import { ChannelIngressAlarm } from '../channels/ingress-alarm.js';
 import { ControlPlaneGateway } from '../control-plane/index.js';
 import { buildSharedSessionAgentSpawnRoutingInput } from '../control-plane/session-intents.js';
+import { ARRIVAL_INTENT_KEY } from '../control-plane/session-broker.js';
 import type { ModelIdCandidate } from '../providers/model-id-resolution.js';
 import {
   GOODVIBES_AGENT_KNOWLEDGE_DB_FILE,
@@ -850,6 +851,11 @@ export function configureDaemonSessionContinuation(options: {
   readonly surfaceActionHelper?: Pick<DaemonSurfaceActionHelper, 'conversationGateDeps'> | undefined;
   /** Reads `conversationGate.*` so both halves of the gate obey one configuration. */
   readonly configReader?: ConversationGateConfigReader | undefined;
+  /**
+   * Whether a spawn would find a free agent slot now (`AgentManager.hasFleetCapacity`).
+   * A message that must be read before it can start is not read while the fleet is full.
+   */
+  readonly hasFreeAgentSlot?: (() => boolean) | undefined;
 }): void {
   const readingInputs = new Set<string>();
   options.sessionBroker.setContinuationRunner(async ({ sessionId, input, task, routeBinding }) => {
@@ -866,10 +872,14 @@ export function configureDaemonSessionContinuation(options: {
       // Classify the OWNER's words (`input.body`), never the enriched
       // continuation task the broker builds from the transcript, that framing
       // reads as work no matter what the owner actually said.
+      // A message held for capacity keeps what it was read as on arrival.
+      const arrivalIntent = input.metadata[ARRIVAL_INTENT_KEY];
+      const intent = arrivalIntent === 'work' || arrivalIntent === 'conversation' || arrivalIntent === 'unsure' ? arrivalIntent : undefined;
       const origin: SurfaceIngressOrigin | null = input.surfaceKind
         ? {
             surface: input.surfaceKind,
             text: input.body,
+            ...(intent ? { intent } : {}),
             ...(input.userId ? { userId: input.userId } : {}),
             ...(routeBinding?.channelId ?? input.externalId ? { channelId: routeBinding?.channelId ?? input.externalId } : {}),
             // Session keys may synthesize channel-as-thread. Only a bound route
@@ -886,6 +896,11 @@ export function configureDaemonSessionContinuation(options: {
       });
       const label = 'DaemonServer.sharedSessionFollowUp';
       let gateDeps = options.surfaceActionHelper?.conversationGateDeps();
+      // The gate would read this message (a decision-model request) only to find
+      // the fleet full; wait for a free agent first and read it once then.
+      if (gateDeps && !escalation.startsContract && !origin?.intent && options.hasFreeAgentSlot?.() === false) {
+        return { disposition: 'capacity', reason: 'every agent slot is taken' };
+      }
       if (gateDeps && !escalation.startsContract) {
         const inputSnapshot = JSON.stringify(captureOwnedJson(input));
         const session = options.sessionBroker.getSession(sessionId);

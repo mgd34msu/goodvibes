@@ -273,6 +273,20 @@ export class AgentManager {
     return active.size;
   }
 
+  /**
+   * Whether a top-level spawn would find a free agent slot now: the same fleet
+   * cap `spawn` refuses with an AgentCapacityError. Reads counts and settings
+   * only, so a caller can learn the fleet is full before doing costly work for
+   * a spawn that would be refused.
+   */
+  hasFleetCapacity(): boolean {
+    if (!this.configManager) return true;
+    const decision = evaluateOrchestrationSpawn({
+      configManager: this.configManager, mode: 'manual-batch', activeAgents: this.fleetCount(), requestedDepth: 0,
+    });
+    return decision.allowed || decision.boundCap?.key !== 'fleet.maxSize';
+  }
+
   private deriveEffectiveTools(
     input: AgentInput,
     defaultTools: string[],

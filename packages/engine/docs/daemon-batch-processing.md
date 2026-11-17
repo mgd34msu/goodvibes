@@ -320,6 +320,7 @@ The platform provisioning route configures the queue consumer with `dead_letter_
 | `413` | `QUEUE_PAYLOAD_TOO_LARGE` | The job body is larger than the daemon's queue message limit and no R2 bucket is bound to hold it. |
 | `429` | `QUEUE_BUDGET_EXHAUSTED` | The daily queue budget is used up; the answer says what was used and when it resets. |
 | `503` | `QUEUE_NOT_CONFIGURED` | A queue route was called but the `GOODVIBES_BATCH_QUEUE` binding is missing. |
+| `503` | `QUEUE_SEND_FAILED` | Storing the job body in R2 or sending the queue message failed. Nothing was queued: the R2 body is deleted and the daily budget reservation is given back. |
 | `503` | `DAEMON_URL_REQUIRED` | Neither `options.daemonUrl` nor `GOODVIBES_DAEMON_URL` is configured. |
 | `400` | `DAEMON_URL_INVALID` | The daemon URL is not a URL. |
 | `400` | `DAEMON_URL_INSECURE` | The daemon URL is not `https:` and `GOODVIBES_ALLOW_INSECURE_DAEMON_URL` is not set. |

@@ -153,6 +153,8 @@ type BudgetAnswer = {
   readonly used?: { readonly ops: number; readonly messages: number };
   readonly limits?: { readonly ops: number; readonly messages: number };
   readonly resetsAt?: number;
+  /** What this reservation charged to the coordinator's counter; released when nothing was queued. */
+  readonly reserved?: { readonly ops: number; readonly messages: number };
 };
 
 // Everything the Worker runs. Its source text is the deployed module, so
@@ -388,8 +390,54 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
       messages: envNumber(env.GOODVIBES_MAX_QUEUE_MESSAGES_PER_DAY),
     };
     if (limits.ops === 0 && limits.messages === 0) return { allowed: true };
-    const answer = await coordinatorCall(env, '/budget/reserve', { ops: queueOpsFor(bytes), messages: 1, limits });
-    return answer ? answer as BudgetAnswer : { allowed: true, unmetered: true };
+    const reserved = { ops: queueOpsFor(bytes), messages: 1 };
+    const answer = await coordinatorCall(env, '/budget/reserve', { ...reserved, limits });
+    if (!answer) return { allowed: true, unmetered: true };
+    return answer['allowed'] === true ? { ...(answer as BudgetAnswer), reserved } : answer as BudgetAnswer;
+  }
+
+  /** Gives back a reservation for a message that was never queued. */
+  async function releaseQueue(env: GoodVibesCloudflareWorkerEnv, answer: BudgetAnswer): Promise<boolean> {
+    if (!answer.reserved) return true;
+    const released = await coordinatorCall(env, '/budget/release', answer.reserved).catch(() => null);
+    return released !== null;
+  }
+
+  /**
+   * Puts the R2 body (when there is one) and sends the queue message. When
+   * either step fails nothing is left behind: the R2 body is deleted, the
+   * budget reservation is given back, and the caller is told nothing was queued.
+   */
+  async function sendQueued(
+    env: GoodVibesCloudflareWorkerEnv,
+    queue: GoodVibesCloudflareQueue<GoodVibesCloudflareQueuePayload>,
+    message: GoodVibesCloudflareQueuePayload,
+    budget: BudgetAnswer,
+    r2Body?: { readonly key: string; readonly text: string; readonly bucket: GoodVibesCloudflareR2Bucket },
+  ): Promise<Response | null> {
+    let step = r2Body ? 'store the job body in R2' : 'send the queue message';
+    try {
+      if (r2Body) await r2Body.bucket.put(r2Body.key, r2Body.text);
+      step = 'send the queue message';
+      await queue.send(message);
+      return null;
+    } catch (error) {
+      if (r2Body) await r2Body.bucket.delete(r2Body.key).catch(() => undefined);
+      const released = await releaseQueue(env, budget);
+      console.warn('GoodVibes worker could not queue a message', { step, error: String(error) });
+      return json({
+        error: `Nothing was queued: the Worker could not ${step} (${String(error)})`,
+        code: 'QUEUE_SEND_FAILED',
+        state: released
+          ? 'nothing was queued and the daily queue budget was not charged'
+          : 'nothing was queued; the daily queue budget reservation could not be given back and stays counted until midnight UTC',
+        next: [
+          'Send the request again',
+          'Post /batch/jobs to send the job straight to the daemon without the queue',
+          'Check the queue and R2 bindings in the Cloudflare dashboard',
+        ],
+      }, 503);
+    }
   }
 
   function budgetRefusal(answer: BudgetAnswer): Response {
@@ -485,7 +533,8 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
     const message = { type: 'batch.tick' as const, force: toRecord(body)['force'] === true, enqueuedAt: Date.now() };
     const budget = await reserveQueue(env, utf8Bytes(JSON.stringify(message)));
     if (!budget.allowed) return budgetRefusal(budget);
-    await queue.send(message);
+    const failed = await sendQueued(env, queue, message, budget);
+    if (failed) return failed;
     return json({ queued: true }, 202);
   }
 
@@ -533,8 +582,9 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
       : { type: 'batch.job.create', body, jobId, enqueuedAt };
     const budget = await reserveQueue(env, utf8Bytes(JSON.stringify(message)));
     if (!budget.allowed) return budgetRefusal(budget);
-    if (useR2 && artifacts) await artifacts.put(payloadKey(jobId), JSON.stringify(body));
-    await queue.send(message);
+    const failed = await sendQueued(env, queue, message, budget,
+      useR2 && artifacts ? { key: payloadKey(jobId), text: JSON.stringify(body), bucket: artifacts } : undefined);
+    if (failed) return failed;
     await kvPut(env, `job:${jobId}`, { state: 'queued', enqueuedAt, payload: useR2 ? 'r2' : 'queue' });
     return json({
       queued: true,
@@ -579,6 +629,23 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
         const next = { day, ops: used.ops + ops, messages: used.messages + messages };
         await this.state.storage.put('budget', next);
         return json({ allowed: true, ...answer, used: { ops: next.ops, messages: next.messages } });
+      }
+      if (request.method === 'POST' && url.pathname === '/budget/release') {
+        // A reservation for a message that was never queued is given back, never below zero.
+        const parsed = parseJsonBody(await request.text());
+        const body = parsed instanceof Response ? {} : toRecord(parsed);
+        const day = utcDay(Date.now());
+        const stored = toRecord(await this.state.storage.get('budget'));
+        if (stored['day'] !== day) return json({ released: false, day });
+        const ops = Math.max(0, Math.floor(Number(body['ops']) || 0));
+        const messages = Math.max(0, Math.floor(Number(body['messages']) || 0));
+        const next = {
+          day,
+          ops: Math.max(0, (Number(stored['ops']) || 0) - ops),
+          messages: Math.max(0, (Number(stored['messages']) || 0) - messages),
+        };
+        await this.state.storage.put('budget', next);
+        return json({ released: true, day, used: { ops: next.ops, messages: next.messages } });
       }
       if (request.method === 'GET' && url.pathname === '/budget') {
         const stored = toRecord(await this.state.storage.get('budget'));

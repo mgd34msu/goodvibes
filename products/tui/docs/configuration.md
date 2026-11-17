@@ -152,7 +152,7 @@ applies.
 | `checkpoints.allowBroadRoot` | boolean | `false` | Opt in to snapshotting a broad root (the filesystem root, your home directory, or `~/.goodvibes`). Such roots are refused by default to avoid an unbounded store. Set `true` only when a broad root is genuinely intended. |
 | `checkpoints.allowLargeFirstSnapshot` | boolean | `false` | Opt in to a first snapshot whose full file sweep exceeds `maxFirstSnapshotFiles`. Refused by default with a message stating the count. |
 | `checkpoints.maxFirstSnapshotFiles` | number | `50000` | Ceiling for the first-ever snapshot's file sweep, a whole number from 1 to 10000000. |
-| `checkpoints.autoRetention` | boolean | `true` | Run a retention sweep automatically after each snapshot and once at startup. Set `false` to drive retention only via manual garbage collection. |
+| `checkpoints.autoRetention` | boolean | `true` | Run a retention sweep automatically after each snapshot and once at startup. Set `false` to drive retention only via manual garbage collection. Retention keeps checkpoints by age and count (turn and agent-run: 24 h, 20; manual: 7 days, 100) and never removes the newest one; `/checkpoints` and `checkpoints.list` say what the last sweep removed and why. |
 
 Example (`.goodvibes/tui/settings.json`; `checkpoints.allowBroadRoot` is taken only from your own settings file):
 

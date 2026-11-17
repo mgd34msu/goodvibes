@@ -112,6 +112,7 @@ export function createWorkspaceCheckpointing(opts: {
 /** The verbs' surface over one workspace's checkpointing, with the routes to the others. */
 export type RoutedCheckpointGateway = WorkspaceCheckpointing['gatewayManager'] & {
   retentionFailure(): ReturnType<WorkspaceCheckpointManager['retentionFailure']>;
+  historyTrimmed(): ReturnType<WorkspaceCheckpointManager['historyTrimmed']>;
   forSession?(sessionId: string): RoutedCheckpointGateway | undefined;
   forCheckpoint?(id: string): Promise<RoutedCheckpointGateway | undefined>;
 };
@@ -128,6 +129,7 @@ function gatewayOf(checkpointing: WorkspaceCheckpointing): RoutedCheckpointGatew
     sessionChanges: (sessionId) => base.sessionChanges(sessionId),
     create: (createOpts) => base.create(createOpts),
     retentionFailure: () => checkpointing.manager.retentionFailure(),
+    historyTrimmed: () => checkpointing.manager.historyTrimmed(),
   };
 }
 

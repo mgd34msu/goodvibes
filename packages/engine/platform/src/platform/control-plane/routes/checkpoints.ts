@@ -172,7 +172,7 @@ function clampLimit(raw: unknown): number {
 
 /** Structural deps, the read/write surface `checkpoints.*` + `sessions.changes.get` needs. */
 export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot' | 'resolveRoot'>
-  & Partial<Pick<WorkspaceCheckpointManager, 'retentionFailure'>>
+  & Partial<Pick<WorkspaceCheckpointManager, 'retentionFailure' | 'historyTrimmed'>>
   & {
     /**
      * The manager of the workspace a session works in, when the host keeps one
@@ -206,7 +206,13 @@ export function createCheckpointsListHandler(manager: CheckpointsGatewayManager)
     // Present only while the last automatic retention sweep is failing, so a
     // store that is growing past its limits says why instead of looking healthy.
     const retentionFailure = scoped.retentionFailure?.() ?? null;
-    return retentionFailure ? { checkpoints, retentionFailure } : { checkpoints };
+    // What retention last removed, so an agent offered rewind knows why an older checkpoint is gone.
+    const historyTrimmed = scoped.historyTrimmed?.() ?? null;
+    return {
+      checkpoints,
+      ...(retentionFailure ? { retentionFailure } : {}),
+      ...(historyTrimmed ? { historyTrimmed } : {}),
+    };
   };
 }
 

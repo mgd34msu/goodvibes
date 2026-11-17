@@ -264,6 +264,11 @@ export const CHECKPOINTS_LIST_OUTPUT_SCHEMA = objectSchema({
     error: STRING_SCHEMA,
     at: NUMBER_SCHEMA,
   }, ['error', 'at']),
+  historyTrimmed: objectSchema({
+    count: NUMBER_SCHEMA,
+    reason: STRING_SCHEMA,
+    at: NUMBER_SCHEMA,
+  }, ['count', 'reason', 'at']),
 }, ['checkpoints']);
 
 export const CHECKPOINTS_CREATE_INPUT_SCHEMA = objectSchema({

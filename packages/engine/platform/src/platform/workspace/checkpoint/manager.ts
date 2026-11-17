@@ -40,7 +40,7 @@ import { captureQuarantineSource, quarantineCorruptFile } from '../../utils/atom
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { AgentEvent } from '../../../events/agents.js';
-import { RetentionPolicy, type RetentionConfig, type RetentionClass } from '../../runtime/retention/index.js';
+import { RetentionPolicy, DEFAULT_RETENTION_CONFIG, type RetentionConfig, type RetentionClass, type RetentionPruneReason } from '../../runtime/retention/index.js';
 import { SideGitRunner, CHECKPOINT_REF_PREFIX, EMPTY_TREE_HASH, detectGitToplevel } from './side-git.js';
 import { acquireCrossProcessLock } from './cross-process-lock.js';
 import { deleteCheckpointRefs, type CheckpointPruneResult } from './pruner.js';
@@ -68,6 +68,38 @@ function generateCheckpointId(now: () => number): string {
 /** Default retention class per checkpoint kind when the caller does not specify one. */
 function defaultRetentionClassFor(kind: CheckpointKind): RetentionClass {
   return kind === 'manual' ? 'forensic' : 'standard';
+}
+
+/**
+ * Checkpoints are bounded by age and count only. A checkpoint's `sizeBytes` is
+ * the working-tree size of the files it changed, not what the side repository
+ * stores (unchanged blobs are shared, and a first checkpoint counts the whole
+ * workspace), so a size ceiling over it pruned checkpoints in any workspace
+ * larger than the ceiling without freeing storage. An explicit class override
+ * keeps its own size limit.
+ */
+function checkpointRetentionConfig(override: Partial<RetentionConfig> | undefined): Partial<RetentionConfig> {
+  const forClass = (cls: RetentionClass) => override?.[cls] ?? { ...DEFAULT_RETENTION_CONFIG[cls], maxSizeBytes: Number.POSITIVE_INFINITY };
+  return { short: forClass('short'), standard: forClass('standard'), forensic: forClass('forensic') };
+}
+
+/** What the last retention sweep removed from the checkpoint history, and why. */
+export interface CheckpointHistoryTrim {
+  readonly count: number;
+  readonly reason: string;
+  readonly at: number;
+}
+
+function describeTrim(reasons: readonly RetentionPruneReason[], config: RetentionConfig): string {
+  const age = reasons.filter((reason) => reason === 'age').length;
+  const count = reasons.filter((reason) => reason === 'count').length;
+  const size = reasons.length - age - count;
+  const hours = (ms: number) => `${Math.round(ms / 3_600_000)} h`;
+  const parts: string[] = [];
+  if (age > 0) parts.push(`${age} older than ${hours(config.standard.maxAgeMs)} (turn and agent-run) or ${hours(config.forensic.maxAgeMs)} (manual)`);
+  if (count > 0) parts.push(`${count} beyond the ${config.standard.maxCount} kept per kind (${config.forensic.maxCount} manual)`);
+  if (size > 0) parts.push(`${size} over the configured size limit`);
+  return `checkpoint history trimmed: ${parts.join('; ')}`;
 }
 
 // Option shapes live in manager-options.ts (800-line cap), re-exported here.
@@ -125,6 +157,7 @@ export class WorkspaceCheckpointManager {
   private readonly daemonStateDir: string;
   /** Non-null (the honest refusal message) when the resolved root was refused as too broad; drives both the skipped auto-subscription and rejected explicit `create()` calls. */
   private lastRetentionFailure: { readonly error: string; readonly at: number } | null = null;
+  private lastTrim: CheckpointHistoryTrim | null = null;
   private rootRefusal: string | null = null;
 
   private checkpoints = new Map<string, WorkspaceCheckpoint>();
@@ -236,7 +269,7 @@ export class WorkspaceCheckpointManager {
     });
     this.manifestPath = join(this.checkpointRootDir, 'index.json');
     this.manifestStore = new JsonFileStore<Manifest>(this.manifestPath);
-    this.retentionPolicy = new RetentionPolicy(this.retentionOverride, this.now);
+    this.retentionPolicy = new RetentionPolicy(checkpointRetentionConfig(this.retentionOverride), this.now);
   }
 
   /**
@@ -379,6 +412,11 @@ export class WorkspaceCheckpointManager {
    */
   retentionFailure(): { readonly error: string; readonly at: number } | null {
     return this.lastRetentionFailure;
+  }
+
+  /** What the last sweep that removed checkpoints removed, and why; null until one has. The newest checkpoint is never removed. */
+  historyTrimmed(): CheckpointHistoryTrim | null {
+    return this.lastTrim;
   }
 
   /** Cheap, non-blocking retention sweep: skips when auto-retention is off, the root was refused, or nothing is over-limit; else fires the lock-serialized `gc()` fire-and-forget (like the auto-snapshot path). */
@@ -729,8 +767,10 @@ export class WorkspaceCheckpointManager {
   }
 
   private async gcInternal(): Promise<CheckpointPruneResult> {
-    const ids = this.retentionPolicy.candidates().map((record) => record.id);
+    const reasons = this.retentionPolicy.candidateReasons();
+    const ids = [...reasons.keys()];
     if (ids.length > 0) {
+      this.lastTrim = { count: ids.length, reason: describeTrim([...reasons.values()], this.retentionPolicy.getConfig()), at: this.now() };
       for (const id of ids) {
         this.checkpoints.delete(id);
         this.retentionPolicy.unregister(id);
@@ -823,8 +863,8 @@ export class WorkspaceCheckpointManager {
    * sizes of the changed paths, read immediately after they were staged and
    * committed (so they still reflect exactly the content just captured).
    * Deleted paths (no longer on disk) contribute 0. This is deliberately not
-   * exact git object-store accounting, it exists for retention's `maxSizeBytes`
-   * bookkeeping, not for a byte-perfect audit.
+   * exact git object-store accounting; it is shown with the checkpoint and is
+   * not a retention limit (see `checkpointRetentionConfig`).
    */
   private async computeSizeBytes(paths: string[]): Promise<number> {
     let total = 0;

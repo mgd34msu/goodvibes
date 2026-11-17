@@ -65,8 +65,14 @@ export function registerCheckpointRuntimeCommands(registry: CommandRegistry): vo
         ctx.print(`Failed to list checkpoints: ${summarizeError(err)}`);
         return;
       }
+      const trimmed = mgr.historyTrimmed();
+      const retentionFailure = mgr.retentionFailure();
+      const notes = [
+        ...(trimmed ? [`${trimmed.reason} (${trimmed.count} removed ${formatAge(trimmed.at)}; the newest is always kept).`] : []),
+        ...(retentionFailure ? [`Automatic retention is failing: ${retentionFailure.error}`] : []),
+      ];
       if (checkpoints.length === 0) {
-        ctx.print('No checkpoints yet. /checkpoint <label> creates one manually; turns and agent runs snapshot automatically.');
+        ctx.print(['No checkpoints yet. /checkpoint <label> creates one manually; turns and agent runs snapshot automatically.', ...notes].join('\n'));
         return;
       }
       const lines = [`Checkpoints (${checkpoints.length}, newest first):`];
@@ -77,6 +83,7 @@ export function registerCheckpointRuntimeCommands(registry: CommandRegistry): vo
       // them would cost one diff spawn per checkpoint (O(checkpoints)), which
       // stops being cheap once there are more than a handful. /rewind <id>
       // loads exactly one diff, so the exact file list is available there.
+      lines.push(...notes);
       lines.push('Use /rewind to preview and restore a completed turn (files and/or conversation); it reuses these checkpoints for the files half. With no completed turns recorded this run (e.g. right after a restart), /rewind falls back to restoring one of these checkpoints directly, by number or id; files only, no conversation state.');
       ctx.print(lines.join('\n'));
     },

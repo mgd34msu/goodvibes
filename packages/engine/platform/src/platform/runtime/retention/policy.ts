@@ -12,6 +12,12 @@
  *  2. Count limit, oldest records beyond `maxCount` are candidates.
  *  3. Size limit , oldest records are candidates until total size fits.
  *
+ * The newest record of a class is never a candidate: the limits apply to
+ * what is older than it. A single record larger than the size ceiling, or a
+ * class left alone past its age limit, keeps its latest entry instead of
+ * emptying the class (and, for workspace checkpoints, losing the parent the
+ * next one is measured against).
+ *
  * The actual file deletion is delegated to `SnapshotPruner`.
  */
 
@@ -192,6 +198,17 @@ export class RetentionPolicy {
     return this._collectCandidates();
   }
 
+  /** The current candidates with the limit each one crossed first (age, then count, then size). */
+  candidateReasons(): ReadonlyMap<string, RetentionPruneReason> {
+    const reasons = new Map<string, RetentionPruneReason>();
+    for (const cls of RETENTION_CLASSES) {
+      for (const [id, reason] of this._evaluateClass(this._getClassRecords(cls), this._config[cls]!)) {
+        if (!reasons.has(id)) reasons.set(id, reason);
+      }
+    }
+    return reasons;
+  }
+
   /**
    * Return current retention statistics per class.
    *
@@ -247,16 +264,15 @@ export class RetentionPolicy {
    * Records violating multiple limits are included once.
    */
   private _collectCandidates(): CheckpointRecord[] {
-    const classes: RetentionClass[] = ['short', 'standard', 'forensic'];
     const candidateSet = new Set<string>();
     const candidates: CheckpointRecord[] = [];
 
-    for (const cls of classes) {
+    for (const cls of RETENTION_CLASSES) {
       const config = this._config[cls]!;
       const classRecords = this._getClassRecords(cls);
-      const clsCandidates = this._evaluateClass(classRecords, config);
-      for (const record of clsCandidates) {
-        if (!candidateSet.has(record.id)) {
+      const pruneSet = this._evaluateClass(classRecords, config);
+      for (const record of classRecords) {
+        if (pruneSet.has(record.id) && !candidateSet.has(record.id)) {
           candidateSet.add(record.id);
           candidates.push(record);
         }
@@ -280,44 +296,54 @@ export class RetentionPolicy {
    *
    * @param sorted  - Records sorted oldest-first.
    * @param config  - Limits for this class.
-   * @returns Records that should be pruned.
+   * @returns The ids to prune, each with the first limit it crossed. The
+   *          newest record is never among them.
    */
   private _evaluateClass(
     sorted: CheckpointRecord[],
     config: RetentionClassConfig,
-  ): CheckpointRecord[] {
+  ): Map<string, RetentionPruneReason> {
     const now = this._clock();
-    const pruneSet = new Set<string>();
+    const pruneSet = new Map<string, RetentionPruneReason>();
+    // The newest record stays; every limit applies to what is older than it.
+    const older = sorted.slice(0, -1);
+    const newest = sorted.at(-1);
 
     // 1. Age limit
-    for (const record of sorted) {
+    for (const record of older) {
       if (now - record.createdAt > config.maxAgeMs) {
-        pruneSet.add(record.id);
+        pruneSet.set(record.id, 'age');
       }
     }
 
     // 2. Count limit, retain only the newest `maxCount` records.
-    const retained = sorted.filter((r) => !pruneSet.has(r.id));
-    if (retained.length > config.maxCount) {
-      const overflow = retained.length - config.maxCount;
+    const retained = older.filter((r) => !pruneSet.has(r.id));
+    const keptCount = retained.length + (newest ? 1 : 0);
+    if (keptCount > config.maxCount) {
+      const overflow = keptCount - config.maxCount;
       // Remove oldest first (sorted array is oldest-first).
       for (let i = 0; i < overflow; i++) {
         const r = retained[i];
-        if (r) pruneSet.add(r.id);
+        if (r) pruneSet.set(r.id, 'count');
       }
     }
 
     // 3. Size limit, trim oldest until total size fits.
     const afterCount = retained.filter((r) => !pruneSet.has(r.id));
-    let totalSize = afterCount.reduce((sum, r) => sum + r.sizeBytes, 0);
+    let totalSize = afterCount.reduce((sum, r) => sum + r.sizeBytes, newest?.sizeBytes ?? 0);
     for (const record of afterCount) {
       if (totalSize <= config.maxSizeBytes) {
         break;
       }
-      pruneSet.add(record.id);
+      pruneSet.set(record.id, 'size');
       totalSize -= record.sizeBytes;
     }
 
-    return sorted.filter((r) => pruneSet.has(r.id));
+    return pruneSet;
   }
 }
+
+const RETENTION_CLASSES: readonly RetentionClass[] = ['short', 'standard', 'forensic'];
+
+/** The limit a pruned record crossed. */
+export type RetentionPruneReason = 'age' | 'count' | 'size';

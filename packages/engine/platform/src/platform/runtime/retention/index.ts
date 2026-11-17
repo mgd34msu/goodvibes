@@ -14,6 +14,7 @@
  */
 
 export { RetentionPolicy, DEFAULT_RETENTION_CONFIG } from './policy.js';
+export type { RetentionPruneReason } from './policy.js';
 export { SnapshotPruner } from './pruner.js';
 export {
   APPEND_ONLY_STORES,

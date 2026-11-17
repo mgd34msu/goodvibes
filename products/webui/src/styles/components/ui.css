@@ -514,7 +514,9 @@ textarea.gv-input {
 }
 
 @media (pointer: coarse) {
-  .gv-segmented__item {
+  /* The small size is listed too: its two-class selector would otherwise outrank this one. */
+  .gv-segmented__item,
+  .gv-segmented--sm .gv-segmented__item {
     height: 38px;
     min-width: 44px;
   }

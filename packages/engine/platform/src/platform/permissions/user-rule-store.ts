@@ -32,7 +32,15 @@ import { withProcessLock } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
-import { ruleCovers, type RememberTier } from './approval-rules.js';
+import { compileRules, ruleCovers, type CompiledRules, type RememberTier } from './approval-rules.js';
+
+/** One project's rules for evaluation: the committed and remembered lists, and both compiled for matching. */
+export interface CompiledProjectRules {
+  readonly committed: readonly PolicyRule[];
+  readonly remembered: readonly PolicyRule[];
+  /** committed then remembered, compiled once; matched by the gate without copying either list. */
+  readonly lookup: CompiledRules;
+}
 
 /** A stored rule plus its provenance. */
 export interface StoredUserPermissionRule {
@@ -142,7 +150,7 @@ export class UserPermissionRuleStore {
   #compiled: {
     readonly records: readonly StoredUserPermissionRule[];
     readonly remembered: readonly StoredUserPermissionRule[];
-    readonly byProject: Map<string, { readonly committed: readonly PolicyRule[]; readonly remembered: readonly PolicyRule[] }>;
+    readonly byProject: Map<string, CompiledProjectRules>;
   } | null = null;
   readonly #revisionSource = revisionSource('permission rules', () => { this.refreshFromDisk(); return this.#changeRevision; });
   /** Whole mutations run one at a time, in call order. See StoreWriteQueue. */
@@ -323,15 +331,17 @@ export class UserPermissionRuleStore {
 
   /**
    * rules() and rememberedRules() for one check, after taking in another
-   * process's write once (one `stat`), with the publication revision they
-   * stand under. Both lists are frozen and shared until a rule changes.
+   * process's write once (one `stat`, none while the directory watch is quiet),
+   * with the publication revision they stand under, and `lookup`: both lists
+   * compiled for matching, committed first. All are frozen and shared by
+   * reference until a rule changes.
    */
-  evaluationRules(project?: string | null): { readonly committed: readonly PolicyRule[]; readonly remembered: readonly PolicyRule[]; readonly revision: number } {
+  evaluationRules(project?: string | null): CompiledProjectRules & { readonly revision: number } {
     this.refreshFromDisk();
     return { ...this.compiledFor(project), revision: this.publicationRevision };
   }
 
-  private compiledFor(project: string | null | undefined): { readonly committed: readonly PolicyRule[]; readonly remembered: readonly PolicyRule[] } {
+  private compiledFor(project: string | null | undefined): CompiledProjectRules {
     let compiled = this.#compiled;
     if (!compiled || compiled.records !== this.records || compiled.remembered !== this.remembered) {
       compiled = { records: this.records, remembered: this.remembered, byProject: new Map() };
@@ -341,10 +351,9 @@ export class UserPermissionRuleStore {
     let lists = compiled.byProject.get(key);
     if (!lists) {
       const applies = (record: StoredUserPermissionRule) => project === undefined || appliesIn(record, project);
-      lists = Object.freeze({
-        committed: Object.freeze(this.records.filter(applies).map(ruleForEvaluation)),
-        remembered: Object.freeze(this.remembered.filter(applies).map(ruleForEvaluation)),
-      });
+      const committed = Object.freeze(this.records.filter(applies).map(ruleForEvaluation));
+      const remembered = Object.freeze(this.remembered.filter(applies).map(ruleForEvaluation));
+      lists = Object.freeze({ committed, remembered, lookup: compileRules([...committed, ...remembered]) });
       compiled.byProject.set(key, lists);
     }
     return lists;

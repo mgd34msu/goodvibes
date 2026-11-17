@@ -36,14 +36,14 @@ import { effectPermittedForProvenance } from '../gate/surface-authority.js';
 import { isStateMutation } from '../gate/policy/state-policy.js';
 import { resolve } from 'node:path';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
-import { buildDurableRuleForDecision, buildRememberOptions, matchDurableRulesAsync, sessionApprovalKey, type RememberTier } from './approval-rules.js';
+import { buildDurableRuleForDecision, buildRememberOptions, compileRules, sessionApprovalKey, type CompiledRules, type RememberTier } from './approval-rules.js';
 import { stableStringify } from '../providers/registry-helpers.js';
 import { changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { toolDecisionOf } from './denial.js';
 import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
 import { processJevDecisions, type JevDecisionLedger, type JevDecisionRuleEffect } from './jev-decisions.js';
-import { readModeCategory, toolCategoryOf, type ToolDefinition } from '../types/tools.js';
-import { projectIdentity, type UserPermissionRuleStore } from './user-rule-store.js';
+import { readModeCategory, toolCategoryOf, type ToolDecision, type ToolDefinition } from '../types/tools.js';
+import { projectIdentity, type CompiledProjectRules, type UserPermissionRuleStore } from './user-rule-store.js';
 import type { PolicyRuntimeState } from '../runtime/permissions/policy-runtime.js';
 import { LayeredPolicyEvaluator } from '../runtime/permissions/evaluator.js';
 import { exportDecisions } from '../runtime/permissions/decision-otlp.js';
@@ -90,11 +90,14 @@ export type {
  */
 type PermissionConfigSnapshot = Readonly<Pick<ReturnType<typeof getConfigSnapshot>, 'permissions'>>;
 
-/** Owned fields from the already captured autonomous authority frame. */
+/**
+ * Owned fields from the already captured autonomous authority frame. The rule
+ * lists are not copied into it: the frame holds their publication revisions,
+ * which the admission's check compares, and the rules are matched from their
+ * owners' compiled lists.
+ */
 interface AutonomousPermissionOwner {
   readonly directory: string | null;
-  readonly rules: readonly PolicyRule[];
-  readonly policyRules: readonly PolicyRule[];
   readonly policyEnabled: boolean;
 }
 type AutonomousPermissionReading = Readonly<{
@@ -143,10 +146,8 @@ interface CallFactInput {
   readonly definition: ToolDefinition | undefined;
   readonly ownerOnly: OwnerOnlyKind | undefined;
   readonly directory: string | null;
-  readonly tools: PermissionsToolConfig | undefined;
-  readonly remembered: RememberedDecision | null;
-  readonly landed: RememberedDecision | null;
-  readonly policy: PermissionCheckResult | null;
+  /** What the decision's one rule lookup found (ruleFactOf). */
+  readonly rule: CallRuleFact | undefined;
   readonly untrustedRead: boolean;
   /** The registry's prepared call was declared read-only by its tool's own projection. */
   readonly declaredReadOnly?: boolean | undefined;
@@ -181,6 +182,27 @@ let exportedDecisionSequence = 0;
 /** A stable OTLP trace id for one session, so a collector joins its decisions. */
 function sessionTraceId(sessionId: string): string {
   return createHash('sha256').update(sessionId).digest('hex').slice(0, 32);
+}
+
+/** A manager with no rule store matches no saved rule. */
+const NO_RULES: CompiledProjectRules & { readonly revision: number } = Object.freeze({
+  committed: [], remembered: [], lookup: compileRules([]), revision: 0,
+});
+
+/** The owner's hand-written mode-constraint rules in a compiled list, found once per list. */
+const modeConstraintsOf = new WeakMap<CompiledRules, readonly PolicyRule[]>();
+function userModeConstraints(lookup: CompiledRules): readonly PolicyRule[] {
+  let found = modeConstraintsOf.get(lookup);
+  if (!found) {
+    found = Object.freeze(lookup.rules.filter((rule) => rule.type === 'mode-constraint'));
+    modeConstraintsOf.set(lookup, found);
+  }
+  return found;
+}
+
+/** Managed policy's verdict: allowed or refused by a policy rule, or undefined when none decided the call. */
+function managedVerdict(decision: LayeredPermissionDecision): boolean | undefined {
+  return decision.sourceLayer === 'policy' ? decision.allowed : undefined;
 }
 
 /**
@@ -731,11 +753,9 @@ export class PermissionManager {
     const choices = this.gate.autonomousChoices?.(sourceId) ?? {};
     const surface = this.gate.surfaceOf?.();
     const source = sourceOf();
-    const rules = this.userRuleStore?.rules(this.configReader.getWorkingDirectory()) ?? [];
-    const rulePublication = this.userRuleStore?.getPublicationRevision?.() ?? 0;
-    const policyRegistry = this.policyRuntimeState.getRegistry();
-    const policyRules = policyRegistry.getCurrent()?.rules ?? [];
-    const policyPublication = policyRegistry.getPublicationRevision?.() ?? 0;
+    // Another process's rule write is taken in first (committedRevision), so the publication is current.
+    const rulePublication = this.userRuleStore?.committedRevision?.() ?? this.userRuleStore?.getPublicationRevision?.() ?? 0;
+    const policyPublication = this.policyRuntimeState.getRegistry().getPublicationRevision?.() ?? 0;
     const policyEnabled = this.featureFlags?.isEnabled('permissions-policy-engine') === true;
     const ledger = this.gate.ledger ?? getProcessUntrustedContentLedger();
     const exposure = ledger.ingestedThisTurn();
@@ -746,7 +766,7 @@ export class PermissionManager {
     const executionOwner = currentExecutionModeOwner();
     const mode = executionOwner ? this.ownerMode(executionOwner) : effectivePermissionMode(scope.permissions.mode, scope.autoApprove, this.decisionModelWorks());
     const frame = { ...scope, permissions: { ...scope.permissions, mode }, autoApprove: false,
-      executionOwnerRevision: executionOwner?.getRevision(), source, surface, rules, rulePublication, policyRules, policyPublication, policyEnabled,
+      executionOwnerRevision: executionOwner?.getRevision(), source, surface, rulePublication, policyPublication, policyEnabled,
       exposure,
       exposureCoverage: { complete: coverage.complete, revision: coverage.revision } };
     assertAutonomousData(choices);
@@ -988,19 +1008,14 @@ export class PermissionManager {
     const effectWriteDenied = mode !== 'yolo' && permissions.tools?.write === 'deny';
     const owner = { frame: capturedAuthority, assertCurrent };
     const ownerOnly = recognizeOwnerOnly(toolName, args, definition, this.settingsFacts(toolName, args, admissionEvidence));
-    const subjects = callSubjects(args, definition);
-    const durable = mode === 'yolo' ? null : await this.rememberedDecision(this.getApprovalKey(toolName, args, options.hookOwner?.sessionId), toolName, args, { signal, assertCurrent }, owner, ownerOnly, subjects);
-    const policy = mode !== 'yolo' && capturedAuthority.policyEnabled
-      ? this.mapEvaluatorDecision(await this.evaluateRuntimePolicy(toolName, args, mode, this.policyClassification(category), { signal, assertCurrent }, owner, subjects), analysis)
-      : null;
-    // A link inside an allowed folder can lead to a path the owner denied: that denial applies too.
-    const landed = mode !== 'yolo' && durable?.effect !== 'deny'
-      ? await this.deniedWhereLinksLead(toolName, args, { signal, assertCurrent }, owner, options.hookOwner?.sessionId)
-      : null;
+    const rule = await this.ruleFactOf({
+      toolName, args, category, mode, tools: permissions.tools, ownerOnly, subjects: callSubjects(args, definition),
+      policyEnabled: capturedAuthority.policyEnabled, options: { signal, assertCurrent }, owner, sessionId: options.hookOwner?.sessionId,
+    });
     const exposure = (rawAuthority as Readonly<Record<string, unknown>>)['exposure'];
     const decided = classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface: effectSurface, definition, ownerOnly,
-      directory: capturedAuthority.directory, tools: permissions.tools, remembered: durable, landed, policy,
+      directory: capturedAuthority.directory, rule,
       untrustedRead: Array.isArray(exposure) && exposure.length > 0,
       declaredReadOnly: preparedCall?.registry.isPreparedReadOnly(preparedCall.call) === true,
     }));
@@ -1201,7 +1216,7 @@ export class PermissionManager {
       workingDirectory: input.workingDirectory,
       ...(input.attribution ? { attribution: input.attribution } : {}),
       // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
-      ...(o.ownerOnly === 'channel-request' ? {} : { rememberOptions: buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere()) }),
+      rememberOptions: o.ownerOnly === 'channel-request' ? [] : buildRememberOptions(input.toolName, input.args, this.rememberedRulesHere()),
     }, { signal: input.signal }), input.signal);
     input.assertCurrent();
     const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
@@ -1347,38 +1362,63 @@ export class PermissionManager {
     };
   }
 
-  /**
-   * The facts one call is classified by, from values this decision already
-   * holds. A deny is reported over an allow: a tool setting, then managed
-   * policy, then a denying answer or rule (including where a link leads), then
-   * an allowing answer or rule, then a managed allow.
-   */
+  /** The facts one call is classified by, from values this decision already holds. */
   private callFacts(i: CallFactInput): CallFacts {
     const paths = declaredValues(i.args, i.definition?.subjects?.paths);
     return {
       tool: i.toolName, category: i.category, sideEffects: i.definition?.sideEffects, surface: i.surface,
-      rule: i.mode === 'yolo' ? undefined : this.ruleFact(i),
+      rule: i.mode === 'yolo' ? undefined : i.rule,
       paths: paths === undefined ? undefined : classifyPaths(paths, i.directory),
       recoverable: declaredRecoverable(i.definition, i.args),
       ownerOnly: i.ownerOnly, untrustedRead: i.untrustedRead, declaredReadOnly: i.declaredReadOnly,
     };
   }
 
-  private ruleFact(i: CallFactInput): CallRuleFact | undefined {
+  /**
+   * The one rule lookup of a decision, reported as the rule fact the
+   * classifier reads: the owner's per-tool setting, managed policy, his answers
+   * this session and his saved rules (the rule store's compiled list, handed
+   * over by reference), and where a path's link leads. A deny is reported over
+   * an ask or an allow: a tool setting, then managed policy, then a denying
+   * answer or rule (including where a link leads), then an answer or rule, then
+   * a managed allow. Yolo and plan mode's refusal of a change read no rule.
+   */
+  private async ruleFactOf(i: {
+    readonly toolName: string;
+    readonly args: Record<string, unknown>;
+    readonly category: PermissionCategory;
+    readonly mode: GatePresetName;
+    readonly tools: PermissionsToolConfig | undefined;
+    readonly ownerOnly: OwnerOnlyKind | undefined;
+    readonly subjects: CallSubjects | undefined;
+    readonly policyEnabled: boolean;
+    readonly options: JudgmentReadingOptions;
+    readonly owner?: AutonomousPermissionReading | undefined;
+    readonly sessionId?: string | undefined;
+  }): Promise<CallRuleFact | undefined> {
+    if (i.mode === 'yolo' || (i.mode === 'plan' && i.category !== 'read')) return undefined;
     if (this.ownerDeniesTool(i.toolName, i.category, i.tools)) {
       const key = TOOL_CONFIG_KEYS[i.toolName] ?? 'delegate';
       return { effect: 'deny', source: 'tool-setting',
         description: i.tools?.[key] === 'deny' ? `the setting permissions.tools.${key} = deny` : 'the setting permissions.tools.write = deny' };
     }
-    if (i.policy?.approved === false) return { effect: 'deny', source: 'managed-policy', description: 'managed permission policy' };
-    const remembered = (answer: RememberedDecision, source: CallRuleFact['source'], where = ''): CallRuleFact => ({
-      effect: answer.effect, source, description: `${answer.description}${where}`,
+    const managed = i.policyEnabled
+      ? managedVerdict(await this.evaluateRuntimePolicy(i.toolName, i.args, i.mode, this.policyClassification(i.category), i.options, i.owner, i.subjects))
+      : undefined;
+    if (managed === false) return { effect: 'deny', source: 'managed-policy', description: 'managed permission policy' };
+    const fact = (answer: RememberedDecision, where = ''): CallRuleFact => ({
+      effect: answer.effect, source: answer.source === 'session_override' ? 'session' : 'user-rule', description: `${answer.description}${where}`,
       ...(answer.ownerOnly ? { ownerOnly: answer.ownerOnly } : {}),
     });
-    const sourceOf = (answer: RememberedDecision): CallRuleFact['source'] => answer.source === 'session_override' ? 'session' : 'user-rule';
-    if (i.landed) return remembered(i.landed, sourceOf(i.landed), ', where this path\'s link leads');
-    if (i.remembered) return remembered(i.remembered, sourceOf(i.remembered));
-    if (i.policy?.approved) return { effect: 'allow', source: 'managed-policy', description: 'managed permission policy' };
+    const sessionId = i.sessionId ?? sessionOfCheck.getStore();
+    const remembered = await this.rememberedDecision(this.getApprovalKey(i.toolName, i.args, sessionId), i.toolName, i.args, i.options, i.owner, i.ownerOnly, i.subjects);
+    if (remembered?.effect !== 'deny') {
+      // A link inside an allowed folder can lead to a path the owner denied: that denial applies too.
+      const landed = await this.deniedWhereLinksLead(i.toolName, i.args, i.options, i.owner, sessionId);
+      if (landed) return fact(landed, ', where this path\'s link leads');
+    }
+    if (remembered) return fact(remembered);
+    if (managed === true) return { effect: 'allow', source: 'managed-policy', description: 'managed permission policy' };
     return undefined;
   }
 
@@ -1408,38 +1448,66 @@ export class PermissionManager {
 
   /**
    * Decides a model-requested hook change. A hook runs on events for as long as it is registered and an
-   * http hook sends each event's tool arguments and results to its URL, so a change is never settled by
-   * category, mode or a remembered rule: the owner is asked every time, whatever was approved before.
-   * Plan mode refuses it (it is a write); the mode that skips every prompt allows it. An answer is never
-   * remembered, so approving one change grants nothing else.
+   * http hook sends each event's tool arguments and results to its URL, so a change is the owner's grant
+   * of access (owner-only `grant-access`), classified like any call: plan mode refuses it (it is a
+   * write), yolo allows it, a surface that cannot direct changes cannot direct this one, a deny (a
+   * setting that denies the tool the hook would use, or a remembered deny) refuses it, and otherwise the
+   * owner is asked. He is asked once: an answer he chose to remember is his answer to this kind, so the
+   * same change is not asked again for as long as he chose (this exact change for the session, or a rule).
+   * just-vibes holds it for him at the end of the run.
    */
   async checkHookChange(request: import('../tools/state/index.js').HookChangeRequest, options?: PermissionExecutionOptions): Promise<{ approved: boolean; reason?: string }> {
     this.assertSelectedModeCurrent();
-    const signal = options?.signal;
-    assertPermissionActive(signal);
+    assertPermissionActive(options?.signal);
+    // A session answer belongs to the hosted session that gave it, as for every gated call.
+    return sessionOfCheck.run(options?.hookOwner?.sessionId, () => this.decideHookChange(request, options?.signal));
+  }
+
+  private async decideHookChange(request: import('../tools/state/index.js').HookChangeRequest, signal: AbortSignal | undefined): Promise<{ approved: boolean; reason?: string }> {
     const hook = request.hook;
     const mode = this.getMode();
-    if (mode === 'yolo') return { approved: true };
-    if (mode === 'plan') {
-      return { approved: false, reason: `plan mode is on and changing a hook is a write; leave plan mode, then ask again` };
-    }
-    if (!this.surfaceAllows('write')) {
-      return { approved: false, reason: 'this source may not make changes, and changing a hook is a change' };
-    }
-    const underlying = hook.type === 'command' || hook.type === 'ts' ? 'exec' : hook.type === 'http' ? 'fetch' : 'agent';
-    const configured = (this.configReader.getAutonomousSnapshot?.() ?? this.configReader.getSnapshot()).permissions?.tools;
-    if (this.ownerDeniesTool(underlying, 'write', configured)) {
-      return { approved: false, reason: `the owner's permission settings deny ${configured?.write === 'deny' ? 'writes' : `the ${underlying} tool`}, which this ${hook.type} hook would use` };
-    }
     const { args, analysis } = describeHookChange(request);
+    const configured = (this.configReader.getAutonomousSnapshot?.() ?? this.configReader.getSnapshot()).permissions?.tools;
+    const underlying = hook.type === 'command' || hook.type === 'ts' ? 'exec' : hook.type === 'http' ? 'fetch' : 'agent';
+    const ownerOnly: OwnerOnlyKind = 'grant-access';
+    // The setting that denies the tool the hook would use denies the hook too; otherwise the one rule lookup.
+    const rule: CallRuleFact | undefined = mode === 'yolo' || mode === 'plan' ? undefined
+      : this.ownerDeniesTool(underlying, 'write', configured)
+        ? { effect: 'deny', source: 'tool-setting',
+          description: `the setting ${configured?.write === 'deny' ? 'permissions.tools.write' : `permissions.tools.${TOOL_CONFIG_KEYS[underlying] ?? 'delegate'}`} = deny, which this ${hook.type} hook would use` }
+        : await this.ruleFactOf({
+          toolName: 'state', args, category: 'write', mode, tools: undefined, ownerOnly, subjects: undefined,
+          policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: { signal },
+        });
+    assertPermissionActive(signal);
+    const decided = classifyCall(mode, {
+      tool: 'the hook change', category: 'write', sideEffects: undefined, surface: this.gate.surfaceOf?.(), rule,
+      recoverable: false, ownerOnly,
+      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
+    });
+    const refusal = (decision: ToolDecision): string => [decision.reason, ...(decision.next ?? []).slice(0, 1)].join('; ');
+    if (decided.kind === 'fact') return decided.allow ? { approved: true } : { approved: false, reason: refusal(decided.decision) };
+    // The owner-only kind it is put to him as: grant-access, or a channel's request, or his own "always ask me" rule.
+    const item: OwnerOnlyKind = decided.kind === 'owner-only' ? decided.item : ownerOnly;
+    // A just-vibes run does not stop for it: it is held for the owner at the end of the run.
+    if (mode === 'just-vibes') {
+      const held = this.queuedForOwner({ toolName: 'state', args }, analysis, `held for you: ${ownerOnlyReason(item)}`, item);
+      return { approved: false, reason: held.result.decision ? refusal(held.result.decision) : (held.result.detail ?? 'held for the owner') };
+    }
     const reply = await awaitPermission(() => this.requestPermission({
-      callId: crypto.randomUUID(), tool: 'state', args, category: 'write', analysis,
+      callId: crypto.randomUUID(), tool: 'state', args, category: 'write',
+      analysis: { ...analysis, reasons: [...analysis.reasons, `Only you decide this: ${ownerOnlyReason(item)}.`] },
       workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
-      rememberEffect: 'owner-asked-again',
+      // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
+      rememberOptions: item === 'channel-request' ? [] : buildRememberOptions('state', args, this.rememberedRulesHere()),
     }, { signal }), signal);
     assertPermissionActive(signal);
+    // The change itself cannot be edited on the card: an answer that edited it remembers nothing.
+    const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
+    const notSaved = item === 'channel-request' ? undefined : await this.rememberReply('state', args, reply, modified, item);
+    assertPermissionActive(signal);
     if (reply.approved) return { approved: true };
-    return { approved: false, reason: reply.reason ?? `the ${hook.type} hook change was not approved` };
+    return { approved: false, reason: reply.reason ?? `the ${hook.type} hook change was not approved${notSaved ? `. ${notSaved}` : ''}` };
   }
 
   /**
@@ -1507,21 +1575,13 @@ export class PermissionManager {
     assertCurrent();
     this.policyRuntimeState.recordPermissionRequest({ callId, tool: toolName, category, analysis });
     const ownerOnly = recognizeOwnerOnly(toolName, args, definition, this.settingsFacts(toolName, args));
-    let policy: PermissionCheckResult | null = null;
-    let remembered: RememberedDecision | null = null;
-    let landed: RememberedDecision | null = null;
-    const subjects = callSubjects(args, definition);
-    if (mode !== 'yolo' && !(mode === 'plan' && category !== 'read')) {
-      if (this.featureFlags?.isEnabled('permissions-policy-engine') === true) {
-        policy = this.mapEvaluatorDecision(await this.evaluateRuntimePolicy(toolName, args, mode, this.policyClassification(category), { signal, assertCurrent }, undefined, subjects), analysis);
-      }
-      remembered = await this.rememberedDecision(this.getApprovalKey(toolName, args), toolName, args, { signal, assertCurrent }, undefined, ownerOnly, subjects);
-      // A link inside an allowed folder can lead to a path the owner denied: that denial applies too.
-      if (remembered?.effect !== 'deny') landed = await this.deniedWhereLinksLead(toolName, args, { signal, assertCurrent });
-    }
+    const rule = await this.ruleFactOf({
+      toolName, args, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(args, definition),
+      policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: { signal, assertCurrent },
+    });
     const decided = classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface, definition, ownerOnly,
-      directory: config.directory, tools: config.permissions?.tools, remembered, landed, policy,
+      directory: config.directory, rule,
       untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
     }));
     const policyResult = this.policyResultOf(decided, analysis);
@@ -1560,14 +1620,13 @@ export class PermissionManager {
     const category = this.getCategory(toolName, captured, definition);
     const config = this.configReader.getSnapshot();
     const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.settingsFacts(toolName, captured));
-    const subjects = callSubjects(captured, definition);
-    const options = signal ? { signal } : {};
-    const remembered = mode === 'yolo' ? null
-      : await this.rememberedDecision(this.getApprovalKey(toolName, captured), toolName, captured, options, undefined, ownerOnly, subjects);
-    const landed = mode === 'yolo' || remembered?.effect === 'deny' ? null : await this.deniedWhereLinksLead(toolName, captured, options);
+    const rule = await this.ruleFactOf({
+      toolName, args: captured, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(captured, definition),
+      policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: signal ? { signal } : {},
+    });
     const decided = classifyCall(mode, this.callFacts({
       toolName, args: captured, category, mode, surface: this.gate.surfaceOf?.(), definition, ownerOnly,
-      directory: this.configReader.getWorkingDirectory(), tools: config.permissions?.tools, remembered, landed, policy: null,
+      directory: this.configReader.getWorkingDirectory(), rule,
       untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).ingestedThisTurn().length > 0,
     }));
     return { mode, category, decided };
@@ -1604,20 +1663,21 @@ export class PermissionManager {
       return { approved: session, effect: session ? 'allow' : 'deny', source: 'session_override', reason: session ? 'session_cached_allow' : 'session_cached_deny',
         description: 'your answer earlier in this session', ...(ownerAnswer !== undefined ? { ownerOnly } : {}), assertCurrent: current };
     }
-    // Rules remembered from an answer this process are matched live, after the
-    // committed rules, until the store loads them as committed on restart.
-    const rules = owner ? [...owner.frame.rules, ...view.remembered] : this.userRuleStore ? [...view.committed, ...view.remembered] : undefined;
-    const projectRoot = owner ? owner.frame.directory : rules ? this.configReader.getWorkingDirectory() : undefined;
-    const durable = rules
-      ? await matchDurableRulesAsync(rules, toolName, args, { signal: options.signal, assertCurrent: current, projectRoot: projectRoot ?? undefined, subjects })
+    // The store's compiled list: committed rules, then rules remembered from an
+    // answer this process (matched live until the store loads them as committed
+    // on restart). An admission's frame holds the publication it was read
+    // under, which `current` compares, so the list here is the one it captured.
+    const projectRoot = owner ? owner.frame.directory : this.configReader.getWorkingDirectory();
+    const durable = this.userRuleStore
+      ? await view.lookup.match(toolName, args, { signal: options.signal, assertCurrent: current, projectRoot: projectRoot ?? undefined, subjects })
       : null;
     current();
     if (!durable) return null;
     const approved = durable.effect === 'allow';
-    const rule = rules?.find((candidate) => candidate.id === durable.ruleId);
+    const rule = durable.rule;
     return { approved, effect: durable.effect, source: 'user_rule', reason: approved ? 'user_rule_allow' : 'user_rule_deny',
-      description: `the saved rule "${rule?.description ?? durable.ruleId}"`,
-      ...(rule?.ownerOnly ? { ownerOnly: rule.ownerOnly } : {}), assertCurrent: current };
+      description: `the saved rule "${rule.description ?? durable.ruleId}"`,
+      ...(rule.ownerOnly ? { ownerOnly: rule.ownerOnly } : {}), assertCurrent: current };
   }
 
   /** The denial for the first path argument whose link lands somewhere a remembered rule or session answer denies. */
@@ -1680,9 +1740,9 @@ export class PermissionManager {
     const args = { path: rawPath };
     if (this.configReader.isAutoApproveEnabled()) return 'allow';
     if (this.featureFlags?.isEnabled('permissions-policy-engine') === true) {
-      const mapped = this.mapEvaluatorDecision(await this.evaluateRuntimePolicy('read', args, mode, 'read'), analyzePermissionRequest('read', args, 'read'));
+      const managed = managedVerdict(await this.evaluateRuntimePolicy('read', args, mode, 'read'));
       assertWorkspace();
-      if (mapped) return mapped.approved ? 'allow' : 'restricted';
+      if (managed !== undefined) return managed ? 'allow' : 'restricted';
     }
     const readKey = this.getApprovalKey('read', { path: this.absoluteReadPath(rawPath) }, sessionId);
     if (this.sessionDeniesRead(sessionApprovalKey('read', { path: this.absoluteReadPath(rawPath) }), sessionId)) return 'restricted';
@@ -1962,13 +2022,13 @@ export class PermissionManager {
       if (!unchanged!()) throw new Error('Permission configuration changed while reading');
     };
     current();
-    // User-origin rules are evaluated before managed (registry) rules by the
-    // evaluator, so a user allow-rule wins over a managed one.
-    const rules = owner ? [...owner.frame.rules, ...view.remembered, ...owner.frame.policyRules] : [
-      ...view.committed,
-      ...view.remembered,
-      ...(this.policyRuntimeState.getRegistry().getCurrent()?.rules ?? []),
-    ];
+    // Managed (registry) rules, by reference. The owner's saved rules are
+    // matched once, by the store's compiled list (rememberedDecision); only a
+    // hand-written mode-constraint rule, which that matcher does not read, is
+    // evaluated here, between managed denies and managed allows as before.
+    const managed = this.policyRuntimeState.getRegistry().getCurrent()?.rules ?? [];
+    const modeRules = userModeConstraints(view.lookup);
+    const rules = modeRules.length === 0 ? managed : [...managed, ...modeRules];
     const evaluator = new LayeredPolicyEvaluator({
       mode:
         mode === 'yolo' ? 'allow-all'
@@ -1988,12 +2048,14 @@ export class PermissionManager {
    * write is taken in here (one `stat`), and the lists are the store's frozen
    * copies, rebuilt only when a rule changed.
    */
-  private ruleView(): { readonly committed: readonly PolicyRule[]; readonly remembered: readonly PolicyRule[]; readonly revision: number } {
+  private ruleView(): CompiledProjectRules & { readonly revision: number } {
     const store = this.userRuleStore;
     const project = this.configReader.getWorkingDirectory();
-    if (!store) return { committed: [], remembered: [], revision: 0 };
+    if (!store) return NO_RULES;
     if (store.evaluationRules) return store.evaluationRules(project);
-    return { committed: store.rules(project), remembered: store.rememberedRules?.(project) ?? [],
+    // An embedding store without compiled lists: compiled for this check.
+    const committed = store.rules(project), remembered = store.rememberedRules?.(project) ?? [];
+    return { committed, remembered, lookup: compileRules([...committed, ...remembered]),
       revision: store.committedRevision?.() ?? store.getPublicationRevision?.() ?? 0 };
   }
 
@@ -2030,23 +2092,6 @@ export class PermissionManager {
       .catch((error: unknown) => {
         logger.warn('decision OTLP export failed', { error: summarizeError(error) });
       });
-  }
-
-  /**
-   * Map explicit user or managed policy rules to permission results. Only the
-   * evaluator's policy layer supplies a result here; preset decisions use the
-   * Jev reading in the surrounding permission flow.
-   */
-  private mapEvaluatorDecision(
-    decision: LayeredPermissionDecision,
-    analysis: PermissionRequestAnalysis,
-  ): PermissionCheckResult | null {
-    if (decision.sourceLayer === 'policy') {
-      return decision.allowed
-        ? this.result(true, false, 'managed_policy', 'managed_policy_allow', analysis)
-        : this.result(false, false, 'managed_policy', 'managed_policy_deny', analysis);
-    }
-    return null;
   }
 
   private emitAndReturn(

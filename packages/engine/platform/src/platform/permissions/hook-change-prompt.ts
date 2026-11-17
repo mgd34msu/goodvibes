@@ -42,7 +42,7 @@ export function describeHookChange(request: HookChangeRequest): {
         ? 'allowInternal is on: the request may reach private and loopback hosts.'
         : 'allowInternal is off: private and loopback hosts are refused.',
     ] : []),
-    'You are asked every time; approving this does not approve anything else.',
+    'Approving it approves this change only, unless you choose to remember your answer.',
   ];
   const summary = `${action === 'add' ? 'Add' : action === 'enable' ? 'Enable' : action === 'disable' ? 'Disable' : 'Remove'} a ${hook.type} hook on ${events}`;
   const target = hook.type === 'http' ? { target: hook.url, targetKind: 'url' as const }

@@ -304,7 +304,7 @@ export interface DurableRuleMatch {
  * enforced even under an older, broader allow; among rules of one effect the
  * first match is reported.
  */
-/** @deprecated Synchronous compatibility; production callers use matchDurableRulesAsync. */
+/** @deprecated Synchronous compatibility; production callers match through compileRules. */
 export function matchDurableRules(
   rules: readonly PolicyRule[],
   toolName: string,
@@ -344,22 +344,61 @@ export function matchDurableRules(
   return firstAsk ?? firstAllow;
 }
 
+/** A durable match with the rule that made it. */
+export interface CompiledRuleMatch extends DurableRuleMatch {
+  readonly rule: PolicyRule;
+}
+
+export type CompiledRuleOptions = JudgmentReadingOptions & { readonly projectRoot?: string | undefined; readonly subjects?: CallSubjects | undefined };
+
+/**
+ * A rule list compiled once for matching, kept by its owner (the rule store)
+ * until a rule changes and handed to each check by reference. A call is matched
+ * only against the rules that name its tool or every tool, in list order; that
+ * list is built on a tool's first call. Matching is matchDurableRules': a deny
+ * wins, then an ask, then an allow.
+ */
+export interface CompiledRules {
+  readonly rules: readonly PolicyRule[];
+  match(toolName: string, args: Record<string, unknown>, options?: CompiledRuleOptions): Promise<CompiledRuleMatch | null>;
+}
+
+export function compileRules(rules: readonly PolicyRule[]): CompiledRules {
+  const list = Object.freeze([...rules]);
+  const byTool = new Map<string, readonly PolicyRule[]>();
+  const candidates = (toolName: string): readonly PolicyRule[] => {
+    let found = byTool.get(toolName);
+    if (!found) {
+      found = Object.freeze(list.filter((rule) => {
+        const pattern = rule.toolPattern;
+        return Array.isArray(pattern) ? pattern.includes('*') || pattern.includes(toolName) : pattern === '*' || pattern === toolName;
+      }));
+      byTool.set(toolName, found);
+    }
+    return found;
+  };
+  return Object.freeze({
+    rules: list,
+    match: (toolName: string, args: Record<string, unknown>, options: CompiledRuleOptions = {}) => matchRuleList(candidates(toolName), toolName, args, options),
+  });
+}
+
 /**
  * The rules and arguments are the caller's owned copies, so nothing between
  * two synchronous rule checks can change them; the caller's check runs only
  * after an arg-shape rule's await, the one point another writer can run.
  */
-export async function matchDurableRulesAsync(
+async function matchRuleList(
   rules: readonly PolicyRule[],
   toolName: string,
   args: Record<string, unknown>,
-  options: JudgmentReadingOptions & { readonly projectRoot?: string | undefined; readonly subjects?: CallSubjects | undefined } = {},
-): Promise<DurableRuleMatch | null> {
+  options: CompiledRuleOptions,
+): Promise<CompiledRuleMatch | null> {
   const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   current();
   const subjects = options.subjects;
-  let firstAllow: DurableRuleMatch | null = null;
-  let firstAsk: DurableRuleMatch | null = null;
+  let firstAllow: CompiledRuleMatch | null = null;
+  let firstAsk: CompiledRuleMatch | null = null;
   for (const rule of rules) {
     let matched = false;
     switch (rule.type) {
@@ -384,9 +423,9 @@ export async function matchDurableRulesAsync(
         break;
     }
     if (matched) {
-      if (rule.effect === 'deny') return { effect: 'deny', ruleId: rule.id };
-      if (rule.effect === 'ask') firstAsk ??= { effect: 'ask', ruleId: rule.id };
-      else firstAllow ??= { effect: 'allow', ruleId: rule.id };
+      if (rule.effect === 'deny') return { effect: 'deny', ruleId: rule.id, rule };
+      if (rule.effect === 'ask') firstAsk ??= { effect: 'ask', ruleId: rule.id, rule };
+      else firstAllow ??= { effect: 'allow', ruleId: rule.id, rule };
     }
   }
   return firstAsk ?? firstAllow;

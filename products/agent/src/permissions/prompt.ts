@@ -257,9 +257,9 @@ const PROMPT_CHOICES: ReadonlyArray<readonly [key: string, text: string, tone: B
   ['n', 'Deny', 'danger'],
 ];
 
-/** An ask the mode always puts to the owner again is not skipped by a remembered allow, so it is not offered. */
-function remembersAllow(request: PermissionRequest): boolean {
-  return request.rememberEffect !== 'owner-asked-again';
+/** An ask whose answer is not remembered (it offers an empty remember list) does not offer "for session". */
+export function remembersAllow(request: Pick<PermissionRequest, 'rememberOptions'>): boolean {
+  return request.rememberOptions === undefined || request.rememberOptions.length > 0;
 }
 /** An ask to type the answer a running command is waiting for on its terminal. */
 function isExecPrompt(request: PermissionRequest): boolean {

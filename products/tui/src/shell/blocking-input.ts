@@ -1,7 +1,7 @@
 import { handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest, RememberTier } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { applyHunkKey, hunkSelectionAnswer, type HunkSelectionState } from '../permissions/hunk-selection.ts';
-import { asksAgainEvenIfRemembered, permissionButtons } from '../permissions/prompt-card.ts';
+import { offersNoRemembering, permissionButtons } from '../permissions/prompt-card.ts';
 
 export type PendingPermissionState = PermissionRequest & {
   resolve: (
@@ -270,14 +270,14 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     // user-origin rule; 'session' only caches in memory.
     if (key === 'a') {
       render();
-      // An ask put to the owner again offers no remembering: `a` chooses Allow once.
-      if (asksAgainEvenIfRemembered(req)) return { handled: true, pendingPermission: { ...req, choice: 0 } };
+      // An ask whose answer is not remembered offers no remembering: `a` chooses Allow once.
+      if (offersNoRemembering(req)) return { handled: true, pendingPermission: { ...req, choice: 0 } };
       const sessionTier = req.rememberOptions?.findIndex((option) => option.tier === 'session') ?? -1;
       if (sessionTier >= 0) return { handled: true, pendingPermission: { ...req, submenuOpen: true, submenuIndex: sessionTier } };
       const session = permissionButtons(req, req).findIndex((button) => button.id === 'session' || button.id === 'remember');
       return { handled: true, pendingPermission: session >= 0 ? { ...req, choice: session } : req };
     }
-    if (/^[1-9]$/.test(key) && !asksAgainEvenIfRemembered(req) && req.rememberOptions && req.rememberOptions.length > 0) {
+    if (/^[1-9]$/.test(key) && !offersNoRemembering(req) && req.rememberOptions && req.rememberOptions.length > 0) {
       const index = Number(key) - 1;
       render();
       return {

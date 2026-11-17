@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { WITHHELD_PROMPT_ANSWER, type PermissionPromptDecision, type PermissionPromptRequest, type PermissionRequestHandler } from '../permissions/prompt.js';
-import { buildDurableRuleForDecision, matchDurableRulesAsync } from '../permissions/approval-rules.js';
+import { buildDurableRuleForDecision, compileRules, type CompiledRuleMatch } from '../permissions/approval-rules.js';
 import type { ControlPlaneSurfaceMessage } from './types.js';
 import { logger } from '../utils/logger.js';
 import { isRecord } from '../utils/record-coerce.js';
@@ -673,6 +673,8 @@ export class ApprovalBroker {
         effect: approved ? 'allow' : 'deny',
       });
       if (rule) {
+        // The same compiled lookup the gate matches saved rules with, compiled once for the sweep.
+        const lookup = compileRules([rule]);
         for (const candidate of [...this.approvals.values()]) {
           if (candidate.id === approvalId) continue;
           if (candidate.status !== 'pending' && candidate.status !== 'claimed') continue;
@@ -689,9 +691,9 @@ export class ApprovalBroker {
             if (this.approvals.get(candidate.id) !== candidate || this.pendingResolvers.get(candidate.id)?.retired)
               throw new Error('Remembered approval candidate is no longer pending');
           };
-          let covered: Awaited<ReturnType<typeof matchDurableRulesAsync>>;
+          let covered: CompiledRuleMatch | null;
           try {
-            covered = await matchDurableRulesAsync([rule], candidate.request.tool, candidate.request.args, {
+            covered = await lookup.match(candidate.request.tool, candidate.request.args, {
               projectRoot: candidate.request.workingDirectory,
               signal: this.pendingResolvers.get(candidate.id)?.promptController?.signal,
               assertCurrent: candidateCurrent,

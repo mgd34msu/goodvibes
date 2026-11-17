@@ -234,11 +234,12 @@ restart that follows immediately. A session-only answer is kept in memory,
 keyed like the session cache (an exec command class, or the exact set of
 edited paths). An answer that edited the arguments remembers nothing. A
 remembered allow suppresses the next ask wherever an ask is the only thing
-left to decide (operation without a decision model); in a decision mode, calls that still need
-the owner (critical or irreversible stakes, a failed boundary check) keep
-asking. A remembered deny is enforced in every mode. Those asks carry
-`rememberEffect: 'owner-asked-again'` so a surface does not promise that "Allow
-for session" skips them. A later "deny for session" or deny rule applies from
+left to decide (operation without a decision model). An item only the owner
+decides (a hook change, a declared-dangerous tool, an MCP trust change) is
+settled again only by an answer he gave to that item, so he is asked once;
+a change asked for in a channel is approved one call at a time, and its ask
+carries an empty remember list so no surface offers to remember it. A
+remembered deny is enforced in every mode. A later "deny for session" or deny rule applies from
 the next decision on; it does not stop a call with the same key that was already
 admitted and is running.
 

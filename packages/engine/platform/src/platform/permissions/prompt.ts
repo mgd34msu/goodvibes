@@ -104,19 +104,12 @@ export interface PermissionPromptRequest {
    * The remember tiers this ask can offer (exact command / command class /
    * path scope / whole tool / session), most specific first, computed by
    * PermissionManager so EVERY surface (TUI, webui, companion) renders the
-   * same options. A decision answers with `rememberTier`.
+   * same options. A decision answers with `rememberTier`. An empty list: no
+   * answer to this ask is remembered (a change asked for in a channel is
+   * approved one call at a time), so a surface offers only allow once and deny.
+   * Absent: an ask from before remember tiers; a surface may offer a session answer.
    */
   rememberOptions?: readonly RememberTierOption[] | undefined;
-  /**
-   * What a remembered ALLOW does for the next matching call. Absent or `skips-ask`:
-   * the next matching call is allowed without asking. `owner-asked-again`: this
-   * ask is one the mode always puts to the owner (critical, irreversible,
-   * security-weakening or boundary-failing action), so a remembered allow is
-   * recorded but the owner is asked again; a surface must not promise otherwise.
-   * A remembered DENY is enforced in every mode except the one that skips all prompts and
-   * consults no remembered rule at all.
-   */
-  rememberEffect?: 'skips-ask' | 'owner-asked-again' | undefined;
 }
 
 export interface PermissionPromptDecision {

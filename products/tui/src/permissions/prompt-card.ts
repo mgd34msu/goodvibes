@@ -87,17 +87,17 @@ export interface PermissionButton {
   readonly label: string;
 }
 
-/** True when a remembered allow would not stop the next matching call from asking the owner again. */
-export function asksAgainEvenIfRemembered(request: Pick<PermissionPromptRequest, 'rememberEffect'>): boolean {
-  return request.rememberEffect === 'owner-asked-again';
+/** True when no answer to this ask is remembered (it offers an empty remember list), so only allow once and deny are offered. */
+export function offersNoRemembering(request: Pick<PermissionPromptRequest, 'rememberOptions'>): boolean {
+  return request.rememberOptions !== undefined && request.rememberOptions.length === 0;
 }
 
 /** The card's buttons, in order (the safe answers are Allow once / Apply first, Deny last). */
 export function permissionButtons(request: PermissionPromptRequest, state: Pick<PermissionCardState, 'hunkState' | 'replyMode'>): PermissionButton[] {
   if (state.replyMode === 'exec-answer') return [];
   if (state.hunkState) return [{ id: 'apply', label: 'Apply selected' }, { id: 'deny', label: 'Deny' }];
-  // An ask the mode always puts to the owner again is not skipped by a remembered allow, so the card does not offer one.
-  if (asksAgainEvenIfRemembered(request)) return [{ id: 'allow', label: 'Allow once' }, { id: 'deny', label: 'Deny' }];
+  // An ask whose answer is not remembered (a change asked for in a channel) offers nothing to remember.
+  if (offersNoRemembering(request)) return [{ id: 'allow', label: 'Allow once' }, { id: 'deny', label: 'Deny' }];
   const tiers = request.rememberOptions?.length ?? 0;
   return [
     { id: 'allow', label: 'Allow once' },
@@ -412,7 +412,7 @@ function cardHints(request: PermissionPromptRequest, state: PermissionCardState)
   if (state.replyMode === 'deny-reason') return [['⏎', 'deny with this reason'], ['esc', 'back'], ['ctrl+c', 'abort turn']];
   if (state.submenuOpen) return [['↑↓', 'tier'], ['⏎', 'allow and remember'], ['esc', 'back']];
   if (state.hunkState) return [['↑↓', 'hunk'], ['space', 'toggle'], ['a', 'all'], ['pgup/pgdn', 'scroll'], ['←→', 'choose'], ['⏎', 'confirm'], ['n', 'deny']];
-  if (asksAgainEvenIfRemembered(request)) return [['←→', 'choose'], ['⏎', 'confirm'], ['y', 'allow once'], ['n', 'deny'], ['type', 'a reason to deny']];
+  if (offersNoRemembering(request)) return [['←→', 'choose'], ['⏎', 'confirm'], ['y', 'allow once'], ['n', 'deny'], ['type', 'a reason to deny']];
   const tiers = request.rememberOptions?.length ?? 0;
   return [
     ['←→', 'choose'], ['⏎', 'confirm'], ['y', 'allow once'],

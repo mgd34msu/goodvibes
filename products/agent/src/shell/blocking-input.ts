@@ -3,6 +3,7 @@ import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/
 import { applyHunkKey, hunkSelectionAnswer, type HunkSelectionState } from '@goodvibes-jev/engine/terminal-shell/hunk-selection';
 import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
+import { remembersAllow } from '../permissions/prompt.ts';
 
 export type PendingPermissionState = PermissionRequest & {
   /**
@@ -157,8 +158,8 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
       render();
       return { handled: true, pendingPermission: { ...req, hunkState: state }, recoveryPending };
     }
-    // "For session" is not offered for an ask the owner is asked again.
-    const canRemember = req.rememberEffect !== 'owner-asked-again';
+    // "For session" is not offered for an ask whose answer is not remembered.
+    const canRemember = remembersAllow(req);
     if (req.rememberArmed) {
       if (data === '\r' || data === '\n') {
         req.resolve(true, true);

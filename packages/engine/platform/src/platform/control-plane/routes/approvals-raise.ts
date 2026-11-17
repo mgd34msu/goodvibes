@@ -128,7 +128,6 @@ export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest 
   const workingDirectory = optionalString(raw['workingDirectory'], 'request.workingDirectory');
   const attribution = raw['attribution'];
   const rememberOptions = raw['rememberOptions'];
-  const rememberEffect = raw['rememberEffect'];
   // Only the fields of a permission ask are copied: the record is stored and
   // shown to every surface, so a field nobody validated must not ride along.
   return {
@@ -140,7 +139,6 @@ export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest 
     ...(workingDirectory === undefined ? {} : { workingDirectory }),
     ...(isRecord(attribution) ? { attribution: attribution as unknown as PermissionPromptRequest['attribution'] } : {}),
     ...(Array.isArray(rememberOptions) ? { rememberOptions: rememberOptions as PermissionPromptRequest['rememberOptions'] } : {}),
-    ...(rememberEffect === 'skips-ask' || rememberEffect === 'owner-asked-again' ? { rememberEffect } : {}),
   };
 }
 

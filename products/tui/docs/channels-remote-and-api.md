@@ -134,7 +134,7 @@ Key remote API paths:
 | --- | --- |
 | `/remote` | List runners and their state |
 | `/remote show <runner>` | Show one runner in detail |
-| `/remote capabilities [runner]` | Show what a runner can execute |
+| `/remote capabilities [runner]` | Show what a runner can execute and what holds it there: files, commands, approvals, artifacts, resume, and containment (an external runner is a host process held to its tools and write scope at each permission ask; nothing contains the process itself) |
 | `/remote recover [runner]` | Recover a runner's stalled work |
 | `/remote dispatch ...` | Dispatch work to a runner |
 | `/remote dispatch-pool <pool> ...` | Dispatch work to a runner pool |

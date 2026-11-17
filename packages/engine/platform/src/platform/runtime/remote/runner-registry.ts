@@ -259,8 +259,8 @@ export class RemoteRunnerRegistry {
   private readonly artifacts = new Map<string, RemoteExecutionArtifact>();
   private readonly pools = new Map<string, RemoteRunnerPool>();
   /**
-   * @param workspaceRoot The runtime's working directory, the workspace its
-   *   shared sandbox projects; carried on every contract this registry builds.
+   * @param workspaceRoot The runtime's working directory; carried on every
+   *   contract this registry builds.
    */
   constructor(
     private readonly agentManager: Pick<AgentManager, 'getStatus' | 'list'>,

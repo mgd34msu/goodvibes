@@ -40,10 +40,9 @@ export interface RemoteRunnerContract {
   readonly orchestrationNodeId?: string | undefined;
   readonly capabilityCeiling: RemoteRunnerCapabilityCeiling;
   /**
-   * The workspace the runtime's shared sandbox projects: the runtime's working
-   * directory, set by the registry that built the contract. A write scope path
-   * equal to or under it is written inside the shared sandbox. Absent when the
-   * contract was built or imported without one.
+   * The runtime's working directory, set by the registry that built the
+   * contract: the workspace the runner's write scope is read against. Absent
+   * when the contract was built or imported without one.
    */
   readonly workspaceRoot?: string | undefined;
   readonly createdAt: number;

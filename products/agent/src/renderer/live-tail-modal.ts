@@ -5,7 +5,7 @@
  * every shown line wrapped in full, following the newest output unless
  * scrolled back. Standard error follows standard output under its own
  * heading (the manager keeps the two streams apart). Esc goes back to the
- * process monitor; a running process keeps running (k stops it).
+ * process monitor; a running process keeps running (x then y stops it).
  */
 
 import type { ProcessManager } from '@goodvibes-jev/engine/platform/platform/tools';
@@ -18,7 +18,9 @@ const LIVE_TAIL_EMPTY_OUTPUT = '(no output yet)';
 const LIVE_TAIL_NO_OUTPUT = '(no output)';
 const LIVE_TAIL_PRUNED = '(output no longer kept)';
 const LIVE_TAIL_STDERR_HEADING = '── stderr ──';
-const LIVE_TAIL_HINTS: readonly KitHint[] = [['↑↓', 'scroll'], ['k', 'stop process'], ['esc', 'back, the process keeps running']];
+const LIVE_TAIL_HINTS: readonly KitHint[] = [['↑↓ j k', 'scroll'], ['x', 'stop, then y to confirm'], ['esc', 'back, the process keeps running']];
+/** Shown once x or Delete asked to stop the process: only y stops it. */
+const LIVE_TAIL_CONFIRM_HINTS: readonly KitHint[] = [['y', 'stop it'], ['any other key', 'keep it running']];
 
 /** The static strings this surface can show (checked by package verification). */
 export function renderLiveTailModalPackageText(): string {
@@ -33,6 +35,7 @@ export function renderLiveTailModalPackageText(): string {
     '<n> more ↑',
     '<n> more ↓',
     ...LIVE_TAIL_HINTS.map(([, action]) => action),
+    ...LIVE_TAIL_CONFIRM_HINTS.map(([, action]) => action),
   ].join('\n');
 }
 
@@ -44,12 +47,15 @@ export class LiveTailModal {
   public active = false;
   public entry: ProcessEntry | null = null;
   public scrollOffset = 0;
+  /** x or Delete asked to stop the open process; the next key decides (only y stops it). */
+  public stopRequested = false;
 
   constructor(private readonly deps: LiveTailModalDeps) {}
 
   open(entry: ProcessEntry): void {
     this.entry = entry;
     this.scrollOffset = 0;
+    this.stopRequested = false;
     this.active = true;
   }
 
@@ -57,6 +63,7 @@ export class LiveTailModal {
     this.active = false;
     this.entry = null;
     this.scrollOffset = 0;
+    this.stopRequested = false;
   }
 
   scrollUp(): void {
@@ -104,7 +111,7 @@ export function renderLiveTailModal(
   const f = beginModal(screenWidth, screenHeight, {
     title: 'Runtime activity',
     crumbs: [status === 'running' ? 'Live output' : `Output · ${status}`],
-    hints: LIVE_TAIL_HINTS,
+    hints: modal.stopRequested ? LIVE_TAIL_CONFIRM_HINTS : LIVE_TAIL_HINTS,
     // Esc is a hint of its own here: it goes back to the process list.
     escKey: false,
   });

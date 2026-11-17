@@ -103,6 +103,8 @@ export function handleProcessModalToken(state: ProcessRouteState, token: InputTo
 type LiveTailRouteState = {
   liveTailModal: {
     active: boolean;
+    /** x or Delete asked to stop the process; the footer then asks for y. */
+    stopRequested: boolean;
     scrollUp: () => void;
     scrollDown: () => void;
     stopProcess: () => boolean;
@@ -114,8 +116,6 @@ type LiveTailRouteState = {
   requestRender: () => void;
   handleEscape: () => void;
 };
-/** Live tails whose process the owner asked to stop with x or Delete; y then stops it. */
-const liveTailStopRequested = new WeakSet<object>();
 /**
  * The live tail's keys: arrows and j/k scroll; x or Delete asks to stop the
  * process and only y then stops it and goes back; any other key withdraws the
@@ -124,8 +124,8 @@ const liveTailStopRequested = new WeakSet<object>();
 export function handleLiveTailToken(state: LiveTailRouteState, token: InputToken): boolean {
   const modal = state.liveTailModal;
   if (!modal.active) return false;
-  const requested = liveTailStopRequested.has(modal);
-  liveTailStopRequested.delete(modal);
+  const requested = modal.stopRequested;
+  modal.stopRequested = false;
 
   if (token.type === 'key') {
     if (token.logicalName === 'escape') {
@@ -134,11 +134,11 @@ export function handleLiveTailToken(state: LiveTailRouteState, token: InputToken
     }
     if (token.logicalName === 'up') modal.scrollUp();
     else if (token.logicalName === 'down') modal.scrollDown();
-    else if (token.logicalName === 'delete') liveTailStopRequested.add(modal);
+    else if (token.logicalName === 'delete') modal.stopRequested = true;
   } else if (token.type === 'text') {
     if (token.value === 'k') modal.scrollUp();
     else if (token.value === 'j') modal.scrollDown();
-    else if (token.value === 'x') liveTailStopRequested.add(modal);
+    else if (token.value === 'x') modal.stopRequested = true;
     else if (token.value === 'y' && requested && modal.stopProcess()) state.handleEscape();
   }
 

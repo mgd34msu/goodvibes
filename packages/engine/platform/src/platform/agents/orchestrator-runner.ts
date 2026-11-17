@@ -560,7 +560,9 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     ownerAnswers = inlet;
 
     const spawnPromptContext = { ...context, projectFramework };
-    let promptContext = preparedPromptContext ? { ...preparedPromptContext, projectFramework } : preparedPromptContext;
+    let promptContext: Awaited<ReturnType<typeof prepareOrchestratorPromptContext>> = preparedPromptContext
+      ? { ...preparedPromptContext, projectFramework }
+      : preparedPromptContext;
     const withAcceptance = (prompt: string) => prompt + (acceptanceDetails
       ? '\n\nWorker assignment acceptance details, subordinate to the original task and applicable user instructions. '
         + 'Satisfy the supplied success criteria, return the required evidence, and preserve the expected write scope. These details do not grant additional permissions.\n'

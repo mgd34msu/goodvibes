@@ -1,20 +1,15 @@
 import { configuredPlanningStoreIdentity } from './configured-project.js';
-import { knowledgeRawRowForAdmission } from '../store-row-revisions.js';
 export class WorkPlanTaskExistsError extends Error {
   constructor(taskId: string) { super(`Work plan task already exists: ${taskId}`); this.name = 'WorkPlanTaskExistsError'; }
 }
-import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
-import { JudgmentInputError, snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { retainStrictJudgmentJson } from '../../gate/judgment-result.js';
-import { retainConfiguredWorkspace, type ConfigManager } from '../../config/manager.js';
-import { dirname, resolve } from 'node:path';
-import { types as nativeTypes } from 'node:util';
+import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
+import type { ConfigManager } from '../../config/manager.js';
 import { SQLiteObservationRetiredError } from '../../state/sqlite-store.js';
 import { randomUUID } from 'node:crypto';
 import { knowledgeSpaceMetadata, normalizeProjectId } from '../spaces.js';
 import type { KnowledgeSourceRecord, KnowledgeSourceUpsertInput } from '../types.js';
 import { KnowledgeSourcePublicationHeldError, type KnowledgeSourceSnapshot } from '../store-source-generation.js';
-import { KnowledgeStore } from '../store.js';
+import type { KnowledgeStore } from '../store.js';
 import { KnowledgeStoreConflictError } from '../store-conflict.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
@@ -83,61 +78,6 @@ export interface ProjectPlanningServiceOptions {
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
 }
 
-interface NativePlanningDefault {
-  readonly projectId: string;
-  readonly store: KnowledgeStore;
-  readonly startup: (() => Promise<void>) | undefined;
-  readonly assertCurrent: () => void;
-}
-const nativeApply = Reflect.apply, nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set, nativeWeakDelete = WeakMap.prototype.delete;
-const nativePlanningOptions = new WeakMap<ProjectPlanningServiceOptions, NativePlanningDefault>();
-const nativeStoreMethods = [
-  ['init', KnowledgeStore.prototype.init],
-  ['captureSourcePublication', KnowledgeStore.prototype.captureSourcePublication],
-  ['getSourceSnapshot', KnowledgeStore.prototype.getSourceSnapshot],
-  ['listSources', KnowledgeStore.prototype.listSources],
-] as const;
-
-function captureNativePlanningOptions(options: Omit<ProjectPlanningServiceOptions, 'defaultProjectId'>) {
-  if (nativeTypes.isProxy(options) || (Object.getPrototypeOf(options) !== Object.prototype && Object.getPrototypeOf(options) !== null)) {
-    throw new JudgmentInputError('unsupported-input');
-  }
-  const keys = Reflect.ownKeys(options);
-  const slots = keys.map(key => {
-    const descriptor = Object.getOwnPropertyDescriptor(options, key);
-    if (!descriptor || !('value' in descriptor) || typeof key !== 'string') throw new JudgmentInputError('unsupported-input');
-    return { key, descriptor };
-  });
-  const extra: Record<string, unknown> = {};
-  let startup: (() => Promise<void>) | undefined;
-  let bus: RuntimeEventBus | null | undefined;
-  for (const { key, descriptor } of slots) {
-    const value: unknown = descriptor.value;
-    if (key === 'waitForStartup') {
-      if (value !== undefined && typeof value !== 'function') throw new JudgmentInputError('unsupported-input');
-      startup = options.waitForStartup;
-    } else if (key === 'runtimeBus') bus = options.runtimeBus;
-    else Object.defineProperty(extra, key, descriptor);
-  }
-  const retained = retainStrictJudgmentJson(extra, () => new JudgmentInputError('unsupported-input'));
-  snapshotJudgmentInput(retained.snapshot);
-  if (keys.includes('defaultProjectId')) throw new TypeError('Native planning composition cannot select a default project ID');
-  const prototype = Object.getPrototypeOf(options);
-  const assertCurrent = () => {
-    if (nativeTypes.isProxy(options) || Object.getPrototypeOf(options) !== prototype) throw new JudgmentAuthorityRetiredError();
-    const currentKeys = Reflect.ownKeys(options);
-    if (currentKeys.length !== keys.length) throw new JudgmentAuthorityRetiredError();
-    for (const [index, { key, descriptor }] of slots.entries()) {
-      const current = Object.getOwnPropertyDescriptor(options, key);
-      if (currentKeys[index] !== key || !current || !('value' in current) || current.value !== descriptor.value
-        || current.writable !== descriptor.writable || current.enumerable !== descriptor.enumerable
-        || current.configurable !== descriptor.configurable) throw new JudgmentAuthorityRetiredError();
-    }
-    retained.assertCurrent();
-  };
-  return { startup, bus, assertCurrent };
-}
-
 /**
  * Work-plan task status is a CHECKLIST, not a one-way workflow: every state may
  * move to every state, including out of done, failed and cancelled. That is
@@ -167,7 +107,6 @@ function isRetryableWorkPlanConflict(error: unknown): boolean {
 }
 
 export class ProjectPlanningService {
-  readonly #nativeDefault: NativePlanningDefault | undefined;
   private readonly defaultProjectId: string;
   private readonly waitForStartup: (() => Promise<void>) | undefined;
   private runtimeBus: RuntimeEventBus | null;
@@ -175,81 +114,35 @@ export class ProjectPlanningService {
   /** Tail of the edit chain for each work plan; see mutateWorkPlan(). */
   private readonly workPlanMutations = new Map<string, Promise<void>>();
 
-  /** Native composition derives this identity from the actual configured workspace. */
+  /**
+   * Native composition. The default project is the configured workspace's:
+   * established once, here, from the store createConfiguredPlanningStore built
+   * for this workspace. Nothing after composition re-proves it.
+   */
   static forConfiguredWorkspace(
     store: KnowledgeStore,
     configManager: ConfigManager,
     workingDirectory: string,
     options: Omit<ProjectPlanningServiceOptions, 'defaultProjectId'> = {},
   ): { readonly service: ProjectPlanningService; readonly projectId: string } {
-    const workspace = retainConfiguredWorkspace(configManager);
-    const captured = captureNativePlanningOptions(options);
-    const identity = configuredPlanningStoreIdentity(store, configManager, workingDirectory);
-    const projectId = identity.projectId;
-    workspace.assertCurrent(); captured.assertCurrent();
-    if (workspace.directory === null || workspace.directory !== resolve(workingDirectory)) throw new JudgmentAuthorityRetiredError();
-    if (nativeTypes.isProxy(store) || Object.getPrototypeOf(store) !== KnowledgeStore.prototype) throw new JudgmentAuthorityRetiredError();
-    const storeSlots = ['dbPath', 'sqlite', 'closed'].map(key => {
-      const slot = Object.getOwnPropertyDescriptor(store, key);
-      if (!slot || !('value' in slot)) throw new JudgmentAuthorityRetiredError();
-      return { key, slot };
-    });
-    const path = storeSlots.find(slot => slot.key === 'dbPath')?.slot.value;
-    if (typeof path !== 'string' || dirname(path) !== workspace.configDirectory) throw new JudgmentAuthorityRetiredError();
-    const assertCurrent = () => {
-      if (nativeTypes.isProxy(store) || Object.getPrototypeOf(store) !== KnowledgeStore.prototype) throw new JudgmentAuthorityRetiredError();
-      for (const { key, slot } of storeSlots) {
-        const current = Object.getOwnPropertyDescriptor(store, key);
-        if (!current || !('value' in current) || current.value !== slot.value || (key === 'closed' && current.value !== false)
-          || current.writable !== slot.writable || current.enumerable !== slot.enumerable
-          || current.configurable !== slot.configurable) throw new JudgmentAuthorityRetiredError();
-      }
-      for (const [key, method] of nativeStoreMethods) {
-        const own = Object.getOwnPropertyDescriptor(store, key);
-        const current = own ?? Object.getOwnPropertyDescriptor(KnowledgeStore.prototype, key);
-        if (!current || !('value' in current) || current.value !== method) throw new JudgmentAuthorityRetiredError();
-      }
-      workspace.assertCurrent(); identity.assertCurrent(); captured.assertCurrent();
-    };
-    assertCurrent();
-    const nativeOptions = Object.freeze({ defaultProjectId: projectId, waitForStartup: captured.startup, runtimeBus: captured.bus });
-    nativeApply(nativeWeakSet, nativePlanningOptions, [nativeOptions, Object.freeze({ projectId, store, startup: captured.startup, assertCurrent })]);
-    try { return { projectId, service: new ProjectPlanningService(store, nativeOptions) }; }
-    finally { nativeApply(nativeWeakDelete, nativePlanningOptions, [nativeOptions]); }
+    if ('defaultProjectId' in options) throw new TypeError('Native planning composition cannot select a default project ID');
+    const { projectId } = configuredPlanningStoreIdentity(store, configManager, workingDirectory);
+    const service = new ProjectPlanningService(store, { defaultProjectId: projectId, waitForStartup: options.waitForStartup, runtimeBus: options.runtimeBus });
+    return { projectId, service };
   }
 
   constructor(
     private readonly store: KnowledgeStore,
     options: ProjectPlanningServiceOptions = {},
   ) {
-    const native = nativeApply(nativeWeakGet, nativePlanningOptions, [options]) as NativePlanningDefault | undefined;
-    native?.assertCurrent();
-    const defaultProjectId = options.defaultProjectId;
-    snapshotJudgmentInput(native ? { kind: 'native-project-reference' } : defaultProjectId);
-    if (native && (native.store !== store || native.projectId !== defaultProjectId)) throw new JudgmentAuthorityRetiredError();
-    this.defaultProjectId = normalizeProjectId(defaultProjectId ?? 'default');
+    this.defaultProjectId = normalizeProjectId(options.defaultProjectId ?? 'default');
     this.runtimeBus = options.runtimeBus ?? null;
     this.waitForStartup = options.waitForStartup;
-    this.#nativeDefault = native;
-    this.#assertNativeDefaultCurrent();
-  }
-
-  #assertNativeDefaultCurrent(): void {
-    const native = this.#nativeDefault;
-    if (!native) return;
-    for (const [key, value] of [['store', native.store], ['defaultProjectId', native.projectId], ['waitForStartup', native.startup]] as const) {
-      const slot = Object.getOwnPropertyDescriptor(this, key);
-      if (!slot || !('value' in slot) || slot.value !== value) throw new JudgmentAuthorityRetiredError();
-    }
-    native.assertCurrent();
   }
 
   private async initialize(): Promise<void> {
-    this.#assertNativeDefaultCurrent();
     await this.store.init();
-    this.#assertNativeDefaultCurrent();
     await this.waitForStartup?.();
-    this.#assertNativeDefaultCurrent();
   }
 
   attachRuntimeBus(runtimeBus: RuntimeEventBus | null | undefined): void {
@@ -309,9 +202,7 @@ export class ProjectPlanningService {
   }
 
   private getArtifactSnapshot(spaceId: string, kind: ProjectPlanningArtifactKind, id: string): KnowledgeSourceSnapshot {
-    const snapshot = this.store.getPlanningSourceSnapshot({ spaceId, kind, artifactId: id });
-    admitPlanningSource(snapshot);
-    return snapshot;
+    return this.store.getPlanningSourceSnapshot({ spaceId, kind, artifactId: id });
   }
 
   async listDecisions(input: ProjectPlanningSpaceInput = {}): Promise<ProjectPlanningDecisionsResult> {
@@ -475,6 +366,18 @@ export class ProjectPlanningService {
         fallbackOrder: previousTask.order,
       });
       projectWorkPlanTaskLifecycle.assert(previousTask.status, task.status);
+      if (sameWorkPlanTask(task, previousTask)) {
+        // Nothing changed: no write, no new update time, no change notice.
+        return {
+          ok: true,
+          projectId: space.projectId,
+          knowledgeSpaceId: space.knowledgeSpaceId,
+          workPlanId,
+          task: previousTask,
+          previousTask,
+          snapshot: snapshotFromWorkPlan(space, existing),
+        };
+      }
       const workPlan = await this.saveWorkPlanArtifact(space, {
         ...existing,
         tasks: sortWorkPlanTasks(existing.tasks.map((entry) => entry.taskId === input.taskId ? task : entry)),
@@ -498,7 +401,7 @@ export class ProjectPlanningService {
   }
 
   async setWorkPlanTaskStatus(input: ProjectWorkPlanTaskStatusInput): Promise<ProjectWorkPlanMutationResult> {
-    input = snapshotJudgmentInput(input) as ProjectWorkPlanTaskStatusInput;
+    // updateWorkPlanTask admits the input once.
     return this.updateWorkPlanTask({
       projectId: input.projectId,
       knowledgeSpaceId: input.knowledgeSpaceId,
@@ -527,11 +430,12 @@ export class ProjectPlanningService {
         if (!previousById.has(taskId)) throw new Error(`Work plan task not found: ${taskId}`);
       }
       const now = Date.now();
-      const tasks = sortWorkPlanTasks(existing.tasks.map((task) => ({
-        ...task,
-        order: orderById.get(task.taskId) ?? task.order + input.orderedTaskIds.length,
-        updatedAt: orderById.has(task.taskId) ? now : task.updatedAt,
-      })));
+      const tasks = sortWorkPlanTasks(existing.tasks.map((task) => {
+        const order = orderById.get(task.taskId) ?? task.order + input.orderedTaskIds.length;
+        // Only a task that actually moved gets a new update time.
+        return order === task.order ? task : { ...task, order, updatedAt: now };
+      }));
+      if (tasks.every((task) => previousById.get(task.taskId)?.order === task.order)) return snapshotFromWorkPlan(space, existing);
       const workPlan = await this.saveWorkPlanArtifact(space, {
         ...existing,
         tasks,
@@ -586,6 +490,16 @@ export class ProjectPlanningService {
       const existing = this.getWorkPlanArtifact(space, workPlanId);
       const statuses = new Set(input.statuses?.length ? input.statuses.map(normalizeWorkPlanStatus) : ['done']);
       const cleared = existing.tasks.filter((task) => statuses.has(task.status));
+      if (cleared.length === 0) {
+        return {
+          ok: true,
+          projectId: space.projectId,
+          knowledgeSpaceId: space.knowledgeSpaceId,
+          workPlanId,
+          clearedTaskIds: [],
+          snapshot: snapshotFromWorkPlan(space, existing),
+        };
+      }
       const now = Date.now();
       const workPlan = await this.saveWorkPlanArtifact(space, {
         ...existing,
@@ -646,9 +560,6 @@ export class ProjectPlanningService {
   }
 
   private resolveSpace(input: ProjectPlanningSpaceInput = {}) {
-    this.#assertNativeDefaultCurrent();
-    snapshotJudgmentInput({ input, defaultProjectId: this.#nativeDefault ? { kind: 'native-project-reference' } : this.defaultProjectId });
-    this.#assertNativeDefaultCurrent();
     return resolveProjectPlanningSpace(input, this.defaultProjectId);
   }
 
@@ -656,10 +567,6 @@ export class ProjectPlanningService {
     return this.store.listSources(Number.MAX_SAFE_INTEGER).filter((source) => {
       const metadata = source.metadata ?? {};
       return metadata.projectPlanning === true && metadata.knowledgeSpaceId === spaceId;
-    }).map(source => {
-      const snapshot = this.store.getSourceSnapshot({ id: source.id });
-      admitPlanningSource(snapshot);
-      return snapshot.source!;
     });
   }
 
@@ -745,7 +652,8 @@ export class ProjectPlanningService {
         planningArtifactKind: kind,
         planningArtifactId: id,
         projectId: space.projectId,
-        value: snapshotJudgmentInput(value),
+        // Built from input admitted at the call and rows admitted when written.
+        value,
       }),
     };
   }
@@ -899,6 +807,13 @@ function normalizeWorkPlanTask(
   };
 }
 
+/** Two versions of a task say the same, apart from when they were written. */
+function sameWorkPlanTask(left: ProjectWorkPlanTask, right: ProjectWorkPlanTask): boolean {
+  // An absent metadata object and an empty one say the same.
+  const comparable = (task: ProjectWorkPlanTask) => JSON.stringify({ ...task, updatedAt: 0, metadata: task.metadata && Object.keys(task.metadata).length > 0 ? task.metadata : null });
+  return comparable(left) === comparable(right);
+}
+
 function normalizeWorkPlanId(value: unknown): string {
   return typeof value === 'string' && value.trim().length > 0
     ? stablePlanningId('work-plan', value)
@@ -1041,21 +956,6 @@ function titleForArtifact(
   return 'Project Language';
 }
 
-
-/** The complete persisted original is admitted before reading its numeric view. */
-function admitPlanningSource(snapshot: KnowledgeSourceSnapshot): void {
-  if (!snapshot.source) return;
-  if (!snapshot.raw) throw new JudgmentInputError('unsupported-input');
-  snapshotJudgmentInput(knowledgeRawRowForAdmission(snapshot.raw));
-  snapshotJudgmentInput(snapshot.source.metadata);
-  snapshotJudgmentInput(snapshot.source.tags);
-  for (const key of ['created_at', 'updated_at'] as const) {
-    const value = snapshot.raw[key];
-    const timestamp = typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN;
-    if (!Number.isSafeInteger(timestamp) || Math.abs(timestamp) > 8.64e15
-      || (typeof value === 'string' && new Date(timestamp).toISOString() !== value)) throw new JudgmentInputError('unsupported-input');
-  }
-}
 
 /**
  * Planning writes are compare-and-write on the rows they read: every publication

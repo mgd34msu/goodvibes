@@ -5,7 +5,6 @@ import { createHash } from 'node:crypto';
 import { basename, join, resolve } from 'node:path';
 import { captureExistingDirectory } from '../../utils/atomic-json-store.js';
 import { retainConfiguredWorkspace, type ConfigManager } from '../../config/manager.js';
-import { SQLiteStore } from '../../state/sqlite-store.js';
 import { KnowledgeStore } from '../store.js';
 import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, REGULAR_KNOWLEDGE_DB_FILE, type KnowledgeStoreConfig } from '../store-config.js';
 import { normalizeSpaceComponent } from '../spaces.js';
@@ -20,16 +19,8 @@ interface PreparedProject {
   readonly source: PersistedPlanningProjects;
   assertCurrent(): void;
 }
-const NativeMap = Map, apply = Reflect.apply, weakGetMethod = WeakMap.prototype.get, weakSetMethod = WeakMap.prototype.set;
-const mapGetMethod = Map.prototype.get, mapSetMethod = Map.prototype.set, mapValuesMethod = Map.prototype.values;
-function weakGet<K extends object, V>(map: WeakMap<K, V>, key: K): V | undefined { return apply(weakGetMethod, map, [key]) as V | undefined; }
-function weakSet<K extends object, V>(map: WeakMap<K, V>, key: K, value: V): void { apply(weakSetMethod, map, [key, value]); }
-function mapGet<K, V>(map: Map<K, V> | undefined, key: K): V | undefined { return map ? apply(mapGetMethod, map, [key]) as V | undefined : undefined; }
-function mapValues<K, V>(map: Map<K, V> | undefined): IterableIterator<V> { return map ? apply(mapValuesMethod, map, []) as IterableIterator<V> : [][Symbol.iterator](); }
 const preparations = new WeakMap<ConfigManager, Map<string, PreparedProject>>();
 const constructedStores = new WeakMap<KnowledgeStore, PreparedProject>();
-const nativeStoreConstructor = KnowledgeStore;
-const nativeInit = KnowledgeStore.prototype.init;
 /** Exact compatibility for a real old-format selector found in saved metadata.
  * Fresh contexts never derive public labels from their private workspace path.
  */
@@ -91,9 +82,9 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
   if (activate) {
     const binding = registered, prepared = Object.freeze({ path: selectedPath, projectId: binding.projectId, binding, source,
       assertCurrent() { current(); binding.assertCurrent(); } });
-    let entries = weakGet(preparations, config); if (!entries) { entries = new NativeMap(); weakSet(preparations, config, entries); }
-    const previous = mapGet(entries, file); if (previous && previous.projectId !== prepared.projectId) throw new ProjectIdentityUnavailableError();
-    apply(mapSetMethod, entries, [file, prepared]);
+    let entries = preparations.get(config); if (!entries) { entries = new Map(); preparations.set(config, entries); }
+    const previous = entries.get(file); if (previous && previous.projectId !== prepared.projectId) throw new ProjectIdentityUnavailableError();
+    entries.set(file, prepared);
   }
   originalSourcesCurrent();
   return Object.freeze({ registration: 'registered', projectId: registered.projectId });
@@ -108,8 +99,7 @@ function assertWorkPlanOwnershipCurrent(plan: { readonly path: string; inspectio
   plan.inspection = next;
 }
 function requirePreparedProject(config: ConfigManager, file: string): PreparedProject {
-  selectedFile(file); const prepared = mapGet(weakGet(preparations, config), file); if (!prepared) throw new ProjectIdentityUnavailableError(); prepared.assertCurrent(); prepared.source.assertInitialImage();
-  if (Object.getOwnPropertyDescriptor(KnowledgeStore.prototype, 'init')?.value !== nativeInit) throw new ProjectIdentityUnavailableError();
+  selectedFile(file); const prepared = preparations.get(config)?.get(file); if (!prepared) throw new ProjectIdentityUnavailableError(); prepared.assertCurrent(); prepared.source.assertInitialImage();
   return prepared;
 }
 
@@ -129,19 +119,19 @@ export function assertConfiguredProjectContextReady(config: ConfigManager, worki
 export function createConfiguredPlanningStore(config: ConfigManager, file = REGULAR_KNOWLEDGE_DB_FILE,
   options: Pick<KnowledgeStoreConfig, 'nativeDataWriter' | 'family'> = {}): KnowledgeStore {
   const prepared = requirePreparedProject(config, file);
-  const store = new nativeStoreConstructor({ family: file === GOODVIBES_AGENT_KNOWLEDGE_DB_FILE ? 'agent' : 'wiki', ...options, configManager: config, dbFileName: file, beforeInitialRead: () => { prepared.assertCurrent(); prepared.source.assertInitialImage(); } });
-  prepared.assertCurrent(); weakSet(constructedStores, store, prepared); return store;
+  const store = new KnowledgeStore({ family: file === GOODVIBES_AGENT_KNOWLEDGE_DB_FILE ? 'agent' : 'wiki', ...options, configManager: config, dbFileName: file, beforeInitialRead: () => { prepared.assertCurrent(); prepared.source.assertInitialImage(); } });
+  prepared.assertCurrent(); constructedStores.set(store, prepared); return store;
 }
-/** Used only by the native configured factory. An ID, parsed JSON, borrowed
- * constructor, copied getter or caller-authored options cannot mint this proof.
+/**
+ * The one identity check, at composition: the store was built by
+ * createConfiguredPlanningStore for this configuration's prepared project, at
+ * that project's path, for this workspace. The project id comes from there.
  */
-export function configuredPlanningStoreIdentity(store: KnowledgeStore, config: ConfigManager, workingDirectory: string): { readonly projectId: string; assertCurrent(): void } {
-  const prepared = weakGet(constructedStores, store); if (!prepared || ![...mapValues(weakGet(preparations, config))].includes(prepared)) throw new ProjectIdentityUnavailableError();
-  const workspace = retainConfiguredWorkspace(config); if (workspace.directory !== resolve(workingDirectory)) throw new ProjectIdentityUnavailableError();
-  const slot = Object.getOwnPropertyDescriptor(store, 'sqlite'), path = Object.getOwnPropertyDescriptor(store, 'dbPath');
-  if (!slot || !('value' in slot) || !(slot.value instanceof SQLiteStore) || !path || !('value' in path) || path.value !== prepared.path) throw new ProjectIdentityUnavailableError();
-  const originalSqlite: unknown = slot.value, originalPath: unknown = path.value;
-  const assertCurrent = () => { prepared.assertCurrent(); workspace.assertCurrent();
-    if (Object.getOwnPropertyDescriptor(store, 'sqlite')?.value !== originalSqlite || Object.getOwnPropertyDescriptor(store, 'dbPath')?.value !== originalPath) throw new ProjectIdentityUnavailableError(); };
-  assertCurrent(); return Object.freeze({ projectId: prepared.projectId, assertCurrent });
+export function configuredPlanningStoreIdentity(store: KnowledgeStore, config: ConfigManager, workingDirectory: string): { readonly projectId: string } {
+  const prepared = constructedStores.get(store);
+  if (!prepared || ![...(preparations.get(config)?.values() ?? [])].includes(prepared)) throw new ProjectIdentityUnavailableError();
+  const workspace = retainConfiguredWorkspace(config);
+  if (workspace.directory !== resolve(workingDirectory) || store.storagePath !== prepared.path) throw new ProjectIdentityUnavailableError();
+  prepared.assertCurrent();
+  return Object.freeze({ projectId: prepared.projectId });
 }

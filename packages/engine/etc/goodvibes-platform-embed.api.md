@@ -454,6 +454,7 @@ export class SharedSessionBroker {
     //
     // (undocumented)
     setExternalLivenessProbe(probe: ((session: SharedSessionRecord) => boolean) | null): void;
+    setExternalTurnCounter(counter: (() => number) | null): void;
     setSurfaceNoticeSender(sender: ((routeId: string, text: string) => void) | null): void;
     // Warning: (ae-forgotten-export) The symbol "SharedSessionSurfaceReplyBinder" needs to be exported by the entry point embed.d.ts
     setSurfaceReplyBinder(binder: SharedSessionSurfaceReplyBinder | null): void;

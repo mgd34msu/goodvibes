@@ -6367,7 +6367,7 @@
       {
         "id": "local_auth.users.create",
         "title": "Create Local Auth User",
-        "description": "Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.",
+        "description": "Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions, read:transcripts and write:sessions for someone who only chats); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.",
         "category": "auth",
         "source": "builtin",
         "access": "admin",
@@ -144081,7 +144081,7 @@
       {
         "id": "sessions.get",
         "title": "Get Shared Session",
-        "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts, as sessions.list and sessions.search do (titles and participants).",
+        "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -146351,7 +146351,7 @@
       {
         "id": "sessions.integration.snapshot",
         "title": "Session Integration Snapshot",
-        "description": "Return the session integration snapshot. It carries the conversation's title, which is drawn from what was said, so it needs read:transcripts.",
+        "description": "Return the session integration snapshot.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -146360,7 +146360,7 @@
           "ws"
         ],
         "scopes": [
-          "read:transcripts"
+          "read:sessions"
         ],
         "http": {
           "method": "GET",
@@ -146426,7 +146426,7 @@
       {
         "id": "sessions.list",
         "title": "List Shared Sessions",
-        "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them. Session titles come from what was said and participants name the people in each conversation, so it needs read:transcripts.",
+        "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -146435,7 +146435,7 @@
           "ws"
         ],
         "scopes": [
-          "read:transcripts"
+          "read:sessions"
         ],
         "http": {
           "method": "GET",
@@ -148573,7 +148573,7 @@
       {
         "id": "sessions.search",
         "title": "Search Shared Sessions",
-        "description": "Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKind, and status. Closed sessions are EXCLUDED by default, pass includeClosed:true to include them, and a returned closed session always carries an honest status:\"closed\" (never hidden, never relabeled). Cursor pagination returns disjoint pages that union to the full matching set. Titles and participants come from the conversations, so it needs read:transcripts.",
+        "description": "Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKind, and status. Closed sessions are EXCLUDED by default, pass includeClosed:true to include them, and a returned closed session always carries an honest status:\"closed\" (never hidden, never relabeled). Cursor pagination returns disjoint pages that union to the full matching set.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -148581,7 +148581,7 @@
           "ws"
         ],
         "scopes": [
-          "read:transcripts"
+          "read:sessions"
         ],
         "inputSchema": {
           "type": "object",

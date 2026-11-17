@@ -44,12 +44,17 @@
     {
       "name": "DECISION_MODEL_POLICIES",
       "kind": "const",
-      "text": "DECISION_MODEL_POLICIES: readonly [\"Default - On\", \"Preferred\", \"Classic - Off\"]"
+      "text": "DECISION_MODEL_POLICIES: readonly [\"Decision Model Only\", \"Hybrid\", \"No Decision Model\"]"
     },
     {
       "name": "DECISION_MODEL_POLICY_HEADER",
       "kind": "const",
       "text": "DECISION_MODEL_POLICY_HEADER = \"x-goodvibes-decision-policy\""
+    },
+    {
+      "name": "DEFAULT_DECISION_MODEL_POLICY",
+      "kind": "const",
+      "text": "DEFAULT_DECISION_MODEL_POLICY: DecisionModelPolicy"
     },
     {
       "name": "DaemonErrorCategory",
@@ -62,9 +67,20 @@
       "text": "export type DaemonErrorSource = 'provider' | 'tool' | 'transport' | 'config' | 'permission' | 'runtime' | 'render' | 'acp' | 'unknown';"
     },
     {
+      "name": "DecisionModelFailureState",
+      "kind": "interface",
+      "required": [
+        "model",
+        "nextStep",
+        "since",
+        "what"
+      ],
+      "text": "export interface DecisionModelFailureState { readonly model: string; readonly what: string; readonly nextStep: string; readonly since: number; }"
+    },
+    {
       "name": "DecisionModelPolicy",
       "kind": "type",
-      "text": "export type DecisionModelPolicy = 'Default - On' | 'Preferred' | 'Classic - Off';"
+      "text": "export type DecisionModelPolicy = 'Decision Model Only' | 'Hybrid' | 'No Decision Model';"
     },
     {
       "name": "DecisionModelPolicyState",
@@ -75,7 +91,18 @@
         "reason",
         "revision"
       ],
-      "text": "export interface DecisionModelPolicyState { readonly policy: DecisionModelPolicy; readonly operation: 'decision' | 'classic'; readonly reason: 'selected' | 'unavailable' | null; readonly revision: number; }"
+      "text": "export interface DecisionModelPolicyState { readonly policy: DecisionModelPolicy; readonly operation: 'decision' | 'classic'; readonly reason: NoDecisionModelReason | null; readonly revision: number; readonly failure?: DecisionModelFailureState; }"
+    },
+    {
+      "name": "DecisionModelUse",
+      "kind": "interface",
+      "required": [
+        "inUse",
+        "line",
+        "policy",
+        "reason"
+      ],
+      "text": "export interface DecisionModelUse { readonly inUse: boolean; readonly policy: DecisionModelPolicy; readonly reason: 'not-set' | 'selected' | 'unavailable' | null; readonly failure?: DecisionModelFailureState; readonly line: string; }"
     },
     {
       "name": "DecisionModelsDisabledError",
@@ -277,6 +304,11 @@
       "text": "MEMORY_RECORD_NOT_FOUND_CODE = \"MEMORY_RECORD_NOT_FOUND\""
     },
     {
+      "name": "NoDecisionModelReason",
+      "kind": "type",
+      "text": "export type NoDecisionModelReason = 'selected' | 'not-set' | 'unavailable';"
+    },
+    {
       "name": "RETRYABLE_STATUS_CODES",
       "kind": "const",
       "text": "RETRYABLE_STATUS_CODES: readonly number[]"
@@ -447,9 +479,24 @@
       "text": "export declare function createSharedRegexTester(options: { readonly operation: string; readonly timeoutMs?: number | undefined; }): SharedRegexTester;"
     },
     {
+      "name": "decisionModelFailingLine",
+      "kind": "function",
+      "text": "export declare function decisionModelFailingLine(failure: Pick<DecisionModelFailureState, 'model' | 'what' | 'nextStep'>, policy: DecisionModelPolicy): string; ;; via Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; };"
+    },
+    {
+      "name": "decisionModelPolicyLabel",
+      "kind": "function",
+      "text": "export declare function decisionModelPolicyLabel(policy: DecisionModelPolicy): string;"
+    },
+    {
       "name": "decisionModelPolicyState",
       "kind": "function",
       "text": "export declare function decisionModelPolicyState(): DecisionModelPolicyState;"
+    },
+    {
+      "name": "decisionModelUse",
+      "kind": "function",
+      "text": "export declare function decisionModelUse(state?: DecisionModelPolicyState): DecisionModelUse;"
     },
     {
       "name": "failureReading",

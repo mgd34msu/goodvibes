@@ -16,7 +16,7 @@ interface PendingPermission {
   finished: boolean;
   response?: RequestPermissionResponse;
   responseText?: string;
-  admission?: Admission;
+  admission?: Admission | undefined;
   cleanup?: () => void;
   claim?: boolean;
 }
@@ -59,7 +59,8 @@ export class AcpPermissionWire {
     };
     return { request: pending.request, protocolSubject: pending.protocolSubject, signal: pending.lifetime.signal, assertCurrent,
       bindTerminal: (response: RequestPermissionResponse) => { this.responses.set(response, pending); },
-      defer: (response: RequestPermissionResponse, admission: Admission, claim: boolean, cleanup: () => void) => {
+      /** `admission` is absent for an answer this side decided alone (a runner ceiling refusal). */
+      defer: (response: RequestPermissionResponse, admission: Admission | undefined, claim: boolean, cleanup: () => void) => {
         assertCurrent(); if (pending.response) throw new Error('ACP permission response already bound');
         pending.response = response; pending.responseText = JSON.stringify(response); pending.admission = admission; pending.claim = claim; pending.cleanup = cleanup;
         this.responses.set(response, pending);

@@ -81,8 +81,13 @@ export interface SubagentTask {
   description: string;
   /** Additional context to inject into the subagent's system prompt. */
   context: string;
-  /** Tool names the subagent is allowed to use. */
+  /**
+   * Tool names the subagent may use: a permission ask for a call outside them
+   * is refused (acp/runner-ceiling.ts). Empty sets no tool ceiling.
+   */
   tools: string[];
+  /** Paths (relative to the working directory) the subagent may write; empty or absent sets no path ceiling. */
+  writeScope?: string[] | undefined;
   /** App-owned working directory for the spawned ACP session. */
   workingDirectory: string;
   /** Optional model override (e.g. "claude-sonnet-4-5"). */

@@ -2,6 +2,7 @@ import { createTrustReviewTools, createTrustCommandFlow } from '@goodvibes-jev/e
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import { runnerToolsText } from './remote-ceiling-text.ts';
 import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@/runtime/index.ts';
 import { BUILTIN_SUITES } from '@/runtime/index.ts';
 import {
@@ -217,7 +218,7 @@ export function registerProductRuntimeCommands(registry: CommandRegistry): void 
             `  template: ${contract.template}`,
             `  trustClass: ${contract.trustClass}`,
             `  transport: ${contract.sourceTransport}/${contract.transport.state}`,
-            `  tools (advisory, not enforced on an external runner): ${contract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
+            `  tools: ${runnerToolsText(contract)}`,
             `  pool: ${contract.poolId ?? '(unassigned)'}`,
           ].join('\n'),
         );

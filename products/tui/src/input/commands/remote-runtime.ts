@@ -2,6 +2,7 @@ import { directOwnerRemoteInput, isDirectOwnerCommandContext, type CommandRegist
 import { AGENT_TEMPLATES } from '@goodvibes-jev/engine/platform/platform/tools';
 import { handleRemoteSetupCommand } from './remote-runtime-setup.ts';
 import { handleRemotePoolCommand } from './remote-runtime-pool.ts';
+import { runnerReviewText, runnerToolsText, runnerWriteScopeText } from './remote-ceiling-text.ts';
 import { requireAgentManager, requireAcpManager, requirePeerClient, requireShellPaths } from './runtime-services.ts';
 
 /** Own keys only: `constructor` or `toString` are not templates. */
@@ -142,7 +143,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         if (contracts.length > 0) {
           lines.push('  contracts:');
           for (const contract of contracts.slice(0, 12)) {
-            lines.push(`    ${contract.runnerId}  ${contract.template}  ${contract.transport.state}  ${contract.capabilityCeiling.executionProtocol}/${contract.capabilityCeiling.reviewMode} (review mode advisory)`);
+            lines.push(`    ${contract.runnerId}  ${contract.template}  ${contract.transport.state}  ${contract.capabilityCeiling.executionProtocol}/${runnerReviewText(contract)}`);
           }
         }
         ctx.print(lines.join('\n'));
@@ -166,7 +167,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  heartbeat: ${selected.heartbeat.status}`,
           `  heartbeat detail: ${selected.heartbeat.detail}`,
           `  executionProtocol: ${selected.negotiation.executionProtocol}`,
-          `  reviewMode (advisory): ${selected.negotiation.reviewMode}`,
+          `  reviewMode: ${selected.negotiation.trustClass === 'self-hosted-acp' && selected.negotiation.reviewMode === 'contract' ? 'contract (not applied to an external runner)' : selected.negotiation.reviewMode}`,
           `  communicationLane: ${selected.negotiation.communicationLane}`,
           `  trustClass: ${selected.negotiation.trustClass}`,
           `  taskId: ${selected.taskId ?? 'n/a'}`,
@@ -196,7 +197,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  label: ${selected.label}`,
           `  transport: ${selected.transportState}`,
           `  executionProtocol: ${selected.negotiation.executionProtocol}`,
-          `  reviewMode (advisory): ${selected.negotiation.reviewMode}`,
+          `  reviewMode: ${selected.negotiation.trustClass === 'self-hosted-acp' && selected.negotiation.reviewMode === 'contract' ? 'contract (not applied to an external runner)' : selected.negotiation.reviewMode}`,
           `  communicationLane: ${selected.negotiation.communicationLane}`,
           `  trustClass: ${selected.negotiation.trustClass}`,
           '  capabilities:',
@@ -266,7 +267,8 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  contract: ${contract?.id ?? 'n/a'}`,
           `  pool: ${contract?.poolId ?? 'n/a'}`,
           `  executionProtocol: ${contract?.capabilityCeiling.executionProtocol ?? 'n/a'}`,
-          `  reviewMode (advisory): ${contract?.capabilityCeiling.reviewMode ?? 'n/a'}`,
+          `  reviewMode: ${contract ? runnerReviewText(contract) : 'n/a'}`,
+          `  tools: ${contract ? runnerToolsText(contract) : 'n/a'}`,
           `  communicationLane: ${contract?.capabilityCeiling.communicationLane ?? 'n/a'}`,
         ].join('\n'));
         return;
@@ -331,7 +333,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
         ctx.print([
           `Dispatched remote runner ${runnerId}`,
           `  template: ${template}`,
-          `  tools: ${templateDef.defaultTools.join(', ')} (advisory: listed to the runner in its prompt; the runner's own harness is not restricted to them)`,
+          `  tools: ${templateDef.defaultTools.join(', ')} (a permission ask for any other kind of call is refused)`,
           `  description: ${description}`,
         ].join('\n'));
         return;
@@ -414,7 +416,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
             ? `Dispatched remote runner ${runnerId} via pool ${poolId}`
             : `Dispatched remote runner ${runnerId}; pool ${poolId} filled up meanwhile, so the runner is not in it (cancel it with /remote cancel ${runnerId} if it should not run outside the pool)`,
           `  template: ${template}`,
-          `  tools: ${templateDef.defaultTools.join(', ')} (advisory: listed to the runner in its prompt; the runner's own harness is not restricted to them)`,
+          `  tools: ${templateDef.defaultTools.join(', ')} (a permission ask for any other kind of call is refused)`,
           `  description: ${description}`,
         ].join('\n'));
         return;
@@ -439,12 +441,11 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
           `  trustClass: ${contract.trustClass}`,
           `  template: ${contract.template}`,
           `  transport: ${contract.transport.state}`,
-          `  tools (advisory, not enforced on an external runner): ${contract.capabilityCeiling.allowedTools.join(', ') || '(none)'}`,
-          `  ceiling (advisory, not enforced on an external runner): ${contract.capabilityCeiling.capabilityCeilingTools.join(', ') || '(none)'}`,
+          `  tools: ${runnerToolsText(contract)}`,
           `  protocol: ${contract.capabilityCeiling.executionProtocol}`,
-          `  reviewMode (advisory): ${contract.capabilityCeiling.reviewMode}`,
+          `  reviewMode: ${runnerReviewText(contract)}`,
           `  communicationLane: ${contract.capabilityCeiling.communicationLane}`,
-          `  writeScope (advisory): ${contract.capabilityCeiling.writeScope.join(', ') || '(none)'}`,
+          `  writeScope: ${runnerWriteScopeText(contract)}`,
         ].join('\n'));
         return;
       }

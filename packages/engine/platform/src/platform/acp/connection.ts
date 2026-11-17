@@ -32,6 +32,7 @@ import {
 } from './protocol.js';
 import { admitExternalRequest, externalAskDeadlineMs, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
 import { AcpPermissionWire } from './permission-wire.js';
+import { runnerCeilingRefusal } from './runner-ceiling.js';
 import { logger } from '../utils/logger.js';
 import { AcpError } from '../types/errors.js';
 import { VERSION } from '../version.js';
@@ -126,7 +127,7 @@ export class AcpConnection {
     options: AcpConnectionOptions = {},
   ) {
     this.id = id;
-    this.task = { ...task, tools: [...task.tools] };
+    this.task = { ...task, tools: [...task.tools], ...(task.writeScope ? { writeScope: [...task.writeScope] } : {}) };
     this.spawnCmd = [...spawnCmd];
     this.runtimeBus = options.runtimeBus ?? null;
     this.hookDispatcher = options.hookDispatcher ?? null;
@@ -447,6 +448,16 @@ export class AcpConnection {
           if (!binding || !owned || !protocolSubject) return this.refuse('the permission ask was not a well-formed ACP request');
           if (!this.sessionId || owned.sessionId !== this.sessionId || !owned.toolCall.toolCallId || !wellFormedPermissionOptions(owned.options))
             return this.refuse('the permission ask named another session or offered malformed options');
+          // The runner's ceiling is a fact of the task: a call outside it is refused here, before anyone is asked.
+          const outside = runnerCeilingRefusal(this.task, owned.toolCall);
+          if (outside) {
+            const refusal = permissionOutcomeFor(owned.options, { approved: false, remember: false });
+            binding.defer(refusal, undefined, false, () => {});
+            deferred = true;
+            this.info.lastRefusal = { at: Date.now(), reason: outside };
+            logger.warn('AcpConnection: a call outside the runner ceiling was refused', { id: this.id, reason: outside });
+            return refusal;
+          }
           deadlineMs = externalAskDeadlineMs(host);
           deadline = AbortSignal.timeout(deadlineMs);
           const signal = AbortSignal.any([this.lifetime.signal, binding.signal, deadline]);
@@ -510,7 +521,10 @@ export class AcpConnection {
     }
 
     if (this.task.tools.length > 0) {
-      parts.push(`Available tools: ${this.task.tools.join(', ')}`);
+      parts.push(`Available tools: ${this.task.tools.join(', ')}. A permission request for any other kind of tool call is refused.`);
+    }
+    if (this.task.writeScope?.length) {
+      parts.push(`Write only inside: ${this.task.writeScope.join(', ')}. Edits elsewhere, and commands, are refused.`);
     }
 
     if (this.task.model) {

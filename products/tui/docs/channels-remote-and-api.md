@@ -141,6 +141,8 @@ Key remote API paths:
 | `/remote import <path>` | Import an exported record |
 | `/remote setup` | Review or export the remote setup |
 
+A dispatched runner is an external agent that runs its own tools, so its tool ceiling is held at the one place this side decides: its permission asks. The runner is told its tools in its prompt, and an ask for a call outside them (a command from a runner without `exec`, an edit from a read-only one; a call of unknown kind counts as a command) is answered with a refusal before you or Jev are asked, and the reason is kept on the runner. A runner given a write scope has an edit outside it, or any command, refused the same way. `/remote contract <runner>` shows the tools and scope it is held to.
+
 ## /channel command
 
 The `/channel` command gives in-session visibility into the channel runtime state.

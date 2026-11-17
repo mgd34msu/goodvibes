@@ -8,7 +8,7 @@ import type { ServiceRegistry } from '../../config/service-registry.js';
 import { CONFIG_SCHEMA, isValidConfigKey } from '../../config/schema.js';
 import { coerceSchemaValue } from '../../config/manager-bootstrap.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
-import { DECISION_MODEL_POLICY_HEADER, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { DECISION_MODEL_POLICY_HEADER, DecisionModelsDisabledError, decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { DecisionModelPolicyChangedError, withDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -383,6 +383,16 @@ export class DaemonHttpRouter {
         // An error leaves as the route wrote it: its code is the fact a client reads, so nothing is attached for a model to read.
         const response = asset ?? await this.requests.route(req).catch((error: unknown) => {
           if (error instanceof DecisionModelPolicyChangedError) throw error;
+          // Decision models are off (Classic) and this feature needs one: the owner's setting, not a daemon fault.
+          if (error instanceof DecisionModelsDisabledError) {
+            return jsonErrorResponse({
+              error: error.message,
+              code: 'DECISION_MODELS_DISABLED',
+              category: 'bad_request',
+              state: 'decision models are off (judgment.policy Classic - Off)',
+              next: ['Turn decision models on (judgment.policy Default - On or Preferred) to use this, or use the Classic alternative the message names'],
+            }, { status: 409 });
+          }
           // A route that throws must still answer: a bare rejection reaches the
           // listener as a dropped connection with nothing for the caller to act on.
           logger.error('[daemon-http] request handler failed', { method: req.method, path: new URL(req.url).pathname, error: summarizeError(error) });

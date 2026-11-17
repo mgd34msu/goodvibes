@@ -46,6 +46,7 @@ import { acquireCrossProcessLock } from './cross-process-lock.js';
 import { deleteCheckpointRefs, type CheckpointPruneResult } from './pruner.js';
 import { computeSessionChanges } from './session-changes.js';
 import { applyRestore } from './restore.js';
+import { noteProjectFilesChanged } from '../../intelligence/project-files-epoch.js';
 import { recordsForUnlistedRefs, deleteUnlistedRefs } from './unlisted-refs.js';
 import { CheckpointDiffObservations } from './diff-observations.js';
 import {
@@ -730,6 +731,10 @@ export class WorkspaceCheckpointManager {
     } catch (error) {
       if (safetyCheckpointId === null) throw error;
       throw new CheckpointRestoreError(id, safetyCheckpointId, error);
+    } finally {
+      // A restore, even one that failed part way, can change any tracked file:
+      // a cached import graph built before it must not answer the next query.
+      noteProjectFilesChanged();
     }
   }
 

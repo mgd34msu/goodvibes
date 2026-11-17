@@ -2,6 +2,7 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { noteToolWrites } from './file-watcher.js';
+import { noteProjectFilesChanged } from '../intelligence/project-files-epoch.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,6 +90,8 @@ function restore(path: string, content: string | Buffer | null): void {
   }
   // An undo or redo is the product's own change, not one made outside it.
   noteToolWrites([path]);
+  // A cached import graph built before the undo must not answer the next relationship query.
+  noteProjectFilesChanged();
 }
 
 function entryOf(operations: FileOperation[]): FileUndoEntry {

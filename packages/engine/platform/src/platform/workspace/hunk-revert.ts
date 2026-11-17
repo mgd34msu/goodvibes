@@ -23,6 +23,7 @@ import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { WorkspaceCheckpoint } from './checkpoint/types.js';
 import { parseUnifiedHunks } from '../git/structured-diff.js';
+import { noteProjectFilesChanged } from '../intelligence/project-files-epoch.js';
 
 /** Thrown when a hunk cannot be reverse-applied cleanly (stale/drifted/malformed). */
 export class HunkRevertConflictError extends Error {
@@ -311,6 +312,8 @@ export async function applyHunkRevert(
     throw new HunkRevertConflictError(`${path} changed while the safety checkpoint was being taken; nothing was written. Preview the hunk again and retry.`);
   }
   writeFileSync(resolveInsideRoot(root, path), result.nextContent, 'utf8');
+  // A cached import graph built before the revert must not answer the next relationship query.
+  noteProjectFilesChanged();
   return {
     reverted: true,
     path,

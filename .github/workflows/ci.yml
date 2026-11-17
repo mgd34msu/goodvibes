@@ -1,11 +1,19 @@
 name: CI
 
+# Every job but the security audit and the native builds runs
+# `bun run validate --job <job>`, so a local `bun run validate` runs the same
+# commands in the same order (packages/engine/scripts/validate.ts lists them).
+# Here CI adds the host set-up, one build passed to the jobs that read it, the
+# dependency audit and secret scan, and the daemon on other platforms on pushes
+# to main.
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
 # Default to read-only permissions. Individual jobs elevate as needed.
 permissions:
   contents: read
@@ -15,68 +23,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Integration gate: typecheck, browser compat, metadata, no-any, pack check,
-  # install smoke. Deliberately self-contained, this is the 'everything works
-  # atomically' check that matches what a local developer runs via
-  # `bun run validate`.
-  # ---------------------------------------------------------------------------
-  validate:
-    runs-on: ubuntu-latest
-    # pack:check packs every workspace package and dominates the run time;
-    # individual bun tests carry their own timeouts, so this only bounds a hang.
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Validate workspace
-        run: bun run validate
-      - name: Test release asset consistency
-        run: python3 -m unittest discover -s .github/scripts -p 'test_release_asset_*.py'
-      - name: Build TUI native artifact
-        run: |
-          bun run --cwd products/tui smoke:tui
-          tar -czf /tmp/tui-native-linux-x64.tgz \
-            products/tui/dist/goodvibes-linux-x64 \
-            products/tui/dist/goodvibes-linux-x64.bun \
-            products/tui/dist/goodvibes-linux-x64.bun.LICENSE.md \
-            products/tui/dist/goodvibes-linux-x64.bun.json \
-            products/tui/dist/lib/sqlite-vec-linux-x64/vec0.so
-      - name: Upload TUI native artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: tui-native-linux-x64
-          path: /tmp/tui-native-linux-x64.tgz
-          retention-days: 7
-          if-no-files-found: error
-
-  security-audit:
-    name: Security audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Dependency audit
-        run: bun audit --audit-level high
-      - name: Secret scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ---------------------------------------------------------------------------
-  # Single build job. Uploads all package dist directories as one artifact so
-  # every downstream job tests the exact same workspace package bytes.
-  # ---------------------------------------------------------------------------
-  build:
+  # Source-only checks: no build.
+  gates:
+    name: Gates
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -84,397 +33,111 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
-      - name: Build shared engine packages
-        # Product builds run once in validate. This artifact contains only the
-        # engine/judgment output and the separately built Agent E2E binary.
-        run: bun packages/engine/scripts/build.ts
-      - name: Build Agent native E2E artifact
+      - name: Gates
+        run: bun run validate --job gates
+
+  # The one build. Every job that reads compiled output restores this artifact.
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Bun + deps (cached)
+        uses: ./.github/actions/setup
+      - name: Build the engine and every product
+        run: bun run validate --job build
+      # The engine's build state (tsconfig.tsbuildinfo) travels with its output,
+      # so the typecheck job's incremental engine step finds it current.
+      - name: Archive the build output
         run: |
-          bun run --cwd products/agent build:binary --target linux-x64
-          products/agent/dist/goodvibes-agent-linux-x64 --version
-      - name: Archive workspace package output
-        run: |
-          tar -czf /tmp/workspace-build-output.tgz packages/engine/*/dist packages/judgment/dist \
-            products/agent/dist/goodvibes-agent-linux-x64 products/agent/dist/lib \
-            products/agent/dist/goodvibes-agent-linux-x64.bun \
-            products/agent/dist/goodvibes-agent-linux-x64.bun.LICENSE.md \
-            products/agent/dist/goodvibes-agent-linux-x64.bun.json
-      - name: Upload dist artifact
+          tar -czf "$RUNNER_TEMP/workspace-build-output.tgz" \
+            packages/engine/*/dist packages/engine/*/tsconfig.tsbuildinfo packages/judgment/dist products/*/dist
+      - name: Upload the build output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: workspace-build-output
-          path: /tmp/workspace-build-output.tgz
-          # Short retention: only this run's downstream jobs consume it.
+          path: ${{ runner.temp }}/workspace-build-output.tgz
+          # Only this run's jobs read it.
           retention-days: 7
           if-no-files-found: error
 
-  # ---------------------------------------------------------------------------
-  # Engine tests: five disjoint partitions of the engine suite (selected by the
-  # runner itself with --partition=INDEX/5) plus the companion runtimes. Each
-  # partition runs its files one per process, cores - 1 at a time (the runner's
-  # default). Every leg restores the build job's compiled output. Partition 1
-  # also owns the installer lifecycle and judgment; partition 5 holds the
-  # dedicated native workflow suite, whose declared four-minute test sets its
-  # own timeout.
-  # ---------------------------------------------------------------------------
-  platform-matrix:
-    name: Platform matrix (${{ matrix.name }})
-    # Process-group timeout proofs require GNU coreutils, supplied by this image.
-    runs-on: ubuntu-24.04
-    # Was nine single-process partitions (slowest ~10.5 min); per-file processes on the runner's cores replace four of them.
-    timeout-minutes: 35
-    needs: [build]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: "bun 1/5", foundation: true, test-cmd: "bun packages/engine/scripts/test.ts --partition=1/5" }
-          - { name: "bun 2/5", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=2/5" }
-          - { name: "bun 3/5", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=3/5" }
-          - { name: "bun 4/5", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=4/5" }
-          - { name: "bun 5/5", foundation: false, test-cmd: "bun packages/engine/scripts/test.ts --partition=5/5" }
-          - { name: rn-bundle, foundation: false, test-cmd: "bun run test:rn" }
-          - { name: workers, foundation: false, test-cmd: "bun run test:workers" }
-          - { name: workers-wrangler, foundation: false, test-cmd: "bun run test:workers:wrangler" }
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Restore workspace package output
-        uses: ./.github/actions/restore-build
-      - name: Configure git identity for worktree/orchestration tests
-        # The orchestration worktree flow makes real git commits and relies on
-        # ambient git config. A fresh CI runner has no identity, so those
-        # commits fail and the worktree integration tests hang.
-        run: |
-          git config --global user.email "ci@goodvibes.local"
-          git config --global user.name "GoodVibes CI"
-      - name: Run test suite (${{ matrix.name }})
-        run: ${{ matrix.test-cmd }}
-      - name: Check installer lifecycle
-        if: matrix.foundation
-        run: bun run test:installer
-      - name: Run judgment suite
-        if: matrix.foundation
-        run: bun run test:judgment
-
-  # Product test suites for the products that have no dedicated lane below.
-  # The daemon leg also produces the Linux x64 native artifact.
-  product-tests:
-    name: Product tests (${{ matrix.product }})
-    runs-on: ubuntu-latest
-    # Measured on a 12-core workstation with --jobs=auto: tui 4.3 min, daemon 9.1 min
-    # (including `bun run build`), then the daemon native build; hosted runners have 4 vCPUs.
-    timeout-minutes: 45
-    needs: [build]
-    strategy:
-      fail-fast: false
-      matrix:
-        product: [daemon, tui, webui]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Restore workspace package output
-        uses: ./.github/actions/restore-build
-      - name: Configure git identity for product worktree tests
-        run: |
-          git config --global user.email "ci@goodvibes.local"
-          git config --global user.name "GoodVibes CI"
-      - name: Run complete declared product test suite
-        id: product-test-run
-        env:
-          PRODUCT: ${{ matrix.product }}
-        run: bun run products:test "$PRODUCT"
-
-      # Only this matrix leg produces the daemon binary; consumers never rebuild
-      # it. ci-artifact.json is part of the archive cohort that
-      # products/daemon/scripts/acquire-native.ts admits from this run.
-      - name: Build and record daemon native artifact
-        if: matrix.product == 'daemon'
-        env:
-          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          bun run --cwd products/daemon build:binary --target linux-x64
-          bun products/daemon/scripts/ci-artifact.ts record "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
-          tar -czf /tmp/daemon-native-linux-x64.tgz \
-            products/daemon/native/goodvibes-daemon-linux-x64 \
-            products/daemon/native/goodvibes-daemon-linux-x64.bun \
-            products/daemon/native/goodvibes-daemon-linux-x64.bun.LICENSE.md \
-            products/daemon/native/goodvibes-daemon-linux-x64.bun.json \
-            products/daemon/native/lib/sqlite-vec-linux-x64/vec0.so \
-            products/daemon/native/ci-artifact.json
-      - name: Upload daemon native artifact
-        if: matrix.product == 'daemon'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: daemon-native-linux-x64
-          path: /tmp/daemon-native-linux-x64.tgz
-          retention-days: 7
-          if-no-files-found: error
-
-  daemon-native:
-    name: Daemon native artifact (isolated Linux)
-    # Match the live containment lanes: no host security relaxation.
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    needs: [build, product-tests]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Install filesystem isolation harness
-        uses: ./.github/actions/apt-install
-        with:
-          packages: bubblewrap
-      - name: Restore workspace package output
-        uses: ./.github/actions/restore-build
-      - name: Download daemon native artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: daemon-native-linux-x64
-          path: /tmp/daemon-native-artifact
-      - name: Restore daemon native artifact
-        run: tar -xzf /tmp/daemon-native-artifact/daemon-native-linux-x64.tgz -C .
-      - name: Qualify isolated daemon commands and synthetic send
-        run: bun run --cwd products/daemon verify:binary
-
-  # Native production occurs once per target; restored consumers never build.
-  daemon-native-produce:
-    name: Daemon native producer (${{ matrix.target }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
-    needs: [build]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-arm64
-            platform: linux
-            runner: ubuntu-22.04-arm
-          - target: darwin-x64
-            platform: darwin
-            runner: macos-15-intel
-          - target: darwin-arm64
-            platform: darwin
-            runner: macos-15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Restore canonical workspace package output
-        uses: ./.github/actions/restore-build
-      - name: Build exact native target
-        env:
-          NATIVE_TARGET: ${{ matrix.target }}
-        run: bun products/daemon/scripts/build-native-ci.ts "$NATIVE_TARGET"
-      - name: Archive Linux ARM cohort
-        if: matrix.platform == 'linux'
-        env:
-          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          bun products/daemon/scripts/ci-artifact.ts record "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
-          tar -czf /tmp/daemon-native-linux-arm64.tgz \
-            products/daemon/native/goodvibes-daemon-linux-arm64 \
-            products/daemon/native/goodvibes-daemon-linux-arm64.bun \
-            products/daemon/native/goodvibes-daemon-linux-arm64.bun.LICENSE.md \
-            products/daemon/native/goodvibes-daemon-linux-arm64.bun.json \
-            products/daemon/native/lib/sqlite-vec-linux-arm64/vec0.so \
-            products/daemon/native/ci-artifact.json
-      - name: Record and archive Darwin execution cohort
-        if: matrix.platform == 'darwin'
-        env:
-          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-          NATIVE_TARGET: ${{ matrix.target }}
-        run: |
-          node products/daemon/scripts/native-execution-artifact.mjs record "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
-          node products/daemon/scripts/native-execution-artifact.mjs archive "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD" "/tmp/daemon-native-${NATIVE_TARGET}.tgz"
-      - name: Upload exact native cohort
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: daemon-native-${{ matrix.target }}
-          path: /tmp/daemon-native-${{ matrix.target }}.tgz
-          retention-days: 7
-          if-no-files-found: error
-
-  daemon-native-execution:
-    name: Daemon restored native execution (${{ matrix.target }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 10
-    needs: [build, daemon-native-produce]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-arm64
-            platform: linux
-            runner: ubuntu-22.04-arm
-          - target: darwin-x64
-            platform: darwin
-            runner: macos-15-intel
-          - target: darwin-arm64
-            platform: darwin
-            runner: macos-15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Install filesystem isolation harness
-        if: matrix.platform == 'linux'
-        uses: ./.github/actions/apt-install
-        with:
-          packages: bubblewrap
-      - name: Restore canonical workspace package output
-        uses: ./.github/actions/restore-build
-      - name: Download exact native cohort
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: daemon-native-${{ matrix.target }}
-          path: /tmp/daemon-native-artifact
-      - name: Restore exact native cohort
-        env:
-          NATIVE_TARGET: ${{ matrix.target }}
-        run: tar -xzf "/tmp/daemon-native-artifact/daemon-native-${NATIVE_TARGET}.tgz" -C .
-      - name: Execute isolated Linux ARM cohort
-        if: matrix.platform == 'linux'
-        run: node products/daemon/scripts/verify-binary.mjs --binary native/goodvibes-daemon-linux-arm64
-      - name: Verify installer open file identity on Darwin
-        if: matrix.platform == 'darwin'
-        run: bun packages/engine/scripts/test.ts --cwd ../.. scripts/installer-open-file-identity.test.ts
-      - name: Verify and execute portable Darwin cohort
-        if: matrix.platform == 'darwin'
-        env:
-          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          node products/daemon/scripts/native-execution-artifact.mjs verify "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
-          node products/daemon/scripts/verify-native-execution.mjs "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
-
-  # The whole Agent suite, split into eight even shards by sorted file index
-  # (every test file is in exactly one shard by construction). Each file runs in
-  # its own bun process (--jobs=2, each with its own home directory), so files
-  # cannot leak state into one another.
-  agent-tests:
-    name: Agent tests (shard ${{ matrix.shard }}/8)
-    runs-on: ubuntu-latest
-    # Slowest shard measured at ~9.5 min on a 12-core workstation.
-    timeout-minutes: 35
-    needs: [build]
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Restore workspace package output
-        uses: ./.github/actions/restore-build
-      - name: Select the restored Agent native binary for E2E files
-        run: |
-          products/agent/dist/goodvibes-agent-linux-x64 --version
-          echo "GOODVIBES_E2E_BINARY=$GITHUB_WORKSPACE/products/agent/dist/goodvibes-agent-linux-x64" >> "$GITHUB_ENV"
-          echo "GOODVIBES_TEST_HEADLESS_AGENT_BINARY=$GITHUB_WORKSPACE/products/agent/dist/goodvibes-agent-linux-x64" >> "$GITHUB_ENV"
-      - name: Install Agent terminal E2E prerequisite
-        uses: ./.github/actions/apt-install
-        with:
-          packages: tmux
-      - name: Configure git identity for product worktree tests
-        run: |
-          git config --global user.email "ci@goodvibes.local"
-          git config --global user.name "GoodVibes CI"
-      - name: Run Agent test shard
-        id: agent-test-run
-        env:
-          SHARD: ${{ matrix.shard }}
-        run: |
-          mapfile -t files < <(cd products/agent && find src/test -type f -regextype posix-extended -regex '.*\.(test|spec)\.[cm]?[jt]sx?' \
-            -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/.git/*' \
-            | LC_ALL=C sort \
-            | awk -v shard="$SHARD" 'NR % 8 == shard' | sed 's|^|./|')
-          echo "Agent shard $SHARD: ${#files[@]} files"
-          test "${#files[@]}" -gt 0
-          bun packages/engine/scripts/test.ts --cwd ../../products/agent --jobs=2 --timeout=180000 "${files[@]}"
-
-  # Exact TUI source, production migration handlers and real owner-terminal input.
-  # The ordinary TUI product runner intentionally excludes E2E files.
-  tui-host-pair-terminal:
-    name: TUI host pairing (compiled terminal)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [validate, build]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install official terminal harness package
-        uses: ./.github/actions/apt-install
-        with:
-          packages: tmux
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Restore workspace package output
-        uses: ./.github/actions/restore-build
-      - name: Download TUI native artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: tui-native-linux-x64
-          path: /tmp/tui-native-artifact
-      - name: Restore TUI native artifact
-        run: |
-          tar -xzf /tmp/tui-native-artifact/tui-native-linux-x64.tgz -C .
-          products/tui/dist/goodvibes-linux-x64 --version
-      - name: Run every TUI terminal end-to-end file against the built binary
-        env:
-          GOODVIBES_E2E_BINARY: ${{ github.workspace }}/products/tui/dist/goodvibes-linux-x64
-        run: bun packages/engine/scripts/test.ts --cwd ../../products/tui --timeout=300000 src/test/e2e
-
-  # The WebUI browser suite (phone, desktop and the genuine LAN origin) on two
-  # runners using Playwright's own sharding. Each retains two workers and every
-  # assertion.
-  webui-browser:
-    name: WebUI browser (shard ${{ matrix.shard }}/2)
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: [build]
-    defaults:
-      run:
-        working-directory: products/webui
-        shell: bash
-    env:
-      DESIGN_PROOF_SHOTS: e2e/.artifacts/screenshots
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Bun + deps (cached)
+        uses: ./.github/actions/setup
+      - name: Restore the build output
+        uses: ./.github/actions/restore-build
+      - name: Typecheck, API reports, exports and examples
+        run: bun run validate --job typecheck
+
+  proofs:
+    name: Proofs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The Workers proof bundles the built engine (test/workers/worker.ts).
+    needs: [build]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Bun + deps (cached)
+        uses: ./.github/actions/setup
+      - name: Restore the build output
+        uses: ./.github/actions/restore-build
+      - name: Run the default test suite
+        run: bun run validate --job proofs
+
+  # The test/live files run commands inside real bubblewrap; a skip fails. Ubuntu
+  # 22.04 allows unprivileged user namespaces without relaxing host security
+  # (24.04's AppArmor default refuses them); never disable AppArmor, change
+  # sysctls or run as root to make a failing host look supported.
+  live-sandbox:
+    name: Live sandbox
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install bubblewrap
+        uses: ./.github/actions/apt-install
+        with:
+          packages: bubblewrap
+      - name: Setup Bun + deps (cached)
+        uses: ./.github/actions/setup
+      - name: Run the live sandbox tests
+        run: bun run validate --job live-sandbox
+
+  # Counts per scenario against packages/engine/scripts/measure/budgets.json; wall
+  # time only as a ratio inside this run.
+  measure:
+    name: Measure
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Bun + deps (cached)
+        uses: ./.github/actions/setup
+      - name: Check the speed budgets
+        run: bun run validate --job measure
+
+  # The packages as released, then the three Linux programs built and run: the
+  # terminal and Agent programs finish a turn, the web UI's journeys pass in
+  # Chromium, the daemon runs inside bubblewrap (Ubuntu 22.04, as for the live
+  # sandbox). Ends by refusing any change to the checkout. acquire-native.ts
+  # admits the daemon artifact this job uploads by this job's name.
+  package:
+    name: Package and smoke
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    needs: [build]
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -484,12 +147,16 @@ jobs:
           node-version: "22"
       - name: Setup Bun + deps (cached)
         uses: ./.github/actions/setup
-      - name: Restore workspace package output
+      - name: Install bubblewrap
+        uses: ./.github/actions/apt-install
+        with:
+          packages: bubblewrap
+      - name: Restore the build output
         uses: ./.github/actions/restore-build
-      - name: Install official Playwright Chromium and OS dependencies
+      - name: Install Playwright's Chromium and, only if it cannot start, its OS dependencies
+        working-directory: products/webui
         run: |
-          # Use the lockfile-installed CLI and its exact Chromium revision. Browser
-          # acquisition does not need a broad package-index refresh on a ready host.
+          # The lockfile's Playwright CLI and its exact Chromium revision.
           timeout --signal=KILL 180s node node_modules/@playwright/test/cli.js install chromium
           if timeout --signal=KILL 30s bun scripts/ci-browser-smoke.ts; then
             exit 0
@@ -501,124 +168,149 @@ jobs:
           if (( probe_status == 124 || probe_status >= 128 )); then
             exit "$probe_status"
           fi
-          # If the actual browser cannot run, install the official dependency set.
           sudo -n timeout --signal=KILL 180s "$(command -v node)" "$(realpath node_modules/@playwright/test/cli.js)" install-deps chromium
           timeout --signal=KILL 30s bun scripts/ci-browser-smoke.ts
-      - name: Check workspace exports and generated data
-        run: bun run release:gate && bun run generated:check
-      - name: Exercise the WebUI client against a real daemon
-        # One real daemon boot (isolated home, loopback, no model) is enough: the
-        # browser shards below use synthetic fixtures, so this is what fails when a
-        # route or stream frame changes shape.
-        if: matrix.shard == 1
-        run: bun run test:live
-      - name: Exercise the production app with synthetic daemon fixtures
-        run: node node_modules/@playwright/test/cli.js test --shard=${{ matrix.shard }}/2 --workers=2
-      - name: Retain report, traces, and screenshots
-        if: always()
+      - name: Package checks, the three programs, and the smoke runs
+        run: bun run validate --job package
+      # The daemon program verify:binary just ran, recorded for
+      # `bun run --cwd products/daemon native:acquire`.
+      - name: Record and archive the Linux x64 daemon program
+        env:
+          DAEMON_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          bun products/daemon/scripts/ci-artifact.ts record "$GITHUB_SHA" "$DAEMON_SOURCE_HEAD"
+          tar -czf "$RUNNER_TEMP/daemon-native-linux-x64.tgz" \
+            products/daemon/native/goodvibes-daemon-linux-x64 \
+            products/daemon/native/goodvibes-daemon-linux-x64.bun \
+            products/daemon/native/goodvibes-daemon-linux-x64.bun.LICENSE.md \
+            products/daemon/native/goodvibes-daemon-linux-x64.bun.json \
+            products/daemon/native/lib/sqlite-vec-linux-x64/vec0.so \
+            products/daemon/native/ci-artifact.json
+      - name: Upload the Linux x64 daemon program
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: webui-browser-shard-${{ matrix.shard }}
+          name: daemon-native-linux-x64
+          path: ${{ runner.temp }}/daemon-native-linux-x64.tgz
+          retention-days: 7
+          if-no-files-found: error
+      - name: Keep the web UI journey report and traces of a failed run
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: webui-e2e-report
           path: |
             products/webui/e2e/.artifacts/report
             products/webui/e2e/.artifacts/test-output
-            products/webui/e2e/.artifacts/screenshots
           include-hidden-files: true
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: ignore
 
-  # A separate, mandatory live OS-boundary proof. Pin a supported VM runner
-  # with unprivileged namespaces; never disable AppArmor, change sysctls, or
-  # run the fixtures as root to make a failing host look supported. The runner
-  # selects every engine test that reads the containment requirement (the marker
-  # its skip depends on) and turns each such skip into a failure; two lanes split
-  # that selection in half.
-  exec-containment-proof:
-    name: Exec containment proof (live bubblewrap, ${{ matrix.lane }})
+  security-audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Setup Bun + deps (cached)
+        uses: ./.github/actions/setup
+      - name: Dependency audit
+        run: bun run security:audit
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The daemon built and run on each other release platform, on pushes to main
+  # (and a manual run), not on pull requests. Each target builds and runs in one
+  # job, so nothing is passed between runners.
+  native:
+    name: Native (${{ matrix.target }})
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    needs: [build]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { lane: a, part: 1 }
-          - { lane: b, part: 2 }
-    runs-on: ubuntu-22.04
-    timeout-minutes: 40
-    needs: [build]
+          - target: linux-arm64
+            platform: linux
+            runner: ubuntu-22.04-arm
+          - target: darwin-x64
+            platform: darwin
+            runner: macos-15-intel
+          - target: darwin-arm64
+            platform: darwin
+            runner: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Install official sandbox and PTY packages
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+      - name: Setup Bun + deps (cached)
+        uses: ./.github/actions/setup
+      - name: Install bubblewrap
+        if: matrix.platform == 'linux'
         uses: ./.github/actions/apt-install
         with:
-          packages: bubblewrap util-linux
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Restore workspace package output
+          packages: bubblewrap
+      - name: Restore the build output
         uses: ./.github/actions/restore-build
-      - name: Require actual sandbox fixture execution
+      - name: Build the daemon for ${{ matrix.target }}
         env:
-          PART: ${{ matrix.part }}
-        run: bun packages/engine/scripts/test.ts --live-sandbox --partition="$PART/2"
+          NATIVE_TARGET: ${{ matrix.target }}
+        run: bun products/daemon/scripts/build-native-ci.ts "$NATIVE_TARGET"
+      - name: Run the daemon inside bubblewrap
+        if: matrix.platform == 'linux'
+        run: node products/daemon/scripts/verify-binary.mjs --binary native/goodvibes-daemon-linux-arm64
+      # verify-native-execution.mjs reads the record of the payload it runs.
+      - name: Run the daemon (boot and memory round trip)
+        if: matrix.platform == 'darwin'
+        run: |
+          node products/daemon/scripts/native-execution-artifact.mjs record "$GITHUB_SHA" "$GITHUB_SHA"
+          node products/daemon/scripts/verify-native-execution.mjs "$GITHUB_SHA" "$GITHUB_SHA"
+      - name: Installer never overwrites a running program in place
+        if: matrix.platform == 'darwin'
+        run: bun run test:one scripts/installer-open-file-identity.test.ts
 
-  # ---------------------------------------------------------------------------
-  # Packaged-artifact coherence gate: pack every workspace package exactly as
-  # publish would, install the tarballs into a scratch consumer, and run the
-  # shipped conformance kit against a catalog/daemon composed FROM THE PACKED
-  # ARTIFACTS (descriptors-have-handlers, catalog invoke round-trips, REST
-  # parity). Proves the tarballs are internally coherent before publish.
-  # ---------------------------------------------------------------------------
-  artifact-lane:
-    name: Packaged-artifact release lane (conformance)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [build]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Setup Node
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-      - name: Setup Bun + deps (cached)
-        uses: ./.github/actions/setup
-      - name: Restore workspace package output
-        uses: ./.github/actions/restore-build
-      - name: Run packaged-artifact release lane
-        run: bun run release:artifact-lane
-
-  # One job a branch rule and the release gate can require: it fails when any
-  # other job did not succeed, including a skipped or cancelled one.
+  # The one job a branch rule and the release gate require (release.yml's
+  # ci-green reads its "CI ok" check run). It fails when any other job did not
+  # succeed; only `native` may be skipped, and only on a pull request.
   ci-ok:
     name: CI ok
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs:
-      - validate
-      - security-audit
+      - gates
       - build
-      - platform-matrix
-      - product-tests
-      - daemon-native
-      - daemon-native-produce
-      - daemon-native-execution
-      - agent-tests
-      - tui-host-pair-terminal
-      - webui-browser
-      - exec-containment-proof
-      - artifact-lane
+      - typecheck
+      - proofs
+      - live-sandbox
+      - measure
+      - package
+      - security-audit
+      - native
     steps:
       - name: Every CI job succeeded
         env:
           RESULTS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
         run: |
           echo "$RESULTS" | python3 -c '
-          import json, sys
-          bad = {name: job["result"] for name, job in json.load(sys.stdin).items() if job["result"] != "success"}
+          import json, os, sys
+          pull_request = os.environ["EVENT"] == "pull_request"
+          bad = {
+              name: job["result"]
+              for name, job in json.load(sys.stdin).items()
+              if job["result"] != "success" and not (name == "native" and pull_request and job["result"] == "skipped")
+          }
           if bad:
               sys.exit("CI jobs that did not succeed: " + ", ".join(f"{n} ({r})" for n, r in sorted(bad.items())))
+          print("Every CI job succeeded.")
           '

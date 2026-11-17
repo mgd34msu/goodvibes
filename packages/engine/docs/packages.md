@@ -81,7 +81,7 @@ These entry points contain no Bun globals and bundle cleanly with Metro, Vite, w
 | `@goodvibes-jev/engine/platform/transport-realtime` | Runtime-event connectors over SSE and WebSocket |
 | `@goodvibes-jev/engine/platform/transport-direct` | In-process direct transport facade subpath; see [Transports](./transports.md) |
 
-CI job `platform-matrix` (`rn-bundle` dimension) enforces that companion dist bundles contain no `Bun.*` identifiers and no `node:*` imports.
+The default test suite (`test/rn-bundle-node-imports.test.ts`, CI job `proofs`) enforces that nothing a companion entry point imports, followed from source through the exports maps, uses a Node built-in module or calls a `Bun.*` API.
 
 
 ## Transport middleware

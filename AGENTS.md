@@ -59,7 +59,7 @@ MEASURE_TRACE=stats,fileWrites bun run measure -- --only <name>   # each counted
 
 ## Gates: if you touch X, run Y
 
-`bun run validate` runs all of these in order. When a step fails it prints the step and the command; continue with `bun run validate --from <step>` or repeat one with `bun run validate --only <step>`.
+`bun run validate` runs all of these, and every other check CI runs on a pull request, in CI's order: each CI job is `bun run validate --job <job>` (`gates`, `build`, `typecheck`, `proofs`, `live-sandbox`, `measure`, `package`; `--help` lists the steps of each). When a step fails it prints the step and the command; continue with `bun run validate --from <step>` or repeat one with `bun run validate --only <step>`.
 
 | If you touch | Run | When it fails |
 | --- | --- | --- |
@@ -74,6 +74,7 @@ MEASURE_TRACE=stats,fileWrites bun run measure -- --only <name>   # each counted
 | Operator or peer methods, their schemas, or anything feeding the contract | `bun run contracts:check` | `bun run refresh:contracts`, then commit the regenerated files. |
 | Engine entry-point size | `bun run build` then `bun run bundle:check` | Advisory; explain a large increase. |
 | `packages/engine/errors/src`, `packages/engine/platform/src/platform/types/errors.ts`, `packages/engine/transport-http/src/retry.ts` | `bun run error:check` | Keep every error kind and its mapping in step. |
+| A setting key, its type, default or allowed values (`packages/engine/platform/src/platform/config` schema, feature settings) | `bun run --cwd products/webui generated:check` (also run by the web UI build inside `bun run build`) | Intended change: `bun run --cwd products/webui release:prepare`, then commit the diff under `products/webui/src/lib/generated/`; a removed or renamed key shows there. |
 | A secret-store write in `packages/engine/platform/src` | `bun run credential-scope:check` | Classify the key in `packages/engine/platform/src/platform/config/credential-scope-registry.ts`. The pre-commit hook runs this one. |
 
 ## Generated files: never open or grep

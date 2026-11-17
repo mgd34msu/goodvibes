@@ -36,7 +36,8 @@ function admitJobs(gh: RunGitHub, base: string, attempt: number): void {
   const pages = JSON.parse(gh(['api', '--hostname', 'github.com', '--paginate', '--slurp', `${base}/jobs?filter=latest&per_page=100`])) as Array<{ jobs: Array<{ name: string; conclusion: string; status: string; run_attempt: number }> }>;
   if (!Array.isArray(pages)) throw new Error('Missing CI job evidence');
   const jobs = pages.flatMap(page => page.jobs);
-  for (const name of ['Product tests (daemon)', 'Daemon native artifact (isolated Linux)']) {
+  // The CI job that builds this artifact, runs it inside bubblewrap and uploads it.
+  for (const name of ['Package and smoke']) {
     const matching = jobs.filter(job => job.name === name);
     const job = matching[0];
     if (matching.length !== 1 || !job || !Number.isSafeInteger(job.run_attempt) || job.run_attempt < 1 || job.run_attempt > attempt

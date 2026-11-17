@@ -38,14 +38,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { retryTransientInstall } from './install-retry.ts';
-import {
-  cleanupStage,
-  collectTarballs,
-  createPlatformTempDir,
-  packStage,
-  run,
-  stagePackages,
-} from './release-shared.ts';
+import { acquirePackedReleaseStage, createPlatformTempDir, run } from './release-shared.ts';
 
 /**
  * The conformance script run INSIDE the scratch consumer, against the installed
@@ -177,13 +170,13 @@ function writeConsumerFiles(projectDir: string): void {
 }
 
 async function main(): Promise<void> {
+  // The packed stage validate shares with pack:check, publint:check and
+  // install:smoke when it runs them together; otherwise one made here.
   console.log('[artifact-lane] packing workspace packages exactly as publish would...');
-  const { tempRoot, publicStages } = await stagePackages();
-  const packDestination = createPlatformTempDir('goodvibes-artifact-lane-tarballs-');
+  const { stage, release } = await acquirePackedReleaseStage();
   const projectDir = createPlatformTempDir('goodvibes-artifact-lane-consumer-');
   try {
-    const packResults = publicStages.map((stage) => packStage(stage.stageDir, packDestination));
-    const tarballs = collectTarballs(packResults, packDestination);
+    const tarballs = [...stage.tarballs];
     console.log(`[artifact-lane] packed ${tarballs.length} tarballs`);
 
     writeConsumerFiles(projectDir);
@@ -201,8 +194,7 @@ async function main(): Promise<void> {
     console.log('[artifact-lane] artifact lane passed, packed artifacts are internally coherent');
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
-    rmSync(packDestination, { recursive: true, force: true });
-    cleanupStage(tempRoot);
+    release();
   }
 }
 

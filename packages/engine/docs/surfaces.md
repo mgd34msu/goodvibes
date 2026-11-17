@@ -67,4 +67,4 @@ This surface works on Hermes (React Native / Expo), browser, Cloudflare Workers,
 
 ## Enforcement
 
-CI job `platform-matrix` (`rn-bundle` dimension, implemented in `test/rn-bundle-node-imports.test.ts`) verifies that the companion entry point dist bundles, `react-native.js`, `expo.js`, `browser.js`, `browser-homeassistant.js`, `browser-knowledge.js`, `web.js`, `workers.js`, `auth.js`, contain no `Bun.*` identifiers and no `node:*` imports. Any match fails CI and blocks release.
+`test/rn-bundle-node-imports.test.ts`, in the default test suite (CI job `proofs`), follows every runtime import of the companion entry points (React Native, Expo, browser, Home Assistant, knowledge, web, Workers and the auth helpers) from source through the exports maps and verifies that none of them uses a Node built-in module or calls a `Bun.*` API. Any match fails CI and blocks release.

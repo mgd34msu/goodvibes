@@ -202,23 +202,24 @@ the runner.
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs on every push to `main` and every pull request
-against it. One `build` job produces the workspace output and the test jobs
-restore it instead of rebuilding.
+`.github/workflows/ci.yml` runs on every push to `main`, every pull request
+against it, and by hand. Each job but the audit and the native builds runs
+`bun run validate --job <job>`, so `bun run validate` locally runs the same
+commands in the same order. One `build` job produces the workspace output and
+the jobs that read it restore it instead of rebuilding.
 
 | Job | Runs |
 | --- | --- |
-| `validate` | `bun run validate` |
+| `gates` | The source-only checks: errors, products, credential scope, judgment lint, events, version, flag graduation, internal ids, architecture, platform console, no `any`, contracts, the web UI's engine imports, the release asset scripts |
+| `build` | `bun run build` once (the web UI build checks its committed settings-schema snapshot first) |
+| `typecheck` | The test, type-test, installer and product projects against the built declarations; API reports, exports, examples, browser compatibility, package metadata |
+| `proofs` | `bun run test` |
+| `live-sandbox` | `bun run test:live` inside real bubblewrap, where a skip fails |
+| `measure` | `bun run measure:check` against the recorded budgets |
+| `package` | Pack, publint, install smoke, packaged-artifact conformance and bundle sizes; the three Linux programs built, the built-program smoke files, the daemon inside bubblewrap and the web UI against a real daemon; then no file in the checkout may have changed |
 | `security-audit` | Dependency audit and secret scan |
-| `build` | The single workspace build |
-| `platform-matrix` | Nine engine test partitions, plus the companion-bundle (`rn-bundle`), Workers and Wrangler legs |
-| `product-tests` | The daemon, TUI and WebUI test suites |
-| `daemon-native`, `daemon-native-produce`, `daemon-native-execution` | The native daemon artifact on isolated Linux, then built and executed on Linux ARM and macOS |
-| `agent-tests` | The Agent suite in eight shards |
-| `tui-host-pair-terminal` | TUI host pairing against the compiled binary in a real terminal |
-| `webui-browser` | The WebUI Playwright suite in two shards |
-| `exec-containment-proof` | The live-sandbox tests (`--live-sandbox`) in two lanes, where a skip fails |
-| `artifact-lane` | Packaged-artifact conformance (`bun run release:artifact-lane`) |
+| `native` | Pushes to `main` and manual runs, not pull requests: the daemon built and run on Linux ARM, macOS Intel and macOS ARM |
+| `ci-ok` | Fails unless every job succeeded (`native` may be skipped on a pull request); the release requires it on the release commit |
 
 Workflows install the Bun version named by `engines.bun` in the root
 `package.json` through the `.github/actions/bun` action; change the version

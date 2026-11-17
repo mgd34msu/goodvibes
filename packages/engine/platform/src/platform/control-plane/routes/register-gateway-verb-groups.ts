@@ -45,6 +45,7 @@ import { registerOpsDoctorGatewayMethod } from './ops-doctor.js';
 import { createOpsCheckContext } from '../../runtime/ops/index.js';
 import type { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import { registerMemoryProjectionsGatewayMethods, type MemoryProjectionSource } from './memory-projections.js';
+import { registerMemorySnapshotGatewayMethods } from './memory-snapshot-verbs.js';
 import {
   registerCredentialWriteGatewayMethods,
   type CredentialWriteConfig,
@@ -332,7 +333,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * absent (an embed with no memory store) → the verbs stay cataloged-but-
    * unhandled, a graceful degrade exactly like the other optional groups.
    */
-  readonly memoryRegistry?: (MemoryProjectionSource & Partial<Pick<MemoryRegistry, 'decideConsolidationProposal'>>) | undefined;
+  readonly memoryRegistry?: (MemoryProjectionSource & Partial<Pick<MemoryRegistry, 'decideConsolidationProposal' | 'listSnapshots' | 'restoreSnapshot'>>) | undefined;
   /**
    * The config + secret pair the credentials.set/.clear verbs write through,
    * the only way a surface that is not on this filesystem can finish a settings
@@ -785,6 +786,13 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   if (deps.memoryRegistry) {
     registerMemoryProjectionsGatewayMethods(catalog, deps.memoryRegistry);
     const registry = deps.memoryRegistry;
+    // The store's copies: list them, and the owner's confirmed restore of one.
+    if (registry.listSnapshots && registry.restoreSnapshot) {
+      registerMemorySnapshotGatewayMethods(catalog, {
+        listSnapshots: registry.listSnapshots.bind(registry),
+        restoreSnapshot: registry.restoreSnapshot.bind(registry),
+      });
+    }
     const decideDescriptor = catalog.get('memory.consolidation.decide');
     if (decideDescriptor && registry.decideConsolidationProposal) {
       const decide = registry.decideConsolidationProposal.bind(registry);

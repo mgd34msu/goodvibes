@@ -1,4 +1,4 @@
-import { createRecallDispatch } from '@goodvibes-jev/engine/terminal-shell/recall-dispatch';
+import { createMemorySnapshotCommands, createRecallDispatch, memoryRestoreConfirmation } from '@goodvibes-jev/engine/terminal-shell/recall-dispatch';
 /**
  * /recall command handler.
  *
@@ -24,6 +24,7 @@ import {
   handleRecallImport,
 } from './recall-bundle.ts';
 import {
+  getMemorySpine,
   handleRecallGet,
   handleRecallLink,
   handleRecallList,
@@ -91,9 +92,13 @@ function printRecallUsage(context: CommandContext): void {
     '  handoff-import <path>                          — Import a handoff bundle into durable memory',
     '  list [class] [--scope <scope>]                 — List all records grouped by class',
     '  remove <id>                                    — Delete a record',
+    '  snapshots                                      — List the point-in-time copies of memory (daily, before a migration, before a restore)',
+    '  restore <name|latest|date>                     — Replace all memory with one copy; the current records are copied first',
   ].join('\n');
   context.print(usage);
 }
+
+const memoryCopies = createMemorySnapshotCommands<CommandContext>(getMemorySpine, { tag: '[recall]', command: 'recall' });
 
 const dispatchRecall = createRecallDispatch<CommandContext>({
   add: handleRecallAdd,
@@ -123,6 +128,8 @@ export const recallCommand: SlashCommand = {
   usage: '[<subcommand> [args]]: bare opens the modal; report prints the subcommand usage text',
   argsHint: 'add|search|link|get|list|remove|report',
   confirm(args) {
+    const restore = memoryRestoreConfirmation(args, 'recall');
+    if (restore) return restore;
     if (args[0] !== 'remove' || !args[1]) return undefined;
     return {
       title: `Delete memory record ${args[1]}?`,
@@ -170,6 +177,14 @@ export const recallCommand: SlashCommand = {
 
       case 'injections':
         handleRecallInjections(rest, context);
+        break;
+
+      case 'snapshots':
+        await memoryCopies.snapshots(rest, context);
+        break;
+
+      case 'restore':
+        await memoryCopies.restore(rest, context);
         break;
 
       default:

@@ -97,6 +97,7 @@ export const queryKeys = {
   // for this domain yet, so MemoryView polls/refetches manually rather than riding
   // useRealtimeInvalidation (same standing gap fleet.*/checkpoints.* document above).
   memoryList: ['memory', 'list'] as const,
+  memoryCopies: ['memory', 'copies'] as const,
   memoryReviewQueue: ['memory', 'review-queue'] as const,
   // Calendar events are windowed by [from, to), keyed on the range plus an optional
   // logical calendarId filter so switching ranges/calendars refetches honestly rather

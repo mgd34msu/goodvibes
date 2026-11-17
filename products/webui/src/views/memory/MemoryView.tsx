@@ -1,7 +1,8 @@
 /**
  * The Memory tab of the Library, the web UI's consumer of the canonical, cross-surface
  * memory store (memory.records.* platform 1.1.0): search and browse, record detail with its
- * review form and confirmed delete. The Agent's persona is its VIBE.md file, not memory
+ * review form and confirmed delete, and the store's point-in-time copies with the owner's
+ * confirmed restore (MemoryCopiesPanel). The Agent's persona is its VIBE.md file, not memory
  * records; records an earlier import left tagged `vibe` are listed as ordinary memory,
  * to keep, edit or delete like any other. Adding a record is the page's primary action (AddMemoryDialog, in LibraryView).
  *
@@ -37,6 +38,7 @@ import { sentence, useDebouncedValue, useMemoryRecordMutations } from '../librar
 import { MemoryRecordRow } from './MemoryRecordRow';
 import { MemoryRecordPane } from './MemoryRecordPane';
 import { MemorySearchHonestyNote } from './MemorySearchHonestyNote';
+import { MemoryCopiesPanel } from './MemoryCopiesPanel';
 import { MEMORY_CLASSES, MEMORY_SCOPES, splitTags } from './memory-helpers';
 import '../../styles/components/memory.css';
 
@@ -59,6 +61,7 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
   const [tagsInput, setTagsInput] = useState('');
   const [recall, setRecall] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showCopies, setShowCopies] = useState(false);
   const tagsSettled = useDebouncedValue(tagsInput);
 
   const { remove, saveReview } = useMemoryRecordMutations();
@@ -206,7 +209,12 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
             <Checkbox checked={recall} onChange={setRecall}>What the agent would recall</Checkbox>
           </span>
           {filtersActive && <Button variant="ghost" size="sm" onClick={resetFilters}>Reset filters</Button>}
+          <Button variant="ghost" size="sm" aria-expanded={showCopies} onClick={() => setShowCopies((open) => !open)}>
+            {showCopies ? 'Hide copies' : 'Copies and restore'}
+          </Button>
         </div>
+
+        {showCopies && <MemoryCopiesPanel />}
 
         {mutationError && (
           <div className="lib-toolbar"><div className="dv-notice dv-notice--bad" role="alert"><span>{formatError(mutationError)}</span></div></div>

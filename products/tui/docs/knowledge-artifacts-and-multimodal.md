@@ -127,6 +127,22 @@ literal matching. This is a permanent platform capability limit, not a
 packaging defect. `/recall vector status` names the reason plainly. Linux
 (including WSL2) has no such restriction.
 
+### Copies of memory and restoring one
+
+The memory records store (`memory.sqlite`) is copied once a day, before a
+schema upgrade, and before every restore; the semantic index is not copied, it
+is rebuilt from the records. `/recall snapshots` lists the copies with their
+date, size and record count. `/recall restore <name|latest|date>` replaces
+every record, link and pending consolidation proposal with those of one copy,
+after one confirmation. The records it replaces are copied first and the
+answer names that copy, so restoring it undoes the restore. The restore runs
+where the store's writer is (the daemon when the terminal app is attached to
+one) in a single SQLite transaction: the terminal app, the Agent and the
+daemon that share the file see the restored records on their next read, and a
+failure part way leaves the store unchanged. Semantic search then embeds again
+only the records whose text differs from what the index held. The web UI's
+Memory tab offers the same list and restore under "Copies and restore".
+
 ## GraphQL and projections
 
 The knowledge domain exposes a GraphQL schema and execution surface, alongside projection
@@ -181,7 +197,7 @@ Six command families front this whole subsystem:
 
 | Command | Does |
 | --- | --- |
-| `/recall add\|search\|vector\|queue\|review\|explain\|injections\|promote\|capture` | Durable project memory; these are the subcommands most tasks reach for, and `/recall` has more |
+| `/recall add\|search\|vector\|queue\|review\|explain\|injections\|promote\|capture\|snapshots\|restore` | Durable project memory; these are the subcommands most tasks reach for, and `/recall` has more |
 | `/knowledge status\|ask\|ingest-url\|import-bookmarks\|import-urls\|list\|search\|get\|queue\|review-issue\|candidates\|reports\|schedules\|lint\|packet\|explain\|reindex\|consolidate` | The structured knowledge store's full command surface |
 | `/memory-sync` | Durable memory export/import and bundle exchange |
 | `/handoff` | Reviewable memory handoff bundles (export, inspect, import) |

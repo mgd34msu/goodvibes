@@ -18,6 +18,8 @@ export { FileUndoConflictError, FileUndoManager } from './file-undo.js';
 export type { FileOperation, FileUndoEntry, FileUndoResult } from './file-undo.js';
 export { MemoryStore, memoryRecordTemporalStatus, isMemoryTemporallyActive } from './memory-store.js';
 export { MemoryRegistry } from './memory-registry.js';
+export { listMemorySnapshots, MemorySnapshotError } from './memory-snapshots.js';
+export type { MemorySnapshotInfo, MemoryRestoreResult, MemorySnapshotErrorCode } from './memory-snapshots.js';
 export type {
   MemoryBundle,
   MemoryClass,

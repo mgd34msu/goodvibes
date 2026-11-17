@@ -41,7 +41,7 @@ const DEFAULT_MEMORY_ADD_TIMEOUT_MS = 15_000;
 /** For verbs whose cost grows with the store: a whole bundle, a diagnostic sweep, a semantic search. */
 const DEFAULT_LONG_MEMORY_WIRE_TIMEOUT_MS = 60_000;
 const LONG_RUNNING_VERBS: ReadonlySet<string> = new Set([
-  'exportBundle', 'importBundle', 'doctor', 'vectorStats', 'searchSemantic',
+  'exportBundle', 'importBundle', 'doctor', 'vectorStats', 'searchSemantic', 'listSnapshots', 'restoreSnapshot',
 ]);
 
 export interface MemorySpineRestTransportOptions {
@@ -142,5 +142,7 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
     importBundle: (bundle, operation) => call('importBundle', operation, (transport, owned) => transport.importBundle?.(bundle, owned)),
     vectorStats: (operation) => call('vectorStats', operation, (transport, owned) => transport.vectorStats?.(owned)),
     doctor: (operation) => call('doctor', operation, (transport, owned) => transport.doctor?.(owned)),
+    listSnapshots: (operation) => call('listSnapshots', operation, (transport, owned) => transport.listSnapshots?.(owned)),
+    restoreSnapshot: (snapshot, operation) => call('restoreSnapshot', operation, (transport, owned) => transport.restoreSnapshot?.(snapshot, owned)),
   };
 }

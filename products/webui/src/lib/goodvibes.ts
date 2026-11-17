@@ -927,6 +927,52 @@ export const DEFAULT_SSE_RECONNECT = {
 
 // ─── Memory (memory.records.*, memory.review-queue, memory.consolidation.receipts) ──
 
+/** One point-in-time copy of the memory store (memory.snapshots.list). */
+export interface MemoryCopy {
+  readonly name: string;
+  readonly reason: string;
+  readonly createdAt: number;
+  readonly sizeBytes: number;
+  readonly recordCount: number | null;
+}
+
+/** What a restore did (memory.snapshots.restore). */
+export interface MemoryRestoreOutcome {
+  readonly restored: string;
+  readonly restoredReason: string;
+  readonly restoredCreatedAt: number;
+  readonly recordsBefore: number;
+  readonly recordsAfter: number;
+  readonly linksAfter: number;
+  readonly undoSnapshot: string;
+  readonly vectorIndex: 'updating' | 'off';
+}
+
+function readMemoryCopies(raw: unknown): readonly MemoryCopy[] {
+  const list = (raw as { snapshots?: unknown } | null)?.snapshots;
+  if (!Array.isArray(list)) throw new Error('The daemon returned an unreadable list of memory copies.');
+  return list.map((entry): MemoryCopy => {
+    const copy = entry as Partial<Record<keyof MemoryCopy, unknown>>;
+    if (typeof copy.name !== 'string' || typeof copy.reason !== 'string' || typeof copy.createdAt !== 'number' || typeof copy.sizeBytes !== 'number'
+      || (copy.recordCount !== null && typeof copy.recordCount !== 'number')) throw new Error('The daemon returned an unreadable memory copy.');
+    return { name: copy.name, reason: copy.reason, createdAt: copy.createdAt, sizeBytes: copy.sizeBytes, recordCount: copy.recordCount ?? null };
+  });
+}
+
+function readMemoryRestore(raw: unknown): MemoryRestoreOutcome {
+  const r = (raw ?? {}) as Partial<Record<keyof MemoryRestoreOutcome, unknown>>;
+  const numbers = [r.restoredCreatedAt, r.recordsBefore, r.recordsAfter, r.linksAfter];
+  if (typeof r.restored !== 'string' || typeof r.restoredReason !== 'string' || typeof r.undoSnapshot !== 'string'
+    || numbers.some((value) => typeof value !== 'number') || (r.vectorIndex !== 'updating' && r.vectorIndex !== 'off')) {
+    throw new Error('The daemon returned an unreadable restore answer; list the copies to see what is there now.');
+  }
+  return {
+    restored: r.restored, restoredReason: r.restoredReason, restoredCreatedAt: r.restoredCreatedAt as number,
+    recordsBefore: r.recordsBefore as number, recordsAfter: r.recordsAfter as number, linksAfter: r.linksAfter as number,
+    undoSnapshot: r.undoSnapshot, vectorIndex: r.vectorIndex,
+  };
+}
+
 export type MemoryRecordEntityResult = OperatorMethodOutput<'memory.records.get'>;
 export type MemoryRecord = MemoryRecordEntityResult['record'];
 export type MemoryScope = MemoryRecord['scope'];
@@ -1494,6 +1540,16 @@ export const client = {
         // ws-only, through the control-plane invoke endpoint.
         decide: (input: OperatorMethodInput<'memory.consolidation.decide'>) =>
           invokeGatewayMethod('memory.consolidation.decide', input),
+      },
+      // The store's point-in-time copies, through the generic invoke endpoint.
+      snapshots: {
+        list: async (signal?: AbortSignal): Promise<readonly MemoryCopy[]> =>
+          readMemoryCopies(await requestJson('/api/control-plane/methods/memory.snapshots.list/invoke', { method: 'POST', body: { body: {} }, ...(signal ? { signal } : {}) })),
+        // The owner's act: sent only from the confirmed restore button, as an explicit request.
+        restore: async (snapshot: string, signal?: AbortSignal): Promise<MemoryRestoreOutcome> =>
+          readMemoryRestore(await requestJson('/api/control-plane/methods/memory.snapshots.restore/invoke', {
+            method: 'POST', body: { body: { snapshot, confirm: true } }, explicitUserRequest: true, ...(signal ? { signal } : {}),
+          })),
       },
     },
     // contracts.get is REST-routed; contracts.summaries/status, fleet.*, checkpoints.*,

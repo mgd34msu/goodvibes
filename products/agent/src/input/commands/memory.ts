@@ -1,4 +1,4 @@
-import { createRecallDispatch } from '@goodvibes-jev/engine/terminal-shell/recall-dispatch';
+import { createMemorySnapshotCommands, createRecallDispatch, memoryRestoreConfirmation } from '@goodvibes-jev/engine/terminal-shell/recall-dispatch';
 /**
  * /memory command handler.
  *
@@ -24,6 +24,7 @@ import {
   handleRecallImport,
 } from './recall-bundle.ts';
 import {
+  getMemorySpine,
   handleRecallGet,
   handleRecallLink,
   handleRecallList,
@@ -36,6 +37,8 @@ import { handleRecallExplain, handleRecallPromote, handleRecallQueue, handleReca
 import { VALID_CLASSES } from './recall-shared.ts';
 
 // ── Top-level command ─────────────────────────────────────────────────────────
+
+const memoryCopies = createMemorySnapshotCommands<CommandContext>(getMemorySpine, { tag: '[memory]', command: 'memory' });
 
 const dispatchRecall = createRecallDispatch<CommandContext>({
   add: handleRecallAdd,
@@ -60,12 +63,14 @@ const dispatchRecall = createRecallDispatch<CommandContext>({
 export const recallCommand: SlashCommand = {
   name: 'recall',
   effect: 'local-state',
-  readVerbs: ['search', 'get', 'list', 'files'],
+  readVerbs: ['search', 'get', 'list', 'files', 'snapshots'],
   aliases: ['rc'],
   description: 'Project memory: add decisions, constraints, incidents, and patterns with provenance.',
   usage: '<subcommand> [args]',
   argsHint: 'add|search|link|get|list|remove|files',
   confirm(args) {
+    const restore = memoryRestoreConfirmation(args, 'memory');
+    if (restore) return restore;
     if (args[0] !== 'remove' || !args[1]) return undefined;
     return {
       title: `Delete memory record ${args[1]}?`,
@@ -88,6 +93,14 @@ export const recallCommand: SlashCommand = {
         else context.print('[memory] Usage: /memory files <sync|review|apply> [--dir <path>]');
         break;
       }
+
+      case 'snapshots':
+        await memoryCopies.snapshots(rest, context);
+        break;
+
+      case 'restore':
+        await memoryCopies.restore(rest, context);
+        break;
 
       default: {
         const usage = [
@@ -118,6 +131,8 @@ export const recallCommand: SlashCommand = {
           '  files apply <id>... | --all [--dir <path>]     , Apply the named proposals to memory',
           '  list [class] [--scope <scope>]                , List all records grouped by class',
           '  remove <id> --yes                             , Delete a record',
+          '  snapshots                                     , List the point-in-time copies of memory (daily, before a migration, before a restore)',
+          '  restore <name|latest|date>                    , Replace all memory with one copy; the current records are copied first',
         ].join('\n');
         context.print(usage);
         break;

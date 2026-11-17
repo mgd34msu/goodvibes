@@ -91,6 +91,11 @@ function parseStatusFromMessage(message: unknown): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+/** The machine code a memory wire error carries, if any (the body's `code`). */
+export function memoryWireErrorCode(error: unknown): string | undefined {
+  return extractWire404Signal(error).code;
+}
+
 /**
  * Classify a caught memory wire error. Returns 'other' for anything that is not a
  * 404 (network, auth, malformed body, 5xx) so the caller propagates it unchanged.

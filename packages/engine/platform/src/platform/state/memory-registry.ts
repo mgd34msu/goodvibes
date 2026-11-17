@@ -18,6 +18,9 @@ const STANDING_DECISIONS_LIMIT = 2_000;
 function consolidationProposalId(proposal: Pick<MemoryConsolidationProposal, 'kind' | 'ids'>): string {
   return `${proposal.kind}:${[...proposal.ids].sort().join(',')}`;
 }
+import { basename } from 'node:path';
+import { snapshotStoreFileAsync } from './store-snapshots.js';
+import { listMemorySnapshots, MemorySnapshotError, readMemorySnapshotImage, resolveMemorySnapshot, type MemoryRestoreResult, type MemorySnapshotInfo } from './memory-snapshots.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { runHonestMemorySearch, type HonestMemorySearchOptions, type HonestMemorySearchResult } from './memory-recall-contract.js';
@@ -173,6 +176,41 @@ export class MemoryRegistry {
     const removed = this.store.delete(id, operation);
     if (removed) this.notify();
     return removed;
+  }
+
+  /** The store's point-in-time copies, newest first (daily, before a migration, before a restore). */
+  listSnapshots(): MemorySnapshotInfo[] {
+    return listMemorySnapshots(this.store.dbPath);
+  }
+
+  /**
+   * Put the records of one copy back (see MemoryStore.replaceFromSnapshot).
+   * The copy is read and checked first, then a copy of the records being
+   * replaced is taken, so the restore can itself be undone by restoring that
+   * copy; nothing is changed when either step fails. The owner's act only:
+   * callers reach it through a confirmed command or the confirmed operator verb.
+   */
+  async restoreSnapshot(selector: string, options?: MemoryOperationOptions): Promise<MemoryRestoreResult> {
+    const store = this.store, dbPath = store.dbPath;
+    const chosen = resolveMemorySnapshot(dbPath, selector);
+    const image = readMemorySnapshotImage(chosen);
+    const undo = dbPath ? await snapshotStoreFileAsync(dbPath, 'pre-restore') : null;
+    if (!undo) {
+      throw new MemorySnapshotError('MEMORY_SNAPSHOT_UNAVAILABLE', 'A copy of the current records could not be taken first, so the restore was not started; nothing was changed.');
+    }
+    if (this.store !== store) throw new Error('Memory store changed during the restore; nothing was changed.');
+    const replaced = await store.replaceFromSnapshot(image, options);
+    this.notify();
+    return {
+      restored: image.name,
+      restoredReason: image.reason,
+      restoredCreatedAt: image.createdAt,
+      recordsBefore: replaced.recordsBefore,
+      recordsAfter: replaced.recordsAfter,
+      linksAfter: replaced.linksAfter,
+      undoSnapshot: basename(undo),
+      vectorIndex: replaced.vectorIndex,
+    };
   }
 
   getAll(): MemoryRecord[] {

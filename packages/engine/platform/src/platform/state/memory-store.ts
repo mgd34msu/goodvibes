@@ -27,6 +27,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { MemoryUsageChange, MemoryUsageEntry, MemoryUsageTopEntry } from './memory-usage-stats.js';
 import type { MemoryConsolidationProposal } from './memory-consolidation.js';
+import { MEMORY_SNAPSHOT_TABLES, type MemorySnapshotImage } from './memory-snapshots.js';
 import {
   assertValidMemoryBundle,
   assertValidMemoryFields,
@@ -729,6 +730,63 @@ export class MemoryStore {
     await this.persistNow();
     logger.info('MemoryStore: bundle imported', { importedRecords, skippedRecords, importedLinks });
     return { importedRecords, skippedRecords, importedLinks };
+  }
+
+  /**
+   * Make the store hold exactly the copy's records, links, proposals and store
+   * facts, in one immediate write transaction: another process cannot commit
+   * between the clear and the inserts, and a failure part way rolls the whole
+   * restore back. Each record keeps the revision it had in the copy, so the
+   * vector index re-embeds only the records whose text differs from what it
+   * holds. Other processes see the restored rows on their next read (SQLite
+   * `data_version`); nothing is reopened.
+   */
+  async replaceFromSnapshot(image: MemorySnapshotImage, options?: MemoryOperationOptions): Promise<{ readonly recordsBefore: number; readonly recordsAfter: number; readonly linksAfter: number; readonly vectorIndex: 'updating' | 'off' }> {
+    const operation = this.captureOperation(options);
+    assertMemoryOperationCurrent(operation);
+    if (!this.ready) throw new Error('MemoryStore: not initialized');
+    const cell = (value: unknown): string | number | Uint8Array | null => {
+      if (value === null || value === undefined) return null;
+      if (typeof value === 'string' || typeof value === 'number' || value instanceof Uint8Array) return value;
+      if (typeof value === 'bigint') return Number(value);
+      if (typeof value === 'boolean') return value ? 1 : 0;
+      return String(value);
+    };
+    const outcome = await this.sqlite.transactPersisted((db) => {
+      const count = (table: string): number => {
+        const value = db.exec(`SELECT count(*) FROM ${table}`)[0]?.values[0]?.[0];
+        return typeof value === 'number' ? value : 0;
+      };
+      const recordsBefore = count('memory_records');
+      // Links first: they name records (foreign keys are on).
+      for (const table of [...MEMORY_SNAPSHOT_TABLES].reverse()) db.run(`DELETE FROM ${table}`);
+      for (const table of MEMORY_SNAPSHOT_TABLES) {
+        const source = image.tables.get(table);
+        if (!source || source.rows.length === 0) continue;
+        const live = new Set((db.exec(`PRAGMA table_info(${table})`)[0]?.values ?? []).map((row) => String(row[1])));
+        // The revision is stamped by the insert trigger and set back below; an
+        // older copy without a newer column gets that column's default.
+        const kept = source.columns.flatMap((column, index) => live.has(column) && column !== 'gv_revision' ? [{ column, index }] : []);
+        if (kept.length === 0) continue;
+        const sql = `INSERT INTO ${table} (${kept.map((entry) => entry.column).join(', ')}) VALUES (${kept.map(() => '?').join(', ')})`;
+        for (const row of source.rows) db.run(sql, kept.map((entry) => cell(row[entry.index])));
+      }
+      const records = image.tables.get('memory_records');
+      const idAt = records?.columns.indexOf('id') ?? -1, revisionAt = records?.columns.indexOf('gv_revision') ?? -1;
+      if (records && idAt >= 0 && revisionAt >= 0) {
+        // A revision-only update does not fire the revision trigger (it lists the content columns).
+        for (const row of records.rows) {
+          const revision = row[revisionAt];
+          if (typeof revision === 'string' && revision !== '') db.run('UPDATE memory_records SET gv_revision = ? WHERE id = ?', [revision, cell(row[idAt])]);
+        }
+      }
+      return { changed: true, value: { recordsBefore, recordsAfter: count('memory_records'), linksAfter: count('memory_links') } };
+    }, () => {});
+    if (outcome.kind !== 'completed') throw new Error('MemoryStore: the restore did not complete; the store is as it was.');
+    logger.info('MemoryStore: records restored from a copy', { copy: image.name, recordsBefore: outcome.value.recordsBefore, recordsAfter: outcome.value.recordsAfter });
+    // Re-embed what differs and drop what is gone, off the caller's path.
+    this.syncVectorIndexInBackground();
+    return { ...outcome.value, vectorIndex: this.vectorIndex ? 'updating' : 'off' };
   }
 
   /** Create a directed link between two records. */

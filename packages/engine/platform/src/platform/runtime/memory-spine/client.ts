@@ -76,6 +76,7 @@ import type {
   MemorySemanticSearchResult,
 } from '../../state/memory-store.js';
 import type { MemoryVectorStats } from '../../state/memory-vector-store.js';
+import type { MemoryRestoreResult, MemorySnapshotInfo } from '../../state/memory-snapshots.js';
 import type { HonestMemorySearchOptions, HonestMemorySearchResult } from '../../state/memory-recall-contract.js';
 import {
   buildRecallSnapshot,
@@ -147,6 +148,15 @@ export interface MemoryExtendedAccess {
   importBundle(bundle: MemoryBundle, operation?: MemoryOperationOptions): Promise<MemoryImportResult>;
   vectorStats(operation?: MemoryOperationOptions): Promise<MemoryVectorStats>;
   doctor(operation?: MemoryOperationOptions): Promise<MemoryDoctorReport>;
+  /** The store's point-in-time copies, newest first. */
+  listSnapshots(operation?: MemoryOperationOptions): Promise<readonly MemorySnapshotInfo[]>;
+  /**
+   * The owner's restore of one copy, run by the store's writer (the adopted
+   * daemon, or this process's own store). Only a surface acting on the
+   * owner's confirmed command calls it; the daemon also refuses it without
+   * an explicit owner request.
+   */
+  restoreSnapshot(snapshot: string, operation?: MemoryOperationOptions): Promise<MemoryRestoreResult>;
 }
 
 /**
@@ -196,6 +206,9 @@ export interface LocalMemoryStore {
   importBundle(bundle: MemoryBundle, operation?: MemoryOperationOptions): Promise<MemoryImportResult> | MemoryImportResult;
   vectorStats(operation?: MemoryOperationOptions): MemoryVectorStats;
   doctor(operation?: MemoryOperationOptions): Promise<MemoryDoctorReport> | MemoryDoctorReport;
+  /** The store's copies and the restore of one (MemoryRegistry implements both). */
+  listSnapshots?(): readonly MemorySnapshotInfo[];
+  restoreSnapshot?(snapshot: string, operation?: MemoryOperationOptions): Promise<MemoryRestoreResult>;
   /** Reload when another process saved the store's file since it was loaded (MemoryRegistry implements it). */
   reloadIfChanged?(): Promise<void>;
 }
@@ -224,6 +237,14 @@ export function createLocalMemoryAccess(store: LocalMemoryStore): MemoryAccess {
     importBundle: (bundle, operation) => run(operation, owned => store.importBundle(bundle, owned)),
     vectorStats: (operation) => run(operation, owned => store.vectorStats(owned)),
     doctor: (operation) => run(operation, owned => store.doctor(owned)),
+    listSnapshots: (operation) => run(operation, () => {
+      if (!store.listSnapshots) throw new Error('This memory store keeps no copies.');
+      return store.listSnapshots();
+    }),
+    restoreSnapshot: (snapshot, operation) => run(operation, owned => {
+      if (!store.restoreSnapshot) throw new Error('This memory store keeps no copies, so nothing can be restored; nothing was changed.');
+      return store.restoreSnapshot(snapshot, owned);
+    }),
     ...(store.reloadIfChanged ? { reloadIfChanged: () => store.reloadIfChanged!() } : {}),
   };
 }
@@ -456,6 +477,21 @@ export class MemorySpineClient implements MemoryAccess {
     return this.afterLocalReload(() => {
       const operation = this.operation(options);
       return awaitMemoryOperation(() => this.routeExtended('doctor', a => a.doctor(operation), t => t.doctor?.(operation)), operation);
+    });
+  }
+
+  listSnapshots(options?: MemoryOperationOptions): Promise<readonly MemorySnapshotInfo[]> {
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('listSnapshots', a => a.listSnapshots(operation), t => t.listSnapshots?.(operation)), operation);
+    });
+  }
+
+  /** Runs where the store's writer is: the adopted daemon in client mode, this process's store otherwise. */
+  restoreSnapshot(snapshot: string, options?: MemoryOperationOptions): Promise<MemoryRestoreResult> {
+    return this.afterLocalReload(() => {
+      const operation = this.operation(options);
+      return awaitMemoryOperation(() => this.routeExtended('restoreSnapshot', a => a.restoreSnapshot(snapshot, operation), t => t.restoreSnapshot?.(snapshot, operation)), operation);
     });
   }
 

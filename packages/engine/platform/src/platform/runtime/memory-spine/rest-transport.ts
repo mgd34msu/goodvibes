@@ -60,8 +60,9 @@ import type {
   MemorySemanticSearchResult,
 } from '../../state/memory-store.js';
 import type { MemoryVectorStats } from '../../state/memory-vector-store.js';
+import type { MemoryRestoreResult, MemorySnapshotInfo } from '../../state/memory-snapshots.js';
 import type { HonestMemorySearchOptions, HonestMemorySearchResult } from '../../state/memory-recall-contract.js';
-import { classifyMemoryWireError, memoryVerbUnavailableError } from './wire-verb-availability.js';
+import { classifyMemoryWireError, memoryVerbUnavailableError, memoryWireErrorCode } from './wire-verb-availability.js';
 import type { MemoryTransport, MemoryUpdatePatch } from './client.js';
 
 /**
@@ -280,6 +281,30 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
         );
       } catch (error) {
         return rethrowMemoryWire404('doctor', error);
+      }
+    },
+    listSnapshots: async (operation?: MemoryOperationOptions): Promise<readonly MemorySnapshotInfo[]> => {
+      try {
+        const response = await request<{ snapshots: readonly MemorySnapshotInfo[] }>(
+          operation, url('/api/memory/snapshots'), createJsonRequestInit(token),
+        );
+        return response.snapshots;
+      } catch (error) {
+        return rethrowMemoryWire404('listSnapshots', error);
+      }
+    },
+    // Called only for the owner's confirmed command: it says so, and the daemon
+    // admits the restore only when the credential is the owner's own.
+    restoreSnapshot: async (snapshot: string, operation?: MemoryOperationOptions): Promise<MemoryRestoreResult> => {
+      try {
+        return await request<MemoryRestoreResult>(
+          operation, url('/api/memory/snapshots/restore'),
+          createJsonRequestInit(token, { snapshot, confirm: true }, 'POST', { 'x-goodvibes-explicit-user-request': 'true' }),
+        );
+      } catch (error) {
+        // "No such copy" is the daemon's answer, not a missing route.
+        if (memoryWireErrorCode(error) === 'MEMORY_SNAPSHOT_NOT_FOUND') throw error;
+        return rethrowMemoryWire404('restoreSnapshot', error);
       }
     },
   };

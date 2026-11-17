@@ -7,3 +7,30 @@
 .memory-record-row .dv-value {
   white-space: nowrap;
 }
+
+/* Memory copies: one row per copy, the restore button at the end. */
+.lib-copies {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  padding: var(--space-2, 8px) 0;
+}
+.lib-copies__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+}
+.lib-copies__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 8px);
+}
+.lib-copies__when { min-width: 12em; }
+.lib-copies__reason { flex: 1 1 10em; }
+.lib-copies__count,
+.lib-copies__size { white-space: nowrap; color: var(--text-muted, inherit); }
+.lib-copies__empty { margin: 0; }

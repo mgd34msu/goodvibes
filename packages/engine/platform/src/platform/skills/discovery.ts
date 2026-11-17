@@ -18,6 +18,7 @@ import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   frontmatterIsComplete,
+  isValidSkillName,
   parseSkill,
   parseSkillIndex,
   type Skill,
@@ -159,10 +160,38 @@ export function listSkills(roots: readonly SkillRoot[]): Promise<LocatedSkill[]>
   });
 }
 
-/** The skill `name` resolves to (case does not matter), the same one `listSkillIndex` lists. */
+/**
+ * The skill `name` resolves to (case does not matter), the same one `listSkillIndex` lists.
+ * The document named after it is opened first (`<root>/<name>/SKILL.md`, then
+ * `<root>/<name>.md`, in root order, as the listing orders them), so loading one skill
+ * reads one document rather than every skill's frontmatter. Only the roots before the
+ * one it was found in are listed, since an earlier root wins a name. A name with no
+ * such document, or a document that names another skill, falls back to the listing.
+ */
 export async function findSkill(roots: readonly SkillRoot[], name: string): Promise<LocatedSkillIndex | undefined> {
   const key = name.toLowerCase();
+  const direct = isValidSkillName(name) ? await findSkillByPath(roots, name, key) : null;
+  if (direct !== null) return direct;
   return (await listSkillIndex(roots)).find((entry) => entry.name.toLowerCase() === key);
+}
+
+/** The skill at `name`'s own path, or null when the listing must decide. */
+async function findSkillByPath(roots: readonly SkillRoot[], name: string, key: string): Promise<LocatedSkillIndex | null> {
+  for (const [index, root] of roots.entries()) {
+    const candidates: Candidate[] = [
+      { path: join(root.directory, name, SKILL_FOLDER_DOCUMENT), origin: root.origin, format: 'folder', fallbackName: name },
+      { path: join(root.directory, `${name}${SKILL_FILE_SUFFIX}`), origin: root.origin, format: 'file', fallbackName: name },
+    ];
+    for (const candidate of candidates) {
+      const read = await readDocument(candidate.path, false);
+      if (!read) continue;
+      const located = locate(parseSkillIndex(read.text, read.updatedAt), candidate);
+      if (located.name.toLowerCase() !== key) return null;
+      if (index > 0 && (await listSkillIndex(roots.slice(0, index))).some((entry) => entry.name.toLowerCase() === key)) return null;
+      return located;
+    }
+  }
+  return null;
 }
 
 /** Read a found skill whole. Null when its document disappeared since it was found. */

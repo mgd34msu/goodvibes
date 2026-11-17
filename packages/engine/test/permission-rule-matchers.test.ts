@@ -1,13 +1,24 @@
 // Proves: A remembered allow vouches for a command it never saw, or a deny rule is slipped by rewriting the call.
 // Red when: Rules match the visible command instead of the one that runs (base64, a workflow's later command), an allow matches one entry of a batch or a bare command with chains or redirection, a deny checks only the first command, or a host or path deny is slipped by rewriting.
+// Proves: A remembered "always allow edits under this folder" approves an edit that climbs out of it, or a batch with one edit outside.
+// Red when: A path rule is matched on the path as spelled instead of normalised, on a sibling folder sharing its prefix, or when any (not every) path of a batch is inside.
 /**
  * What the permission text and scope rules read from a call: the command text the exec tool would
  * actually run, a rule for a bare command never covering more than that command, a command a call
  * installs to run later, literal absolute paths in argument matchers, URLs of any scheme and case,
- * and directory-style path patterns.
+ * and directory-style path patterns. A remembered "always allow edits under this folder", asked
+ * through the real permission manager with the real rule store and settings, covers that folder
+ * only.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { EXEC_GATE_TABLE, useGateReadings } from './_helpers/gate-readings.ts';
+import { ConfigManager } from '../platform/src/platform/config/manager.ts';
+import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
+import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
+import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { evaluatePrefixRule, extractCommandArgs } from '../platform/src/platform/runtime/permissions/rules/prefix.ts';
 import { evaluateNetworkScopeRule } from '../platform/src/platform/runtime/permissions/rules/network-scope.ts';
 import { evaluatePathScopeRule } from '../platform/src/platform/runtime/permissions/rules/path-scope.ts';
@@ -95,5 +106,32 @@ describe('path scope patterns', () => {
   test('dir/** covers the directory itself', () => {
     expect(evaluatePathScopeRule(deny(['/proj/secrets/**']), 'read', { path: '/proj/secrets' }).matched).toBe(true);
     expect(evaluatePathScopeRule(deny(['/proj/secrets/**']), 'read', { path: '/proj/secrets/a/b' }).matched).toBe(true);
+  });
+});
+
+describe('a remembered folder grant for edits', () => {
+  const root = mkdtempSync(join(tmpdir(), 'gv-path-grant-'));
+  afterAll(() => { rmSync(root, { recursive: true, force: true }); });
+
+  test('covers edits inside the folder only: not one that climbs out, a sibling folder, or a batch with one edit outside', async () => {
+    const docs = join(root, 'shared', 'docs');
+    const store = new UserPermissionRuleStore(':memory:');
+    const rule = buildDurableRuleForDecision({ toolName: 'edit', args: { path: join(docs, 'guide.md') }, tier: 'path', effect: 'allow' })!;
+    await store.add({ rule, tier: 'path', createdAt: 1, tool: 'edit' });
+    const settings = createPermissionConfigReader(new ConfigManager({
+      surfaceRoot: 'agent', workingDir: join(root, 'project'), homeDir: join(root, 'home'), configDir: join(root, 'config'),
+    }));
+    const permissions = new PermissionManager(async () => ({ approved: false }), settings, new PolicyRuntimeState(), null, null, store);
+    const edit = (...paths: string[]) => ({ edits: paths.map((path) => ({ path, find: 'a', replace: 'b' })) });
+    const settledByGrant = async (args: Record<string, unknown>) => {
+      const decision = await permissions.checkDetailed('edit', args);
+      return decision.approved && decision.sourceLayer === 'user_rule';
+    };
+    expect({
+      inside: await settledByGrant(edit(join(docs, 'intro.md'))),
+      climbsOut: await settledByGrant(edit(`${docs}/../../home/.ssh/authorized_keys`)),
+      sibling: await settledByGrant(edit(join(root, 'shared', 'docs-old', 'notes.md'))),
+      batchWithOneOutside: await settledByGrant(edit(join(docs, 'intro.md'), join(root, 'shared', 'secrets', 'keys.txt'))),
+    }).toEqual({ inside: true, climbsOut: false, sibling: false, batchWithOneOutside: false });
   });
 });

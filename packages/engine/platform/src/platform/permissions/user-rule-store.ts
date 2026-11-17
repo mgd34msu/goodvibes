@@ -14,10 +14,9 @@
  * in and matches only there; a rule with no project key (written before
  * rules were scoped, or by hand) matches in every project, as it always did.
  *
- * Project-scoped rules are stored under `projectRules`, apart from `rules`.
- * An earlier release reads only `rules` and would apply a project key it does
- * not know about in every project; leaving scoped rules out of `rules` makes
- * it ask again instead.
+ * Every rule is written to `rules`, its project key with it. A file from a
+ * release that kept project-scoped rules apart under `projectRules` is still
+ * read, and the next write moves them into `rules`.
  *
  * Every change re-reads the file inside a process lock, so a second process
  * (another window on the same config directory) neither brings back a rule
@@ -62,7 +61,7 @@ function appliesIn(record: StoredUserPermissionRule, project: string | null | un
 interface UserRuleFile extends Record<string, unknown> {
   version: 1;
   rules: StoredUserPermissionRule[];
-  /** Rules scoped to one project; absent when there are none. */
+  /** Project-scoped rules as an earlier release wrote them apart; read, never written. */
   projectRules?: StoredUserPermissionRule[];
 }
 
@@ -86,12 +85,7 @@ function recordsOf(data: UserRuleFile | null): StoredUserPermissionRule[] {
 }
 
 function fileOf(records: readonly StoredUserPermissionRule[]): UserRuleFile {
-  const projectRules = records.filter((record) => record.project !== undefined);
-  return {
-    version: 1,
-    rules: records.filter((record) => record.project === undefined),
-    ...(projectRules.length > 0 ? { projectRules } : {}),
-  };
+  return { version: 1, rules: [...records] };
 }
 
 /** Preserve the bare-token behavior of stored, explicitly class-scoped rules. */

@@ -1,5 +1,5 @@
 // Proves: A notification or an inbound chat message is lost.
-// Red when: Dead letters live in memory only or a resend does not remove its row, a Socket Mode envelope is acknowledged before it was taken, or ntfy suppresses a repeat by its text.
+// Red when: Dead letters live in memory only or a resend does not remove its row, a Socket Mode envelope is acknowledged before it was taken, ntfy suppresses a repeat by its text, or the ntfy subscription reconnects from now instead of from the last message it read.
 // Proves: A notification that could not be sent is lost when a resend of it fails again.
 // Red when: A resend that fails again drops the dead letter (or duplicates it). notification-message-loss.test.ts only ever resends successfully; add the failing resend to its restart case (the list and its file still hold the one entry).
 /**
@@ -139,6 +139,38 @@ describe('ntfy repeat suppression', () => {
       expect(await ntfy.publish('t', 'Done, again.', { announces: 'agent:a1:final:1' })).toBe('suppressed');
       expect(received).toEqual(['Done.', 'Done.']);
     } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('ntfy subscription', () => {
+  test('resumes after a dropped stream from the last message it read, and reads each message once', async () => {
+    const requests: string[] = [];
+    const server: Server = createServer((req, res) => {
+      requests.push(req.url ?? '');
+      res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+      // The first stream hands out one message and drops; the next hands out what was published meanwhile.
+      if (requests.length === 1) {
+        res.end(`${JSON.stringify({ id: 'msg-A', event: 'message', topic: 't', message: 'before the drop', time: 100 })}\n`);
+      } else {
+        res.write(`${JSON.stringify({ id: 'msg-B', event: 'message', topic: 't', message: 'during the drop', time: 101 })}\n`);
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const stop = new AbortController();
+    const read: string[] = [];
+    try {
+      const ntfy = new NtfyIntegration(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+      await ntfy.subscribeJsonStream('t', (message) => {
+        read.push(String(message.message));
+        if (read.length === 2) stop.abort();
+      }, { signal: stop.signal, reconnectDelayMs: 0 });
+      expect(read).toEqual(['before the drop', 'during the drop']);
+      expect(requests.map((url) => new URL(url, 'http://ntfy.test').searchParams.get('since'))).toEqual([null, 'msg-A']);
+    } finally {
+      stop.abort();
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

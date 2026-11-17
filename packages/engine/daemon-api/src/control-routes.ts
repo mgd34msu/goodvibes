@@ -172,6 +172,19 @@ function credentialOf(principal: AuthenticatedPrincipal): CredentialKind | null 
   return kind === 'local' || kind === 'shared-token' || kind === 'device-token' || kind === 'agent' || kind === 'user-session' ? kind : null;
 }
 
+/**
+ * The header a terminal app names itself in, so what it does is attributed to
+ * it (an inbox answer given in the TUI says tui). A label only: it grants
+ * nothing, and anything else, or nothing, reads as the web.
+ */
+export const CLIENT_SURFACE_HEADER = 'x-goodvibes-client';
+const NAMED_CLIENT_SURFACES: ReadonlySet<string> = new Set(['tui', 'agent']);
+
+function readClientSurface(req: Request): string {
+  const raw = req.headers.get(CLIENT_SURFACE_HEADER)?.trim().toLowerCase();
+  return raw !== undefined && NAMED_CLIENT_SURFACES.has(raw) ? raw : 'web';
+}
+
 function readExplicitUserRequest(req: Request): boolean | undefined {
   const raw = req.headers.get(EXPLICIT_USER_REQUEST_HEADER);
   if (raw === null) return undefined;
@@ -366,7 +379,7 @@ export function createDaemonControlRouteHandlers(
           principalKind: principal?.principalKind,
           admin: principal?.admin,
           scopes: principal?.scopes,
-          clientKind: 'web',
+          clientKind: readClientSurface(req),
           ...(readExplicitUserRequest(req) === undefined
             ? {}
             : { explicitUserRequest: readExplicitUserRequest(req) }),
@@ -442,7 +455,7 @@ export function createDaemonControlRouteHandlers(
           principalKind: principal?.principalKind,
           admin: principal?.admin,
           scopes: principal?.scopes,
-          clientKind: 'web',
+          clientKind: readClientSurface(req),
           ...(readExplicitUserRequest(req) === undefined
             ? {}
             : { explicitUserRequest: readExplicitUserRequest(req) }),

@@ -396,7 +396,12 @@ function clientFor(baseUrl: string, token: string, fetchImpl: FetchLike, validat
   let client = clients.get(key);
   if (!client) {
     // A redirect would carry the credential to wherever the host points; refuse it.
-    const noRedirect = (input: string | URL | Request, init?: RequestInit) => fetchImpl(input, { ...init, redirect: 'error' });
+    // Every call names the Agent, so what the owner does in it is attributed to it (an inbox answer says agent).
+    const noRedirect = (input: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      headers.set('x-goodvibes-client', 'agent');
+      return fetchImpl(input, { ...init, headers, redirect: 'error' });
+    };
     client = createOperatorApiClient({ baseUrl, authToken: token, fetchImpl: noRedirect, retry: { maxAttempts: 1 }, validateResponses });
     clients.set(key, client);
     if (clients.size > CLIENT_CACHE_LIMIT) {

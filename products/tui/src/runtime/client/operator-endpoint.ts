@@ -209,8 +209,15 @@ export function resolveOperatorRpc(deps: {
 }
 
 function operatorClientFor(endpoint: { readonly baseUrl: string; readonly token: string }, fetchImpl: typeof fetch | undefined): GoodVibesPlatform {
-  const platformClient = createGoodVibesPlatform({ baseUrl: endpoint.baseUrl, authToken: endpoint.token, ...(fetchImpl ? { fetch: fetchImpl } : {}) });
-  return withGatewayRouteForWsOnlyVerbs(platformClient, endpoint.baseUrl, endpoint.token, fetchImpl ?? fetch);
+  // Every call names this app, so what the owner does here is attributed to the terminal (an inbox answer says tui).
+  const base = fetchImpl ?? fetch;
+  const named = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    headers.set('x-goodvibes-client', 'tui');
+    return base(input, { ...init, headers });
+  }) as typeof fetch;
+  const platformClient = createGoodVibesPlatform({ baseUrl: endpoint.baseUrl, authToken: endpoint.token, fetch: named });
+  return withGatewayRouteForWsOnlyVerbs(platformClient, endpoint.baseUrl, endpoint.token, named);
 }
 
 /**

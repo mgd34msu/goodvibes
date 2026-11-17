@@ -6,13 +6,22 @@
  * non-admin principal never receives setting values, approvals, session
  * lifecycle or transcripts, live or replayed, whatever scopes it holds and
  * whatever kind its socket names; an admin and an internal stream that carries
- * no principal scopes receive everything.
+ * no principal scopes receive everything. One session's agent tool lists,
+ * reads, steers and cancels only the agents that session started, though every
+ * session of the process shares one agent manager.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.js';
 import { ControlPlaneGateway } from '../platform/src/platform/control-plane/gateway.js';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.js';
+import { AgentManager } from '../platform/src/platform/tools/agent/manager.js';
+import { AgentMessageBus } from '../platform/src/platform/agents/message-bus.js';
+import { createAgentTool } from '../platform/src/platform/tools/agent/index.js';
 
 /** Every read scope a non-admin user is granted. */
 const NON_ADMIN_SCOPES = ['read:events', 'read:sessions', 'read:remote', 'read:tasks', 'read:config'] as const;
@@ -94,5 +103,39 @@ describe('the event stream grant is decided once, from the descriptors', () => {
       clientKind: 'web', transport: 'sse', principalId: 'u', principalKind: 'user', scopes: [], admin: false,
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('one session does not see another session\'s agents', () => {
+  const cleanup: Array<() => void> = [];
+  afterEach(() => { for (const step of cleanup.splice(0)) step(); });
+
+  test('the agent tool of one session cannot list, read, message or cancel an agent another session started', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gv-session-agents-'));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const configManager = new ConfigManager({ configDir: join(dir, 'config') });
+    const messageBus = new AgentMessageBus();
+    const manager = new AgentManager({ messageBus, configManager });
+    const mine = manager.spawn({ mode: 'spawn', task: 'session A work', outsideContract: true, sessionId: 'session-a' });
+    const theirs = manager.spawn({ mode: 'spawn', task: 'session B work', outsideContract: true, sessionId: 'session-b' });
+    const unused = (): never => { throw new Error('no contract is read in this proof'); };
+    const toolFor = (sessionId: string) => createAgentTool({
+      manager, messageBus, configManager, projectRoot: '/synthetic/agents',
+      contractRunner: { start: unused, list: unused, get: unused }, resolveSessionId: () => sessionId,
+    });
+    const a = toolFor('session-a');
+    const listed = await a.execute({ mode: 'list' });
+    expect(listed.success).toBe(true);
+    expect(listed.output).toContain(mine.id);
+    expect(listed.output).not.toContain(theirs.id);
+    for (const mode of ['status', 'get', 'cancel', 'message', 'wait']) {
+      const result = await a.execute({ mode, agentId: theirs.id, message: 'stop', timeoutMs: 1 });
+      expect(`${mode}: ${result.success}`).toBe(`${mode}: false`);
+      expect(result.output ?? '').not.toContain('session B work');
+    }
+    expect(manager.getStatus(theirs.id)?.status).not.toBe('cancelled');
+    // The model cannot name another session for itself: the host's session wins.
+    const spoofed = await a.execute({ mode: 'list', sessionId: 'session-b' });
+    expect(spoofed.output).not.toContain(theirs.id);
   });
 });

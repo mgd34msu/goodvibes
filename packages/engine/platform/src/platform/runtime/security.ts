@@ -72,6 +72,5 @@ export type {
   SignedPolicyBundle,
 } from './permissions/index.js';
 
-export { capturePolicyRuntimeReadSource } from './permissions/policy-runtime.js';
 export { createTokenAuditBusEmitter } from './token-audit-events.js';
 export { bindPairingRotationLimit, createConfiguredTokenAuditor, startPairingTokenAudit } from './pairing-token-audit.js';

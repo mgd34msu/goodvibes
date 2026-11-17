@@ -1,5 +1,3 @@
-import { captureRevisionReadSource } from '../../security/read-source.js';
-import { captureSimulationReadSource } from './simulation.js';
 /**
  * Divergence dashboard and enforcement gate.
  *
@@ -143,17 +141,7 @@ export interface DivergenceDashboardConfig {
  * }
  * ```
  */
-/** A check that the dashboard and its simulator did not change while the snapshot was read. */
-export function captureDivergenceReadSource(dashboard: DivergenceDashboard): () => void {
-  return dashboard.captureReadSource();
-}
 export class DivergenceDashboard {
-  private _readRevision = 0;
-
-  captureReadSource(): () => void {
-    const own = captureRevisionReadSource('divergence dashboard', () => this._readRevision), simulation = captureSimulationReadSource(this._simulator);
-    return () => { own(); simulation(); };
-  }
   private readonly _simulator: PermissionSimulator;
   /**
    * @remarks
@@ -256,7 +244,6 @@ export class DivergenceDashboard {
     if (this._trend.length >= this._maxTrendEntries) {
       this._trend.shift();
     }
-    this._readRevision++;
     this._trend.push(entry);
 
     return entry;
@@ -303,7 +290,6 @@ export class DivergenceDashboard {
         throw new DivergenceGateError(gate.message, gate);
       }
     }
-    this._readRevision++;
     this._mode = mode;
   }
 

@@ -1,4 +1,4 @@
-export { McpRegistry, captureMcpSecurityDecisionReadSource } from './registry.js';
+export { McpRegistry } from './registry.js';
 export { createMcpAutonomousElicitationHandler } from './elicitation-autonomous.js';
 export type { McpReloadResult, McpReloadServerResult, McpServerHealth, RegisteredTool } from './registry.js';
 export { McpClient } from './client.js';

@@ -1,4 +1,3 @@
-import { captureRevisionReadSource } from '../../security/read-source.js';
 import type { ExternalRequestEvidence } from '../../permissions/external-request-evidence.js';
 /**
  * MCP per-server permissions: each registered server's trust mode, role,
@@ -149,20 +148,11 @@ function sortFindings(a: McpAttackPathFinding, b: McpAttackPathFinding): number 
  *   4. `evaluateToolCall(name, tool, args)`, checked before every tool invocation.
  *   5. `removeServer(name)`, called on permanent disconnection.
  */
-/** A check that the decision history did not change while it was read. */
-export function captureMcpDecisionHistoryReadSource(manager: McpPermissionManager): () => void {
-  return manager.captureSecurityDecisionReadSource();
-}
-
 export class McpPermissionManager {
   private readonly permissions = new Map<string, McpServerPermissions>();
   private readonly recentDecisions: McpDecisionRecord[] = [];
-  private decisionRevision = 0;
   private readonly decisionListeners = new Set<() => void>();
 
-
-  /** One integer compare per check: the revision moves on every recorded decision. */
-  captureSecurityDecisionReadSource(): () => void { return captureRevisionReadSource('MCP decision history', () => this.decisionRevision); }
 
   /** Be told whenever a decision is recorded. The listener carries no payload: read the recent decisions again. */
   subscribeDecisions(listener: () => void): () => void {
@@ -412,7 +402,6 @@ export class McpPermissionManager {
   }
 
   private _recordDecision(record: McpDecisionRecord): void {
-    this.decisionRevision++;
     this.recentDecisions.unshift(record);
     if (this.recentDecisions.length > MAX_DECISION_HISTORY) {
       this.recentDecisions.length = MAX_DECISION_HISTORY;

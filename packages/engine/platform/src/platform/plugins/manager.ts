@@ -1,5 +1,5 @@
 import { createPublicKey } from 'node:crypto';
-import { captureFileIdentities, captureRevisionReadSource, fileIdentity } from '../security/read-source.js';
+import { fileIdentity } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { resolve, sep } from 'node:path';
@@ -180,25 +180,7 @@ export interface PluginShutdownStatus {
 /**
  * PluginManager, orchestrates plugin discovery, loading, and persistence.
  */
-/**
- * A check that the plugin list did not change while a status read ran: this
- * manager's revision (every load, enable, trust and quarantine change moves
- * it) and one `stat` of each plugin directory and the state file, which
- * another process can change.
- */
-export function capturePluginSecurityReadSource(manager: PluginManager): () => void {
-  return manager.captureReadSource();
-}
 export class PluginManager {
-  private readRevision = 0;
-
-  captureReadSource(): () => void {
-    const revision = captureRevisionReadSource('plugin list', () => this.readRevision, () => !this.closed && this.operations.size === 0);
-    const files = captureFileIdentities('plugin list', [
-      ...getPluginDirectories(this.pathOptions), this.stateFilePath, ...(this.trustFilePath ? [this.trustFilePath] : []),
-    ]);
-    return () => { revision(); files(); };
-  }
   private plugins = new Map<string, LoadedPlugin>();
   private state: PluginState = { ...DEFAULT_STATE, enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {}, publisherKeys: {} };
   /** Lifecycle operations run one at a time, in the order they were asked for. */
@@ -686,7 +668,6 @@ export class PluginManager {
    */
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
-    this.readRevision++;
     this.closed = true;
     this.subscribers.clear();
     const drains: Promise<void>[] = [];
@@ -735,7 +716,6 @@ export class PluginManager {
 
   private ownOperation<T>(action: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new PluginClosedError('manager'));
-    this.readRevision++;
     // Operations await across loads and unloads; running them one at a time
     // keeps a reload from loading a second instance of a plugin an enable is
     // still starting.
@@ -955,7 +935,6 @@ export class PluginManager {
   }
 
   private loadState(): void {
-    this.readRevision++;
     try {
       const parsed = readJsonFileOrQuarantine<Partial<PluginState>>(this.stateFilePath, {
         label: 'plugins/state',
@@ -1025,7 +1004,6 @@ export class PluginManager {
     const identity = fileIdentity(path);
     if (identity === this.trustFileIdentity) return;
     this.trustFileIdentity = identity;
-    this.readRevision++;
     const store = new PluginTrustStore();
     try {
       const records = readJsonFileOrQuarantine<Record<string, PluginTrustRecord>>(path, {
@@ -1056,7 +1034,6 @@ export class PluginManager {
 
   /** Writes the state file; returns the reason when it could not be written. */
   private saveState(): string | undefined {
-    this.readRevision++;
     try {
       writeJsonFileAtomic(this.stateFilePath, this.state, { trailingNewline: false });
       return undefined;
@@ -1111,7 +1088,6 @@ export class PluginManager {
   }
 
   private notifySubscribers(): void {
-    this.readRevision++;
     if (this.closed) return;
     for (const callback of this.subscribers) {
       try {

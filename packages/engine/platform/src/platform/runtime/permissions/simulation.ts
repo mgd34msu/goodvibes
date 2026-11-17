@@ -1,4 +1,3 @@
-import { captureRevisionReadSource } from '../../security/read-source.js';
 /**
  * Runtime permissions simulation pipeline.
  *
@@ -105,10 +104,6 @@ function statsFromCounts(counts: DivergenceCounts | undefined, totalEvaluations:
  * }
  * ```
  */
-/** A check that no evaluation was recorded while the simulation report was read: one integer compare. */
-export function captureSimulationReadSource(simulator: PermissionSimulator): () => void {
-  return simulator.captureReadSource();
-}
 export class PermissionSimulator {
   private readonly actual: LayeredPolicyEvaluator;
   private readonly simulated: LayeredPolicyEvaluator;
@@ -132,10 +127,6 @@ export class PermissionSimulator {
 
   /** Total evaluations across all calls. */
   private totalEvals = 0;
-
-  captureReadSource(): () => void {
-    return captureRevisionReadSource('permission simulation', () => this.totalEvals);
-  }
 
   /**
    * Divergence counts per bucket. Counted as each divergence happens, never recomputed from `records`,

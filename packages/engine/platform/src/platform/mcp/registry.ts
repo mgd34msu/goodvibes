@@ -53,7 +53,7 @@ import type {
 } from './config.js';
 import type { HookDispatcher } from '../hooks/dispatcher.js';
 import type { HookEvent } from '../hooks/types.js';
-import { McpPermissionManager, captureMcpDecisionHistoryReadSource } from '../runtime/mcp/permissions.js';
+import { McpPermissionManager } from '../runtime/mcp/permissions.js';
 import { McpSchemaFreshnessTracker } from '../runtime/mcp/schema-freshness.js';
 import { McpLifecycleManager } from '../runtime/mcp/manager.js';
 import { McpHttpAuthError } from './http-connection.js';
@@ -118,11 +118,6 @@ interface PendingMcpConnection {
 
 function sameServerConfig(a: McpServerConfig | undefined, b: McpServerConfig | undefined): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-}
-
-/** A check that the MCP security decisions did not change while they were read. */
-export function captureMcpSecurityDecisionReadSource(registry: McpRegistry): () => void {
-  return registry.captureSecurityDecisionReadSource();
 }
 
 /** Servers connected at once while applying a configuration. */
@@ -924,8 +919,6 @@ export class McpRegistry {
     }
     return true;
   }
-
-  captureSecurityDecisionReadSource(): () => void { return captureMcpDecisionHistoryReadSource(this.permissions); }
 
   listRecentSecurityDecisions(limit = 8): McpDecisionRecord[] {
     return this.permissions.listRecentDecisions(limit);

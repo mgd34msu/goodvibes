@@ -1,5 +1,3 @@
-import { captureRevisionReadSource } from '../../security/read-source.js';
-import { captureDivergenceReadSource } from './divergence-dashboard.js';
 import { PolicyRegistry } from './policy-registry.js';
 import { DivergencePanel } from '../diagnostics/panels/divergence.js';
 import type { PolicyPanelSnapshot } from '../diagnostics/panels/policy.js';
@@ -31,19 +29,7 @@ export interface PermissionAuditEntry {
   readonly persisted?: boolean | undefined;
 }
 
-/**
- * The policy panel snapshot and a check that nothing it shows changed while it
- * was read: the runtime's revision, the registry's publication revision and
- * the dashboard's, compared as integers.
- */
-export function capturePolicyRuntimeReadSource(state: PolicyRuntimeState): { readonly snapshot: PolicyPanelSnapshot; readonly assertCurrent: () => void } {
-  const assertCurrent = state.captureReadSource();
-  const snapshot = state.getSnapshot();
-  return Object.freeze({ snapshot, assertCurrent });
-}
-
 export class PolicyRuntimeState {
-  private _readRevision = 0;
   private readonly _registry: PolicyRegistry;
   private _dashboard: DivergenceDashboard | null = null;
   private _divergencePanel: DivergencePanel | null = null;
@@ -58,13 +44,6 @@ export class PolicyRuntimeState {
 
   public constructor(registry: PolicyRegistry = new PolicyRegistry()) {
     this._registry = registry;
-  }
-
-  public captureReadSource(): () => void {
-    const own = captureRevisionReadSource('permission policy', () => this._readRevision);
-    const registry = captureRevisionReadSource('permission policy', () => this._registry.getPublicationRevision());
-    const dashboard = this._dashboard ? captureDivergenceReadSource(this._dashboard) : undefined;
-    return () => { own(); registry(); dashboard?.(); };
   }
 
   /** The calls this installation's permission audit recorded, newest first: the evidence a candidate bundle is reviewed against. */
@@ -205,7 +184,6 @@ export class PolicyRuntimeState {
   }
 
   public notify(): void {
-    this._readRevision++;
     for (const cb of this._subscribers) {
       try {
         cb();

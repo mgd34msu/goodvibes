@@ -23,6 +23,12 @@ import { VOICE_FEATURE_FLAGS } from './flags-voice.js';
  * initialises from this array at startup and the lockstep tests keep the
  * registry, the settings bindings, and the config association map aligned.
  */
+/** Gate ids other code checks by name: each is spelled once, here, and imported. */
+export const CONTROL_PLANE_FEATURE_FLAG = 'control-plane-gateway';
+export const ROUTE_BINDING_FEATURE_FLAG = 'route-binding';
+export const DELIVERY_ENGINE_FEATURE_FLAG = 'delivery-engine';
+export const SERVICE_MANAGEMENT_FEATURE_FLAG = 'service-management';
+
 export const FEATURE_FLAGS: FeatureFlag[] = [
   // ── Tier 2 ───────────────────────────────────────────────────────────────
   {
@@ -482,7 +488,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     // approve/deny wired to the shared approval broker. web-surface, watcher-framework, and
     // service-management were later ruled on as defaults too (2026-07-11 rulings), so the
     // whole reachability tier now defaults on with the web surface bound to loopback.
-    id: 'control-plane-gateway',
+    id: CONTROL_PLANE_FEATURE_FLAG,
     name: 'Control-Plane Gateway',
     description:
       'Enables the shared gateway/control-plane host that serves state snapshots, live streams, '
@@ -492,7 +498,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     runtimeToggleable: true,
   },
   {
-    id: 'route-binding',
+    id: ROUTE_BINDING_FEATURE_FLAG,
     name: 'Route Binding',
     description:
       'Enables durable binding and resolution of external conversation routes, thread contexts, '
@@ -502,7 +508,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     runtimeToggleable: true,
   },
   {
-    id: 'delivery-engine',
+    id: DELIVERY_ENGINE_FEATURE_FLAG,
     name: 'Delivery Engine',
     description:
       'Enables first-class delivery tracking for automation results, retries, dead letters, and '
@@ -706,7 +712,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     runtimeToggleable: true,
   },
   {
-    id: 'service-management',
+    id: SERVICE_MANAGEMENT_FEATURE_FLAG,
     name: 'Service Management',
     description:
       'Enables install/start/stop/status/autostart management for running Goodvibes as a '

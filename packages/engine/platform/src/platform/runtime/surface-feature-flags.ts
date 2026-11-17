@@ -11,11 +11,14 @@
 import type { ConfigManager } from '../config/index.js';
 import { surfaceFeatureGateId } from './feature-flags/gates.js';
 import { featureEnablementWrite, getFeatureSetting, isFeatureConfigEnabled } from './feature-flags/feature-settings-queries.js';
+import {
+  CONTROL_PLANE_FEATURE_FLAG,
+  DELIVERY_ENGINE_FEATURE_FLAG,
+  ROUTE_BINDING_FEATURE_FLAG,
+  SERVICE_MANAGEMENT_FEATURE_FLAG,
+} from './feature-flags/flags.js';
 
-export const CONTROL_PLANE_FEATURE_FLAG = 'control-plane-gateway';
-export const ROUTE_BINDING_FEATURE_FLAG = 'route-binding';
-export const DELIVERY_ENGINE_FEATURE_FLAG = 'delivery-engine';
-export const SERVICE_MANAGEMENT_FEATURE_FLAG = 'service-management';
+export { CONTROL_PLANE_FEATURE_FLAG, DELIVERY_ENGINE_FEATURE_FLAG, ROUTE_BINDING_FEATURE_FLAG, SERVICE_MANAGEMENT_FEATURE_FLAG };
 
 const CORE_CHANNEL_FEATURE_FLAGS = [
   CONTROL_PLANE_FEATURE_FLAG,
@@ -34,6 +37,13 @@ export function getSurfaceFeatureFlag(surfaceId: string): string | null {
   return kebab === surfaceId ? null : surfaceFeatureGateId(kebab);
 }
 
+/**
+ * The capabilities a surface's own code path checks: the gateway that serves
+ * it, and for a channel the route binding, the delivery engine and the
+ * channel's own switch. Running the host as an OS service is not on that path
+ * (a container or another supervisor runs it just as well), so it is not a
+ * requirement here.
+ */
 export function getServerSurfaceFeatureFlags(options: {
   readonly serverBacked?: boolean;
   readonly web?: boolean;
@@ -44,7 +54,6 @@ export function getServerSurfaceFeatureFlags(options: {
 
   if (options.serverBacked || options.web || hasExternalSurfaces) {
     flags.add(CONTROL_PLANE_FEATURE_FLAG);
-    flags.add(SERVICE_MANAGEMENT_FEATURE_FLAG);
   }
   if (options.web) {
     const webFlag = getSurfaceFeatureFlag('web');

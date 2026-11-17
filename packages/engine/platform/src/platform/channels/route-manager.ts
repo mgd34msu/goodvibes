@@ -16,6 +16,7 @@ import type { AutomationSurfaceKind } from '../automation/types.js';
 import { AutomationRouteStore } from '../automation/store/routes.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled } from '../runtime/feature-flags/index.js';
+import { ROUTE_BINDING_FEATURE_FLAG } from '../runtime/feature-flags/flags.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
@@ -154,7 +155,7 @@ export class RouteBindingManager {
   }
 
   private isEnabled(): boolean {
-    return isFeatureGateEnabled(this.featureFlags, 'route-binding');
+    return isFeatureGateEnabled(this.featureFlags, ROUTE_BINDING_FEATURE_FLAG);
   }
 
   /**

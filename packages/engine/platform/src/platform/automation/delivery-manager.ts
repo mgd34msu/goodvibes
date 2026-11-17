@@ -24,6 +24,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
+import { DELIVERY_ENGINE_FEATURE_FLAG } from '../runtime/feature-flags/flags.js';
 import { sleep } from '../utils/concurrency.js';
 
 function buildDeliveryMessage(job: AutomationJob, run: AutomationRun): string {
@@ -184,7 +185,7 @@ export class AutomationDeliveryManager {
   }
 
   private isEnabled(): boolean {
-    return isFeatureGateEnabled(this.featureFlags, 'delivery-engine');
+    return isFeatureGateEnabled(this.featureFlags, DELIVERY_ENGINE_FEATURE_FLAG);
   }
 
   private isTargetEnabled(target: AutomationDeliveryTarget): boolean {

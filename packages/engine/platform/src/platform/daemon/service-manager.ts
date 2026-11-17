@@ -6,6 +6,7 @@ import { ConfigManager } from '../config/manager.js';
 import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import type { FeatureFlagReader } from '../runtime/feature-flags/index.js';
 import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-flags/index.js';
+import { SERVICE_MANAGEMENT_FEATURE_FLAG } from '../runtime/feature-flags/flags.js';
 import { currentProcessSignals, resolveDaemonExecInvocation } from './daemon-exec-invocation.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 
@@ -460,11 +461,11 @@ export class PlatformServiceManager {
   }
 
   private isEnabled(): boolean {
-    return isFeatureGateEnabled(this.featureFlags, 'service-management');
+    return isFeatureGateEnabled(this.featureFlags, SERVICE_MANAGEMENT_FEATURE_FLAG);
   }
 
   private requireEnabled(operation: string): void {
-    requireFeatureGate(this.featureFlags, 'service-management', operation);
+    requireFeatureGate(this.featureFlags, SERVICE_MANAGEMENT_FEATURE_FLAG, operation);
   }
 
   private getPaths(): ManagedServicePaths {

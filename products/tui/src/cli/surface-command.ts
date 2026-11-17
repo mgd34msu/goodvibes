@@ -84,6 +84,29 @@ function restoreConfig(config: ConfigManager, snapshot: ReadonlyMap<string, unkn
   }
 }
 
+/**
+ * After a channel is switched off: what enabling channels turned on and is
+ * still on, and why. The HTTP listener is the channels' inbound door, so with
+ * none left it is named with the command that closes it; the shared
+ * capabilities stay on for whatever else uses them.
+ */
+function sharedSettingsLeftOn(config: ConfigManager, surfaceId: string): string[] {
+  const stillEnabled = SURFACE_CONFIGS.filter(([id]) => config.get(`surfaces.${id}.enabled` as ConfigKey) === true).map(([, label]) => label);
+  const lines: string[] = [];
+  if (config.get('danger.httpListener') === true) {
+    lines.push(stillEnabled.length > 0
+      ? `  The HTTP listener stays on: ${stillEnabled.join(', ')} still receive${stillEnabled.length === 1 ? 's' : ''} on it.`
+      : '  The HTTP listener (danger.httpListener) is still on and no enabled channel uses it; run `goodvibes surfaces disable listener` to close it.');
+  }
+  // What enabling this channel switched on besides its own switch.
+  const sharedOn = surfaceFeatureGateSettingsKeys(getServerSurfaceFeatureFlags({ serverBacked: true, externalSurfaces: [surfaceId] }))
+    .filter((key) => !key.startsWith('surfaces.') && config.get(key as ConfigKey) === true);
+  if (sharedOn.length > 0) {
+    lines.push(`  Left on: ${sharedOn.join(', ')}; ${stillEnabled.length > 0 ? `${stillEnabled.join(', ')} and ` : ''}the web UI, terminals and automation deliveries use them.`);
+  }
+  return lines;
+}
+
 export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
   const config = runtime.configManager;
   const [sub = 'list', ...rest] = runtime.cli.commandArgs;
@@ -180,6 +203,8 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
           lines.push(`  still needs: ${missing.join(', ')}. Set each in the TUI with /config set <key> <value> (a token may be a goodvibes://secrets/ reference), then run goodvibes surfaces check ${resolved.id}.`);
         }
       }
+    } else if (resolved.kind === 'external') {
+      lines.push(...sharedSettingsLeftOn(config, resolved.id));
     } else {
       lines.push('  Its network settings are left as they are; run `goodvibes surfaces list` to see them.');
     }

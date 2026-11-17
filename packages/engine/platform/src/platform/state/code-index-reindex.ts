@@ -28,8 +28,8 @@
  *
  *  4. NOTHING IS DROPPED WHILE PAUSED. An edit made while reindexing is off or
  *     paused is not queued; the scheduler counts it, and the first reindex
- *     that finds the gate open again (the next edit, or a host calling
- *     `resume()`) starts the store's incremental build instead, which re-reads
+ *     that finds the gate open again (the governor resuming the job, the next
+ *     edit, or a host calling `resume()`) starts the store's incremental build instead, which re-reads
  *     every file and re-embeds only those whose bytes changed, so edits made
  *     by the shell, git or another editor while paused are caught as well.
  *
@@ -80,6 +80,12 @@ export interface CodeIndexReindexSchedulerDeps {
   readonly workingDirectory: string | (() => string);
   /** Live gate for the embedder's storage.codeIndexEnabled setting. Default: always enabled. */
   readonly isEnabled?: (() => boolean) | undefined;
+  /**
+   * Resolves when the memory governor next resumes reindexing. With it, edits
+   * missed while paused are caught up as soon as the pause ends instead of at
+   * the next edit. Absent, the next edit (or a host calling `resume()`) does it.
+   */
+  readonly whenResumed?: (() => Promise<void>) | undefined;
   /** Per-path debounce window in ms. Default DEFAULT_REINDEX_DEBOUNCE_MS. */
   readonly debounceMs?: number | undefined;
   /** Injectable clock for deterministic activity timestamps in tests. */
@@ -131,6 +137,8 @@ export class CodeIndexReindexScheduler {
   private last: CodeIndexReindexActivity | null = null;
   /** Edits made while the live gate was closed; nonzero means the index missed them and needs the incremental build. */
   private missedEdits = 0;
+  /** A catch-up is armed on the governor's resume; one at a time. */
+  private resumeArmed = false;
   private readonly debounceMs: number;
   private readonly now: () => number;
 
@@ -224,6 +232,10 @@ export class CodeIndexReindexScheduler {
       path: absPath, at: this.now(), status: 'skipped',
       reason: `code index reindexing is off or paused; ${this.missedEdits} edit${this.missedEdits === 1 ? '' : 's'} not yet indexed, the changed files are reindexed when it resumes`,
     };
+    const whenResumed = this.deps.whenResumed;
+    if (!whenResumed || this.resumeArmed) return;
+    this.resumeArmed = true;
+    void whenResumed().then(() => { this.resumeArmed = false; this.resume(); }, () => { this.resumeArmed = false; });
   }
 
   private track(promise: Promise<void>): void {

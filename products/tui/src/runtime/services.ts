@@ -564,6 +564,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     configManager,
     memoryEmbeddingRegistry,
     isReindexPaused: () => pauseController.isPaused('code-index-reindex'),
+    whenReindexResumed: () => pauseController.whenResumed('code-index-reindex'),
     admitExpensiveWork,
   });
   disposalScope.registry.add('code index store', () => codeIndexStore.close());

@@ -11,10 +11,14 @@
  * honestly says when there is none.
  *
  * Cost: detection runs at most once per `refreshIntervalMs` (a lazy TTL over the
- * injected clock), so folding observed rows into every fleet snapshot/tick stays
- * cheap, a cached read between refreshes. The CPU-delta that drives liveness is
- * measured across those refresh boundaries, so `active`/`quiet` reflects CPU
- * burned in the last refresh interval, not per-query noise.
+ * injected clock), and only while something reads the rows (the fleet view or a
+ * needs-input push). A read never waits for it: it returns the rows of the last
+ * scan and starts the next one in the background, which walks `/proc` without
+ * blocking the event loop and tells `onRefresh` listeners when it lands. tmux
+ * is asked for its panes only when a session appears on a terminal not seen
+ * before, and again, synchronously, right before a steer types. The CPU-delta
+ * that drives liveness is measured across scan boundaries, so `active`/`quiet`
+ * reflects CPU burned since the last scan, not per-query noise.
  */
 import type { ObservedAgentKind, ObservedLiveness, ObservedSteerChannel, SteerOptions, SteerResult } from '../types.js';
 import {
@@ -22,8 +26,11 @@ import {
   defaultProcessTableReader,
   defaultTmuxPaneReader,
   paneForTty,
+  type ClassifiedObservedProcess,
+  type ObservedRawProcess,
   type ProcessTableReader,
   type TmuxPaneReader,
+  type TmuxPaneRow,
 } from './detect.js';
 import { spawnSync } from 'node:child_process';
 
@@ -66,7 +73,7 @@ export interface ObservedAgentSourceDeps {
   readonly paneReader?: TmuxPaneReader | undefined;
   readonly steerRunner?: TmuxCommandRunner | undefined;
   readonly now?: (() => number) | undefined;
-  /** Detection cadence, at most one scan per this many ms (default 2500). */
+  /** Detection cadence, at most one scan per this many ms (default 10000). */
   readonly refreshIntervalMs?: number | undefined;
   /**
    * The pid whose process tree this runtime owns (default: this process).
@@ -76,7 +83,12 @@ export interface ObservedAgentSourceDeps {
   readonly ownPid?: number | undefined;
 }
 
-const DEFAULT_REFRESH_INTERVAL_MS = 2_500;
+const DEFAULT_REFRESH_INTERVAL_MS = 10_000;
+
+/** What a fleet row shows of the observed sessions, to tell a scan that changed nothing. */
+function rowsSignature(rows: readonly ObservedAgentRow[]): string {
+  return rows.map((row) => `${row.pid}:${row.liveness.state}:${row.steer.kind}`).join('|');
+}
 
 function livenessDetail(state: 'active' | 'quiet', firstSighting: boolean): string {
   if (firstSighting) return 'first observation, no prior CPU sample to compare yet';
@@ -103,6 +115,10 @@ export class ObservedAgentSource {
   private cached: readonly ObservedAgentRow[] = [];
   private lastScanAt = 0;
   private scanned = false;
+  private scanning: Promise<void> | undefined;
+  /** tty → the tmux pane hosting it (or none), from the last pane read. */
+  private readonly paneByTty = new Map<string, TmuxPaneRow | null>();
+  private readonly refreshListeners = new Set<() => void>();
 
   constructor(deps: ObservedAgentSourceDeps = {}) {
     this.processReader = deps.processReader ?? defaultProcessTableReader();
@@ -113,19 +129,79 @@ export class ObservedAgentSource {
     this.ownPid = deps.ownPid ?? process.pid;
   }
 
-  /** Current observed rows. Lazily re-scans (read-only) at most once per refresh interval. */
+  /**
+   * Current observed rows. Re-scans (read-only) at most once per refresh
+   * interval; with an asynchronous reader the scan runs in the background and
+   * this returns the last scan's rows at once.
+   */
   list(): readonly ObservedAgentRow[] {
     const at = this.now();
     if (this.scanned && at - this.lastScanAt < this.refreshIntervalMs) return this.cached;
-    this.cached = this.scan();
     this.lastScanAt = at;
-    this.scanned = true;
+    const readAsync = this.processReader.readAsync?.bind(this.processReader);
+    if (!readAsync) {
+      const processes = this.processReader.read();
+      this.cached = this.rowsFrom(this.panesFor(processes, () => this.paneReader.listPanes()));
+      this.scanned = true;
+      return this.cached;
+    }
+    this.scanning ??= (async () => {
+      try {
+        const processes = await readAsync();
+        const listAsync = this.paneReader.listPanesAsync?.bind(this.paneReader);
+        const classified = await this.panesForAsync(processes, listAsync ?? (async () => this.paneReader.listPanes()));
+        const before = rowsSignature(this.cached);
+        this.cached = this.rowsFrom(classified);
+        const firstScan = !this.scanned;
+        this.scanned = true;
+        if (!firstScan && rowsSignature(this.cached) === before) return;
+        for (const listener of this.refreshListeners) {
+          try { listener(); } catch { /* A listener cannot stop the next one being told. */ }
+        }
+      } catch {
+        // An unreadable process table leaves the last rows in place until the next scan.
+      } finally {
+        this.scanning = undefined;
+      }
+    })();
     return this.cached;
   }
 
-  private scan(): readonly ObservedAgentRow[] {
-    const classified = classifyObservedProcesses(this.processReader.read(), new Set([this.ownPid]));
-    const panes = classified.length > 0 ? this.paneReader.listPanes() : [];
+  /** Be told when a background scan lands new rows. Returns the unsubscribe. */
+  onRefresh(listener: () => void): () => void {
+    this.refreshListeners.add(listener);
+    return () => { this.refreshListeners.delete(listener); };
+  }
+
+  /** The terminals of the agent sessions in `processes` that the pane cache has not seen. */
+  private unseenTtys(processes: readonly ObservedRawProcess[]): { classified: ClassifiedObservedProcess[]; unseen: boolean } {
+    const classified = classifyObservedProcesses(processes, new Set([this.ownPid]));
+    return { classified, unseen: classified.some((proc) => proc.tty !== undefined && !this.paneByTty.has(proc.tty)) };
+  }
+
+  /**
+   * Keep the pane of each live session's terminal: a fresh pane read replaces
+   * it, otherwise the cached mapping stands (a steer reads the panes again
+   * before it types). Terminals no session uses any more are forgotten.
+   */
+  private rememberPanes(classified: readonly ClassifiedObservedProcess[], panes: readonly TmuxPaneRow[] | undefined): readonly ClassifiedObservedProcess[] {
+    const live = new Set(classified.flatMap((proc) => (proc.tty ? [proc.tty] : [])));
+    for (const tty of [...this.paneByTty.keys()]) if (!live.has(tty)) this.paneByTty.delete(tty);
+    if (panes) for (const tty of live) this.paneByTty.set(tty, paneForTty(panes, tty) ?? null);
+    return classified;
+  }
+
+  private panesFor(processes: readonly ObservedRawProcess[], listPanes: () => readonly TmuxPaneRow[]): readonly ClassifiedObservedProcess[] {
+    const { classified, unseen } = this.unseenTtys(processes);
+    return this.rememberPanes(classified, unseen ? listPanes() : undefined);
+  }
+
+  private async panesForAsync(processes: readonly ObservedRawProcess[], listPanes: () => Promise<readonly TmuxPaneRow[]>): Promise<readonly ClassifiedObservedProcess[]> {
+    const { classified, unseen } = this.unseenTtys(processes);
+    return this.rememberPanes(classified, unseen ? await listPanes() : undefined);
+  }
+
+  private rowsFrom(classified: readonly ClassifiedObservedProcess[]): readonly ObservedAgentRow[] {
     const rows: ObservedAgentRow[] = [];
     const seenPids = new Set<number>();
     for (const proc of classified) {
@@ -134,7 +210,7 @@ export class ObservedAgentSource {
       const firstSighting = prior === undefined;
       const state: 'active' | 'quiet' = !firstSighting && proc.cpuSeconds > prior ? 'active' : 'quiet';
       this.cpuByPid.set(proc.pid, proc.cpuSeconds);
-      const pane = paneForTty(panes, proc.tty);
+      const pane = proc.tty ? this.paneByTty.get(proc.tty) ?? undefined : undefined;
       const steer: ObservedSteerChannel = pane
         ? { kind: 'tmux', paneId: pane.paneId, tty: pane.tty }
         : {

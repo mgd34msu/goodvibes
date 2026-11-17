@@ -47,21 +47,23 @@ import {
   adaptContractGroup,
   adaptContractUnit,
   allContractUnits,
+  contractGroupNodeId,
+  contractNodeId,
   contractUnitNodeId,
   repriceContractOwnerNode,
 } from './adapters/contract.js';
 import { adaptWorkflow } from './adapters/workflow.js';
 import { adaptHookAction } from './adapters/hook-action.js';
-import { adaptSchedule } from './adapters/schedule.js';
+import { adaptSchedule, scheduleNodeId } from './adapters/schedule.js';
 import { adaptWatcher } from './adapters/watcher.js';
 import { adaptWatcherTrigger } from './adapters/watcher-trigger.js';
 import type { TriggerManager as WatcherTriggerManager } from '../../triggers/manager.js';
 import { adaptBackgroundProcess } from './adapters/background-process.js';
 import { adaptAutomationJob, automationJobNodeId, isAutomationJobRaw } from './adapters/automation.js';
 import type { CodeIndexProcessSource } from './adapters/code-index.js';
-import { adaptCodeIndex } from './adapters/code-index.js';
-import { adaptHostedAcpAgent, killHostedAcpNode, steerHostedAcpNode } from './adapters/acp-host.js';
-import { adaptObservedAgent, steerObservedNode } from './adapters/observed.js';
+import { adaptCodeIndex, codeIndexNodeId } from './adapters/code-index.js';
+import { acpHostNodeId, adaptHostedAcpAgent, killHostedAcpNode, steerHostedAcpNode } from './adapters/acp-host.js';
+import { adaptObservedAgent, observedNodeId, steerObservedNode } from './adapters/observed.js';
 import type { ObservedAgentSource } from './observed/source.js';
 import type { AcpHostService } from '../../acp/host.js';
 import { DEFAULT_STALL_TELL_MS, HeadlineTable, deriveStallTell } from './headlines.js';
@@ -164,7 +166,7 @@ export interface ProcessRegistryDeps {
   /** Optional: hosted third-party ACP agents fold in as 'acp-agent' nodes (steer = next prompt, kill = stop, permission ask = awaiting-approval). Absent ⇒ exactly today's behavior. */
   readonly acpHost?: Pick<AcpHostService, 'list' | 'prompt' | 'stop'> | undefined;
   /** Optional: externally-launched agents observed read-only on the host fold in as 'observed-external' rows (steer = the foreign session's own channel, e.g. tmux; stop never offered; NOT counted against fleet.maxSize). Absent ⇒ exactly today's behavior. */
-  readonly observedAgents?: Pick<ObservedAgentSource, 'list' | 'steer'> | undefined;
+  readonly observedAgents?: (Pick<ObservedAgentSource, 'list' | 'steer'> & Partial<Pick<ObservedAgentSource, 'onRefresh'>>) | undefined;
   /**
    * Optional: folds `/schedule` automation jobs
    * (platform/automation, a SEPARATE subsystem from the workflow-tool's
@@ -359,6 +361,9 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     );
   }
 
+  // Observed sessions are scanned in the background; a scan that changed them is a change to show.
+  if (deps.observedAgents?.onRefresh) busUnsubscribers.push(deps.observedAgents.onRefresh(() => markDirty()));
+
   if (deps.runtimeBus) {
     for (const domain of FLEET_SOURCE_DOMAINS) {
       if (domain === 'agents') continue; // marked by the activity handler above
@@ -401,10 +406,18 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     return byAgentId;
   }
 
-  function assemble(): { capturedAt: number; nodes: ProcessNode[] } {
-    const capturedAt = now();
-    const agents: AgentRecord[] = deps.agentManager.list();
-    const contracts: readonly ContractView[] = deps.contractRunner.list({ includeTerminal: true, includeInputSnapshot: false });
+  /**
+   * What the agent adapter reads besides the record. `withBindings` adds the
+   * pending approvals and session bindings (a scan of each); a control verb
+   * needs neither, because they change only how a node is labelled, never what
+   * may be done to it.
+   */
+  function agentContext(
+    capturedAt: number,
+    agents: readonly AgentRecord[],
+    contracts: readonly ContractView[],
+    withBindings: boolean,
+  ): AgentAdapterContext {
     const contractIds = new Set<string>(contracts.map((contract) => contract.id));
     const unitNodeIds = new Set<string>();
     for (const contract of contracts) {
@@ -415,10 +428,11 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     for (const record of agents) {
       if (record.orchestrationNodeId) agentIdByOrchestrationNodeId.set(record.orchestrationNodeId, record.id);
     }
-    const { agentIds: pendingApprovalAgentIds, sessionIds: pendingApprovalSessionIds } = collectPendingApprovals();
-    const sessionIdByAgentId = collectSessionBindings();
-
-    const agentCtx: AgentAdapterContext = {
+    const { agentIds: pendingApprovalAgentIds, sessionIds: pendingApprovalSessionIds } = withBindings
+      ? collectPendingApprovals()
+      : { agentIds: new Set<string>(), sessionIds: new Set<string>() };
+    const sessionIdByAgentId = withBindings ? collectSessionBindings() : new Map<string, string>();
+    return {
       now: capturedAt,
       stalledThresholdMs,
       activity,
@@ -434,6 +448,23 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
       priceProvenance: deps.priceProvenance,
       messageBusPresent: deps.messageBus !== undefined,
     };
+  }
+
+  /** The read-model projections every surface inherits: headline, stall tell and a recorded control failure. */
+  function decorate(node: ProcessNode, capturedAt: number): ProcessNode {
+    const headline = headlines.derive(node, capturedAt);
+    const stall = deriveStallTell(node, capturedAt, stallTellMs);
+    const controlFailure = controlFailures.get(node.id);
+    if (!headline && !stall && !controlFailure) return node;
+    return { ...node, ...(headline ? { headline } : {}), ...(stall ? { stall } : {}), ...(controlFailure ? { controlFailure } : {}) };
+  }
+
+  function assemble(): { capturedAt: number; nodes: ProcessNode[] } {
+    const capturedAt = now();
+    const agents: AgentRecord[] = deps.agentManager.list();
+    const contracts: readonly ContractView[] = deps.contractRunner.list({ includeTerminal: true, includeInputSnapshot: false });
+    const agentCtx = agentContext(capturedAt, agents, contracts, true);
+    const agentIds = agentCtx.agentIds;
 
     const nodes: ProcessNode[] = [];
     const agentNodeById = new Map<string, ProcessNode>();
@@ -523,11 +554,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     const liveIds = new Set<string>();
     const finalNodes = withOverrides.map((node) => {
       liveIds.add(node.id);
-      const headline = headlines.derive(node, capturedAt);
-      const stall = deriveStallTell(node, capturedAt, stallTellMs);
-      const controlFailure = controlFailures.get(node.id);
-      if (!headline && !stall && !controlFailure) return node;
-      return { ...node, ...(headline ? { headline } : {}), ...(stall ? { stall } : {}), ...(controlFailure ? { controlFailure } : {}) };
+      return decorate(node, capturedAt);
     });
     for (const id of controlFailures.keys()) if (!liveIds.has(id)) controlFailures.delete(id);
     headlines.prune(liveIds);
@@ -551,9 +578,83 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     return { capturedAt, nodes: selected };
   }
 
+  /**
+   * The one node with this id, built from its owning source alone, in the
+   * order assemble() lists sources (so an id two sources share resolves the
+   * same way). Only the matching record is adapted; the rest of the fleet is
+   * not rebuilt. `forRead` adds what a reader sees beyond what control needs:
+   * approval and session labels, a contract owner's repricing and the
+   * headline projections.
+   */
+  function resolveNode(id: string, forRead: boolean): ProcessNode | null {
+    const capturedAt = now();
+    const finish = (node: ProcessNode): ProcessNode => (forRead ? decorate(node, capturedAt) : node);
+    const agents: AgentRecord[] = deps.agentManager.list();
+    let contractsRead: readonly ContractView[] | undefined;
+    const contracts = (): readonly ContractView[] =>
+      (contractsRead ??= deps.contractRunner.list({ includeTerminal: true, includeInputSnapshot: false }));
+    let ctxRead: AgentAdapterContext | undefined;
+    const ctx = (): AgentAdapterContext => (ctxRead ??= agentContext(capturedAt, agents, contracts(), forRead));
+    const agentNode = (agentId: string | undefined): ProcessNode | undefined => {
+      const record = agentId === undefined ? undefined : agents.find((candidate) => candidate.id === agentId);
+      return record ? adaptAgent(record, ctx()) : undefined;
+    };
+    const agentNodesOf = (agentIds: readonly string[]): ProcessNode[] => [...new Set(agentIds)]
+      .map((agentId) => agentNode(agentId))
+      .filter((node): node is ProcessNode => node !== undefined);
+    const contractNodeFor = (contract: ContractView): ProcessNode => adaptContract(contract,
+      agentNodesOf([...contract.plannerAgentIds, ...contract.units.flatMap((unit) => unit.agentIds)])
+        .filter((node) => node.id !== contract.ownerAgentId),
+      capturedAt);
+
+    const asAgent = agentNode(id);
+    if (asAgent) {
+      if (!forRead) return asAgent;
+      const owned = contracts().find((contract) => contract.ownerAgentId === id);
+      return finish(owned ? repriceContractOwnerNode(asAgent, contractNodeFor(owned)) : asAgent);
+    }
+    for (const contract of contracts()) {
+      if (contractNodeId(contract.id) === id) return finish(contractNodeFor(contract));
+      for (const group of contract.groups) {
+        if (contractGroupNodeId(contract.id, group.id) !== id) continue;
+        const groupAgents = contract.units.filter((unit) => unit.groupId === group.id).flatMap((unit) => unit.agentIds);
+        return finish(adaptContractGroup(group, contract, agentNodesOf(groupAgents), capturedAt));
+      }
+      for (const unit of allContractUnits(contract)) {
+        if (contractUnitNodeId(contract.id, unit.id) !== id) continue;
+        return finish(adaptContractUnit(unit, contract, {
+          activeAgent: agentNode(unit.activeAgentId),
+          memberNodes: agentNodesOf(unit.agentIds),
+          messageBusPresent: deps.messageBus !== undefined,
+          mergeConflict: conflictedUnitDetails(deps.contractRunner.fleetControls?.()).get(qualifyId(contract.id, unit.id)),
+          now: capturedAt,
+        }));
+      }
+    }
+    const instance = deps.workflow.workflowManager.list().find((candidate) => candidate.id === id);
+    if (instance) return finish(adaptWorkflow(instance, capturedAt));
+    const action = deps.workflow.hookActions.list().find((candidate) => candidate.id === id);
+    if (action) return finish(adaptHookAction(action, capturedAt));
+    const trigger = deps.triggerSupervisor?.list().find((record) => record.definition.id === id);
+    if (trigger) return finish(adaptWatcherTrigger(trigger, capturedAt));
+    const schedule = deps.workflow.scheduleManager.list().find((entry) => scheduleNodeId(entry.name) === id);
+    if (schedule) return finish(adaptSchedule(schedule));
+    const job = deps.automationManager?.listJobs().find((candidate) => automationJobNodeId(candidate.id) === id);
+    if (job) return finish(adaptAutomationJob(job));
+    const watcher = deps.watcherRegistry.list().find((candidate) => candidate.id === id);
+    if (watcher) return finish(adaptWatcher(watcher, capturedAt));
+    const processRecord = deps.processManager.getStatus(id);
+    if (processRecord) return finish(adaptBackgroundProcess(processRecord, capturedAt));
+    const hosted = deps.acpHost?.list().find((candidate) => acpHostNodeId(candidate.id) === id);
+    if (hosted) return finish(adaptHostedAcpAgent(hosted, capturedAt));
+    const observed = deps.observedAgents?.list().find((row) => observedNodeId(row.pid) === id);
+    if (observed) return finish(adaptObservedAgent(observed, capturedAt));
+    if (deps.codeIndexService && codeIndexNodeId() === id) return finish(adaptCodeIndex(deps.codeIndexService, capturedAt));
+    return null;
+  }
+
   function getNode(id: string): ProcessNode | null {
-    const { nodes } = assemble();
-    return nodes.find((node) => node.id === id) ?? null;
+    return resolveNode(id, true);
   }
 
   // ── Coalesced tick + subscription ──────────────────────────────────────────
@@ -732,12 +833,14 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   }
 
   function kill(id: string, opts?: ProcessKillOptions): readonly string[] {
-    const { nodes } = assemble();
-    const target = nodes.find((node) => node.id === id);
+    // A cascade needs every node's parent link, so it reads the whole fleet;
+    // a single kill resolves only its target.
+    const nodes = opts?.cascade ? assemble().nodes : undefined;
+    const target = nodes ? nodes.find((node) => node.id === id) : resolveNode(id, false);
     if (!target) return [];
     const affected = new Set<string>();
     const targets: ProcessNode[] = [target];
-    if (opts?.cascade) {
+    if (nodes) {
       // Children first, depth-first, so leaves stop before their parents.
       const byParent = new Map<string, ProcessNode[]>();
       for (const node of nodes) {
@@ -777,8 +880,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   }
 
   function interrupt(id: string): boolean {
-    const { nodes } = assemble();
-    const target = nodes.find((node) => node.id === id);
+    const target = resolveNode(id, false);
     if (!target) return false;
     switch (target.kind) {
       case 'agent':
@@ -819,8 +921,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
    * enable-based pause/resume cycle at all (e.g. an agent).
    */
   function resume(id: string): boolean {
-    const { nodes } = assemble();
-    const target = nodes.find((node) => node.id === id);
+    const target = resolveNode(id, false);
     if (!target || !target.capabilities.resumable) return false;
     switch (target.kind) {
       case 'trigger':
@@ -856,8 +957,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
    * instead).
    */
   function steer(id: string, text: string, options?: SteerOptions): SteerResult {
-    const { nodes } = assemble();
-    const target = nodes.find((node) => node.id === id);
+    const target = resolveNode(id, false);
     if (!target) return { queued: false, reason: 'no such process' };
     // A hosted ACP agent's steer travels over its own stdio connection (no message bus needed).
     if (target.kind === 'acp-agent') return steerHostedAcpNode(deps.acpHost, target, text);

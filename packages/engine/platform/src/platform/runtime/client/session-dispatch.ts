@@ -355,9 +355,9 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
 
   /**
    * Whether the run a delivered input is bound to can no longer answer it: the
-   * surface process named on it is gone from this machine, or (on another
-   * machine, or named by no process) it is older than the window after which a
-   * live surface gives up on a run and acknowledges it itself.
+   * surface process named on it is gone from this machine, or it is older than
+   * the window after which a live surface gives up on a run and acknowledges it
+   * itself (whatever process now holds the pid it names).
    */
   const abandonedRun = (input: SharedSessionInputRecord): boolean => {
     if (!input.activeAgentId || awaitingAnswers.has(input.activeAgentId)) return false;
@@ -368,8 +368,10 @@ export function createWireSessionDispatch(options: WireSessionDispatchOptions): 
       const pidAt = named.lastIndexOf(':', last - 1);
       const host = pidAt > 0 ? named.slice(0, pidAt) : '';
       const pid = Number(named.slice(pidAt + 1, last));
-      if (host === thisHost && Number.isInteger(pid) && pid > 0 && pid !== process.pid) return !processAlive(pid);
-      if (host === thisHost && pid === process.pid) return false;
+      // A pid that is gone settles it. A live pid (or this process's own pid
+      // under another nonce) may belong to another program after a reboot or
+      // pid reuse, so it falls through to the time bound.
+      if (host === thisHost && Number.isInteger(pid) && pid > 0 && pid !== process.pid && !processAlive(pid)) return true;
     }
     return now() - input.updatedAt >= AWAITED_ANSWER_MAX_AGE_MS + RECONCILE_INTERVAL_MS;
   };

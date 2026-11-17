@@ -143,21 +143,19 @@ test('composed protected sources refuse legacy asynchronous-only guards while st
   await bind(ctx, [a.owned]); await expect(read(ctx)).rejects.toMatchObject({ code: 'INBOX_SCOPE_UNAVAILABLE' });
 });
 
-test('IMAP generation history and progress remain attached only to the owning provider', async () => {
+test('the mailbox reader history and progress stay attached only to the provider it feeds', async () => {
   const ctx = context();
-  const checkpoint = { kind: 'imap-uid' as const, uidValidity: 7, lastTerminalUid: null,
-    history: { kind: 'bounded-seed' as const, lowerBoundUid: 101, skippedOlderMessages: 100 } };
-  const email = await source(ctx, 'email', [], { adapters: new Map([['email', { id: 'email', pollIntervalMs: 3_600_000,
-    checkpointKind: 'imap-uid', assertCurrent() {}, async poll() { return { items: [], state: 'empty' as const, configured: true, pendingMessages: 2,
-      checkpointAdvance: { kind: 'imap-uid' as const, transition: 'seed' as const, previous: null, next: checkpoint, coveredUids: [], terminal: [] } }; } }]]) });
+  const status = { state: 'empty' as const, itemCount: 0, polled: true, configured: true,
+    mailboxProgress: { uidValidity: 7, pendingMessages: 2 },
+    mailboxHistory: { kind: 'bounded-seed' as const, lowerBoundUid: 101, skippedOlderMessages: 100, uidValidity: 7 } };
+  const email = await source(ctx, 'email', [], { adapters: new Map([['email', { id: 'email', pollIntervalMs: 0,
+    checkpointKind: 'pushed' as const, async poll() { return { items: [], state: 'empty' as const }; },
+    status: () => status, isRunning: () => true }]]) });
   const slack = await source(ctx, 'slack'); await bind(ctx, [slack.owned, email.owned]);
   const page = await read(ctx); expect(page.partial).toBe(true);
   expect(page.providers[0]?.mailboxHistory).toBeUndefined();
-  expect(page.providers[1]).toMatchObject({ mailboxHistory: { uidValidity: 7, skippedOlderMessages: 100 }, mailboxProgress: { uidValidity: 7, pendingMessages: 2 } });
-  expect(email.owned.getImapCheckpoint?.('email')).toEqual(checkpoint);
-  await email.owned.close();
-  const reopened = new InboxCursorStore(ctx.workingDirectory, email.file);
-  try { await reopened.init(); expect(reopened.getImapCheckpoint('email')).toEqual(checkpoint); } finally { await reopened.close(); }
+  expect(page.providers[1]).toMatchObject({ syncing: true, mailboxHistory: { uidValidity: 7, skippedOlderMessages: 100 },
+    mailboxProgress: { uidValidity: 7, pendingMessages: 2 } });
 });
 
 test('direct source shutdown accepts synchronous void gate retirement', async () => {

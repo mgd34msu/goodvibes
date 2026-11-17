@@ -40,11 +40,8 @@ test('canonical IMAP-only surface projection enables owned reads without inventi
   expect(inbox('email.smtpHost')).toBe(''); expect(f.service.getStatus().ready).toBe(false);
   const status = f.service.getInboxReadStatus(); expect(status.ready).toBe(true);
   expect(status.config).toMatchObject({ imapHost: 'imap.fixture.invalid', username: 'owner@fixture.invalid', smtpHost: '', passwordRef: '[configured]' });
-  const seed = await f.service.readInboxPage(); expect(seed.outcome).toBe('checkpoint-required');
-  if (seed.outcome !== 'checkpoint-required') throw new Error('Expected seed plan');
-  const page = await f.service.readInboxPage({ checkpoint: seed.next }); expect(page.outcome).toBe('complete');
-  expect(f.service.getInboxMailboxObservation(page)).toBeDefined(); expect(f.connections()).toBe(2); expect(f.smtp()).toBe(0);
   const snapshot = await f.service.readInboxBatch(); expect(snapshot.outcome).toBe('complete');
+  expect(f.service.getInboxMailboxObservation(snapshot)).toBeDefined(); expect(f.connections()).toBe(1); expect(f.smtp()).toBe(0);
 });
 
 test('generic explicitly enabled IMAP-only deps permit owned reads while sends retain all requirements', async () => {
@@ -61,21 +58,19 @@ test('generic explicitly enabled IMAP-only deps permit owned reads while sends r
 
 test.each(['email.imapHost', 'email.username', 'email.passwordRef'])('missing %s rejects before secrets and transport', async key => {
   const f = fixture(false, { [key]: '' }); expect(f.service.getInboxReadStatus().ready).toBe(false);
-  await expect(f.service.readInboxPage()).rejects.toThrow('config is invalid');
   await expect(f.service.readInboxBatch()).rejects.toThrow('config is invalid');
   expect(f.secrets()).toBe(0); expect(f.connections()).toBe(0);
 });
 
 test.each(['surfaces.email.imap.host', 'surfaces.email.user'])('canonical surface missing %s remains disabled for read admission', async key => {
   const f = fixture(true, { [key]: '' }); expect(f.service.getInboxReadStatus().ready).toBe(false);
-  await expect(f.service.readInboxPage()).rejects.toThrow('not enabled');
+  await expect(f.service.readInboxBatch()).rejects.toThrow('not enabled');
   expect(f.secrets()).toBe(0); expect(f.connections()).toBe(0);
 });
 
 test('generic email.enabled=false remains authoritative even with valid IMAP configuration', async () => {
   const f = fixture(false, { 'email.enabled': false, 'email.smtpHost': 'smtp.fixture.invalid', 'email.fromAddress': 'owner@fixture.invalid' });
   expect(f.service.getInboxReadStatus().ready).toBe(false);
-  await expect(f.service.readInboxPage()).rejects.toThrow('not enabled');
   await expect(f.service.readInboxBatch()).rejects.toThrow('not enabled');
   await expect(f.service.sendMail({ to: 'recipient@fixture.invalid', subject: 'Synthetic', body: 'Synthetic', confirm: true })).rejects.toThrow('not enabled');
   expect(f.secrets()).toBe(0); expect(f.connections()).toBe(0); expect(f.smtp()).toBe(0);
@@ -85,7 +80,7 @@ test('raw IMAP credentials are still rejected and ordinary listing retains prior
   const f = fixture(false, { 'email.passwordRef': 'raw-password-marker' });
   expect(f.service.getInboxReadStatus().ready).toBe(false);
   expect(JSON.stringify(f.service.getInboxReadStatus())).not.toContain('raw-password-marker');
-  await expect(f.service.readInboxPage()).rejects.toThrow('secret reference');
+  await expect(f.service.readInboxBatch()).rejects.toThrow('secret reference');
   expect(f.secrets()).toBe(0);
   const configured = fixture(true);
   await expect(configured.service.listInbox()).rejects.toThrow('not enabled');

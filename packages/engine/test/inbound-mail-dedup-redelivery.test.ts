@@ -308,6 +308,7 @@ describe('a redelivered message produces exactly one notice', () => {
       settings: resolveWatcherSettings({ account: ACCOUNT, mailbox: MAILBOX, mode: 'poll' }),
       reader: {
         capabilities: async () => ['IMAP4REV1'],
+        searchCompleteUids: async () => [], readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
         fetchEnvelopes: async () => [envelopeFor(102)],
         fetchEnvelopeBatch: async () => ({ envelopes: [envelopeFor(102)], unreadable: [] }),
       },

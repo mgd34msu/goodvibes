@@ -358,6 +358,30 @@ export async function makeFakeMailbox(
         writeProbeBody(socket, index + 1, messages[index] as FakeMessage, probe);
         return;
       }
+      // The complete-source read a consumer that shows the message asks for,
+      // on the reader's own session: the header block, the structure, then
+      // the one text part, each addressed by UID.
+      const askedUid = parseInt(/^UID FETCH (\d+) /i.exec(rest)?.[1] ?? '0', 10);
+      const asked = messages.findIndex((entry) => entry.uid === askedUid);
+      const complete = /BODY\.PEEK\[HEADER\]$/i.test(rest) ? 'header'
+        : /^UID FETCH \d+ (?:BODYSTRUCTURE|\(INTERNALDATE BODYSTRUCTURE\))$/i.test(rest) ? 'structure'
+          : /BODY\.PEEK\[1\]$/i.test(rest) ? 'text' : null;
+      if (complete !== null) {
+        const found = messages[asked];
+        if (found !== undefined) {
+          const body = bodyText(found);
+          if (complete === 'header') {
+            writeFetchSectionResponse(socket, { seq: asked + 1, uid: found.uid, section: 'BODY[HEADER]', payload: headerBlock(found) });
+          } else if (complete === 'text') {
+            writeFetchSectionResponse(socket, { seq: asked + 1, uid: found.uid, section: 'BODY[1]', payload: body });
+          } else {
+            const internalDate = /INTERNALDATE/i.test(rest) ? 'INTERNALDATE "27-Jul-2026 09:00:00 +0000" ' : '';
+            serverWrite(socket, `* ${asked + 1} FETCH (UID ${found.uid} ${internalDate}BODYSTRUCTURE ("TEXT" "PLAIN" ("CHARSET" "UTF-8") NIL NIL "8BIT" ${Buffer.byteLength(body)} 1))`);
+          }
+        }
+        serverWrite(socket, `${tag} OK FETCH completed`);
+        return;
+      }
       const wanted = (/^UID FETCH (\S+)/i.exec(rest)?.[1] ?? '')
         .split(',')
         .map((part) => parseInt(part, 10))
@@ -389,6 +413,9 @@ export async function makeFakeMailbox(
   const HEADER_SECTION =
     'BODY[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID TO DELIVERED-TO '
     + 'X-ORIGINAL-TO AUTHENTICATION-RESULTS)]';
+
+  /** The one text part of a message, for a complete-source read. */
+  const bodyText = (message: FakeMessage): string => `Body of ${message.subject}`;
 
   /** The header block exactly as it goes on the wire: CRLF, blank line last. */
   const headerBlock = (message: FakeMessage): string =>

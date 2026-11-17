@@ -208,34 +208,6 @@ test('registration close aborts and drains accepted polling before resignation a
   expect(clock.pendingTimers).toBe(0);
 }, 15_000);
 
-test('an elected registration cannot commit UID ownership evidence after the account fence expires', async () => {
-  const clock = new FakeClusterClock(); const bus = new MemoryClusterBus();
-  const entered = deferred(); const release = deferred(); let current = true; let fences = 0;
-  const owned: InboundProviderAdapter = {
-    id: account, pollIntervalMs: 3_600_000, checkpointKind: 'imap-uid',
-    assertCurrent() { fences++; if (!current) throw new Error('Synthetic account generation expired'); },
-    async poll() {
-      entered.resolve(); await release.promise;
-      return { state: 'pending', items: [], checkpointAdvance: {
-        kind: 'imap-uid', transition: 'seed', previous: null,
-        next: { kind: 'imap-uid', uidValidity: 7, lastTerminalUid: null,
-          history: { kind: 'bounded-seed', lowerBoundUid: 101, skippedOlderMessages: 100 } },
-        coveredUids: [], terminal: [],
-      } };
-    },
-  };
-  const owner = await node(bus, clock, 'expired-owner', [owned]);
-  try {
-    await enroll(owner); await startClusterServices(owner); clock.advance(2000); await entered.promise;
-    current = false; release.resolve(); await owner.clusterCoordinator.settled();
-    expect(fences).toBeGreaterThan(0);
-    expect(owner.inbox.getImapCheckpoint!(account)).toBeNull();
-    expect(await invoke(owner.gatewayMethods)).toMatchObject({ total: 0, partial: true, providers: [{ state: 'error' }] });
-  } finally { release.resolve(); await owner.close(); }
-  expect(clock.pendingTimers).toBe(0);
-});
-
-
 test('actual daemon receipt publication callback declares both model and account reader capabilities and surfaces refusal', async () => {
   const declared: string[] = []; let allowed = true;
   const host = await node(new MemoryClusterBus(), new FakeClusterClock(), 'receipt-floor', [adapter(account)], false, {

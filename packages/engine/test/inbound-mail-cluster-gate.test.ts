@@ -213,14 +213,14 @@ describe('the telegram inert branch cannot skip a later registration', () => {
     expect(rig.gates.map((gate) => gate.id)).toEqual(['telegram-ingress']);
   });
 
-  test('the mailbox gate is not registered when the surface is switched off', async () => {
+  test('the mailbox reader is contested with notices off, since the inbox reads through it', async () => {
     const rig = harness({
       config: { ...EMAIL_ON, 'surfaces.email.inbound.enabled': false },
       telegramBotId: '1234567',
       mailbox: { account: 'primary', mailbox: 'INBOX' },
     });
     await rig.register();
-    expect(rig.gates.map((gate) => gate.id)).toEqual(['telegram-ingress']);
+    expect(rig.gates.map((gate) => gate.id)).toEqual(['telegram-ingress', 'email-inbound']);
   });
 
   test('switching the mailbox on later registers its gate without a restart, once', async () => {

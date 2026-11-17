@@ -270,6 +270,8 @@ describe('resolving whether the server can push', () => {
       },
       fetchEnvelopes: async () => [],
       fetchEnvelopeBatch: async () => ({ envelopes: [], unreadable: [] }),
+      searchCompleteUids: async () => [],
+      readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
     };
   }
 

@@ -118,6 +118,7 @@ async function runDrain(scenario: Scenario) {
 
   const reader: MailboxReader = {
     capabilities: async () => ['IMAP4REV1'],
+    searchCompleteUids: async () => [], readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
     fetchEnvelopes: async (uids) => (await reader.fetchEnvelopeBatch(uids)).envelopes as ImapEnvelope[],
     fetchEnvelopeBatch: async (uids): Promise<ImapEnvelopeBatch> => ({
       envelopes: uids.filter((uid) => scenario.readable.includes(uid)).map(envelope),

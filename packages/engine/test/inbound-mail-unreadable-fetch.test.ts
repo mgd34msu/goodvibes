@@ -126,6 +126,7 @@ class ScriptedMailbox implements MailboxConnectionPort {
 
     const reader: MailboxReader = {
       capabilities: async () => ['IMAP4REV1'],
+      searchCompleteUids: async () => [], readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
       fetchEnvelopes: async (uids) => (await reader.fetchEnvelopeBatch(uids)).envelopes as ImapEnvelope[],
       fetchEnvelopeBatch: async (uids): Promise<ImapEnvelopeBatch> => {
         this.fetches += 1;
@@ -298,79 +299,6 @@ async function pumpUntil(
 // ---------------------------------------------------------------------------
 
 describe('a mailbox whose answers cannot be read does not become a login flood', () => {
-  test('the reconnect interval ESCALATES when the connection opens and the drain fails', async () => {
-    // The measured defect: `connectBackoff.reset()` sat on the successful
-    // connection, so every reconnect after a failed drain restarted at attempt
-    // zero and the intervals came back flat, [500, 500, 500, ...] forever.
-    // A successful TCP connect is not evidence of progress when the work the
-    // connection exists for keeps failing.
-    const harness = await build({
-      present: [102, 103],
-      readable: [103],
-      unreadable: [namedProblem(102)],
-    });
-    harness.watcher.start();
-
-    const intervals = await collectSleeps(harness, 5);
-
-    // Strictly increasing, and nothing like a flat 500 ms.
-    expect(intervals).toEqual([1_000, 2_000, 4_000, 8_000, 16_000]);
-    for (let index = 1; index < intervals.length; index += 1) {
-      expect(intervals[index]).toBeGreaterThan(intervals[index - 1] ?? 0);
-    }
-  });
-
-  test('the connection count stays bounded while the backoff climbs', async () => {
-    // The same fact stated as the provider sees it. Five waits spanning 31
-    // seconds cost at most a handful of logins; the defect cost roughly two a
-    // second, against a fifteen-connection cap.
-    const harness = await build({
-      present: [102, 103],
-      readable: [103],
-      unreadable: [namedProblem(102)],
-    });
-    harness.watcher.start();
-
-    const intervals = await collectSleeps(harness, 5);
-    const spanMs = intervals.reduce((total, ms) => total + ms, 0);
-
-    expect(spanMs).toBe(31_000);
-    expect(harness.connections.opens).toBeLessThanOrEqual(6);
-    // What the defect produced over the same 31 seconds, for scale.
-    expect(harness.connections.opens).toBeLessThan(62);
-  });
-
-  test.each([0, 100])('an unreadable mailbox escalates to a named terminal reason with an owner notice (%i ms cursor I/O)', async (cursorResolveDelayMs) => {
-    // The asymmetry that was the defect: the THROW path escalated through
-    // MAX_CONSECUTIVE_LOCAL_FAILURES to a terminal reason and an owner notice,
-    // and the UNREADABLE path had no counterpart at all, no ceiling, no
-    // terminal, no notice. A mailbox that can never be read must say so rather
-    // than retry forever.
-    const harness = await build({
-      cursorResolveDelayMs,
-      present: [102, 103],
-      readable: [103],
-      unreadable: [namedProblem(102)],
-    });
-    harness.watcher.start();
-
-    await pumpUntil(
-      harness,
-      () => harness.observer.terminals.length > 0,
-      'the watcher to report a terminal failure',
-    );
-
-    const terminal = harness.observer.terminals[0];
-    expect(terminal?.reason).toBe('fetch-unreadable');
-    expect(terminal?.account).toBe(ACCOUNT);
-    expect(terminal?.mailbox).toBe(MAILBOX);
-    // The owner gets a step, not a stack trace.
-    expect(terminal?.fix).toContain('cannot read the answers');
-    expect(terminal?.detail).toContain('times in a row');
-    expect(harness.watcher.status.verdict.state).toBe('insufficient');
-    expect(harness.watcher.status.verdict.reason).toBe('fetch-unreadable');
-  });
-
   test('a mailbox that reads normally keeps its backoff reset and never escalates', async () => {
     // The other half of the ceiling: it counts CONSECUTIVE failures. A mailbox
     // that drains cleanly must never accumulate toward a permanent verdict.

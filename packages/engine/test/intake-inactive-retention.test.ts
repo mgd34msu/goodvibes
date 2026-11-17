@@ -178,17 +178,17 @@ async function mirrorWitness(root: string, fileName: string) {
     return {
       recent: database.all("SELECT * FROM items WHERE id LIKE '%:recent'"),
       cursors: database.all('SELECT * FROM cursors'),
-      checkpoints: database.all('SELECT * FROM imap_checkpoints'),
+      generations: database.all('SELECT * FROM mail_generations'),
       sourcePolicy: database.all('SELECT * FROM inbox_source_revision_policy'),
       retentionPolicy: database.all('SELECT * FROM inbox_retention_policy'),
     };
   } finally { database.close(); }
 }
 
-test('current mirror cleanup preserves surviving native revisions, protected fields, cursors and both policies', async () => {
+test('current mirror cleanup preserves surviving native revisions, protected fields, cursors, the mail generation and both policies', async () => {
   const root = makeProjectTempDir('inactive-inbox-current-schema'), row = await archived(root, 'email'); await row.store.close();
   await editImage(root, row.name, "INSERT OR REPLACE INTO cursors (provider, nextSince) VALUES ('email', 123)");
-  await editImage(root, row.name, "INSERT INTO imap_checkpoints (provider, checkpoint) VALUES ('email', 'original-checkpoint')");
+  await editImage(root, row.name, "INSERT INTO mail_generations (provider, uidValidity) VALUES ('email', 7)");
   const before = await mirrorWitness(root, row.name);
   expect(before.sourcePolicy).toEqual([{ singleton: 1, version: 1 }]);
   expect(before.recent[0]?.triage_revision).toMatch(/^ir-[0-9a-f]{32}$/);

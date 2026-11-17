@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager, SecretsManager, createDaemonCredentialStore } from '@goodvibes-jev/engine/platform/platform/config';
@@ -33,7 +34,7 @@ function fixture() {
       async resolveConfigSecret() { throw new Error('Absence admission must not resolve credentials'); }, async resolveRef() { return null; },
       async put() { throw new Error('No credential writes'); }, async has() { return false; } },
   };
-  const controls = { gatePolling() { polling++; }, onAccountInvalidation(listener: () => void) {
+  const controls = { mailboxReaders: new MailboxReaders(), gatePolling() { polling++; }, onAccountInvalidation(listener: () => void) {
     listeners.add(listener); return () => { listeners.delete(listener); };
   } };
   const invoke = () => ctx.catalog.invoke('channels.inbox.list', { body: {}, context: { scopes: ['read:channels'] } });

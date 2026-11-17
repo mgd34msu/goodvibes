@@ -321,6 +321,7 @@ describe('the drain loop tells an expunge from an unreadable answer', () => {
   function readerReturning(batch: ImapEnvelopeBatch): MailboxReader {
     return {
       capabilities: async () => ['IMAP4REV1'],
+      searchCompleteUids: async () => [], readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
       fetchEnvelopes: async () => [...batch.envelopes],
       fetchEnvelopeBatch: async () => batch,
     };

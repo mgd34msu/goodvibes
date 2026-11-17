@@ -8,14 +8,11 @@ import { Client } from 'undici/index.js';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { registerRoutingMethods } from '@goodvibes-jev/engine/platform/platform/channels';
-import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
 import { createSlackInboxOwner, createEmailInboxOwner, type RouteResolver, type InboxPollingControl, type InboxListOutput } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { HandlerContext } from '../../daemon/handlers/context.js';
 import { createSlackDaemonInboxFactory } from '../../runtime/slack-inbox-composition.js';
 import { createEmailDaemonInboxFactory } from '../../runtime/email-inbox-composition.js';
-import { composeMailDeps } from '../../runtime/mail-composition.js';
-import { SnapshotSocket } from '../helpers/email-snapshot-socket.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -65,17 +62,7 @@ async function fixture(provider: 'slack' | 'email', held = false) {
   const controls = {
     onAccountInvalidation(listener: () => void) { invalidations.add(listener); return () => { invalidations.delete(listener); }; },
     gatePolling(_provider: string, value: InboxPollingControl) { control = value; return () => {}; },
-    createEmailService() {
-      const disposers: Array<() => void> = [];
-      const { emailServiceDeps } = composeMailDeps({ configManager,
-        secretsManager: { async get() { return 'synthetic-password'; }, onDidChange(listener: (key: string) => void) { credentialChanges.add(listener); return () => { credentialChanges.delete(listener); }; } },
-        registerDispose(dispose) { disposers.push(dispose); } });
-      const service = new EmailService({ ...emailServiceDeps, async imapSocketFactory() {
-        const socket = new SnapshotSocket({ validity: 7, uids: [42] });
-        setImmediate(() => socket.greet()); return socket as unknown as Socket;
-      } });
-      return { service, close() { for (const dispose of disposers.reverse()) dispose(); } };
-    } };
+  };
   const timestamp = Date.now() - 10000;
   const slack = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     const path = new URL(request.url).pathname;
@@ -110,7 +97,8 @@ async function fixture(provider: 'slack' | 'email', held = false) {
   };
 }
 
-for (const provider of ['slack', 'email'] as const) {
+// Email routing is resolved by the inbox consumer of the mailbox reader, not by a poll.
+for (const provider of ['slack'] as readonly ('slack' | 'email')[]) {
   test(`${provider} actual factory propagates the canonical persisted routing profile`, async () => {
     const f = await fixture(provider);
     await f.invoke('channels.routing.assign', { surfaceKind: provider, profileId: 'profile-owned', confirm: true });

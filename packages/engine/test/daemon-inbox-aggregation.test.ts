@@ -169,7 +169,7 @@ test('proven absent admission is unconfigured without inventing a poll, while un
   ];
   const out = aggregateInbox({
     store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
-      maxSequence: () => 0, getImapCheckpoint: () => null },
+      maxSequence: () => 0 },
     poller: { snapshotStatuses: () => statuses, isProviderRunning: () => false },
   }, normalizeInboxQuery({}));
   expect(out.providers.map(row => row.state)).toEqual(['unconfigured', 'pending', 'pending', 'error']);

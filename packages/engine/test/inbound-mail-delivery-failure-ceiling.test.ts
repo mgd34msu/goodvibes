@@ -49,6 +49,7 @@ class Mailbox implements MailboxConnectionPort {
     const uids = this.uids;
     const reader: MailboxReader = {
       capabilities: async () => ['IMAP4REV1'],
+      searchCompleteUids: async () => [], readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
       fetchEnvelopes: async (wanted) => (await reader.fetchEnvelopeBatch(wanted)).envelopes as ImapEnvelope[],
       fetchEnvelopeBatch: async (wanted): Promise<ImapEnvelopeBatch> => ({
         envelopes: wanted.filter((uid) => uids.includes(uid)).map(envelope),

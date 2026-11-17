@@ -26,62 +26,6 @@ test('ignored constructor capability acquires no mail subscriptions or credentia
   expect(retired).toBe(1); expect(f.reads()).toBe(0);
 });
 
-test('factory failure closes every constructed mail service without credential reads', async () => {
-  const f = fixture();
-  await expect(registerOwnedMailInbox((_ctx, _routing, capability) => {
-    capability.createEmailService!(); capability.createEmailService!();
-    expect(f.config.size).toBe(2); expect(f.secrets.size).toBe(2);
-    throw new Error('Synthetic constructor failure');
-  }, context(), routing, controls, f.input)).rejects.toThrow('constructor failure');
-  expect(f.config.size).toBe(0); expect(f.secrets.size).toBe(0); expect(f.reads()).toBe(0);
-});
-
-test('surface cleanup failure still retires mail; stale constructors cannot resurrect it', async () => {
-  const f = fixture(); let captured: DaemonInboxControls | undefined;
-  const registration = await registerOwnedMailInbox((_ctx, _routing, capability) => {
-    captured = capability; const mail = capability.createEmailService!();
-    expect(Object.keys(mail)).toEqual(['service', 'close']);
-    return { async close() { throw new Error('Synthetic cleanup failure'); } };
-  }, context(), routing, controls, f.input);
-  await expect(registration.close()).rejects.toMatchObject({ name: 'AggregateError',
-    message: 'Inbox source and retention cleanup did not drain cleanly',
-    errors: [expect.objectContaining({ message: 'Synthetic cleanup failure' })] });
-  expect(f.config.size).toBe(0); expect(f.secrets.size).toBe(0);
-  expect(() => captured!.createEmailService!()).toThrow('retired'); expect(f.reads()).toBe(0);
-});
-
-test('repeated construction and shutdown leave no accumulated source subscriptions', async () => {
-  const f = fixture();
-  for (let n = 0; n < 3; n++) {
-    const registration = await registerOwnedMailInbox((_ctx, _routing, capability) => {
-      const mail = capability.createEmailService!(); return { async close() { mail.close(); mail.close(); } };
-    }, context(), routing, controls, f.input);
-    expect(f.config.size).toBe(1); expect(f.secrets.size).toBe(1); await registration.close();
-    expect(f.config.size).toBe(0); expect(f.secrets.size).toBe(0);
-  }
-});
-
-test('second subscription failure rolls back the first acquired subscription', async () => {
-  const f = fixture();
-  f.input.secretsManager.onDidChange = () => { throw new Error('Synthetic subscribe failure'); };
-  await expect(registerOwnedMailInbox((_ctx, _routing, capability) => {
-    capability.createEmailService!(); return { async close() {} };
-  }, context(), routing, controls, f.input)).rejects.toThrow('subscribe failure');
-  expect(f.config.size).toBe(0); expect(f.secrets.size).toBe(0);
-});
-
-test('throwing config unsubscribe still attempts secret subscription cleanup', async () => {
-  const f = fixture();
-  f.input.configManager.onDidInvalidate = listener => { f.config.add(listener); return () => { f.config.delete(listener); throw new Error('Synthetic unsubscribe failure'); }; };
-  const registration = await registerOwnedMailInbox((_ctx, _routing, capability) => {
-    capability.createEmailService!(); return { async close() {} };
-  }, context(), routing, controls, f.input);
-  await expect(registration.close()).rejects.toMatchObject({ name: 'AggregateError',
-    message: 'Inbox source and retention cleanup did not drain cleanly',
-    errors: [expect.objectContaining({ message: 'Inbox mail lifetimes did not close cleanly' })] });
-  expect(f.config.size).toBe(0); expect(f.secrets.size).toBe(0);
-});
-
 test('real account lifecycle reports config and aliased secret ABA changes without exposing keys or values', async () => {
   const root = makeOwnedTempDir('inbox-account-lifecycle');
   const home = join(root, 'home'), workspace = join(root, 'workspace');
@@ -99,7 +43,7 @@ test('real account lifecycle reports config and aliased secret ABA changes witho
       stop = capability.onAccountInvalidation!((...args: unknown[]) => { observed.push(args); });
       return { async close() {} };
     }, context(workspace), routing, controls, { configManager, secretsManager });
-    expect(Object.keys(captured!).sort()).toEqual(['acquireHostedScreening', 'createEmailService', 'gatePolling', 'onAccountInvalidation', 'onConfigurationChange']);
+    expect(Object.keys(captured!).sort()).toEqual(['acquireHostedScreening', 'gatePolling', 'onAccountInvalidation', 'onConfigurationChange']);
     expect(secretReads).not.toHaveBeenCalled();
     const initial = observed.length;
     configManager.set('surfaces.slack.workspaceId', 'T-SYNTHETIC-ONE');
@@ -168,23 +112,6 @@ test('partial account subscription acquisition failure releases its first listen
   }, context(), routing, controls, f.input)).rejects.toThrow('account subscription failure');
   expect(stopped).toBe(1); expect(f.config.size).toBe(0); expect(f.secrets.size).toBe(0);
   expect(f.reads()).toBe(0);
-});
-
-test('throwing account config cleanup still disposes its secret subscription and sibling mail owner', async () => {
-  const f = fixture(); let stops = 0;
-  f.input.configManager.onDidInvalidate = listener => {
-    f.config.add(listener); return () => { stops++; f.config.delete(listener); throw new Error('Synthetic cleanup failure'); };
-  };
-  const registration = await registerOwnedMailInbox((_ctx, _routing, capability) => {
-    capability.createEmailService!();
-    capability.onAccountInvalidation!(() => {});
-    return { async close() {} };
-  }, context(), routing, controls, f.input);
-  const closing = registration.close(); expect(registration.close()).toBe(closing);
-  await expect(closing).rejects.toMatchObject({ name: 'AggregateError',
-    message: 'Inbox source and retention cleanup did not drain cleanly',
-    errors: [expect.objectContaining({ message: 'Inbox mail lifetimes did not close cleanly' })] });
-  expect(stops).toBe(2); expect(f.config.size).toBe(0); expect(f.secrets.size).toBe(0);
 });
 
 test('legacy controls and managers without lifecycle subscriptions remain accepted without invented capability', async () => {

@@ -41,6 +41,7 @@ describe('a poll loop that ends on a delivery failure', () => {
       settings: resolveWatcherSettings({ account: ACCOUNT, mailbox: MAILBOX, mode: 'poll' }),
       reader: {
         capabilities: async () => ['IMAP4REV1'],
+        searchCompleteUids: async () => [], readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
         fetchEnvelopes: async () => uids.map(envelopeFor),
         fetchEnvelopeBatch: async () => ({ envelopes: uids.map(envelopeFor), unreadable: [] }),
       },

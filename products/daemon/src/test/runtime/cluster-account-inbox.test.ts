@@ -1,10 +1,4 @@
 import { screeningAnswers } from '../helpers/screening-answers.js';
-import type { Socket } from 'node:net';
-import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
-import type { EmailInboxAccount, ImapUidCheckpoint } from '@goodvibes-jev/engine/platform/platform/intake';
-import { SnapshotSocket } from '../helpers/email-snapshot-socket.js';
-import { createEmailDaemonInboxFactory } from '../../runtime/email-inbox-composition.js';
-import { composeMailDeps } from '../../runtime/mail-composition.js';
 import { afterEach, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -199,60 +193,6 @@ test('account cursor is node-local: a cold successor starts cold, returning owne
   const returned = await node(bus, clock, 'node-a', endpoints(), a.root); await returned.registration.ready;
   expect(returned.stored()).toEqual(prior);
 });
-
-// Canonical mail service and observation generations, synthetic socket only.
-test('cold email metadata eligibility precedes UID checkpoint seed and generation change re-enrolls safely', async () => {
-  const clock = new FakeClusterClock(), bus = new MemoryClusterBus(), remote = endpoints();
-  const root = makeOwnedTempDir('cluster-email-inbox'), homeDirectory = join(root, 'home'), workingDirectory = join(root, 'workspace');
-  mkdirSync(workingDirectory, { recursive: true });
-  const mailAccount: EmailInboxAccount = { host: 'mail.synthetic.invalid', port: 993, username: 'owner@synthetic.invalid', mailbox: 'INBOX', security: 'tls' };
-  const configManager = new ConfigManager({ surfaceRoot: 'tui', workingDir: workingDirectory, homeDir: homeDirectory });
-  configManager.set('cluster.enabled', true); configManager.set('surfaces.email.host', mailAccount.host); configManager.set('surfaces.email.user', mailAccount.username);
-  const context: HandlerContext = { configManager, workingDirectory, homeDirectory, catalog: new GatewayMethodCatalog(), logger,
-    credentials: createDaemonCredentialStore({ async get() { return null; }, async set() {} }) };
-  const coordinator = new ClusterCoordinator({ settings: { enabled: true, heartbeatSeconds: 1, masterTimeoutSeconds: 3, bootProbeSeconds: 1,
-    port: 0, multicastGroup: 'memory', secret: '', peers: [] }, version: '1.0.0', stateDirectory: root, logger,
-    transport: bus.createTransport('mail-node'), clock, nodeId: 'mail-node', random: () => 0 });
-  cleanups.push(() => coordinator.stop()); await coordinator.start();
-  let validity = 7, enrollments = 0, fileName = '';
-  const sockets: SnapshotSocket[] = [];
-  const factory = createEmailDaemonInboxFactory({ account: mailAccount, screening: remote.screening }, {
-    eligibilityClock: clock, registerSurface(ctx, options) { fileName = options.storeFileName!; return registerInboxSurface(ctx, options); },
-  });
-  const registration = await factory(context, { async initialize() {}, async close() {}, unregister() {}, resolveProfileId: () => null }, {
-    gatePolling() { throw new Error('Unexpected unverified gate'); },
-    gatePollingOwned(id, control) { enrollments++; return coordinator.registerOwned(inboxPollerGate(id, control)); },
-    createEmailService() {
-      const disposers: Array<() => void> = [];
-      const { emailServiceDeps } = composeMailDeps({ configManager,
-        secretsManager: { async get() { return 'synthetic-mail-secret'; }, onDidChange() { return () => {}; } }, registerDispose(dispose) { disposers.push(dispose); } });
-      const refuse = async (): Promise<never> => { throw new Error('Unexpected real mail transport'); };
-      const service = new EmailService({ ...emailServiceDeps, transport: { connectImapTls: refuse, connectImapPlain: refuse, connectSmtpTls: refuse, connectSmtpStartTls: refuse },
-        async imapSocketFactory() { const socket = new SnapshotSocket({ validity, uids: [42, 43] }); sockets.push(socket); setImmediate(() => socket.greet()); return socket as unknown as Socket; } });
-      return { service, close() { for (const dispose of disposers.splice(0).reverse()) dispose(); } };
-    },
-  });
-  void registration.ready!.catch(() => {}); cleanups.push(() => registration.close());
-  const checkpoint = (): ImapUidCheckpoint | null => {
-    const path = join(workingDirectory, '.goodvibes', 'tui', 'operator', fileName);
-    if (!existsSync(path)) return null;
-    const db = new Database(path, { readonly: true }); try {
-      const row = db.query('SELECT checkpoint FROM imap_checkpoints WHERE provider = ?').get('email') as { checkpoint: string } | null;
-      return row ? JSON.parse(row.checkpoint) as ImapUidCheckpoint : null;
-    } finally { db.close(); }
-  };
-  await registration.ready;
-  expect(enrollments).toBe(1); expect(checkpoint()).toBeNull();
-  expect(sockets.flatMap(socket => socket.commands).some(command => command.includes('BODY'))).toBe(false);
-  await advance(clock, 2000); await until(() => checkpoint()?.uidValidity === 7);
-  expect(checkpoint()?.lastTerminalUid).toBeNull();
-  validity = 8; await advance(clock, 31000); await until(() => enrollments === 2);
-  await advance(clock, 2000); await until(() => checkpoint()?.uidValidity === 8);
-  expect(checkpoint()?.lastTerminalUid).toBeNull();
-  const wire = bus.sent.map(packet => packet.raw).join('\n');
-  expect(wire).not.toContain(mailAccount.username); expect(wire).not.toContain(mailAccount.host); expect(wire).not.toContain('synthetic-mail-secret');
-});
-
 
 test.each(['account', 'source'] as const)('verified Slack %s revocation withdraws account eligibility', async reason => {
   const clock = new FakeClusterClock(), bus = new MemoryClusterBus();

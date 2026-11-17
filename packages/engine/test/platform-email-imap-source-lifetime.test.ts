@@ -196,7 +196,7 @@ describe('actual IMAP source lifetime', () => {
       reading: { signal: lifetime.signal }, report: { advertisedCapabilities: ['IMAP4REV1'], idle: { known: true, supported: false },
         mailbox: { name: 'INBOX', exists: 0, uidValidity: 7, uidNext: 1, readOnly: true } },
       bodyCapability: { outcome: 'unproven', detail: 'Empty at open.' },
-      reader: { capabilities: async () => ['IMAP4REV1'], fetchEnvelopes: async () => [],
+      reader: { capabilities: async () => ['IMAP4REV1'], fetchEnvelopes: async () => [], searchCompleteUids: async () => [], readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
         fetchEnvelopeBatch: async () => ({ envelopes: [imapMessageFixture({ uid: 1 }).envelope, imapMessageFixture({ uid: 2 }).envelope], unreadable: [] }) },
       wire: { sendCommand: async () => 'A1', awaitTag: async () => ['* SEARCH 1 2'], sendRawLine: async () => {},
         awaitContinuation: async () => {}, onUntagged: () => () => {}, waitForUntagged: async () => '* 0 EXISTS' },

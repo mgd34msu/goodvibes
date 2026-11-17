@@ -7,7 +7,7 @@ import { inboxPollerGate } from '../../runtime/cluster-composition.js';
 import { createShellPathService } from '../../runtime/index.js';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
-import type { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
+import { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
 import { createSlackDaemonInboxSourceFactory } from '../../runtime/slack-inbox-composition.js';
 import { createEmailDaemonInboxSourceFactory } from '../../runtime/email-inbox-composition.js';
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -112,7 +112,7 @@ test('shutdown initiates all owner retirements before awaiting any and awaits th
   expect(ctx.catalog.hasHandler('channels.inbox.list')).toBe(false);
 });
 
-test('Slack and email source factories preserve independent locks, read proofs, checkpoints and invalidation', async () => {
+test('Slack and email source factories preserve independent locks, read proofs and invalidation', async () => {
   const ctx = context();
   const configManager = new ConfigManager({ workingDir: ctx.workingDirectory, homeDir: ctx.workingDirectory, surfaceRoot: 'daemon' });
   configManager.set('cluster.enabled', false);
@@ -124,9 +124,9 @@ test('Slack and email source factories preserve independent locks, read proofs, 
   const emailAccount = { host: 'mail.synthetic.invalid', port: 993, username: 'synthetic@example.invalid', mailbox: 'INBOX', security: 'tls' as const };
   let slackSource!: OwnedInboxSource, emailSource!: OwnedInboxSource;
   const wrappedSources: OwnedInboxSource[] = [];
-  let proofChecks = 0, invalidations = 0, unsubscribed = false, mailClosed = false;
+  let proofChecks = 0, invalidations = 0, unsubscribed = false;
+  const readers = new MailboxReaders();
   let invalidation: (() => void) | undefined;
-  let checkpoint: (() => unknown) | undefined;
   const starts: Promise<void>[] = [];
   const proof = async () => Object.assign(async () => { proofChecks++; }, { assertCurrent() { proofChecks++; } });
   const surface = await createMultiOwnerDaemonInboxFactory([
@@ -136,8 +136,9 @@ test('Slack and email source factories preserve independent locks, read proofs, 
       createSource(context, options) { return slackSource = createOwnedInboxSource(context, options); },
     }),
     createEmailDaemonInboxSourceFactory({ account: emailAccount, screening }, {
-      createOwner(options) { checkpoint = options.getCheckpoint; return { account: emailAccount, scopeId: 'synthetic-email',
-        adapter: adapter('email'), assertReadCurrent: async () => {}, acquireReadLease: proof, close: async () => {} }; },
+      createOwner() { return { account: emailAccount, scopeId: 'synthetic-email',
+        adapter: adapter('email'), consumer: { id: 'inbox:synthetic-email', deliver: async () => {} }, needsHistory: () => false,
+        assertReadCurrent: async () => {}, acquireReadLease: proof, close: async () => {} }; },
       createSource(context, options) { return emailSource = createOwnedInboxSource(context, options); },
     }),
   ].map(factory => async (...args: Parameters<DaemonInboxFactory>) => {
@@ -145,14 +146,15 @@ test('Slack and email source factories preserve independent locks, read proofs, 
   }))(configured, routing, {
     gatePolling(_provider, control) { starts.push(control.start()); return () => control.stop(); },
     onAccountInvalidation(listener) { invalidation = listener; return () => { unsubscribed = true; }; },
-    createEmailService() { return { service: {} as EmailService, close() { mailClosed = true; } }; },
+    mailboxReaders: readers,
   });
   const lock = (provider: string) => join(ctx.workingDirectory, '.goodvibes', 'tui', 'operator', `inbox-${provider}-synthetic-${provider}.sqlite.owner.lock`);
   try {
     await surface.ready; await Promise.all(starts);
     expect(await invoke(ctx)).toMatchObject({ total: 2 });
     expect(proofChecks).toBeGreaterThanOrEqual(4);
-    expect(checkpoint!()).toBeNull();
+    // The inbox is attached to the mailbox reader once its mirror is open.
+    expect(readers.consumers('mail.synthetic.invalid\nsynthetic@example.invalid\nINBOX').map(consumer => consumer.id)).toEqual(['inbox:synthetic-email']);
     expect(slackSource.providerIds).toEqual(['slack']); expect(emailSource.providerIds).toEqual(['email']);
     expect(existsSync(lock('slack'))).toBe(true); expect(existsSync(lock('email'))).toBe(true);
     invalidation!(); expect(invalidations).toBe(1);
@@ -163,7 +165,8 @@ test('Slack and email source factories preserve independent locks, read proofs, 
     }
   } finally { await surface.close(); }
   expect(existsSync(lock('slack'))).toBe(false); expect(existsSync(lock('email'))).toBe(false);
-  expect(unsubscribed).toBe(true); expect(mailClosed).toBe(true);
+  expect(unsubscribed).toBe(true);
+  expect(readers.consumers('mail.synthetic.invalid\nsynthetic@example.invalid\nINBOX')).toEqual([]);
 });
 
 test('shutdown drains an admitted read holding multiple real source leases and rejects its stale result', async () => {

@@ -44,6 +44,7 @@ class RefusingMailbox implements MailboxConnectionPort {
     const refusal = this.refusal;
     const reader: MailboxReader = {
       capabilities: async () => ['IMAP4REV1'],
+      searchCompleteUids: async () => [], readCompleteMessageDetail: async () => ({ outcome: 'gone' as const }),
       fetchEnvelopes: async () => { throw new Error(refusal); },
       fetchEnvelopeBatch: async () => { throw new Error(refusal); },
     };

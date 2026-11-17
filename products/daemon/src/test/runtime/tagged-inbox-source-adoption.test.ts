@@ -7,9 +7,8 @@ import { ConfigManager, createDaemonCredentialStore } from '@goodvibes-jev/engin
 import { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { createSlackInboxOwner, createEmailInboxOwner, createOwnedInboxSource, type OwnedInboxTagging, type OwnedInboxSource } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
-import { EmailService } from '@goodvibes-jev/engine/platform/platform/email';
+import { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
 import { SecretsManager } from '../../config/secrets.js';
-import { composeMailDeps } from '../../runtime/mail-composition.js';
 import { createSlackDaemonInboxSourceFactory } from '../../runtime/slack-inbox-composition.js';
 import { createEmailDaemonInboxSourceFactory } from '../../runtime/email-inbox-composition.js';
 import type { HandlerContext } from '../../daemon/handlers/context.js';
@@ -57,11 +56,7 @@ test('configured email opt-in derives exact TLS mailbox target from the real own
    createOwner(options) { const owner = createEmailInboxOwner(options); scope = owner.scopeId; return owner; },
    createSource(context, options) { return createOwnedInboxSource(context, { ...options, skipInitialPoll: true }); },
  });
- const surface = await factory(f.context, routing, { ...f.controls, createEmailService() {
-   const disposers: Array<() => void> = [];
-   const { emailServiceDeps } = composeMailDeps({ configManager: f.config, secretsManager: f.secrets, registerDispose: dispose => { disposers.push(dispose); } });
-   return { service: new EmailService(emailServiceDeps), close() { for (const dispose of disposers.splice(0).reverse()) dispose(); } };
- } });
+ const surface = await factory(f.context, routing, { ...f.controls, mailboxReaders: new MailboxReaders() });
  cleanups.push(() => surface.close()); await surface.ready; expect(delivered).toBeDefined();
  expect(f.requests[0]).toMatchObject({ provider: 'email', accountScopeId: scope, imap: { host: account.host, port: 993, user: account.username, mailbox: 'INBOX' } }); expect(f.mutations).toBe(0);
 });

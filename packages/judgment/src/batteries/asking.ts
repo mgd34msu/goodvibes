@@ -47,14 +47,15 @@ export interface CallOptions {
 type DecisionIdOf = JudgmentResult<Questions>['decisionId'];
 
 /** The attribution a call carries into the decision log. */
-export function contextFor(header: PatternHeader, pattern: PatternName, options: Pick<CallOptions, 'site' | 'fixture'> = {}): DecisionContext {
-  const { site, fixture } = options;
+export function contextFor(header: PatternHeader, pattern: PatternName, options: Pick<CallOptions, 'site' | 'fixture'> & Pick<DecisionContext, 'commitments'> = {}): DecisionContext {
+  const { site, fixture, commitments } = options;
   return {
     battery: header.name,
     batteryVersion: header.version,
     pattern,
     ...(site === undefined ? {} : { site }),
     ...(fixture === undefined ? {} : { fixture }),
+    ...(commitments === undefined ? {} : { commitments }),
   };
 }
 
@@ -65,7 +66,7 @@ export function askAs<const Q extends Questions>(
   pattern: PatternName,
   state: EntryType,
   questions: Q,
-  options: CallOptions = {},
+  options: CallOptions & Pick<DecisionContext, 'commitments'> = {},
 ): Promise<JudgmentResult<Q>> {
   return port.ask({
     state,

@@ -1,5 +1,5 @@
 /** Reconstructs a complete original-requirements reading from actual recorded batches. */
-import type { DecisionLog } from '@goodvibes-jev/judgment';
+import { judgeCriteriaDigest, type DecisionLog } from '@goodvibes-jev/judgment';
 import type { ContractView } from '../../contract/types.js';
 
 const object = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -36,6 +36,9 @@ export function nativeQuestionBatches(ids: readonly string[], keys: readonly str
 export function nativeJudgeBatches(ids: readonly string[], criteria: ContractView['criteria'], site: string, log: Pick<DecisionLog, 'get'>): ReadonlyMap<string, NativeQuestionReading> | null {
   const judged = criteria.filter(criterion => criterion.disposition === 'judged');
   const readings = nativeQuestionBatches(ids, ['goal', ...judged.map((_, index) => `criterion_${index}`)], site, log);
-  if (!readings || judged.some((criterion, index) => object(readings.get(`criterion_${index}`)!.question['instructions'])?.['criterion'] !== criterion.text)) return null;
-  return readings;
+  if (!readings) return null;
+  // The judge read the criteria from its state and recorded their digest with every batch,
+  // so the judged criteria are the ones this contract holds, in this order.
+  const digest = judgeCriteriaDigest(judged.map(criterion => criterion.text));
+  return ids.every(id => log.get(id)?.context.commitments?.['criteria'] === digest) ? readings : null;
 }

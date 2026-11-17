@@ -91,6 +91,7 @@ export const dispatch = defineDispatch({
 
 export const judge = defineJudge({
   ...header('judge', 'Judges a work product against its goal and acceptance criteria.'),
+  version: 2,
   band: STAKES_BANDS.high.yesNo,
   fixtures: [
     {

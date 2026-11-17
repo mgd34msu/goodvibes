@@ -42,6 +42,12 @@ export interface DecisionContext {
   readonly site?: string;
   /** The calibration fixture a calibration call runs. */
   readonly fixture?: string;
+  /**
+   * Digests of named parts of the state, kept with the entry so a later proof
+   * can match one part (a judge's criteria) without the log keeping its text.
+   * Never sent to the model.
+   */
+  readonly commitments?: Readonly<Record<string, string>>;
 }
 
 /** One call: a state and the named questions to ask about it. */

@@ -25,6 +25,7 @@ export {
 export {
   aggregateJudgment,
   defineJudge,
+  judgeCriteriaDigest,
   type Judge,
   type JudgeFixture,
   type JudgeInput,

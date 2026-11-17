@@ -31,7 +31,7 @@ const GITHUB_TOKEN_PREFIX = ['ghp', ''].join('_');
 
 export const secretLine = defineExistence({
   name: 'engine.tools.secret-line',
-  version: 1,
+  version: 2,
   description: 'Which line of a block of source lines, if any, holds a credential value committed to the code.',
   accuracyFloor: 0.85,
   band: STAKES_BANDS.medium.yesNo,

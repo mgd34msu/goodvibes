@@ -5,6 +5,7 @@ import { assertBand, type Outcome, type YesNoBand } from '../readings/bands.ts';
 import { readYesNo, type YesNoReading } from '../readings/readings.ts';
 import { JudgmentContextLimitError, JudgmentError } from '../port/errors.ts';
 import { askAs, recordAction, recordReadings, type CallOptions, type PatternHeader } from '../batteries/asking.ts';
+import { hashState } from '../log/types.ts';
 
 /** Judging output against a goal: one yes/no per acceptance criterion and one on the goal itself. */
 export interface JudgeSpec extends PatternHeader {
@@ -59,12 +60,12 @@ export interface Judge extends NamedDecision {
   judge(port: JudgmentPort, input: JudgeInput, options?: CallOptions): Promise<Judgment>;
 }
 
-const CRITERION_QUESTION = (criterion: string): NoulQuestion =>
+// The criteria sit in the state beside the goal; each question names its
+// criterion by position, so the questions are the same for every call and the
+// log keeps no criterion text.
+const CRITERION_QUESTION = (index: number): NoulQuestion =>
   noul(
-    {
-      question: 'Does the work shown by `output` and `evidence` fail to meet `criterion`, or lack evidence that it is met? Assess this criterion independently. Actual execution records may establish work performed by the host or another participant.',
-      criterion,
-    },
+    `Does the work shown by \`output\` and \`evidence\` fail to meet \`criteria[${index}]\`, or lack evidence that it is met? Assess this criterion independently. Actual execution records may establish work performed by the host or another participant.`,
     {
       true: 'The work falls short of the criterion, or the output and evidence do not establish it.',
       false: 'The work or actual host execution meets the criterion, as established by the output and evidence together.',
@@ -156,7 +157,17 @@ function assertJudgeFixture(judge: string, fixture: JudgeFixture, allowGoalOnly 
 }
 
 function judgeQuestions(criteria: readonly string[]): Record<string, NoulQuestion> {
-  return Object.fromEntries([['goal', GOAL_QUESTION], ...criteria.map((criterion, index) => [criterionKey(index), CRITERION_QUESTION(criterion)])]);
+  return Object.fromEntries([['goal', GOAL_QUESTION], ...criteria.map((_, index) => [criterionKey(index), CRITERION_QUESTION(index)])]);
+}
+
+/**
+ * The digest of the criteria a judgment read, in order. Every judge call
+ * records it with its log entry (`context.commitments.criteria`), so a later
+ * proof matches the criteria it holds to the judged ones without the log
+ * keeping their text.
+ */
+export function judgeCriteriaDigest(criteria: readonly string[]): string {
+  return hashState(toJson([...criteria]) as EntryType);
 }
 
 export function defineJudge(spec: JudgeSpec): Judge {
@@ -171,12 +182,13 @@ export function defineJudge(spec: JudgeSpec): Judge {
       const criterionTexts = [...input.criteria];
       // Capture once so an overflow cannot cause later batches to judge changed
       // borrowed evidence. Each transport receives its own identical JSON image.
-      const state = toJson({ goal: input.goal, output: input.output, ...(input.evidence === undefined ? {} : { evidence: input.evidence }) }) as EntryType;
+      const state = toJson({ goal: input.goal, criteria: criterionTexts, output: input.output, ...(input.evidence === undefined ? {} : { evidence: input.evidence }) }) as EntryType;
+      const asked = { ...options, commitments: { criteria: judgeCriteriaDigest(criterionTexts) } };
       type Result = JudgmentResult<Record<string, NoulQuestion>>;
       const read = async (questions: Record<string, NoulQuestion>): Promise<Result[]> => {
         options.signal?.throwIfAborted();
         try {
-          const result = await askAs(port, header, 'judge', structuredClone(state), structuredClone(questions), options);
+          const result = await askAs(port, header, 'judge', structuredClone(state), structuredClone(questions), asked);
           if (JSON.stringify(Object.keys(result.answers).sort()) !== JSON.stringify(Object.keys(questions).sort())) {
             throw new JudgmentError('invalid-response', 'The judge response does not match its exact question batch.');
           }

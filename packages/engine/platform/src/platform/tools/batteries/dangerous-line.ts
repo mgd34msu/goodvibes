@@ -25,7 +25,7 @@ const lines = (...texts: string[]): Item[] => texts.map((text, index) => ({ id: 
 
 export const dangerousLine = defineExistence({
   name: 'engine.tools.dangerous-line',
-  version: 1,
+  version: 2,
   description: 'Which line of a block of source lines, if any, makes a risky call.',
   accuracyFloor: 0.85,
   band: STAKES_BANDS.medium.yesNo,

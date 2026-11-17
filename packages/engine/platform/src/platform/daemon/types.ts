@@ -161,8 +161,6 @@ export interface PendingSurfaceReply {
   readonly conversationId?: string | undefined;
   readonly messageId?: string | undefined;
   readonly replyToMessageId?: string | undefined;
-  lastProgressAt?: number | undefined;
-  lastProgress?: string | undefined;
 }
 
 /**

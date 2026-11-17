@@ -19,7 +19,6 @@ import { renderNoticeForSurface } from '../email/inbound-notice-channels.js';
 import type { StructuredNotice } from '../email/inbound-notice.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
-import { isOwnerFacingProgress } from '../agents/progress-audience.js';
 import { renderAgentCompletionAnswer } from '../agents/completion-answer.js';
 import {
   deliverDiscordAgentReply,
@@ -161,6 +160,7 @@ type SurfaceReplyRefusal =
 export const ORPHANED_SURFACE_REPLY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 const UNDELIVERED_BODY_EXCERPT_CHARS = 2000;
+const MAX_RECOVERED_REPLIES = 1_000;
 
 function truncateUndeliveredBody(body: string): string {
   return body.length <= UNDELIVERED_BODY_EXCERPT_CHARS
@@ -169,12 +169,10 @@ function truncateUndeliveredBody(body: string): string {
 }
 
 export class DaemonSurfaceDeliveryHelper {
-  /** One poll at a time: an overlapping tick would sync and complete the same agent twice. */
-  private polling = false;
-  /** Agents whose final answer is being written and delivered right now. */
+  /** Agents whose final answer a surface is reporting right now; a retried report waits its turn. */
   private readonly finalizingReplies = new Set<string>();
-  /** Agents whose session copy could not be written; the pipeline reports undelivered replies without options, so the reporter reads this. */
-  private readonly sessionWriteFailed = new Set<string>();
+  /** Agents whose reply route was recovered from the session after a restart; see `recoverPendingReply`. */
+  private readonly recoveredReplies = new Set<string>();
 
   constructor(
     private readonly context: DaemonSurfaceDeliveryContext,
@@ -196,6 +194,7 @@ export class DaemonSurfaceDeliveryHelper {
     if (this.context.pendingSurfaceReplies.has(input.agentId)) return true;
     const pending = this.buildPendingSurfaceReply(binding, input);
     if (!pending) return false;
+    this.dropOrphanedReplies();
     this.context.pendingSurfaceReplies.set(input.agentId, pending);
     this.context.channelReplyPipeline.trackPending(pending);
     this.recordLedger({
@@ -280,7 +279,8 @@ export class DaemonSurfaceDeliveryHelper {
   /** Record a reply that reached the pipeline but never reached the conversation. */
   recordUndeliveredReply(reply: UndeliveredChannelReply, options: { readonly sessionCopyKept?: boolean } = {}): void {
     if (reply.phase !== 'final') return;
-    const sessionCopyKept = options.sessionCopyKept ?? !this.sessionWriteFailed.has(reply.agentId);
+    // The session broker stores every final from the agent's terminal event.
+    const sessionCopyKept = options.sessionCopyKept ?? reply.sessionId !== undefined;
     const route = reply.routeId ? this.context.routeBindings.getBinding(reply.routeId) : undefined;
     this.recordLedger({
       deliveryId: `surface-reply:${reply.agentId}`,
@@ -486,13 +486,11 @@ export class DaemonSurfaceDeliveryHelper {
   /**
    * A surface that ran the turn in ITS OWN process reports the answer.
    *
-   * `pollPendingSurfaceReplies` below is the same three steps, write the
-   * answer into the shared session, push it down the reply pipeline, drop the
-   * pending entry, driven by this daemon's own AgentManager. That loop can
-   * only ever see agents THIS process spawned, so an answer produced by a TUI
-   * or agent process that collected the input over `sessions.inputs.list` was
-   * invisible to it: the pending reply sat until the pipeline's own retention
-   * dropped it, and the conversation got silence.
+   * The agent's terminal event cannot reach this daemon for an agent another
+   * process ran, so the report is that event: write the answer into the shared
+   * session, push it down the reply pipeline, drop the pending entry. When the
+   * daemon restarted since the reply was queued, the route is read back from
+   * the session input the agent was started for.
    *
    * Returns whether a channel delivery was attempted. `false` is the ordinary
    * outcome for a session with no channel behind it (a local terminal), and is
@@ -518,11 +516,12 @@ export class DaemonSurfaceDeliveryHelper {
     readonly body: string;
     readonly status?: 'completed' | 'failed' | 'cancelled' | undefined;
   }): Promise<boolean> {
-    const pending = this.context.pendingSurfaceReplies.get(input.agentId);
-    // Claimed before the first await so the poll loop cannot also deliver it.
-    if (pending) this.context.pendingSurfaceReplies.delete(input.agentId);
+    const held = this.context.pendingSurfaceReplies.get(input.agentId);
+    // Claimed before the first await so the terminal-event path cannot also deliver it.
+    if (held) this.context.pendingSurfaceReplies.delete(input.agentId);
     const status = input.status ?? 'completed';
-    const sessionId = input.sessionId ?? pending?.sessionId;
+    const sessionId = input.sessionId ?? held?.sessionId;
+    const pending = held ?? this.recoverPendingReply(input.agentId, sessionId);
     if (sessionId) {
       try {
         await this.context.sessionBroker.completeAgent(sessionId, input.agentId, input.body, {
@@ -530,8 +529,8 @@ export class DaemonSurfaceDeliveryHelper {
           ...(pending?.routeId ? { routeId: pending.routeId } : {}),
         });
       } catch (error) {
-        // Nothing was delivered: hand the entry back so the poll loop still can.
-        if (pending) this.context.pendingSurfaceReplies.set(input.agentId, pending);
+        // Nothing was delivered: hand the entry back so a retried report still can.
+        if (held) this.context.pendingSurfaceReplies.set(input.agentId, held);
         throw error;
       }
     }
@@ -592,140 +591,90 @@ export class DaemonSurfaceDeliveryHelper {
     });
   }
 
-  async pollPendingSurfaceReplies(syncFinishedAgentTask: (record: import('../tools/agent/index.js').AgentRecord) => void): Promise<void> {
-    if (this.context.pendingSurfaceReplies.size === 0 || this.polling) return;
-    this.polling = true;
-    try { await this.pollPendingSurfaceRepliesOnce(syncFinishedAgentTask); }
-    finally { this.polling = false; }
+  /**
+   * An agent ended: its terminal event is the one owner of the answer. The
+   * reply pipeline renders and sends the final from that event and the session
+   * broker stores it from the same event, each once; this closes the pending
+   * entry and syncs the task record. It sends the answer itself only when the
+   * pipeline took up no final (an end whose event carried no answer).
+   * Progress needs nothing here: the pipeline sends owner-facing progress from
+   * the agent's progress events.
+   */
+  async settleFinishedAgent(agentId: string, syncFinishedAgentTask: (record: import('../tools/agent/index.js').AgentRecord) => void): Promise<void> {
+    const pending = this.context.pendingSurfaceReplies.get(agentId);
+    // A surface reporting the same answer is delivering it.
+    if (!pending || this.finalizingReplies.has(agentId)) return;
+    const record = this.context.agentManager.getStatus(agentId);
+    if (!record || (record.status !== 'completed' && record.status !== 'failed' && record.status !== 'cancelled')) return;
+    this.context.pendingSurfaceReplies.delete(agentId);
+    syncFinishedAgentTask(record);
+    if (this.context.channelReplyPipeline.finalOwner(agentId) !== 'none') return;
+    const message = this.renderAgentCompletionForSurface(record);
+    this.recordReplyPhase(pending, 'started');
+    try {
+      await this.context.channelReplyPipeline.deliverFinal(agentId, message, {
+        keepTracking: pending.surfaceKind === 'ntfy' && typeof pending.contractId === 'string',
+      });
+    } catch (error) {
+      // The reply exists, the conversation is known, and it did not arrive.
+      logger.error('Agent reply delivery failed, the answer did not reach its conversation', {
+        surface: pending.surfaceKind,
+        agentId,
+        sessionId: pending.sessionId ?? null,
+        bindingId: pending.routeId ?? null,
+        reason: summarizeError(error),
+      });
+      this.recordUndeliveredReply({
+        surfaceKind: pending.surfaceKind as ChannelSurface,
+        agentId,
+        sessionId: pending.sessionId,
+        routeId: pending.routeId,
+        phase: 'final',
+        body: message,
+        reason: summarizeError(error),
+      });
+    }
   }
 
-  private async pollPendingSurfaceRepliesOnce(syncFinishedAgentTask: (record: import('../tools/agent/index.js').AgentRecord) => void): Promise<void> {
-    const completed: string[] = [];
-    for (const pending of this.context.pendingSurfaceReplies.values()) {
-      if (!this.context.channelReplyPipeline.has(pending.agentId)) {
-        completed.push(pending.agentId);
-        continue;
-      }
-      const record = this.context.agentManager.getStatus(pending.agentId);
-      if (record && (record.status === 'pending' || record.status === 'running')) {
-        // `record.progress` ONLY, on every surface, and only the lines written
-        // for the person on the other end. `streamingContent` is the raw model
-        // output accumulated so far, both a growing transcript and a fragment
-        // of the answer, so sending it made every notification a superset of
-        // the previous one and leaked the reply a piece at a time. The answer
-        // goes out once, complete, in the final message.
-        //
-        // The audience test is what this route was missing. `record.progress`
-        // is mostly the running tool and a scrap of its arguments, kept for the
-        // TUI's activity surfaces. The channel renderer strips the `Turn 3 · `
-        // prefix, so those arrived on the owner's phone as bare tool traces,
-        // `registry, email send`, `exec, standard`, in the middle of a
-        // conversation. Only lines the orchestrator marked `owner` (a retry, a
-        // model fallback, a stall the reader can act on) travel this way now.
-        // See agents/progress-audience.ts.
-        const progress = isOwnerFacingProgress(record.progressAudience) ? record.progress : undefined;
-        if (progress && progress !== pending.lastProgress && (Date.now() - (pending.lastProgressAt ?? 0)) >= 10_000) {
-          try {
-            await this.context.channelReplyPipeline.deliverProgress(pending.agentId, progress, true, 'owner');
-            pending.lastProgress = progress;
-            pending.lastProgressAt = Date.now();
-          } catch (error) {
-            logger.warn('DaemonServer: progress delivery failed', {
-              surface: pending.surfaceKind,
-              agentId: pending.agentId,
-              error: summarizeError(error),
-            });
-          }
-        }
-      }
-      if (!record && this.now() - pending.createdAt > ORPHANED_SURFACE_REPLY_MAX_AGE_MS) {
-        // Nothing in this process will ever finish this agent; say so instead
-        // of polling an entry nobody can complete until the daemon stops.
-        logger.warn('Surface reply abandoned: its agent is not known to this daemon and never reported back', {
-          surface: pending.surfaceKind,
-          agentId: pending.agentId,
-          sessionId: pending.sessionId ?? null,
-          bindingId: pending.routeId ?? null,
-        });
-        this.recordReplyPhase(pending, 'failed', 'no answer arrived: the agent is not known to this daemon and never reported back');
-        try { this.context.channelReplyPipeline.untrack(pending.agentId); }
-        catch (error) { logger.warn('Surface reply could not be untracked', { agentId: pending.agentId, error: summarizeError(error) }); }
-        completed.push(pending.agentId);
-        continue;
-      }
-      if (!record || (record.status !== 'completed' && record.status !== 'failed' && record.status !== 'cancelled')) {
-        continue;
-      }
-      // The agent's terminal event owns the answer: the reply pipeline sends it
-      // and the session broker stores it, each once. This loop sends only when
-      // that event never took the answer up (an agent ended with no event).
-      const finalOwner = this.context.channelReplyPipeline.finalOwner(pending.agentId);
-      if (finalOwner === 'in-flight') continue;
-      if (finalOwner !== 'none') {
-        syncFinishedAgentTask(record);
-        completed.push(pending.agentId);
-        continue;
-      }
-      // The surface that ran the turn may be reporting this same answer; whoever
-      // removes the entry first delivers it.
-      if (this.context.pendingSurfaceReplies.get(pending.agentId) !== pending) continue;
+  /**
+   * Entries for agents this daemon does not know (run by another process that
+   * never reported back) are closed after a long wait, so the map cannot grow
+   * without end. Looked at when a reply is queued; costs one pass over the map.
+   */
+  private dropOrphanedReplies(): void {
+    const now = this.now();
+    for (const pending of [...this.context.pendingSurfaceReplies.values()]) {
+      if (now - pending.createdAt <= ORPHANED_SURFACE_REPLY_MAX_AGE_MS || this.context.agentManager.getStatus(pending.agentId)) continue;
+      logger.warn('Surface reply abandoned: its agent is not known to this daemon and never reported back', {
+        surface: pending.surfaceKind,
+        agentId: pending.agentId,
+        sessionId: pending.sessionId ?? null,
+        bindingId: pending.routeId ?? null,
+      });
+      this.recordReplyPhase(pending, 'failed', 'no answer arrived: the agent is not known to this daemon and never reported back');
+      try { this.context.channelReplyPipeline.untrack(pending.agentId); }
+      catch (error) { logger.warn('Surface reply could not be untracked', { agentId: pending.agentId, error: summarizeError(error) }); }
       this.context.pendingSurfaceReplies.delete(pending.agentId);
-      const message = this.renderAgentCompletionForSurface(record);
-      syncFinishedAgentTask(record);
-      let sessionCopyKept = false;
-      if (pending.sessionId) {
-        // The session transcript is a second copy of the answer. Failing to
-        // write it must not keep the conversation from getting the answer, or
-        // hold up every reply queued behind this one on each tick.
-        try {
-          await this.context.sessionBroker.completeAgent(pending.sessionId, pending.agentId, message, {
-            status: record.status,
-            routeId: pending.routeId,
-          });
-          sessionCopyKept = true;
-        } catch (error) {
-          this.sessionWriteFailed.add(pending.agentId);
-          logger.warn('DaemonServer: the answer could not be written to its session; delivering it to the conversation anyway', {
-            agentId: pending.agentId,
-            sessionId: pending.sessionId,
-            error: summarizeError(error),
-          });
-        }
-      }
-      this.recordReplyPhase(pending, 'started');
-      try {
-        await this.context.channelReplyPipeline.deliverFinal(pending.agentId, message, {
-          keepTracking: pending.surfaceKind === 'ntfy' && typeof pending.contractId === 'string',
-        });
-      } catch (error) {
-        // The reply exists, the conversation is known, and it did not arrive.
-        // Error level with the binding in hand, plus a ledger entry, silence
-        // here is what made a dropped answer look like a message that was
-        // never sent.
-        logger.error('Agent reply delivery failed, the answer did not reach its conversation', {
-          surface: pending.surfaceKind,
-          agentId: pending.agentId,
-          sessionId: pending.sessionId ?? null,
-          bindingId: pending.routeId ?? null,
-          reason: summarizeError(error),
-        });
-        this.recordUndeliveredReply({
-          surfaceKind: pending.surfaceKind as ChannelSurface,
-          agentId: pending.agentId,
-          sessionId: pending.sessionId,
-          routeId: pending.routeId,
-          phase: 'final',
-          body: message,
-          reason: summarizeError(error),
-        }, { sessionCopyKept });
-      } finally {
-        this.sessionWriteFailed.delete(pending.agentId);
-      }
-      completed.push(pending.agentId);
     }
-    for (const agentId of completed) {
-      this.context.pendingSurfaceReplies.delete(agentId);
-    }
+  }
+
+  /**
+   * The reply route of an agent whose pending entry this process does not hold
+   * (it was queued before a daemon restart): read from the session input the
+   * agent was started for, which the session broker persists with its route.
+   * Once per agent per process, so a repeated report cannot send it twice.
+   */
+  private recoverPendingReply(agentId: string, sessionId: string | undefined): PendingSurfaceReply | null {
+    if (!sessionId || this.recoveredReplies.has(agentId)) return null;
+    const row = this.context.sessionBroker.getInputs(sessionId, 1_000).find((entry) => entry.activeAgentId === agentId && entry.routeId);
+    const binding = row?.routeId ? this.context.routeBindings.getBinding(row.routeId) : undefined;
+    if (!row || !binding || this.describeRefusal(binding)) return null;
+    const pending = this.buildPendingSurfaceReply(binding, { agentId, task: row.body, sessionId });
+    if (!pending) return null;
+    this.recoveredReplies.add(agentId);
+    while (this.recoveredReplies.size > MAX_RECOVERED_REPLIES) this.recoveredReplies.delete(this.recoveredReplies.values().next().value!);
+    this.context.channelReplyPipeline.trackPending(pending);
+    return pending;
   }
 
   /**

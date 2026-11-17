@@ -34,6 +34,7 @@ import type {
 } from '../channels/index.js';
 import { buildDaemonClusterCoordinator, type ClusterCoordinator } from './facade-cluster.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
+import type { AgentEvent } from '../../events/agents.js';
 import type { PlatformServiceManager } from './service-manager.js';
 import type { WatcherRegistry } from '../watchers/index.js';
 import { type DistributedPeerAuth } from '../runtime/remote/index.js';
@@ -205,7 +206,8 @@ export class DaemonServer {
   private readonly httpRouter: DaemonHttpRouter;
   /** Sweeps channel health and tells the owner over a channel that still works; see facade-channel-health.ts. */
   private readonly channelHealth: import('../channels/index.js').ChannelHealthWatcher;
-  private replyPoller: ReturnType<typeof setInterval> | null = null;
+  /** Ends the subscription that settles channel replies on each agent's terminal event. */
+  private replySettlement: (() => void) | null = null;
   /** Lifecycle sidecar: clean-shutdown marker, receipts, hourly auto-update. */
   private lifecycle: DaemonLifecycleRuntime | null = null;
   private readonly companionChatManager: CompanionChatManager;
@@ -638,16 +640,24 @@ export class DaemonServer {
       }
       // Init the canonical memory store so the daemon is a live single-writer memory service on accept (memory.records.add would else throw "not initialized" on a cold store).
       await this.runtimeServices.memoryStore.init();
-      if (this.replyPoller === null) {
-        // Poll every 2 s for asynchronously-resolved surface replies; short interval
-        // keeps companion latency low while batching concurrent replies.
-        this.replyPoller = setInterval(() => {
-          void this.pollPendingSurfaceReplies().catch((error: unknown) => {
-            logger.warn('DaemonServer: surface reply poll failed', { error: summarizeError(error) });
-          });
-        }, 2_000);
-        // unref() so this timer never keeps the event loop alive past shutdown.
-        (this.replyPoller as unknown as { unref?: () => void }).unref?.();
+      if (this.replySettlement === null) {
+        // A channel reply is settled by its agent's terminal event, the same
+        // event the reply pipeline and the session broker act on; no timer.
+        const settle = (agentId: unknown): void => {
+          if (typeof agentId !== 'string') return;
+          // After the event's other handlers, so the pipeline has taken up the final first.
+          setTimeout(() => {
+            void this.surfaceDeliveryHelper.settleFinishedAgent(agentId, (record) => this.syncFinishedAgentTask(record)).catch((error: unknown) => {
+              logger.warn('DaemonServer: a finished agent\'s channel reply could not be settled', { agentId, error: summarizeError(error) });
+            });
+          }, 0);
+        };
+        const unsubscribes = [
+          this.runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', (envelope) => settle(envelope.payload?.agentId)),
+          this.runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_FAILED' }>>('AGENT_FAILED', (envelope) => settle(envelope.payload?.agentId)),
+          this.runtimeBus.on<Extract<AgentEvent, { type: 'AGENT_CANCELLED' }>>('AGENT_CANCELLED', (envelope) => settle(envelope.payload?.agentId)),
+        ];
+        this.replySettlement = () => { for (const unsubscribe of unsubscribes) unsubscribe(); };
       }
       this.surfaceRegistry.syncConfiguredSurfaces();
       if (this.configManager.get('watchers.enabled')) {
@@ -698,10 +708,8 @@ export class DaemonServer {
       const message = summarizeError(err);
       this.releaseBrowserJudgmentChats?.();
       this.releaseBrowserJudgmentChats = undefined;
-      if (this.replyPoller !== null) {
-        clearInterval(this.replyPoller);
-        this.replyPoller = null;
-      }
+      this.replySettlement?.();
+      this.replySettlement = null;
       this.workProposals.dispose();
       this.surfaceDeliveryHelper.abandonPendingSurfaceReplies('the daemon failed to start before the reply was delivered');
       this.channelHealth.stop();
@@ -1097,10 +1105,8 @@ export class DaemonServer {
       await close(async () => { this.triggerManager?.shutdown(); await this.triggerManager?.join(); });
     }
     this.channelHealth.stop();
-    if (this.replyPoller !== null) {
-      clearInterval(this.replyPoller);
-      this.replyPoller = null;
-    }
+    this.replySettlement?.();
+    this.replySettlement = null;
     this.surfaceDeliveryHelper.abandonPendingSurfaceReplies('the daemon stopped before the reply was delivered');
     this.approvalBrokerUnsubscribe?.();
     this.approvalBrokerUnsubscribe = null;
@@ -1437,9 +1443,6 @@ export class DaemonServer {
   private surfaceDeliveryEnabled(surface: 'slack' | 'discord' | 'ntfy' | 'webhook' | 'homeassistant' | 'telegram' | 'google-chat' | 'signal' | 'whatsapp' | 'telephony' | 'imessage' | 'msteams' | 'bluebubbles' | 'mattermost' | 'matrix'): boolean {
     return isSurfaceFeatureGateEnabled(this.runtimeServices.featureFlags, surface)
       && isSurfaceDeliveryEnabled(this.configManager, surface);
-  }
-  private async pollPendingSurfaceReplies(): Promise<void> {
-    await this.surfaceDeliveryHelper.pollPendingSurfaceReplies((record) => this.syncFinishedAgentTask(record));
   }
   private trustProxyEnabled(): boolean {
     return this.tlsState?.trustProxy ?? Boolean(this.configManager.get('controlPlane.trustProxy'));

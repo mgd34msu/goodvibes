@@ -729,7 +729,7 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     key: 'tools.autoHeal',
     type: 'boolean',
     default: false,
-    description: 'Automatically fix syntax errors on precision write/edit operations',
+    description: 'When a write or edit fails validation, try the project\'s own formatter, then its linter fix, then a model repair, each from the content as written; a repair is kept only when it fixes the errors and changes nothing else',
   },
   {
     key: 'tools.defaultTokenBudget',

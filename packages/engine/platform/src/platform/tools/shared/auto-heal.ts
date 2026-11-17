@@ -3,24 +3,30 @@
  *
  * Pipeline (opt-in via tools.autoHeal config):
  *   1. Formatter: the `formatter` a user languages/{id}.json file sets for the
- *      file's language; otherwise prettier --write or biome format
- *   2. Linter fix: the language's `linter` from the same file; otherwise eslint --fix
+ *      file's language; otherwise the project's prettier or biome
+ *   2. Linter fix: the language's `linter` from the same file; otherwise the project's eslint --fix
  *   3. ToolLLM: LLM-assisted fix with error context
  *
  * Design constraints:
- *   - Returns {healed: false, content: originalContent} with warnings whenever
- *     repair cannot safely produce validated replacement content
+ *   - The tools run as the project runs them: the project's own binary
+ *     (node_modules/.bin first, then PATH), in the project directory, on the
+ *     file's real path, so the project's configuration applies; and they run
+ *     asynchronously, so the terminal keeps responding
+ *   - Every stage starts from the content the agent wrote: a stage whose
+ *     change was not accepted hands nothing on, so an accepted repair differs
+ *     from what the agent wrote only by that stage's fix, and `method` names it
  *   - Each stage's change is accepted only when `engine.tools.heal-acceptance`
  *     reads that it fixes the listed errors (and, for the model's whole-file
  *     rewrite, that it changes nothing else); otherwise the next stage runs
+ *   - Returns {healed: false, content: originalContent} with warnings whenever
+ *     repair cannot safely produce validated replacement content
  *   - A JudgmentError (or a missing judgment port) propagates to the caller;
  *     every other failure is caught and reported as a warning
- *   - Uses Bun.which() to detect available tools at runtime
  */
 
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, extname } from 'node:path';
+import { existsSync } from 'node:fs';
+import { writeFile, readFile, unlink } from 'node:fs/promises';
+import { basename, dirname, join, extname, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { captureJudgmentPort, JudgmentPortMissingError, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
@@ -88,7 +94,47 @@ export class AutoHealer {
     private readonly reading?: JudgmentPortCapture,
     /** The workspace's language facts, read only when a heal runs. */
     private readonly languages?: () => ResolvedLanguages | undefined,
+    /** The project directory the tools run in and resolve their binaries from. */
+    private readonly projectRoot?: () => string | undefined,
   ) {}
+
+  /** The project's own binary for a tool: node_modules/.bin under the project first, then PATH. */
+  private projectBinary(name: string): string | null {
+    const root = this.projectRoot?.();
+    const local = root ? join(root, 'node_modules', '.bin', name) : '';
+    if (local && existsSync(local)) return local;
+    return Bun.which(name, root ? { cwd: root } : undefined);
+  }
+
+  /** Runs a tool asynchronously in the project directory; stdin when given. Aborts with the heal. */
+  private async runTool(argv: readonly string[], stdin?: string): Promise<{ readonly exitCode: number; readonly stdout: string }> {
+    const signal = this.execution?.signal ?? this.invocationSignal;
+    const root = this.projectRoot?.();
+    const proc = Bun.spawn([...argv], {
+      ...(root ? { cwd: root } : {}),
+      stdin: stdin === undefined ? 'ignore' : new Blob([stdin]),
+      stdout: 'pipe', stderr: 'pipe',
+      ...(signal ? { signal } : {}),
+    });
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { exitCode, stdout };
+  }
+
+  /**
+   * A user-configured language tool works on a file: a hidden copy beside the
+   * real one, so the project's configuration for that directory applies.
+   */
+  private async runOnSiblingCopy(spec: CommandSpec, filePath: string, content: string): Promise<{ readonly exitCode: number; readonly output: string }> {
+    const copy = join(dirname(resolve(filePath)), `.${basename(filePath)}.heal-${randomBytes(4).toString('hex')}${extname(filePath)}`);
+    this.checkSynchronous();
+    await writeFile(copy, content, 'utf-8');
+    try {
+      const run = await this.runTool(languageToolArgv(spec, copy));
+      return { exitCode: run.exitCode, output: await readFile(copy, 'utf-8') };
+    } finally {
+      await unlink(copy).catch(() => undefined);
+    }
+  }
 
   /**
    * The formatter or linter a user languages file set for this file's
@@ -150,35 +196,12 @@ export class AutoHealer {
         return { healed: false, content };
       }
 
-      const ext = extname(filePath) || '.txt';
-      const tmpFile = this.execution ? '' : join(tmpdir(), `auto-heal-${randomBytes(6).toString('hex')}${ext}`);
-
-      let result: HealResult = { healed: false, content };
-      try {
-        // Stage 1: Formatter
-        const formatterResult = await this._tryFormatter(filePath, tmpFile, content, errors, warnings);
-        if (formatterResult.healed) {
-          result = formatterResult;
-        } else {
-          // Stage 2: Linter fix
-          const linterResult = await this._tryLinter(filePath, tmpFile, formatterResult.content, errors, warnings);
-          if (linterResult.healed) {
-            result = linterResult;
-          } else {
-            // Stage 3: ToolLLM
-            result = await this._tryLLM(filePath, linterResult.content, errors, warnings);
-          }
-        }
-      } finally {
-        // Clean up temp file
-        try {
-          if (tmpFile && existsSync(tmpFile)) {
-            unlinkSync(tmpFile);
-          }
-        } catch (cleanupErr) {
-          addWarning(warnings, `Auto-heal cleanup failed for temporary file '${tmpFile}'`, cleanupErr);
-        }
-      }
+      // Each stage starts from the content the agent wrote; a change that was
+      // not accepted is dropped, never handed to the next stage.
+      let result: HealResult = await this._tryFormatter(filePath, content, errors, warnings);
+      if (!result.healed) result = await this._tryLinter(filePath, content, errors, warnings);
+      if (!result.healed) result = await this._tryLLM(filePath, content, errors, warnings);
+      if (!result.healed) result = { healed: false, content };
 
       await this.check();
       return warnings.length > 0 ? { ...result, warnings } : result;
@@ -192,76 +215,41 @@ export class AutoHealer {
   }
 
   /**
-   * Stage 1: Try formatting with prettier or biome.
+   * Stage 1: the language's configured formatter, else the project's prettier
+   * (`--stdin-filepath`) or biome (`--stdin-file-path`), which read the
+   * project's configuration for the file's real path.
    */
-  private async _tryFormatter(
-    filePath: string,
-    tmpFile: string,
-    content: string,
-    errors: string[],
-    warnings: string[],
-  ): Promise<HealResult> {
+  private async _tryFormatter(filePath: string, content: string, errors: string[], warnings: string[]): Promise<HealResult> {
     try {
       await this.check();
       if (this.execution) return await this._tryContained('formatter', filePath, content, errors, warnings);
       const configured = this.languageTool(filePath, 'formatter', warnings);
       if (configured === null) return { healed: false, content };
       if (configured) {
-        this.checkSynchronous();
-        writeFileSync(tmpFile, content, 'utf-8');
-        this.checkSynchronous();
-        const run = Bun.spawnSync(languageToolArgv(configured, tmpFile), { stdout: 'pipe', stderr: 'pipe' });
+        const run = await this.runOnSiblingCopy(configured, filePath, content);
+        await this.check();
         if (run.exitCode !== 0) {
           addWarning(warnings, `Auto-heal formatter '${configured.command}' exited ${run.exitCode}; continuing to later repair stages`);
           return { healed: false, content };
         }
-        return await this._acceptStage('formatter', filePath, content, readFileSync(tmpFile, 'utf-8'), errors, warnings);
+        return await this._acceptStage('formatter', filePath, content, run.output, errors, warnings);
       }
-      const prettier = Bun.which('prettier');
-      const biome = Bun.which('biome');
-
+      const target = resolve(filePath);
+      const prettier = this.projectBinary('prettier');
+      const biome = prettier ? null : this.projectBinary('biome');
       if (!prettier && !biome) {
-        logger.debug('AutoHealer: no formatter found (prettier/biome), skipping stage 1');
+        logger.debug('AutoHealer: no project formatter found (prettier/biome), skipping stage 1');
         return { healed: false, content };
       }
-
-      // Write content to temp file
-      this.checkSynchronous();
-      writeFileSync(tmpFile, content, 'utf-8');
-
-      let proc: { exitCode: number | null };
-
-      if (prettier) {
-        this.checkSynchronous();
-        proc = Bun.spawnSync([prettier, '--write', '--log-level', 'silent', tmpFile]);
-      } else {
-        // biome format --write
-        this.checkSynchronous();
-        proc = Bun.spawnSync([biome!, 'format', '--write', tmpFile], {
-          stderr: 'pipe',
-        });
-      }
-
-      if (proc.exitCode !== 0) {
-        logger.debug('AutoHealer: formatter exited non-zero, skipping stage 1');
-        addWarning(warnings, 'Auto-heal formatter exited non-zero; continuing to later repair stages');
+      const run = prettier
+        ? await this.runTool([prettier, '--stdin-filepath', target, '--log-level', 'silent'], content)
+        : await this.runTool([biome!, 'format', `--stdin-file-path=${target}`], content);
+      await this.check();
+      if (run.exitCode !== 0) {
+        addWarning(warnings, `Auto-heal formatter ${prettier ? 'prettier' : 'biome'} exited ${run.exitCode} (a formatter cannot read a file that does not parse); continuing to later repair stages`);
         return { healed: false, content };
       }
-
-      const formatted = readFileSync(tmpFile, 'utf-8');
-
-      if (formatted === content) {
-        // Formatter made no changes, errors not formatter-related
-        return { healed: false, content };
-      }
-
-      if (await this._accepted(filePath, content, formatted, errors, 'formatter', warnings)) {
-        logger.debug('AutoHealer: errors resolved by formatter');
-        return { healed: true, content: formatted, method: 'formatter' };
-      }
-
-      // Formatter ran but errors remain, pass updated content to next stage
-      return { healed: false, content: formatted };
+      return await this._acceptStage('formatter', filePath, content, run.stdout, errors, warnings);
     } catch (err) {
       if (isJudgmentFailure(err)) throw err;
       await this.check();
@@ -272,58 +260,39 @@ export class AutoHealer {
   }
 
   /**
-   * Stage 2: Try linter fix with eslint.
+   * Stage 2: the language's configured linter, else the project's eslint
+   * (`--stdin --stdin-filename --fix-dry-run`), which applies the project's
+   * rules for the file's real path and reports the fixed text.
    */
-  private async _tryLinter(
-    filePath: string,
-    tmpFile: string,
-    content: string,
-    errors: string[],
-    warnings: string[],
-  ): Promise<HealResult> {
+  private async _tryLinter(filePath: string, content: string, errors: string[], warnings: string[]): Promise<HealResult> {
     try {
       await this.check();
       if (this.execution) return await this._tryContained('linter', filePath, content, errors, warnings);
       const configured = this.languageTool(filePath, 'linter', warnings);
       if (configured === null) return { healed: false, content };
       if (configured) {
-        this.checkSynchronous();
-        writeFileSync(tmpFile, content, 'utf-8');
-        this.checkSynchronous();
         // A linter exits non-zero when problems remain; what it fixed is in the file either way.
-        Bun.spawnSync(languageToolArgv(configured, tmpFile), { stdout: 'pipe', stderr: 'pipe' });
-        return await this._acceptStage('linter', filePath, content, readFileSync(tmpFile, 'utf-8'), errors, warnings);
+        const run = await this.runOnSiblingCopy(configured, filePath, content);
+        await this.check();
+        return await this._acceptStage('linter', filePath, content, run.output, errors, warnings);
       }
-      const eslint = Bun.which('eslint');
-
+      const eslint = this.projectBinary('eslint');
       if (!eslint) {
-        logger.debug('AutoHealer: eslint not found, skipping stage 2');
+        logger.debug('AutoHealer: no project eslint found, skipping stage 2');
         return { healed: false, content };
       }
-
-      // Write (possibly formatter-updated) content to temp file
-      this.checkSynchronous();
-      writeFileSync(tmpFile, content, 'utf-8');
-
-      this.checkSynchronous();
-      const proc = Bun.spawnSync([eslint, '--fix', tmpFile], {
-        stderr: 'pipe',
-        stdout: 'pipe',
-      });
-
-      // eslint --fix exits 1 on remaining errors, 0 on clean, both are acceptable
-      const fixed = readFileSync(tmpFile, 'utf-8');
-
-      if (fixed === content) {
+      const run = await this.runTool([eslint, '--stdin', '--stdin-filename', resolve(filePath), '--fix-dry-run', '--format', 'json'], content);
+      await this.check();
+      // eslint exits 1 when problems remain; the fixed text is in its report either way.
+      let fixed: string | undefined;
+      try {
+        const report = JSON.parse(run.stdout) as readonly { readonly output?: unknown }[];
+        fixed = typeof report[0]?.output === 'string' ? report[0].output : undefined;
+      } catch {
+        addWarning(warnings, `Auto-heal linter eslint exited ${run.exitCode} without a readable report; continuing to LLM repair`);
         return { healed: false, content };
       }
-
-      if (await this._accepted(filePath, content, fixed, errors, 'linter', warnings)) {
-        logger.debug('AutoHealer: errors resolved by linter');
-        return { healed: true, content: fixed, method: 'linter' };
-      }
-
-      return { healed: false, content: fixed };
+      return fixed === undefined ? { healed: false, content } : await this._acceptStage('linter', filePath, content, fixed, errors, warnings);
     } catch (err) {
       if (isJudgmentFailure(err)) throw err;
       await this.check();
@@ -333,13 +302,13 @@ export class AutoHealer {
     }
   }
 
-  /** A stage's output: no change passes the content on; a change is accepted or passed on to the next stage. */
+  /** A stage's output is the repair only when accepted; otherwise the content the stage was given stands. */
   private async _acceptStage(stage: 'formatter' | 'linter', filePath: string, content: string, candidate: string, errors: string[], warnings: string[]): Promise<HealResult> {
     if (candidate === content) return { healed: false, content };
     if (await this._accepted(filePath, content, candidate, errors, stage, warnings)) {
       return { healed: true, content: candidate, method: stage };
     }
-    return { healed: false, content: candidate };
+    return { healed: false, content };
   }
 
   private async _tryContained(stage: 'formatter' | 'linter', filePath: string, content: string, errors: string[], warnings: string[]): Promise<HealResult> {
@@ -348,7 +317,7 @@ export class AutoHealer {
     await this.check();
     if (candidate === content) return { healed: false, content };
     const accepted = await this._accepted(filePath, content, candidate, errors, stage, warnings);
-    return { healed: accepted, content: candidate, ...(accepted ? { method: stage } : {}) };
+    return accepted ? { healed: true, content: candidate, method: stage } : { healed: false, content };
   }
 
   /**

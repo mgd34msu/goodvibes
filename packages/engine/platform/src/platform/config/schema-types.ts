@@ -189,7 +189,7 @@ export interface GoodVibesConfig {
     llmEnabled: boolean;            // default: false. Enable dedicated tool LLM for internal operations
     llmProvider: string;            // default: ''. Provider for tool LLM calls (empty = use current)
     llmModel: string;               // default: ''. Model for tool LLM calls (empty = fastest available)
-    autoHeal: boolean;              // default: false. Auto-fix syntax errors on write/edit
+    autoHeal: boolean;              // default: false. Repair a write/edit that fails validation: project formatter, linter fix, then model
     defaultTokenBudget: number;     // default: 0. No automatic token budget for read operations
     hooksFile: string;              // default: 'hooks.json'. Hook configuration file name
     overflowSpillBackend: 'file' | 'ledger' | 'diagnostics'; // default: 'file'. Where overflow content spills

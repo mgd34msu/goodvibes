@@ -56,7 +56,6 @@ interface AgentMemoryToolDeps {
   readonly commandContext: CommandContext;
   readonly toolRegistry: ToolRegistry;
   readonly harnessTool?: Tool;
-  readonly localRegistryTool?: Tool;
 }
 
 function error(message: string): { readonly success: false; readonly error: string } {
@@ -114,9 +113,7 @@ function lookupId(args: AgentMemoryToolArgs): string {
   return readString(args.id) || readString(args.recordId);
 }
 
-function findRegisteredTool(registry: ToolRegistry, name: string): Tool | null {
-  return registry.list().find((tool) => tool.definition.name === name) ?? null;
-}
+let recordCallSequence = 0;
 
 function localMemoryArgs(action: AgentMemoryAction, args: AgentMemoryToolArgs): Record<string, unknown> {
   return compactArgs({
@@ -264,9 +261,13 @@ export function createAgentMemoryTool(deps: AgentMemoryToolDeps): Tool {
         }));
       }
 
-      const localRegistryTool = deps.localRegistryTool ?? findRegisteredTool(deps.toolRegistry, 'agent_local_registry');
-      if (!localRegistryTool) return error('Agent-local memory registry is unavailable in this runtime.');
-      return forwardHarnessCatalogCall(localRegistryTool, rawArgs, localMemoryArgs(action, args), options);
+      // Records belong to agent_local_registry. The record call runs as that
+      // tool's own nested call, so it is admitted for what it does (a read or a
+      // write) instead of reusing this call's argument proof.
+      if (!deps.toolRegistry.has('agent_local_registry')) {
+        return error(`memory action:"${action}" was not run: this runtime has no agent_local_registry tool, which owns memory records. Use memory action:"status" for posture.`);
+      }
+      return deps.toolRegistry.executeNested(`memory-record-${action}-${++recordCallSequence}`, 'agent_local_registry', localMemoryArgs(action, args), options);
     },
   };
   return protectHarnessCatalogTool(tool, deps.toolRegistry, isMemoryCatalogCall, deps.commandContext);

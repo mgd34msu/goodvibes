@@ -74,11 +74,8 @@ export function judgmentExportMarkdown(judgment: LoadedComparisonJudgment): stri
   }
   lines.push('## Route Update');
   lines.push('');
-  if (judgment.winnerModel) {
-    lines.push(`Confirmed apply route: agent_model_compare mode:"apply" artifactId:"${judgment.artifact.artifactId}"`);
-  } else {
-    lines.push('This judgment does not name the winning model, so it cannot be applied. Call mode:"judge" again with reveal:true (this saves a new judgment), then mode:"apply" with that one.');
-  }
+  // apply reads the winner model from the judged comparison, so a blind judgment applies as it is.
+  lines.push(`Confirmed apply route: agent_model_compare mode:"apply" artifactId:"${judgment.artifact.artifactId}"${judgment.winnerModel ? '' : ' (the winner model is read from the judged comparison)'}`);
   lines.push('');
   return lines.join('\n');
 }

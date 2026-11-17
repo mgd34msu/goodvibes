@@ -128,7 +128,8 @@ export function buildReviewerReadinessChecklist(
   ));
   const routeDecisionComparisonIds = new Set(routeDecisions.map((artifact) => readMetadataString(artifact.metadata.comparisonId)).filter(Boolean));
   const routeDecisionJudgmentArtifactIds = new Set(routeDecisions.map((artifact) => readMetadataString(artifact.metadata.judgmentArtifactId)).filter(Boolean));
-  const revealedJudgmentsWaitingOnRouteDecision = revealedJudgments.filter((artifact) => {
+  // apply reads the winner model from the judged comparison, so a blind judgment waits on the same decision.
+  const judgmentsWaitingOnRouteDecision = judgments.filter((artifact) => {
     const comparisonId = readMetadataString(artifact.metadata.comparisonId);
     return !routeDecisionJudgmentArtifactIds.has(artifact.id) && (!comparisonId || !routeDecisionComparisonIds.has(comparisonId));
   });
@@ -147,7 +148,7 @@ export function buildReviewerReadinessChecklist(
   const firstProposedSuggestionDocument = reviewDocuments.find((document) => document.suggestions.some((suggestion) => suggestion.status === 'proposed'));
   const firstUnrevealedComparison = unrevealedComparisons[0];
   const firstHiddenJudgment = hiddenJudgments[0];
-  const firstRevealedJudgment = revealedJudgmentsWaitingOnRouteDecision[0];
+  const firstJudgmentWaiting = judgmentsWaitingOnRouteDecision[0];
   const firstHandoffMissingRelated = handoffs.find((artifact) => readMetadataStringList(artifact.metadata.relatedArtifactIds).length === 0);
 
   const rawChecks: ReviewerReadinessCheck[] = [
@@ -214,16 +215,16 @@ export function buildReviewerReadinessChecklist(
     {
       id: 'route-change-decision',
       label: 'Route-change decision',
-      status: revealedJudgmentsWaitingOnRouteDecision.length > 0 ? 'attention' : 'pass',
-      count: revealedJudgmentsWaitingOnRouteDecision.length,
-      detail: revealedJudgmentsWaitingOnRouteDecision.length > 0
-        ? `${revealedJudgmentsWaitingOnRouteDecision.length} revealed judgment(s) can drive an admitted model route update, or the user can explicitly leave routing unchanged before archiving.`
-        : 'No revealed model comparison judgment is waiting on an apply-or-leave-unchanged decision.',
-      inspectRoute: firstRevealedJudgment
-        ? `agent_model_compare review artifactId:"${firstRevealedJudgment.id}" reveal:true`
+      status: judgmentsWaitingOnRouteDecision.length > 0 ? 'attention' : 'pass',
+      count: judgmentsWaitingOnRouteDecision.length,
+      detail: judgmentsWaitingOnRouteDecision.length > 0
+        ? `${judgmentsWaitingOnRouteDecision.length} judgment(s) can drive an admitted model route update (a blind one too: apply reads the winner from its comparison), or the user can explicitly leave routing unchanged before archiving.`
+        : 'No model comparison judgment is waiting on an apply-or-leave-unchanged decision.',
+      inspectRoute: firstJudgmentWaiting
+        ? `agent_model_compare review artifactId:"${firstJudgmentWaiting.id}" reveal:true`
         : 'models action:"status"',
-      repairRoute: firstRevealedJudgment
-        ? `agent_model_compare apply artifactId:"${firstRevealedJudgment.id}" or agent_model_compare routeDecision artifactId:"${firstRevealedJudgment.id}" decision:"left-unchanged"`
+      repairRoute: firstJudgmentWaiting
+        ? `agent_model_compare apply artifactId:"${firstJudgmentWaiting.id}" or agent_model_compare routeDecision artifactId:"${firstJudgmentWaiting.id}" decision:"left-unchanged"`
         : undefined,
     },
     {
@@ -267,7 +268,7 @@ export function buildReviewerReadinessChecklist(
       unrevealedComparisons: unrevealedComparisons.length,
       hiddenJudgments: hiddenJudgments.length,
       revealedJudgments: revealedJudgments.length,
-      judgmentsAwaitingRouteDecision: revealedJudgmentsWaitingOnRouteDecision.length,
+      judgmentsAwaitingRouteDecision: judgmentsWaitingOnRouteDecision.length,
       handoffsMissingRelatedArtifacts,
     },
     ...(readProblems.length > 0 ? { readProblems } : {}),

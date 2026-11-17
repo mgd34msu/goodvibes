@@ -43,6 +43,7 @@ export type SessionSurface = operations.SessionSurface;
 // Remote execution + the distributed runtime.
 export {
   DistributedRuntimeManager,
+  RemoteBackendHost,
   RemoteRunnerRegistry,
   RemoteSupervisor,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';

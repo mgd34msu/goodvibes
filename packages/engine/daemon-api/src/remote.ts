@@ -43,6 +43,10 @@ async function dispatchRemoteRoutesInner(
   if (peerDisconnectMatch && method === 'POST') return handlers.disconnectRemotePeer(safeDecodeURIComponent(peerDisconnectMatch[1]!), req);
   const peerInvokeMatch = pathname.match(/^\/api\/remote\/peers\/([^/]+)\/invoke$/);
   if (peerInvokeMatch && method === 'POST') return handlers.invokeRemotePeer(safeDecodeURIComponent(peerInvokeMatch[1]!), req);
+  if (pathname === '/api/remote/backends' && method === 'GET') return handlers.getRemoteBackends(req);
+  if (pathname === '/api/remote/backends' && method === 'POST') return handlers.registerRemoteBackend(req);
+  const backendMatch = pathname.match(/^\/api\/remote\/backends\/([^/]+)$/);
+  if (backendMatch && method === 'DELETE') return handlers.removeRemoteBackend(safeDecodeURIComponent(backendMatch[1]!), req);
   if (pathname === '/api/remote/work' && method === 'GET') return handlers.getRemoteWork();
   const workCancelMatch = pathname.match(/^\/api\/remote\/work\/([^/]+)\/cancel$/);
   if (workCancelMatch && method === 'POST') return handlers.cancelRemoteWork(safeDecodeURIComponent(workCancelMatch[1]!), req);

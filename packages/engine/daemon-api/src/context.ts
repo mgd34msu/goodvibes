@@ -269,6 +269,10 @@ export interface DaemonRemoteManagementRouteHandlers {
   invokeRemotePeer(peerId: string, req: Request): MaybeResponse;
   cancelRemoteWork(workId: string, req: Request): MaybeResponse;
   getRemoteNodeHostContract(): MaybeResponse;
+  /** Registered execution backends (docker, ssh, cloud terminal, local process): list, register, remove. */
+  getRemoteBackends(req: Request): MaybeResponse;
+  registerRemoteBackend(req: Request): MaybeResponse;
+  removeRemoteBackend(peerId: string, req: Request): MaybeResponse;
 }
 
 /** Route handlers for the knowledge base: sources, nodes, issues, connectors, jobs, schedules, search, and GraphQL. */

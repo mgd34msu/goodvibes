@@ -37,6 +37,7 @@ export const AGENT_HARNESS_MODES = [
   'propose_skill_drafts',
   'remote_snapshot', 'remote_peers', 'remote_work', 'remote_pair_requests',
   'remote_pair_approve', 'remote_pair_reject', 'remote_peers_invoke', 'remote_work_cancel',
+  'remote_backends', 'remote_backends_register', 'remote_backends_remove',
   'unified_inbox',
   'channel_drafts', 'channel_draft_save', 'channel_draft_send',
   'channel_routing', 'channel_routing_assign', 'channel_routing_remove',
@@ -357,7 +358,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   explicitUserRequest: requestParameter(),
   peerId: {
     type: 'string',
-    description: 'Remote peer id for remote_peers_invoke.',
+    description: 'Remote peer or backend id for remote_peers_invoke, remote_backends_register and remote_backends_remove (target is an accepted alias).',
   },
   requestId: {
     type: 'string',
@@ -369,7 +370,20 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   payload: {
     type: 'object',
-    description: 'Command payload for remote_peers_invoke.',
+    description: 'Command payload for remote_peers_invoke. For a registered backend: stdin, env, timeoutMs, cwd (put arguments in command, not payload.args).',
+  },
+  displayName: {
+    type: 'string',
+    description: 'Display name for remote_backends_register; defaults to peerId.',
+  },
+  backendKind: {
+    type: 'string',
+    enum: ['docker', 'ssh', 'cloud-terminal', 'local-process'],
+    description: 'Backend kind for remote_backends_register.',
+  },
+  backendConfig: {
+    type: 'object',
+    description: 'Backend settings for remote_backends_register. docker: containerName, dockerHost; ssh: sshHost, sshPort, sshUser, identityRef; cloud-terminal: provider (gcp|aws|azure), credentialRef, projectId, location, instance; local-process: cwd, allowedCommands. Credentials are goodvibes://secrets/ references only.',
   },
   note: {
     type: 'string',

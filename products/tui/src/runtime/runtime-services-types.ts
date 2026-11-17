@@ -52,6 +52,7 @@ import type { createDurabilityServices } from '@goodvibes-jev/engine/platform/pl
 import type { MemorySpineClient } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { DomainDispatch, RuntimeStore } from '@goodvibes-jev/engine/platform/platform/runtime/state';
+import type { RemoteBackendHost } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus, DistributedRuntimeManager, RemoteRunnerRegistry, RemoteSupervisor, IntegrationHelperService, IdempotencyStore, WorktreeRegistry, SandboxSessionRegistry, ShellPathService, FeatureFlagManager, PolicyRuntimeState, SessionSurface } from '@/runtime/index.ts';
 import type { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
 import type { VoiceSetupService } from '@goodvibes-jev/engine/platform/platform/runtime/voice-setup';
@@ -263,6 +264,8 @@ export interface RuntimeServices {
   /** The one helper route for supporting work; the orchestrator, resume summaries and titles share it. */
   readonly helperModel: HelperModel;
   readonly distributedRuntime: DistributedRuntimeManager;
+  /** Registered execution backends `remote.peers.invoke` runs a command on (docker, ssh, cloud terminal, local process). */
+  readonly remoteBackends: RemoteBackendHost;
   readonly remoteRunnerRegistry: RemoteRunnerRegistry;
   readonly remoteSupervisor: RemoteSupervisor;
   readonly sessionMemoryStore: SessionMemoryStore;

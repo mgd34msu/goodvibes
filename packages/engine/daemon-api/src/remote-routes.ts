@@ -270,6 +270,25 @@ type RemoteInvokeBody = {
   readonly metadata: RemoteMetadata;
 };
 
+/**
+ * Registered execution backends: hosts the daemon runs a command on itself (a
+ * docker container, an ssh host, a cloud VM, a local process). An id a paired
+ * peer holds is never a backend, so `remote.peers.invoke` runs on a backend
+ * only when no paired peer has the id.
+ */
+export interface RemoteBackendRouteService {
+  has(peerId: string): Promise<boolean>;
+  list(): Promise<unknown>;
+  register(input: Record<string, unknown>): Promise<unknown>;
+  remove(peerId: string): Promise<boolean>;
+  invoke(input: {
+    readonly peerId: string;
+    readonly command: string;
+    readonly payload?: unknown;
+    readonly timeoutMs?: number | undefined;
+  }): Promise<unknown>;
+}
+
 interface DaemonRemoteRouteContext {
   /** The principal the gate authenticated; pair approvals, token rotation and invokes are attributed to it. */
   readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string } | null) | undefined;
@@ -278,6 +297,8 @@ interface DaemonRemoteRouteContext {
   readonly requireRemotePeer: (req: Request, scope?: string) => Promise<RemotePeerAuth | Response>;
   readonly requireAuthenticatedSession: (req: Request) => SessionUserLike | null;
   readonly distributedRuntime: DistributedRuntimeRouteService;
+  /** Absent on a host that runs no commands on registered backends. */
+  readonly remoteBackends?: RemoteBackendRouteService | undefined;
 }
 
 const remoteBodySchemas = createRouteBodySchemaRegistry({
@@ -356,7 +377,64 @@ export function createDaemonRemoteRouteHandlers(
     invokeRemotePeer: async (peerId, request) => handleInvokeRemotePeer(context, peerId, request),
     cancelRemoteWork: async (workId, request) => handleCancelRemoteWork(context, workId, request),
     getRemoteNodeHostContract: () => serializableJsonResponse({ contract: context.distributedRuntime.getNodeHostContract() }),
+    getRemoteBackends: async (request) => handleListRemoteBackends(context, request),
+    registerRemoteBackend: async (request) => handleRegisterRemoteBackend(context, request),
+    removeRemoteBackend: async (peerId, request) => handleRemoveRemoteBackend(context, peerId, request),
   };
+}
+
+function backendsUnavailable(): Response {
+  return jsonErrorResponse({
+    error: 'This host runs no commands on registered backends.',
+    code: 'REMOTE_BACKENDS_UNAVAILABLE',
+    next: ['Use a daemon host; it keeps the registered docker, ssh, cloud terminal and local process backends.'],
+  }, { status: 501 });
+}
+
+async function handleListRemoteBackends(context: DaemonRemoteRouteContext, req: Request): Promise<Response> {
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
+  if (!context.remoteBackends) return backendsUnavailable();
+  try {
+    return Response.json(await context.remoteBackends.list());
+  } catch (error) {
+    return refusalResponse(error) ?? readJsonErrorResponse(error, { status: serviceFailureStatus(error) });
+  }
+}
+
+async function handleRegisterRemoteBackend(context: DaemonRemoteRouteContext, req: Request): Promise<Response> {
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
+  if (!context.remoteBackends) return backendsUnavailable();
+  const body = await context.parseJsonBody(req);
+  if (body instanceof Response) return body;
+  const peerId = readOptionalStringField(body, 'peerId');
+  // A paired peer owns its id: invoking it queues work for that peer, so a backend cannot take it.
+  if (peerId && context.distributedRuntime.getPeer(peerId)) {
+    return jsonErrorResponse({
+      error: `A paired peer already has the id '${peerId}'; register the backend under another id.`,
+      code: 'REMOTE_BACKEND_ID_TAKEN',
+    }, { status: 409 });
+  }
+  try {
+    const backend = await context.remoteBackends.register(body);
+    return Response.json({ backend }, { status: 201 });
+  } catch (error) {
+    return refusalResponse(error) ?? readJsonErrorResponse(error, { status: serviceFailureStatus(error) });
+  }
+}
+
+async function handleRemoveRemoteBackend(context: DaemonRemoteRouteContext, peerId: string, req: Request): Promise<Response> {
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
+  if (!context.remoteBackends) return backendsUnavailable();
+  try {
+    return await context.remoteBackends.remove(peerId)
+      ? Response.json({ peerId, removed: true })
+      : jsonErrorResponse({ error: `No registered backend has the id '${peerId}'.`, code: 'REMOTE_PEER_NOT_FOUND' }, { status: 404 });
+  } catch (error) {
+    return refusalResponse(error) ?? readJsonErrorResponse(error, { status: serviceFailureStatus(error) });
+  }
 }
 
 export async function handleRemotePairRequest(
@@ -714,6 +792,12 @@ async function handleInvokeRemotePeer(context: DaemonRemoteRouteContext, peerId:
   const payload = validateRemoteJsonPayload(input.payload, MAX_REMOTE_PAYLOAD_BYTES, 'payload');
   if (payload instanceof Response) return payload;
   try {
+    // A registered backend runs the command here and now, and answers with its
+    // exit code and output. A paired peer keeps its id, so it is checked first.
+    if (context.remoteBackends && !context.distributedRuntime.getPeer(peerId) && await context.remoteBackends.has(peerId)) {
+      const backend = await context.remoteBackends.invoke({ peerId, command: input.command, payload, timeoutMs: input.timeoutMs });
+      return Response.json({ completed: true, backend });
+    }
     const invoked = await context.distributedRuntime.invokePeer({
       peerId,
       command: input.command,

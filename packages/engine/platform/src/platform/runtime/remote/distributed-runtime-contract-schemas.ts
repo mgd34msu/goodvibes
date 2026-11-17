@@ -302,10 +302,97 @@ export const REMOTE_PEER_INVOKE_INPUT_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 }, ['peerId', 'command'], { additionalProperties: true });
 
+export const REMOTE_BACKEND_KIND_SCHEMA = enumSchema(['docker', 'ssh', 'cloud-terminal', 'local-process']);
+
+/**
+ * A backend's settings. Credentials are `goodvibes://secrets/` references only;
+ * which fields apply depends on the kind (docker: containerName, dockerHost;
+ * ssh: sshHost, sshPort, sshUser, identityRef; cloud-terminal: provider,
+ * credentialRef, projectId, location, instance; local-process: cwd,
+ * allowedCommands).
+ */
+export const REMOTE_BACKEND_CONFIG_SCHEMA = objectSchema({
+  kind: REMOTE_BACKEND_KIND_SCHEMA,
+  containerName: STRING_SCHEMA,
+  dockerHost: STRING_SCHEMA,
+  sshHost: STRING_SCHEMA,
+  sshPort: NUMBER_SCHEMA,
+  sshUser: STRING_SCHEMA,
+  identityRef: STRING_SCHEMA,
+  provider: enumSchema(['gcp', 'aws', 'azure']),
+  credentialRef: STRING_SCHEMA,
+  projectId: STRING_SCHEMA,
+  location: STRING_SCHEMA,
+  instance: STRING_SCHEMA,
+  cwd: STRING_SCHEMA,
+  allowedCommands: STRING_LIST_SCHEMA,
+});
+
+export const REMOTE_BACKEND_SCHEMA = objectSchema({
+  peerId: STRING_SCHEMA,
+  displayName: STRING_SCHEMA,
+  backendKind: REMOTE_BACKEND_KIND_SCHEMA,
+  backendConfig: REMOTE_BACKEND_CONFIG_SCHEMA,
+}, ['peerId', 'displayName', 'backendKind', 'backendConfig']);
+
+export const REMOTE_BACKENDS_OUTPUT_SCHEMA = objectSchema({
+  backends: arraySchema(REMOTE_BACKEND_SCHEMA),
+  unreadable: arraySchema(objectSchema({ peerId: STRING_SCHEMA, reason: STRING_SCHEMA }, ['peerId', 'reason'])),
+}, ['backends', 'unreadable']);
+
+export const REMOTE_BACKEND_REGISTER_INPUT_SCHEMA = objectSchema({
+  peerId: STRING_SCHEMA,
+  displayName: STRING_SCHEMA,
+  backendKind: REMOTE_BACKEND_KIND_SCHEMA,
+  backendConfig: objectSchema({
+    containerName: STRING_SCHEMA,
+    dockerHost: STRING_SCHEMA,
+    sshHost: STRING_SCHEMA,
+    sshPort: NUMBER_SCHEMA,
+    sshUser: STRING_SCHEMA,
+    identityRef: STRING_SCHEMA,
+    provider: enumSchema(['gcp', 'aws', 'azure']),
+    credentialRef: STRING_SCHEMA,
+    projectId: STRING_SCHEMA,
+    location: STRING_SCHEMA,
+    instance: STRING_SCHEMA,
+    cwd: STRING_SCHEMA,
+    allowedCommands: STRING_LIST_SCHEMA,
+  }),
+}, ['peerId', 'backendKind', 'backendConfig']);
+
+export const REMOTE_BACKEND_OUTPUT_SCHEMA = objectSchema({
+  backend: REMOTE_BACKEND_SCHEMA,
+}, ['backend']);
+
+export const REMOTE_BACKEND_REMOVE_INPUT_SCHEMA = objectSchema({
+  peerId: STRING_SCHEMA,
+}, ['peerId']);
+
+export const REMOTE_BACKEND_REMOVE_OUTPUT_SCHEMA = objectSchema({
+  peerId: STRING_SCHEMA,
+  removed: BOOLEAN_SCHEMA,
+}, ['peerId', 'removed']);
+
+/** One command run on a registered backend: its exit code and a bounded preview of its output. */
+export const REMOTE_BACKEND_INVOKE_RESULT_SCHEMA = objectSchema({
+  peerId: STRING_SCHEMA,
+  backendKind: REMOTE_BACKEND_KIND_SCHEMA,
+  exitCode: NUMBER_SCHEMA,
+  completed: BOOLEAN_SCHEMA,
+  stdout: STRING_SCHEMA,
+  stderr: STRING_SCHEMA,
+  stdoutBytes: NUMBER_SCHEMA,
+  stdoutTruncated: BOOLEAN_SCHEMA,
+  stderrTruncated: BOOLEAN_SCHEMA,
+}, ['peerId', 'backendKind', 'completed', 'stdout', 'stderr', 'stdoutBytes', 'stdoutTruncated', 'stderrTruncated']);
+
+/** A paired peer answers with the queued `work`; a registered backend with the finished `backend` run. */
 export const REMOTE_PEER_INVOKE_OUTPUT_SCHEMA = objectSchema({
   work: DISTRIBUTED_PENDING_WORK_SCHEMA,
+  backend: REMOTE_BACKEND_INVOKE_RESULT_SCHEMA,
   completed: BOOLEAN_SCHEMA,
-}, ['work', 'completed']);
+}, ['completed']);
 
 export const REMOTE_WORK_CANCEL_INPUT_SCHEMA = objectSchema({
   workId: STRING_SCHEMA,

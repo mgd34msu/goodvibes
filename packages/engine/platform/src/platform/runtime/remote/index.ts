@@ -83,3 +83,24 @@ export {
   DistributedRuntimeManager,
   getDistributedNodeHostContract,
 } from './distributed-runtime.js';
+// Registered execution backends (docker, ssh, cloud terminal, local process):
+// hosts the daemon runs a command on itself, reached through remote.peers.invoke.
+export {
+  RemoteBackendHost,
+  createRemoteBackendHost,
+  readBackendPayload,
+} from './host/backend-host.js';
+export type {
+  RemoteBackendHostOptions,
+  RemoteBackendListing,
+  RemoteBackendInvokeInput,
+  RemoteBackendRecord,
+  RemoteBackendKind,
+  RemoteBackendInvokeResult,
+} from './host/backend-host.js';
+export { normalizeBackendConfig, PeerRegistryValidationError as RemoteBackendValidationError } from './host/peer-registry.js';
+export type {
+  BackendConfig as RemoteBackendConfig,
+  CloudProvider as RemoteBackendCloudProvider,
+} from './host/peer-registry.js';
+export type { RemoteHostCredentialStore, RemoteHostLogger } from './host/context.js';

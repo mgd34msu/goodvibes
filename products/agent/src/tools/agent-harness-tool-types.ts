@@ -79,6 +79,9 @@ export interface AgentHarnessToolArgs {
   readonly payload?: unknown;
   readonly note?: unknown;
   readonly reason?: unknown;
+  readonly displayName?: unknown;
+  readonly backendKind?: unknown;
+  readonly backendConfig?: unknown;
   readonly draftId?: unknown;
   readonly draftStatus?: unknown;
   readonly draftTitle?: unknown;

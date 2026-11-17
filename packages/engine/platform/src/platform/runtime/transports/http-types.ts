@@ -29,6 +29,7 @@ import type {
   DistributedRuntimePairRequest,
   DistributedWorkPriority,
 } from '../remote/distributed-runtime-types.js';
+import type { RemoteBackendInvokeResult } from '../remote/host/backend-host.js';
 import type { UiControlPlaneSnapshot, UiLocalAuthSnapshot, UiSessionSnapshot, UiTasksSnapshot } from '../ui-read-models.js';
 import type { UiRuntimeEvents } from '../ui-events.js';
 import type { TransportPaths } from './transport-paths.js';
@@ -375,10 +376,13 @@ export interface HttpRemotePeerInvokeInput {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
-export interface HttpRemotePeerInvokeResponse {
-  readonly work: DistributedPendingWork;
-  readonly completed: boolean;
-}
+/**
+ * A paired peer answers with the work queued for it; a registered backend
+ * (docker, ssh, cloud terminal, local process) with the finished run.
+ */
+export type HttpRemotePeerInvokeResponse =
+  | { readonly work: DistributedPendingWork; readonly completed: boolean; readonly backend?: undefined }
+  | { readonly backend: RemoteBackendInvokeResult; readonly completed: true; readonly work?: undefined };
 
 export interface HttpRemotePeerClaimInput {
   readonly maxItems?: number | undefined;

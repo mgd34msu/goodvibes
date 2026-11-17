@@ -239,6 +239,7 @@ export {
   matchPeerRoute,
   type PeerRouteId,
   type PeerRouteMatch,
+  type RemoteBackendRouteService,
 } from './remote-routes.js';
 export { buildErrorResponseBody, jsonErrorResponse, readErrorResponseBody, readJsonErrorResponse, summarizeErrorForRecord } from './error-response.js';
 export {

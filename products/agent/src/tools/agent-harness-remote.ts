@@ -12,6 +12,9 @@ export interface AgentHarnessRemoteArgs {
   readonly note?: unknown;
   readonly confirmReplace?: unknown;
   readonly reason?: unknown;
+  readonly displayName?: unknown;
+  readonly backendKind?: unknown;
+  readonly backendConfig?: unknown;
 }
 
 type RemoteResult = { readonly success: boolean; readonly output?: string; readonly error?: string };
@@ -66,7 +69,37 @@ const REMOTE_MODE_ROUTES = {
       const absent = [...(peerId ? [] : ['peerId']), ...(command ? [] : ['command'])];
       if (absent.length > 0) return missing(absent, 'Call mode:"remote_peers" to list peers, then pass peerId (or target) and the command to run.');
       const payload = args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload) ? args.payload as Record<string, unknown> : {};
+      // The permission gate judges `command`; arguments sent beside it would run without being judged.
+      if (payload['args'] !== undefined) {
+        return missing(['command with its arguments'], 'payload.args is not accepted here: put the arguments in command itself, so the command the permission gate judges is the command that runs.');
+      }
       return { input: { peerId, command, ...(Object.keys(payload).length > 0 ? { payload } : {}) } };
+    },
+  },
+  remote_backends: { methodId: 'remote.backends.list' },
+  remote_backends_register: {
+    methodId: 'remote.backends.register',
+    action: 'Remote backend registration',
+    input: (args) => {
+      const peerId = readString(args.peerId || args.target);
+      const backendKind = readString(args.backendKind);
+      const config = args.backendConfig && typeof args.backendConfig === 'object' && !Array.isArray(args.backendConfig)
+        ? args.backendConfig as Record<string, unknown> : undefined;
+      const absent = [...(peerId ? [] : ['peerId']), ...(backendKind ? [] : ['backendKind']), ...(config ? [] : ['backendConfig'])];
+      if (absent.length > 0) {
+        return missing(absent, 'Pass peerId (the id remote_peers_invoke will use), backendKind (docker, ssh, cloud-terminal or local-process) and backendConfig (credentials as goodvibes://secrets/ references only).');
+      }
+      const displayName = readString(args.displayName);
+      return { input: { peerId, backendKind, backendConfig: config, ...(displayName ? { displayName } : {}) } };
+    },
+  },
+  remote_backends_remove: {
+    methodId: 'remote.backends.remove',
+    action: 'Remote backend removal',
+    input: (args) => {
+      const peerId = readString(args.peerId || args.target);
+      if (!peerId) return missing(['peerId'], 'Call mode:"remote_backends" to list registered backends, then pass peerId (or target) of the one to remove.');
+      return { input: { peerId } };
     },
   },
   remote_work_cancel: {
@@ -92,7 +125,7 @@ export function remoteCatalogStatus(): Record<string, unknown> {
   const modes = Object.entries(REMOTE_MODE_ROUTES as Record<string, RemoteModeRoute>);
   return {
     modes: modes.map(([mode, route]) => ({ mode, methodId: route.methodId, effect: route.action ? 'connected-host-state' : 'read' })),
-    policy: 'Each remote mode runs its operator method on the connected host and returns the host\'s answer. Approving or rejecting a pair request, invoking a peer command and cancelling work change host state and need current recorded effect admission for this call; nothing else has to be called afterwards.',
+    policy: 'Each remote mode runs its operator method on the connected host and returns the host\'s answer. Approving or rejecting a pair request, invoking a peer command, registering or removing a backend and cancelling work change host state and need current recorded effect admission for this call; nothing else has to be called afterwards. A paired peer gets an invoked command as queued work; a registered backend (remote_backends) runs it at once and answers with the exit code and output.',
   };
 }
 

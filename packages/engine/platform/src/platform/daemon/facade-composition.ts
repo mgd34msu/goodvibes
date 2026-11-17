@@ -782,6 +782,7 @@ export function createDaemonFacadeCollaborators(
     inboundMailHealth: () => builtinChannels.inboundMailHealth(),
     surfaceRegistry: runtime.surfaceRegistry,
     distributedRuntime: runtime.distributedRuntime,
+    remoteBackends: runtime.runtimeServices.remoteBackends,
     watcherRegistry: runtime.watcherRegistry,
     voiceService: runtime.voiceService,
     webSearchService: runtime.webSearchService,

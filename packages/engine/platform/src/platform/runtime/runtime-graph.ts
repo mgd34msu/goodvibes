@@ -67,6 +67,7 @@ import type { RuntimeAcquisitionScope } from './acquisition-scope.js';
 import { composeJudgment } from './judgment-services.js';
 import { createDomainDispatch } from './store/index.js';
 import { DistributedRuntimeManager } from './remote/distributed-runtime-manager.js';
+import { createRemoteBackendHost } from './remote/host/backend-host.js';
 import { IntegrationHelperService } from './integration/helpers.js';
 import { VoiceProviderRegistry, VoiceService, ensureBuiltinVoiceProviders } from '../voice/index.js';
 import { WebSearchProviderRegistry, WebSearchService } from '../web-search/index.js';
@@ -489,6 +490,18 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     approvalBridge: approvalBroker,
     automationBridge: automationManager,
   });
+  // Hosts the daemon runs a command on itself (docker, ssh, cloud terminal, local
+  // process). Nothing opens until a backend is listed, registered or invoked.
+  const remoteBackends = createRemoteBackendHost({
+    workingDirectory,
+    homeDirectory,
+    credentials: {
+      resolveRef: (ref) => resolveSecretInput(ref, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome() }),
+    },
+    logger,
+    isPairedPeer: (peerId) => distributedRuntime.getPeer(peerId) !== null,
+  });
+  scope.registry.add('remote backends', () => remoteBackends.close());
   // Remote runners and the sandboxes tool calls are confined to, built as one.
   const { remoteRunnerRegistry, remoteSupervisor, sandboxSessionRegistry, mcpRegistry } = createRemoteExecutionServices({
     agentManager, workingDirectory, hookDispatcher, configManager, runtimeBus,
@@ -998,6 +1011,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     toolLLM,
     helperModel,
     distributedRuntime,
+    remoteBackends,
     remoteRunnerRegistry,
     remoteSupervisor,
     sessionMemoryStore,

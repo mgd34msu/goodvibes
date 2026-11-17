@@ -66,6 +66,7 @@ import { MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import type { RuntimeEventBus } from '@/runtime/index.ts';
 import type { DomainDispatch, RuntimeStore } from './store/index.ts';
 import { DistributedRuntimeManager } from '@/runtime/index.ts';
+import type { RemoteBackendHost } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { RemoteRunnerRegistry, RemoteSupervisor } from '@/runtime/index.ts';
 import { IntegrationHelperService } from '@/runtime/index.ts';
 import { VoiceProviderRegistry, VoiceService } from '@goodvibes-jev/engine/platform/platform/voice';
@@ -582,6 +583,8 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   /** The one helper route for supporting work; the orchestrator, resume summaries and titles share it. */
   readonly helperModel: HelperModel;
   readonly distributedRuntime: DistributedRuntimeManager;
+  /** Registered execution backends `remote.peers.invoke` runs a command on (docker, ssh, cloud terminal, local process). */
+  readonly remoteBackends: RemoteBackendHost;
   readonly remoteRunnerRegistry: RemoteRunnerRegistry;
   readonly remoteSupervisor: RemoteSupervisor;
   readonly sessionMemoryStore: SessionMemoryStore;

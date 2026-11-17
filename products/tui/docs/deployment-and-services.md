@@ -281,6 +281,26 @@ Service entries can use an existing `tokenKey` field, a SecretRef in the key fie
 }
 ```
 
+## Remote peers and execution backends
+
+`remote.peers.invoke` (`POST /api/remote/peers/{peerId}/invoke`, admin only) runs a command on one of two kinds of target:
+
+- a **paired peer**, a GoodVibes node or device that paired with this daemon: the command is queued as work the peer claims, and the answer is the queued work item (`remote.work.list` follows it);
+- a **registered backend**, a host the daemon runs the command on itself: the command runs at once and the answer carries `backend` with the exit code and the first 4 KB of stdout and stderr (with their full size and whether they were cut).
+
+Backends are registered by an admin with `remote.backends.register` (`POST /api/remote/backends`), listed with `remote.backends.list` and removed with `remote.backends.remove`. Four kinds exist:
+
+| Kind | Runs | Settings |
+| --- | --- | --- |
+| `docker` | `docker exec <container> sh -c <command>` | `containerName`, optional `dockerHost` |
+| `ssh` | the command over ssh with a key file written for the run and removed after | `sshHost`, `sshUser`, `identityRef`, optional `sshPort` |
+| `cloud-terminal` | `gcloud compute ssh`, `aws ssm start-session` or `az vm run-command invoke` | `provider` (`gcp`, `aws`, `azure`), `credentialRef`, optional `projectId`, `location`, `instance` |
+| `local-process` | the command on this machine, without a shell | optional `cwd`, optional `allowedCommands` |
+
+Credentials (`identityRef`, `credentialRef`, a TLS `dockerHost`) are `goodvibes://secrets/` references only; a raw key or password is refused. A container, instance, project or location starting with `-` is refused, because the CLI receiving it would read it as an option. An id a paired peer already holds cannot be registered as a backend. On a backend, `payload` takes `args`, `stdin`, `env`, `timeoutMs` (at most 10 minutes; default 2 minutes) and `cwd`; any other payload field is refused by name. An Azure command cannot start with `@`, which the Azure CLI would read as a local file to upload. The registry is opened on first use, so a daemon with no backends does no work for them.
+
+In the Agent, `agent_harness` modes `remote_backends`, `remote_backends_register`, `remote_backends_remove` and `remote_peers_invoke` reach these methods; a model's command is judged by the permission gate before it is sent, and arguments go in the command itself (`payload.args` is refused there).
+
 ## Integration helpers
 
 GoodVibes exposes integration-helper and control/state APIs for external clients and helpers. This layer is explicitly control/state APIs, not a UI protocol. It is meant for callers like another GoodVibes instance, a future web frontend or companion app, setup/auth helpers, and operational integrations that need session, approval, account, health, knowledge, search, artifact, or delivery posture.

@@ -40,7 +40,7 @@ import {
 import type { RouteBindingManager, ChannelPolicyManager, ChannelPluginRegistry, SurfaceRegistry } from '../../channels/index.js';
 import type { WatcherRegistry } from '../../watchers/index.js';
 import type { InboundMailHealthLike } from './channel-route-types.js';
-import type { DistributedPeerAuth, DistributedRuntimeManager } from '../../runtime/remote/index.js';
+import type { DistributedPeerAuth, DistributedRuntimeManager, RemoteBackendHost } from '../../runtime/remote/index.js';
 import type { HomeGraphService, KnowledgeService, ProjectPlanningService } from '../../knowledge/index.js';
 import { inspectKnowledgeGraphqlAccess, KnowledgeGraphqlService } from '../../knowledge/index.js';
 import type { VoiceService } from '../../voice/index.js';
@@ -134,6 +134,8 @@ interface DaemonHttpRouterContext {
   /** Inbound mail's health. Absent means no mailbox, NOT a healthy one. */
   readonly inboundMailHealth?: (() => InboundMailHealthLike | null) | undefined;
   readonly distributedRuntime: DistributedRuntimeManager;
+  /** Registered execution backends `remote.peers.invoke` runs a command on; absent where the host keeps none. */
+  readonly remoteBackends?: RemoteBackendHost | undefined;
   readonly watcherRegistry: WatcherRegistry;
   readonly voiceService: VoiceService;
   readonly webSearchService: WebSearchService;
@@ -882,6 +884,7 @@ export class DaemonHttpRouter {
         requireRemotePeer: (request, scope) => this.context.requireRemotePeer(request, scope),
         requireAuthenticatedSession: (request) => this.context.requireAuthenticatedSession(request),
         distributedRuntime: this.context.distributedRuntime,
+        remoteBackends: this.context.remoteBackends,
       },
       knowledge: this.knowledgeRouteContext(this.context.knowledgeService, this.context.knowledgeGraphqlService),
       agentKnowledge: this.knowledgeRouteContext(

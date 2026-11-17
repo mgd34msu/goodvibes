@@ -45,6 +45,7 @@ import type { BrowserJudgmentCapability } from '@goodvibes-jev/engine/daemon-api
 import type { RuntimeEventBus } from './events/index.js';
 import type { DomainDispatch, RuntimeStore } from './store/index.js';
 import type { DistributedRuntimeManager } from './remote/distributed-runtime-manager.js';
+import type { RemoteBackendHost } from './remote/host/backend-host.js';
 import type { RemoteRunnerRegistry, RemoteSupervisor } from './remote/index.js';
 import type { IntegrationHelperService } from './integration/helpers.js';
 import type { VoiceProviderRegistry, VoiceService } from '../voice/index.js';
@@ -450,6 +451,8 @@ export interface RuntimeServices {
   /** The one helper route for supporting work; the orchestrator, resume summaries and titles share it. */
   readonly helperModel: HelperModel;
   readonly distributedRuntime: DistributedRuntimeManager;
+  /** Registered execution backends `remote.peers.invoke` runs a command on (docker, ssh, cloud terminal, local process). */
+  readonly remoteBackends: RemoteBackendHost;
   readonly remoteRunnerRegistry: RemoteRunnerRegistry;
   readonly remoteSupervisor: RemoteSupervisor;
   readonly sessionMemoryStore: SessionMemoryStore;

@@ -2,12 +2,11 @@ import { decisionOrClassic, isClassicOperation, selectClassicCatalog, withConfig
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { routingRegistry, memoryCredentialState, memoryLiveStatus, memoryProviderSelect, memoryReceiptMember, memoryRouteRole, memorySchemaCertified } from '@goodvibes-jev/engine/platform/platform/routing';
-import { maskCredentialCandidates } from '@goodvibes-jev/engine/platform/platform/utils';
+import { routingRegistry, memoryProviderSelect } from '@goodvibes-jev/engine/platform/platform/routing';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { modelReadingServicePath, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { capturePersonalOpsSnapshot, personalOpsEntry, personalOpsJson } from './agent-harness-personal-ops-source.ts';
+import { capturePersonalOpsSnapshot, personalOpsJson } from './agent-harness-personal-ops-source.ts';
 
 /** The invocation's native callbacks and source owner remain the same through producer reads and final publication. */
 export function retainMemoryReadingOptions(original: CatalogRankingOptions): CatalogRankingOptions {
@@ -62,71 +61,6 @@ async function withMemoryReading<T, C>(source: unknown, options: CatalogRankingO
       }
     }, () => { assertMemoryCurrent(current); return classic(captured); },
     () => { assertMemoryCurrent(current); return true; });
-  }));
-}
-
-export async function readMemoryRouteRole(source: unknown, options: CatalogRankingOptions) {
-  const site = memoryRouteRole.name;
-  return withMemoryReading(source, options, memoryRouteRole, async (captured, authority) => {
-    const run = await memoryRouteRole.run(authority.port, personalOpsEntry(captured), { site, signal: authority.signal, beforeAttempt: authority.assertCurrent });
-    authority.assertCurrent(); run.recordAction('read-only published external-memory operation role');
-    const role = run.readings.role, form = run.readings.form;
-    if (role.outcome !== 'act' || form.outcome !== 'act' || (role.choice === 'none') !== (form.choice === 'none')) throw new ToolInputProjectionError('held');
-    return { role: role.choice, form: form.choice };
-  }, () => ({ role: 'unassessed' as const, form: 'none' as const }));
-}
-
-export async function readMemoryCredentialState(source: unknown, options: CatalogRankingOptions) {
-  const site = memoryCredentialState.name;
-  return withMemoryReading(source, options, memoryCredentialState, async (captured, authority) => {
-    const run = await memoryCredentialState.run(authority.port, personalOpsEntry(captured), { site, signal: authority.signal, beforeAttempt: authority.assertCurrent });
-    authority.assertCurrent(); run.recordAction('read-only published external-memory authentication posture');
-    if (run.readings.state.outcome !== 'act') throw new ToolInputProjectionError('held');
-    return run.readings.state.choice === 'unknown' ? null : run.readings.state.choice;
-  }, () => null);
-}
-
-export async function readMemoryLiveStatus(source: unknown, options: CatalogRankingOptions) {
-  const site = memoryLiveStatus.name;
-  return withMemoryReading(source, options, memoryLiveStatus, async (captured, authority) => {
-    const run = await memoryLiveStatus.run(authority.port, personalOpsEntry(captured), { site, signal: authority.signal, beforeAttempt: authority.assertCurrent });
-    authority.assertCurrent(); run.recordAction('read-only published external-memory provider status');
-    if (run.readings.status.outcome !== 'act') throw new ToolInputProjectionError('held');
-    return run.readings.status.choice;
-  }, () => 'unknown' as const);
-}
-
-export async function readMemoryReceiptMember(source: unknown, options: CatalogRankingOptions): Promise<boolean | null> {
-  const site = memoryReceiptMember.name;
-  return withMemoryReading(source, options, memoryReceiptMember, async (captured, authority) => {
-    const run = await memoryReceiptMember.run(authority.port, personalOpsEntry(captured), { site, signal: authority.signal, beforeAttempt: authority.assertCurrent });
-    authority.assertCurrent(); run.recordAction('read-only external-memory receipt membership');
-    const reading = run.readings.member;
-    if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new ToolInputProjectionError('held');
-    return reading.verdict === 'yes';
-  }, () => null);
-}
-
-export async function readMemorySchemaCertified(source: unknown, options: CatalogRankingOptions): Promise<boolean | null> {
-  const site = memorySchemaCertified.name;
-  return withMemoryReading(source, options, memorySchemaCertified, async (captured, authority) => {
-    const run = await memorySchemaCertified.run(authority.port, personalOpsEntry(captured), { site, signal: authority.signal, beforeAttempt: authority.assertCurrent });
-    authority.assertCurrent(); run.recordAction('read-only untyped external-memory schema publication claim');
-    const reading = run.readings.certified;
-    if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new ToolInputProjectionError('held');
-    return reading.verdict === 'yes';
-  }, () => null);
-}
-
-/**
- * Provider metadata with every credential-shaped span masked that its
- * characters do not prove harmless (maskCredentialCandidates): the same local
- * rule the journals use. No span is sent anywhere to be judged.
- */
-export async function readMemoryPublicText(source: string, options: CatalogRankingOptions): Promise<string> {
-  return withConfiguredDecisionModelPolicy(() => withModelReadingSource({ text: source }, retainMemoryReadingOptions(options), async (captured, current) => {
-    assertMemoryCurrent(current);
-    return maskCredentialCandidates(captured.text);
   }));
 }
 

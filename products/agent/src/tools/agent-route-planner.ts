@@ -16,7 +16,7 @@ import { HARNESS_MODE_DESCRIPTORS, listHarnessModes } from './agent-harness-mode
 import { prepareHarnessCatalog, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingInput, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { listWorkspaceActions } from './agent-harness-workspace-actions.ts';
-import { externalMemoryLiveProviderRecords, externalMemoryProviderCatalog, externalMemoryReceiptEvidence } from './agent-harness-memory-external-providers.ts';
+import { externalMemoryProviders } from './agent-harness-memory-external-providers.ts';
 
 /** Native declaration trees have no mutable production consumers. The workspace
  * categories freeze themselves where they are declared. */
@@ -112,7 +112,7 @@ export async function planAgentTaskRoute(
   assertCurrent();
   return withModelReadingSource(captured, { ...options, assertCurrent }, async (protectedArgs, readingOptions) => {
     assertCurrent();
-    const memory = externalMemoryProviderCatalog(await externalMemoryLiveProviderRecords(context, readingOptions), await externalMemoryReceiptEvidence(context, readingOptions));
+    const memory = await externalMemoryProviders(context, readingOptions);
     readingOptions.assertCurrent?.();
     const envelope = await listHarnessModes({ limit: 1000 }, readingOptions);
     readingOptions.assertCurrent?.();

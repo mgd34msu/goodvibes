@@ -16,7 +16,8 @@ export class PrivateSqliteDirectoryMovedError extends Error {
 
 /**
  * Locate the workspace's private SQLite directory (`.goodvibes/tui/operator`)
- * once. With `create`, missing directories are made owner-only. The directory
+ * once. With `create`, missing directories are made owner-only. `.goodvibes`,
+ * `tui` and `operator` must each be a plain directory, never a link. The directory
  * must belong to this user and is kept owner-only (0700). Afterwards only that
  * directory's own identity (device and inode) is checked: changing the mode or
  * owner of the workspace, the home directory or any other ancestor does not
@@ -28,8 +29,23 @@ export function capturePrivateSqliteDirectory(workingDirectory: string, options:
 } {
   const assertOwner = options.assertCurrent.bind(options);
   synchronous(assertOwner);
-  const selected = join(options.create ? resolve(workingDirectory) : realpathSync(workingDirectory), '.goodvibes', 'tui', 'operator');
-  if (options.create) mkdirSync(selected, { recursive: true, mode: 0o700 });
+  const workspace = options.create ? resolve(workingDirectory) : realpathSync(workingDirectory);
+  if (options.create) mkdirSync(workspace, { recursive: true, mode: 0o700 });
+  // Each of `.goodvibes`, `tui` and `operator` must be a real directory inside
+  // the workspace: a repository that ships one of them as a link would choose
+  // where the operator's private stores are written and which directory is
+  // re-moded to 0700. Nothing is created through a link.
+  let selected = workspace;
+  for (const part of ['.goodvibes', 'tui', 'operator']) {
+    selected = join(selected, part);
+    if (options.create && !lstatSync(selected, { throwIfNoEntry: false })) {
+      try { mkdirSync(selected, { mode: 0o700 }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    }
+    const entry = lstatSync(selected); // missing without `create`: throws ENOENT
+    if (entry.isSymbolicLink() || !entry.isDirectory()) {
+      throw new Error(`Private SQLite storage is unavailable: ${selected} is ${entry.isSymbolicLink() ? 'a symbolic link' : 'not a directory'}, so the operator stores were not opened there. Replace it with a plain directory (or remove it), then restart.`);
+    }
+  }
   const directory = realpathSync(selected);
   const stat = lstatSync(directory, { bigint: true });
   if (!stat.isDirectory() || (process.geteuid && stat.uid !== BigInt(process.geteuid()))) {

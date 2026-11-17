@@ -1,10 +1,14 @@
 /**
  * What the provider calls of this process have shown about each provider: a
  * provider whose last call failed on its credentials, its rate limit or its
- * availability carries that status until a later call succeeds (or, for a
- * transient fault, until a short window passes). Every provider call goes
- * through `instrumentedLlmCall`, which is the one writer; the route planner,
- * the optimizer and the health views read it through `ProviderRegistry.health()`.
+ * availability carries that status until a later call succeeds or its hold
+ * ends, whichever comes first. Every hold ends: routed work never picks a
+ * provider while it holds, so a success alone could never clear it, and a
+ * provider fixed outside this process (a key renewed, a bill paid, a local
+ * server started) is tried again. Every provider call goes through
+ * `instrumentedLlmCall`, which writes call outcomes; the startup model-list
+ * sweep writes the providers it could not reach. The route planner, the
+ * optimizer and the health views read it through `ProviderRegistry.health()`.
  */
 import { classifyFailure } from '@goodvibes-jev/engine/errors';
 
@@ -24,7 +28,7 @@ export interface ProviderHealthEntry {
   readonly status: ProviderStatus;
   /** Epoch ms the status was set. */
   readonly since: number;
-  /** Epoch ms after which the status no longer holds; absent while it holds until a call succeeds. */
+  /** Epoch ms after which the status no longer holds and the provider is tried again. */
   readonly until?: number | undefined;
   /** Why, in a few words (the failure category or the startup reason). */
   readonly reason: string;
@@ -32,6 +36,12 @@ export interface ProviderHealthEntry {
 
 /** How long a network, server or timeout failure keeps a provider out of routes before it is tried again. */
 const TRANSIENT_HOLD_MS = 60_000;
+/**
+ * How long a credential, billing or startup-unreachable failure keeps a
+ * provider out of routes. Longer than a transient fault, since these are
+ * usually fixed by a person, but bounded so the fix is noticed without a restart.
+ */
+const RECHECK_HOLD_MS = 10 * 60_000;
 
 const entries = new Map<string, ProviderHealthEntry>();
 
@@ -51,10 +61,10 @@ export function recordProviderCallOutcome(providerId: string, error?: unknown, n
   switch (failure.category) {
     case 'authentication':
     case 'authorization':
-      entries.set(providerId, { status: 'auth_error', since: now, reason: failure.category });
+      entries.set(providerId, { status: 'auth_error', since: now, until: now + RECHECK_HOLD_MS, reason: failure.category });
       return;
     case 'billing':
-      entries.set(providerId, { status: 'unavailable', since: now, reason: 'billing' });
+      entries.set(providerId, { status: 'unavailable', since: now, until: now + RECHECK_HOLD_MS, reason: 'billing' });
       return;
     case 'rate_limit':
       entries.set(providerId, { status: 'rate_limited', since: now, until: now + (failure.retryAfterMs ?? TRANSIENT_HOLD_MS), reason: 'rate_limit' });
@@ -67,6 +77,16 @@ export function recordProviderCallOutcome(providerId: string, error?: unknown, n
     default:
       return;
   }
+}
+
+/**
+ * Record a provider whose model listing failed in the startup sweep. A status
+ * a call already recorded is kept (it is newer evidence); a later successful
+ * call clears this one like any other.
+ */
+export function recordProviderUnreachable(providerId: string, reason: string, now: number = Date.now()): void {
+  if (entries.has(providerId)) return;
+  entries.set(providerId, { status: 'unavailable', since: now, until: now + RECHECK_HOLD_MS, reason });
 }
 
 /** Forget what was recorded for a provider: its registration (credentials, endpoint) was replaced. */

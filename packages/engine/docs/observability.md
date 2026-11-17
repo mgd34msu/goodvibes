@@ -461,7 +461,7 @@ To debug it, `runtime.state.get` (operator method, admin, `read:health`; `GET /a
 
 ### Provider health
 
-The provider registry owns provider health. Every provider call goes through `instrumentedLlmCall`, which records the outcome: a failure on credentials marks the provider `auth_error` until a call succeeds or the provider is registered again, a spent account marks it `unavailable` the same way, a rate limit marks it `rate_limited` until its retry-after (60 seconds when none is given), and a network, timeout or server failure marks it `unavailable` for 60 seconds. A successful call clears it. Providers whose model listing failed in the startup sweep are reported `unavailable` until they are called successfully.
+The provider registry owns provider health. Every provider call goes through `instrumentedLlmCall`, which records the outcome: a failure on credentials marks the provider `auth_error` for 10 minutes, a spent account marks it `unavailable` for 10 minutes, a rate limit marks it `rate_limited` until its retry-after (60 seconds when none is given), and a network, timeout or server failure marks it `unavailable` for 60 seconds. Providers whose model listing failed in the startup sweep are marked `unavailable` for 10 minutes. A successful call or registering the provider again clears any of these sooner; when a hold ends the provider is routed again, so a key renewed, a bill paid or a local server started later is picked up without a restart.
 
 ```ts
 const health = providerRegistry.health();

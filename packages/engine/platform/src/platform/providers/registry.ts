@@ -1148,15 +1148,12 @@ export class ProviderRegistry {
 
   /**
    * Every registered provider that cannot serve, or is limited, now: what its
-   * calls this session showed (provider-health.ts) and, for one not called
-   * since, its failure in the startup sweep. A provider absent is healthy or
-   * not yet known.
+   * calls this session showed and the startup sweep's failures, until a call
+   * succeeds or the hold ends (provider-health.ts). A provider absent is
+   * healthy or not yet known.
    */
   health(): ReadonlyMap<string, ProviderHealthEntry> {
     const health = new Map<string, ProviderHealthEntry>();
-    for (const [providerId, reason] of this.unreachableAtStartup()) {
-      if (this.providers.has(providerId)) health.set(providerId, { status: 'unavailable', since: 0, reason });
-    }
     for (const [providerId, entry] of readProviderHealth()) {
       if (this.providers.has(providerId)) health.set(providerId, entry);
     }

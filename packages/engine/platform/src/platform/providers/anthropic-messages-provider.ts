@@ -21,6 +21,7 @@ import { assembleAnthropicContentBlocks, oneHourCacheWriteTokens, withOneHourCac
 import { withProviderStopReason } from './provider-stop-reason.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
+import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import { trackDeliveredOutput } from './stream-delivery.js';
 import { buildStandardProviderAuthRoutes, summarizeProviderAuth } from './runtime-metadata.js';
 import { toProviderError } from '../utils/error-display.js';
@@ -122,7 +123,8 @@ export class AnthropicMessagesProvider implements LLMProvider {
 
   async chat(params: ChatRequest): Promise<ChatResponse> {
     const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
-    return withRetry(async () => {
+    // Instrumented like every other adapter: the call is metered and its outcome feeds provider health.
+    return (await instrumentedLlmCall(() => withRetry(async () => {
       const resolvedModel = normalizeAnthropicModel(params.model ?? this.defaultModel);
       const body: Record<string, unknown> = {
         model: this.wireModelId(resolvedModel),
@@ -232,7 +234,8 @@ export class AnthropicMessagesProvider implements LLMProvider {
           phase: 'stream',
         });
       }
-    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, params.onRetry);
+    }, { ...(params.signal ? { signal: params.signal } : {}), ...(params.beforeAttempt ? { beforeAttempt: params.beforeAttempt } : {}), ...(params.maxRetries !== undefined ? { maxRetries: params.maxRetries } : {}), canRetry }, params.onRetry),
+    { provider: this.name, model: params.model ?? this.defaultModel })).result;
   }
 
   async describeRuntime(deps: ProviderRuntimeMetadataDeps): Promise<ProviderRuntimeMetadata> {

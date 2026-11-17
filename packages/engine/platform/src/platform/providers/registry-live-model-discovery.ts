@@ -12,6 +12,7 @@
 
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { recordProviderUnreachable } from './provider-health.js';
 import type { LLMProvider } from './interface.js';
 import type { ModelDefinition } from './registry-types.js';
 import {
@@ -137,8 +138,13 @@ export class StartupModelDiscovery {
     this.#settled = sweep().then(
       (reports) => {
         for (const report of reports) {
-          if (report.error !== undefined) this.#unreachable.set(report.providerId, report.error);
-          else this.#unreachable.delete(report.providerId);
+          if (report.error !== undefined) {
+            this.#unreachable.set(report.providerId, report.error);
+            // Routing reads provider health; the hold ends, and a successful call clears it sooner.
+            recordProviderUnreachable(report.providerId, report.error);
+          } else {
+            this.#unreachable.delete(report.providerId);
+          }
         }
       },
       (error: unknown) => { logger.warn('[provider-models] Background live model discovery failed', { error: summarizeError(error) }); },

@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync, type BigIntStats } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { sourceReadsFromFolded, type SourceReadEvidence } from '../contract/evidence.js';
@@ -28,6 +29,22 @@ const sameFile = (before: BigIntStats, after: BigIntStats): boolean => after.dev
  */
 const fileIdentity = (info: BigIntStats): string => `${info.dev}:${info.ino}:${info.size}`;
 
+/**
+ * A stored read result's identity: its call id and a digest of its returned
+ * text, so two results that share a call id and a length are never taken for
+ * one another. Memoised per message object, so a live conversation's results
+ * are hashed once, not on every re-scan.
+ */
+const resultDigests = new WeakMap<object, string>();
+function resultIdentity(message: Record<string, unknown> & { callId: string; content: string }): string {
+  let digest = resultDigests.get(message);
+  if (digest === undefined) {
+    digest = createHash('sha256').update(message.content).digest('base64url');
+    resultDigests.set(message, digest);
+  }
+  return `${message.callId}\0${digest}`;
+}
+
 /** One read result qualified against an input tree: the file lines it returned that match the tree. */
 type QualifiedRead = readonly { readonly path: string; readonly rows: readonly (readonly [number, string])[] }[];
 
@@ -48,11 +65,12 @@ export interface OwnerReadSource {
  *
  * A read's qualification is a function of its call id, its returned text and
  * the input tree, none of which changes, so each read is qualified once per
- * tree and kept. A journal on disk is re-read only when its identity changed;
+ * owner session and tree and kept: one session's rows are never credited to
+ * another whose results happen to share a call id. A journal on disk is re-read only when its identity changed;
  * a live conversation is re-scanned only when its length or last message did. */
 export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): OwnerEvidenceReader {
   const source: OwnerReadSource = typeof from === 'string' ? { surfaceDirectory: from } : from;
-  // Derived results only; journal bytes are never kept. Eight sessions, eight trees.
+  // Derived results only; journal bytes are never kept. Eight sessions, eight (session, tree) pairs.
   const cache = new Map<string, { scope: SourceReadEvidence[]; calls: string[];
     rows: Map<string, [number, string][]>; citations: RegExp;
     sources: readonly { path: string; bytes: number }[];
@@ -132,16 +150,17 @@ export function createOwnerReadEvidenceReader(from: string | OwnerReadSource): O
       for (const message of messages) if (message['role'] === 'assistant' && Array.isArray(message['toolCalls'])) {
         for (const call of message['toolCalls']) if (object(call) && call['name'] === 'read' && typeof call['id'] === 'string') requests.set(call['id'], call);
       }
-      const qualified = qualifiedByTree.get(inputTree) ?? new Map<string, QualifiedRead>();
-      remember(qualifiedByTree, inputTree, qualified);
+      const qualifiedKey = `${sessionId}\0${inputTree}`;
+      const qualified = qualifiedByTree.get(qualifiedKey) ?? new Map<string, QualifiedRead>();
+      remember(qualifiedByTree, qualifiedKey, qualified);
       const records: { callId: string; identity: string }[] = [];
       const pending: { callId: string; identity: string; files: { path: string; content: string; readObservation?: unknown }[] }[] = [];
       const seen = new Set<string>();
       for (const message of messages) {
         if (message['role'] !== 'tool' || typeof message['callId'] !== 'string' || typeof message['content'] !== 'string') continue;
         if (!requests.has(message['callId'])) continue;
-        // A call id's returned text never changes; its length tells a re-stored copy from a different result.
-        const identity = `${message['callId']}\0${message['content'].length}`;
+        // A call id's returned text never changes; its digest tells a re-stored copy from a different result.
+        const identity = resultIdentity(message as Record<string, unknown> & { callId: string; content: string });
         if (seen.has(identity)) continue;
         seen.add(identity);
         records.push({ callId: message['callId'], identity });

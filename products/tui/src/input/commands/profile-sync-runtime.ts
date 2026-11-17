@@ -102,10 +102,11 @@ export function registerProfileSyncRuntimeCommands(registry: CommandRegistry): v
           return;
         }
         const incoming = bundle.profiles.map((entry) => ({ name: prefix ? `${prefix}-${entry.name}` : entry.name, data: entry.data }));
-        // Profiles are stored under their sanitized name, so that is the name a clash is judged by.
-        const unstorable = incoming.filter((entry) => !/[a-z0-9]/i.test(entry.name)).map((entry) => entry.name);
+        // Profiles are stored under their sanitized name, so that is the name a clash is judged by;
+        // the manager's own test decides which names keep nothing once stored.
+        const unstorable = incoming.filter((entry) => pm.storedName(entry.name) === undefined).map((entry) => entry.name);
         if (unstorable.length > 0) {
-          ctx.print(`Profile sync import refused: ${unstorable.length} profile name(s) have no letters or digits: ${unstorable.map((name) => JSON.stringify(name)).join(', ')}. Nothing was changed.`);
+          ctx.print(`Profile sync import refused: ${unstorable.length} profile name(s) keep no characters once stored (letters and digits of any script, "-" and "_" are kept): ${unstorable.map((name) => JSON.stringify(name)).join(', ')}. Nothing was changed.`);
           return;
         }
         const seen = new Map<string, string>();

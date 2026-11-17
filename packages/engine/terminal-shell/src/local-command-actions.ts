@@ -10,6 +10,8 @@ export interface LocalCommandContext {
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
   readonly submitInput?: ((text: string, content: ContentPart[]) => void) | undefined;
+  /** Sends the image prompt as a turn exactly as given. */
+  readonly submitTurn?: ((text: string, content: ContentPart[]) => void) | undefined;
   readonly workspace: { readonly shellPaths?: { readonly workingDirectory: string } | undefined };
   readonly platform: { readonly configManager: { getWorkingDirectory(): string | null | undefined } };
   readonly session: { readonly conversationManager: TerminalConversationManager };
@@ -93,6 +95,8 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
       description: 'Attach an image file to the next message',
       usage: '<path> [prompt text]',
       argsHint: policy.imageHint,
+      // The prompt after the path is free text, sent as typed.
+      rawRest: 1,
       async handler(args: string[], ctx: Context) {
         if (args.length === 0) {
           ctx.print('Usage: /image <path> [prompt text]\nSupported formats: PNG, JPEG, WebP, GIF');
@@ -148,7 +152,11 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
           { type: 'text', text: promptText },
           { type: 'image', data, mediaType },
         ];
-        ctx.submitInput?.(promptText, content);
+        if (!ctx.submitTurn) {
+          ctx.print('The image was not sent: this surface cannot send a message.');
+          return;
+        }
+        ctx.submitTurn(promptText, content);
       },
     } satisfies TerminalSlashCommand<Context>,
     'refresh-models': {

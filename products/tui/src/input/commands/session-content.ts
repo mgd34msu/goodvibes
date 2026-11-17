@@ -197,7 +197,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
               editTemplate(result.item.id);
             } else {
               const content = templateManager.load(result.item.id);
-              if (content !== null) ctx.submitInput?.(content);
+              if (content !== null) ctx.submitTurn?.(content);
               else ctx.print(`Template not found: ${result.item.id}`);
             }
           });
@@ -240,7 +240,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           ctx.print(`Template not found: ${name}\nRun /template list to see available templates.`);
           return;
         }
-        ctx.submitInput?.(templateManager.expand(templateContent, parseTemplateArgs(rest.slice(1))));
+        ctx.submitTurn?.(templateManager.expand(templateContent, parseTemplateArgs(rest.slice(1))));
         return;
       }
       if (sub === 'show' || sub === 'edit') {

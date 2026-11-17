@@ -524,7 +524,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   };
   commandContext.dispatchNativeIntakeTurn = (state) => dispatchNativeTurn(state);
 
-  const submitInput = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
+  const beginSubmission = (): void => {
     commandReadings.cancelAll();
     hostPairing?.cancelForTakeover();
     // Acting here after another surface took the session over is what moves the conversation back for rewinds.
@@ -533,6 +533,11 @@ async function main(prepared: PreparedShellCliRuntime) {
     }
     transcript.toBottom(); // Re-lock on any user input
     conversation.dismissSplash(); // owner rule: any submission retires the splash for the run
+  };
+
+  /** Text typed into the composer: its grammar (`@model:`, `!`, `!#`, `# `) applies. */
+  const submitInput = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
+    beginSubmission();
     const directives = splitAtModelDirectives(text);
     if (directives.models.length > 0) {
       void switchThenSubmit(directives.models, directives.text, content, options);
@@ -560,6 +565,16 @@ async function main(prepared: PreparedShellCliRuntime) {
     } else {
       render();
     }
+  };
+
+  /**
+   * Send text as a turn exactly as given: skill bodies, retries, templates,
+   * forms and speech. Only text typed into the composer is read for its grammar.
+   */
+  const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
+    beginSubmission();
+    // The output of `!` commands run since the last message goes with this one.
+    sendOwnerTurn(shellPassthrough.consumeContext(text), content, options.spokenOutput ? createSpokenTurnInputOptions() : undefined);
   };
 
   const runShellCommand = (command: string): void => {
@@ -668,6 +683,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     commandContext,
     createShellSubmissionPorts(
       submitInput,
+      submitTurn,
       () => spokenTurns.stop(),
       () => input.handlePaste(),
     ),
@@ -861,7 +877,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     commandContext,
     unsubs,
     buffer: input,
-    submitInput: (text) => submitInput(text, undefined, { source: captureNativeConversationInput(text) }),
+    // Speech is sent as said; only typed composer text has a grammar.
+    submitInput: (text) => submitTurn(text, undefined, { source: captureNativeConversationInput(text) }),
     notify: (m) => {
       systemMessageRouter.high(m);
       render();

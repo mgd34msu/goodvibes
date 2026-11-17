@@ -14,6 +14,8 @@ export interface CommandRouteContext {
   };
   readonly executeCommand?: ((name: string, args: string[]) => Promise<boolean>) | undefined;
   readonly submitInput?: ((input: string) => unknown) | undefined;
+  /** Sends text as a turn exactly as given (a skill's body is not composer input). */
+  readonly submitTurn?: ((input: string) => unknown) | undefined;
 }
 export interface CommandRouteState<Context extends CommandRouteContext> {
   commandMode: boolean;
@@ -139,8 +141,13 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
                     homeDirectory: shellPaths.homeDirectory,
                   })
                 : null;
-              if (skillContent) {
-                state.commandContext?.submitInput?.(skillContent);
+              const submitTurn = state.commandContext?.submitTurn;
+              if (skillContent && submitTurn) {
+                // A skill file's body is sent as written: a leading `!` or `# ` in it is not the owner typing a shell command or a note.
+                submitTurn(skillContent);
+              } else if (skillContent) {
+                state.conversationManager?.log(`The skill /${name} was found, but this surface cannot send it as a message.`, { fg: activeTokens().error });
+                state.requestRender();
               } else {
                 state.conversationManager?.log(presentation.unknownCommand(name), { fg: activeTokens().error });
                 state.requestRender();

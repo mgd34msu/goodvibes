@@ -425,7 +425,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
       // so the print is the start. The owner's start sends the steps as a message,
       // since printed text is display-only and never reaches the model.
       if (ctx.invokedByModel !== true) {
-        if (!ctx.submitInput) {
+        if (!ctx.submitTurn) {
           ctx.print([
             `Not started: Agent routine ${found.id} runs as a message in the conversation, and this surface cannot send one.`,
             readinessLine,
@@ -441,7 +441,7 @@ export async function runRoutinesRuntimeCommand(args: readonly string[], ctx: Co
           `  name ${routine.name}`,
           readinessLine,
         ].join('\n'));
-        ctx.submitInput(`Run Agent routine ${routine.name} (${routine.id}).\n\n${routine.steps}`);
+        ctx.submitTurn(`Run Agent routine ${routine.name} (${routine.id}).\n\n${routine.steps}`);
         return;
       }
       const routine = routineRegistry.markStarted(found.id);

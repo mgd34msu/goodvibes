@@ -184,7 +184,8 @@ export function handleConfigModalToken(state: ConfigModalRouteState, token: Inpu
     }
   }
 
-  const submitInput = state.commandContext?.submitInput;
+  // A form's text is sent as written; only the composer reads `!`, `# ` and `@model:`.
+  const submitInput = state.commandContext?.submitTurn;
   const fired =
     actionKey.length > 0 &&
     state.configModal.fireAction(actionKey, {

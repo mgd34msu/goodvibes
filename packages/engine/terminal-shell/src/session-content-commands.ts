@@ -20,6 +20,8 @@ interface ContentContext {
   print(message: string): void;
   renderRequest(): void;
   readonly submitInput?: ((message: string) => void) | undefined;
+  /** Resends a message exactly as it was sent, without the composer's grammar. */
+  readonly submitTurn?: ((message: string) => void) | undefined;
 }
 export function createSessionContentCommands<Context extends ContentContext, Message>(policy: {
   readonly paths: (context: Context) => Pick<ShellPathService, 'resolveWorkspacePath' | 'isWithinWorkingDirectory'>;
@@ -132,7 +134,7 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
         ctx.print('No message to retry.');
         return;
       }
-      if (!ctx.submitInput) {
+      if (!ctx.submitTurn) {
         ctx.print('Retry is unavailable here: this surface cannot resubmit a message, so the conversation was left unchanged.');
         return;
       }
@@ -142,7 +144,7 @@ export function createSessionContentCommands<Context extends ContentContext, Mes
         ctx.print('Nothing was retried: the last turn could not be removed, and sending it again would duplicate it. Type the message as a new prompt if you still want an answer.');
         return;
       }
-      ctx.submitInput(args.length ? args.join(' ') : last);
+      ctx.submitTurn(args.length ? args.join(' ') : last);
     },
   };
   return { exportCommand, titleCommand, retryCommand };

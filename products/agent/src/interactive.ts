@@ -769,13 +769,13 @@ async function main(prepared: PreparedShellCliRuntime) {
 
   Object.assign(
     commandContext,
+    // Spoken input and submitTurn send text as given; only typed composer text has a grammar.
     createShellSubmissionPorts(
       submitComposerText,
+      submitTurn,
       () => spokenTurns.stop(),
       () => input.handlePaste(),
     ),
-    // Spoken input is sent as said; only typed composer text has a grammar.
-    { submitSpokenInput: (text: string, content?: ContentPart[]): void => submitTurn(text, content, { spokenOutput: true, source: captureNativeConversationInput(text, content) }) },
   );
   // Companion messages and an activated plan take the composer's path as sent (no
   // composer grammar), carrying their origin; refused text is shown, not put in the draft.

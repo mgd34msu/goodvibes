@@ -15,15 +15,22 @@ export function readShellFrameFacts<PromptInfo>(
   return { runningProcessCount, cw, promptInfo: input.getWrappedPromptInfo(cw), commandArgsHint: argsHint(input.prompt) };
 }
 /** Capture original spoken input before the product's normal transformation and admission path. */
+/**
+ * The submission ports of a command context: `submitInput` is the composer
+ * (its grammar applies), `submitTurn` sends text exactly as given, and speech
+ * is sent as said.
+ */
 export function createShellSubmissionPorts(
   submit: (text: string, content?: ContentPart[], options?: ProductInputContext) => void,
+  turn: (text: string, content?: ContentPart[], options?: ProductInputContext) => void,
   stop: () => boolean | void,
   paste: () => { readonly pasted: boolean },
 ) {
   return {
     submitInput: submit,
+    submitTurn: turn,
     submitSpokenInput: (text: string, content?: ContentPart[]): void =>
-      submit(text, content, { spokenOutput: true, source: captureNativeConversationInput(text, content) }),
+      turn(text, content, { spokenOutput: true, source: captureNativeConversationInput(text, content) }),
     stopSpokenOutput: stop,
     pasteFromClipboard: paste,
   };

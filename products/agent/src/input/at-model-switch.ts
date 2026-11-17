@@ -14,9 +14,7 @@
 
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/platform/platform/providers';
-
-const LEADING_AT_MODEL_RE = /^@model:(\S+)(?:\s+|$)/;
-const TRAILING_AT_MODEL_RE = /\s+@model:(\S+)$/;
+import { splitAtModelDirectives } from '@goodvibes-jev/engine/terminal-shell/submission-router';
 
 export interface AtModelSwitchOptions {
   readonly providerRegistry: Pick<ProviderRegistry, 'setCurrentModel' | 'getCurrentModel'>;
@@ -56,10 +54,6 @@ function switchModel(modelId: string, options: AtModelSwitchOptions): boolean {
  * Returns the input unchanged when there is none, which is the common case.
  */
 export function applyAtModelSwitches(text: string, options: AtModelSwitchOptions): string {
-  let processed = text.trim();
-  const leading = LEADING_AT_MODEL_RE.exec(processed);
-  if (leading && switchModel(leading[1]!, options)) processed = processed.slice(leading[0].length);
-  const trailing = TRAILING_AT_MODEL_RE.exec(processed);
-  if (trailing && switchModel(trailing[1]!, options)) processed = processed.slice(0, trailing.index);
-  return processed === text.trim() ? text : processed.trim();
+  // The one reading of the token, shared with the TUI (terminal-shell submission-router).
+  return splitAtModelDirectives(text, (model) => switchModel(model, options)).text;
 }

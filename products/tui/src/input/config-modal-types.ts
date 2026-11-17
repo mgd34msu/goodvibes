@@ -108,8 +108,8 @@ export interface ConfigModalActionContext {
    *  surface in place, the same seam ctx.openModal uses. */
   readonly openModal?: (name: string) => void;
   /**
-   * Submit text to the chat/model as a real user turn, the same composer
-   * submission seam `handleUserInput` uses (threaded from CommandContext.submitInput).
+   * Submit text to the chat/model as a real user turn, exactly as written: the
+   * form's text is not composer input (threaded from CommandContext.submitTurn).
    * Generic across surfaces (any modal may hand free-form input to the model).
    *
    * ORDERING GUARD: a turn must never start while a modal owns the keyboard,

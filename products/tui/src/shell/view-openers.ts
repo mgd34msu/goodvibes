@@ -110,7 +110,8 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     workingDirectory: views.workingDirectory,
     getSessionFiles: views.getSessionFiles,
     requestRender: render,
-    submitInput: (text) => commandContext.submitInput?.(text),
+    // A steer message built from the review is sent as written, not read as composer input.
+    submitInput: (text) => commandContext.submitTurn?.(text),
     openInEditor: (path, line) => commandContext.openFileInEditor?.(path, line),
     revertHunk: (hunk) => revertReviewHunk(commandContext, hunk),
     confirm: (confirmOptions) => confirmThrough(host, confirmOptions),

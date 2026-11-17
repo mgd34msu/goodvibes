@@ -25,6 +25,17 @@ export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
   print: (text: string) => void;
   exit: () => void;
   submitSpokenInput?: (text: string, content?: import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[]) => void;
+  /**
+   * Send text as a conversation turn exactly as given, with none of the
+   * composer's grammar (`!` shell, `# ` note, `!#` pin, `@model:` switch).
+   * Skill bodies, retries, templates, image prompts, forms and speech use this;
+   * only text typed into the composer goes through `submitInput`.
+   */
+  submitTurn?: (
+    text: string,
+    content?: import('@goodvibes-jev/engine/platform/platform/providers').ContentPart[],
+    context?: import('./native/native-conversation-input.js').ProductInputContext,
+  ) => void;
   stopSpokenOutput?: () => void;
   pasteFromClipboard?: () => {
     pasted: boolean;

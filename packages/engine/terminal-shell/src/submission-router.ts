@@ -32,6 +32,34 @@ export function readComposerMarker(text: string): ComposerMarker {
         return { kind: 'note', body: leading.slice(1).trim() };
     return { kind: 'none' };
 }
+const LEADING_AT_MODEL = /^@model:(\S+)(?:\s+|$)/;
+const TRAILING_AT_MODEL = /\s+@model:(\S+)$/;
+/**
+ * The `@model:<id>` switch, part of the composer's grammar in both terminal
+ * apps: a whole token at the start or at the end of typed text
+ * (`@model:opus summarize this`, `summarize this @model:opus`). Text that only
+ * contains `@model:` elsewhere (an `scp user@model:/srv` line, a pasted log)
+ * is sent as written. `take` switches to one id and says whether it did; a
+ * token it refuses (an id that names no model) stays in the text, so nothing
+ * typed disappears. Returns the ids taken, in order, and the text without
+ * them; the input unchanged when none was taken. Text that is not typed into
+ * the composer (forms, speech, skill bodies, retries) never comes here.
+ */
+export function splitAtModelDirectives(input: string, take: (model: string) => boolean = () => true): { readonly models: readonly string[]; readonly text: string } {
+    let text = input.trim();
+    const models: string[] = [];
+    const leading = LEADING_AT_MODEL.exec(text);
+    if (leading && take(leading[1]!)) {
+        models.push(leading[1]!);
+        text = text.slice(leading[0].length);
+    }
+    const trailing = TRAILING_AT_MODEL.exec(text);
+    if (trailing && take(trailing[1]!)) {
+        models.push(trailing[1]!);
+        text = text.slice(0, trailing.index);
+    }
+    return { models, text: models.length > 0 ? text.trim() : input };
+}
 export interface ComposerCaptureDeps {
     readonly sessionMemoryStore: { add(text: string): string };
     /** Shows the confirmation or usage line. */

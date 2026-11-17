@@ -14,7 +14,7 @@ export { HandlerSqliteStore } from './daemon-handler-sqlite-store.js';
 export type { HandlerSqliteStoreOptions, HandlerSqliteTransaction } from './daemon-handler-sqlite-store.js';
 export { TelemetryDB } from './telemetry.js';
 export type { ToolCallRecord, TelemetryFilter, TelemetrySummary } from './telemetry.js';
-export { FileUndoManager } from './file-undo.js';
+export { FileUndoConflictError, FileUndoManager } from './file-undo.js';
 export type { FileOperation, FileUndoEntry, FileUndoResult } from './file-undo.js';
 export { MemoryStore, memoryRecordTemporalStatus, isMemoryTemporallyActive } from './memory-store.js';
 export { MemoryRegistry } from './memory-registry.js';

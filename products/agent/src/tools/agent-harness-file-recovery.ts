@@ -2,6 +2,7 @@ import { isAbsolute, relative } from 'node:path';
 import { lstatSync, realpathSync } from 'node:fs';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
+import { FileUndoConflictError } from '@goodvibes-jev/engine/platform/platform/state';
 import type { CommandContext } from '../input/command-registry.ts';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 
@@ -136,25 +137,44 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
   if (!next) return { status: 'nothing_to_recover', recoveryAction: action, summary: managerStatus(context) };
   const root = context.workspace.shellPaths?.workingDirectory;
   if (!root) return { status: 'held', error: `File recovery requires an active workspace, and none is set for this session. ${RECOVERY_NEXT_STEP}` };
-  const captured = { ...next };
-  if (!harnessCatalogInvocationAuthority(args, options, 'write')) {
-    return { status: 'held', error: `File recovery requires current recorded effect admission. ${RECOVERY_NEXT_STEP}` };
+  // One entry may restore several files (one tool call); every one must be inside the workspace.
+  for (const operation of next.operations ?? [next]) {
+    try {
+      const target = resolveAndValidatePath(operation.path, root);
+      // A dangling symlink is absent to existsSync but writeFileSync follows it.
+      // Inspect that final component independently before restoring any bytes.
+      if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) realpathSync(target);
+    } catch {
+      return { status: 'held', error: `File recovery target ${workspacePath(context, operation.path)} is outside the active workspace, or cannot be resolved (missing, or a dangling or escaping symlink). ${RECOVERY_NEXT_STEP}` };
+    }
   }
-  if (context.workspace.fileUndoManager !== manager || context.workspace.shellPaths?.workingDirectory !== root
-    || (action === 'undo' ? manager.peekUndo() : manager.peekRedo()) !== next
-    || next.path !== captured.path || next.tool !== captured.tool || next.timestamp !== captured.timestamp
-    || next.beforeContent !== captured.beforeContent || next.afterContent !== captured.afterContent) {
-    return { status: 'held', error: `File recovery source or workspace changed between inspection and the action. ${RECOVERY_NEXT_STEP}` };
-  }
+  let result: ReturnType<typeof manager.undo>;
   try {
-    const target = resolveAndValidatePath(captured.path, root);
-    // A dangling symlink is absent to existsSync but writeFileSync follows it.
-    // Inspect that final component independently before restoring any bytes.
-    if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) realpathSync(target);
-  } catch {
-    return { status: 'held', error: `File recovery target is outside the active workspace, or cannot be resolved (missing, or a dangling or escaping symlink). ${RECOVERY_NEXT_STEP}` };
+    result = action === 'undo' ? manager.undo() : manager.redo();
+  } catch (failure) {
+    const summary = managerStatus(context);
+    const following = action === 'undo' ? summary.nextUndo : undefined;
+    if (failure instanceof FileUndoConflictError) {
+      return {
+        status: 'conflict',
+        recoveryAction: action,
+        path: workspacePath(context, failure.path),
+        reason: `The file was changed after that ${failure.direction === 'undo' ? 'edit' : 'undo'}, so restoring it would overwrite the later change. No file was changed and that history entry was dropped.`,
+        summary,
+        next: summary[action === 'undo' ? 'undoDepth' : 'redoDepth'] > 0
+          ? `The next ${action} now acts on the entry before it${following ? ` (${String(following.path)}, ${String(following.tool)} at ${String(following.timestamp)})` : ''}; inspect it with execution action:"recovery" before running ${action} again.`
+          : `No further ${action} entries remain; restore the file by hand if the older content is wanted.`,
+      };
+    }
+    return {
+      status: 'failed',
+      recoveryAction: action,
+      path: workspacePath(context, next.path),
+      reason: failure instanceof Error ? failure.message : String(failure),
+      summary,
+      next: 'The history entry was kept; fix the cause (permissions, disk space) and run the same recovery again.',
+    };
   }
-  const result = action === 'undo' ? manager.undo() : manager.redo();
   if (!result) {
     return {
       status: 'nothing_to_recover',
@@ -166,6 +186,7 @@ export function runFileRecovery(context: FileRecoveryContext, args: Record<strin
     status: 'applied',
     recoveryAction: action,
     path: workspacePath(context, result.path),
+    ...(result.paths.length > 1 ? { paths: result.paths.map((path) => workspacePath(context, path)) } : {}),
     tool: result.tool,
     summary: managerStatus(context),
     policy: 'File recovery restored file bytes from the local FileUndoManager snapshot without exposing recovered content.',

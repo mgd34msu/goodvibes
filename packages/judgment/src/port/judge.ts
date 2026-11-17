@@ -115,6 +115,8 @@ export interface JudgeOutcome<R> {
   readonly detail?: string;
   /** The decision log entry the value was read from. */
   readonly decisionId?: string;
+  /** True when a request went to the decision model (an answer, an unsure answer, a missed deadline or a failed request). */
+  readonly requested?: boolean;
 }
 
 const UNIT_SEPARATOR = '\u001f';
@@ -164,10 +166,11 @@ function everyTargetCooling(port: JudgmentPort): boolean {
  *   the action are written to the decision log once, when it completes.
  */
 export async function judge<const Items extends BatteryItems, R>(o: JudgeOptions<Items, R>): Promise<JudgeOutcome<R>> {
-  const fallback = (why: JudgeFallbackReason, detail?: string, decisionId?: string): JudgeOutcome<R> => ({
+  const fallback = (why: JudgeFallbackReason, detail?: string, decisionId?: string, requested = false): JudgeOutcome<R> => ({
     value: o.fallback(why), source: 'fallback', why,
     ...(detail === undefined ? {} : { detail }),
     ...(decisionId === undefined ? {} : { decisionId }),
+    ...(requested ? { requested } : {}),
   });
   if (o.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
   if (o.off) return fallback('off');
@@ -223,9 +226,9 @@ export async function judge<const Items extends BatteryItems, R>(o: JudgeOptions
   } catch (error) {
     if (settleFailure !== undefined) throw settleFailure.error;
     if (o.signal?.aborted) throw error;
-    if (deadline.signal.aborted) return fallback('deadline', `no answer within ${deadlineMs} ms`);
+    if (deadline.signal.aborted) return fallback('deadline', `no answer within ${deadlineMs} ms`, undefined, true);
     if (isDecisionModelsOff(error)) return fallback('off');
-    return fallback('unavailable', failureDetail(error));
+    return fallback('unavailable', failureDetail(error), undefined, true);
   } finally {
     clearTimeout(timer);
   }
@@ -243,6 +246,6 @@ export async function judge<const Items extends BatteryItems, R>(o: JudgeOptions
   }
   const value = concluded.value;
   if (key !== undefined) cache?.set(key, value === undefined ? { settled: false, decisionId } : { settled: true, value, decisionId });
-  if (value === undefined) return fallback('unsure', undefined, decisionId);
-  return { value, source: 'model', ...(decisionId === undefined ? {} : { decisionId }) };
+  if (value === undefined) return fallback('unsure', undefined, decisionId, true);
+  return { value, source: 'model', requested: true, ...(decisionId === undefined ? {} : { decisionId }) };
 }

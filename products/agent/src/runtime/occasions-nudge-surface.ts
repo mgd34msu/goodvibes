@@ -201,23 +201,40 @@ export function createOccasionsNudgeSurface(
   // Single-flight: the ledger is read before the pull's await and replaced
   // after it, so two overlapping raises would both decide against the old
   // ledger and say the same line twice. A caller arriving mid-pull shares that
-  // pull's result; the next turn's call pulls afresh.
+  // pull's result; the next turn's call pulls afresh. A caller arriving after
+  // the owner submitted a turn the pull predates (that turn may already have
+  // completed) would share a result that is dropped as overtaken, so one more
+  // pull runs when it settles and the caller gets that one's result.
   let inFlight: Promise<number> | null = null;
+  let inFlightTurn = 0;
+  let pullAgain = false;
+
+  const pullUntilCurrent = async (): Promise<number> => {
+    try {
+      for (;;) {
+        pullAgain = false;
+        inFlightTurn = turnsSubmitted;
+        let raised = 0;
+        try {
+          raised = await raiseNow();
+        } catch (error) {
+          logger.debug('occasions: raise failed', { error: summarizeError(error) });
+        }
+        if (!pullAgain) return raised;
+      }
+    } finally {
+      inFlight = null;
+    }
+  };
 
   return {
     noteTurnSubmitted: (): void => { turnsSubmitted++; },
     raiseNow: (): Promise<number> => {
-      if (inFlight) return inFlight;
-      inFlight = (async (): Promise<number> => {
-        try {
-          return await raiseNow();
-        } catch (error) {
-          logger.debug('occasions: raise failed', { error: summarizeError(error) });
-          return 0;
-        } finally {
-          inFlight = null;
-        }
-      })();
+      if (inFlight) {
+        if (inFlightTurn !== turnsSubmitted) pullAgain = true;
+        return inFlight;
+      }
+      inFlight = pullUntilCurrent();
       return inFlight;
     },
   };

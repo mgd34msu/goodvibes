@@ -41,7 +41,7 @@ bun packages/engine/scripts/typecheck.ts --project engine-tests  # packages/engi
 bun packages/engine/scripts/typecheck.ts --project agent         # also tui, daemon, webui; refreshes stale engine declarations first
 ```
 
-The other names are `judgment`, `judgment-tests`, `type-tests` and `integration-tests`; an unknown name lists them. A scoped run trusts file times, so it can report nothing for a tree whose times were restored; it is not a substitute for the full run before a merge.
+The other names are `judgment`, `judgment-tests` and `type-tests`; an unknown name lists them. A scoped run trusts file times, so it can report nothing for a tree whose times were restored; it is not a substitute for the full run before a merge.
 
 ## Gates: if you touch X, run Y
 

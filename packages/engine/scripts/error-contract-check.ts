@@ -106,7 +106,6 @@ async function assertRetryContract(): Promise<void> {
   const retryLiteralAllowedFiles = new Set([
     'errors/src/failure-transience.ts',
     'scripts/error-contract-check.ts',
-    'test/error-kind.test.ts',
   ]);
 
   assert(

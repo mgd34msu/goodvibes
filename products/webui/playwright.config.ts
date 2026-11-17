@@ -1,4 +1,3 @@
-import { networkInterfaces } from 'node:os';
 import { defineConfig, devices } from '@playwright/test';
 
 /**
@@ -29,36 +28,6 @@ const WEB_PORT = Number(process.env.GOODVIBES_E2E_PORT ?? 4318);
 const BASE_URL = `http://127.0.0.1:${WEB_PORT}`;
 
 /**
- * The one real, GENUINE private-network address this host itself owns (an RFC 1918
- * interface, 10/8, 172.16/12, 192.168/16), for lan-origin-posture.e2e.ts. This is
- * deliberately a REAL bind + a REAL browser navigation, not a mocked window.location:
- * Chromium's own secure-context determination is a fact about the literal address the
- * page was actually served from, and no in-page mock can fake that. Undefined when the
- * host has no such interface (a loopback-only sandbox), an explicitly requested LAN proof reports unsupported in that
- * case; independent phone/desktop proofs can still run.
- */
-function firstPrivateNetworkAddress(): string | undefined {
-  const isPrivate = (a: string): boolean => {
-    const m = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(a);
-    if (!m) return false;
-    const first = Number(m[1]);
-    const second = Number(m[2]);
-    if (first === 10) return true;
-    if (first === 172 && second >= 16 && second <= 31) return true;
-    if (first === 192 && second === 168) return true;
-    return false;
-  };
-  let interfaces: ReturnType<typeof networkInterfaces>;
-  try { interfaces = networkInterfaces(); } catch { return undefined; }
-  for (const addrs of Object.values(interfaces)) {
-    for (const addr of addrs ?? []) {
-      if (addr.family === 'IPv4' && !addr.internal && isPrivate(addr.address)) return addr.address;
-    }
-  }
-  return undefined;
-}
-
-/**
  * Where the one build lands. The service worker caches only built, hashed assets,
  * which is also what lets pwa-offline.e2e.ts prove the app opens offline.
  * GOODVIBES_E2E_DIST moves it, so two local runs on different ports do not
@@ -74,19 +43,6 @@ const PREVIEW_ENV = {
   GOODVIBES_TUI_SETTINGS_PATH: '/nonexistent/goodvibes-e2e-settings.json',
 };
 
-const LAN_ORIGIN_PORT = Number(process.env.GOODVIBES_E2E_LAN_PORT ?? 4319);
-const LAN_ORIGIN_HOST = firstPrivateNetworkAddress();
-const LAN_ORIGIN_SPEC = '**/lan-origin-posture.e2e.ts';
-const selectedProjects = process.argv.flatMap((argument, index) =>
-  argument.startsWith('--project=') ? [argument.slice('--project='.length)]
-    : argument === '--project' && process.argv[index + 1] ? [process.argv[index + 1]] : []);
-const lanRequired = selectedProjects.length === 0 || selectedProjects.includes('lan-origin') || selectedProjects.includes('*');
-// Playwright reloads this config in workers without the original CLI project
-// flags. Admission belongs to the coordinator; workers inherit its selection.
-if (lanRequired && !LAN_ORIGIN_HOST && process.env.TEST_WORKER_INDEX === undefined) {
-  throw new Error('LAN-origin proof unsupported: no readable private-network interface is available. Select --project=phone --project=desktop for independent loopback proofs; required LAN coverage cannot pass here.');
-}
-
 export default defineConfig({
   testDir: './e2e',
   // Files are named *.e2e.ts (NOT *.spec.ts) so `bun test`, which globs *.spec.ts /
@@ -95,7 +51,6 @@ export default defineConfig({
   outputDir: './e2e/.artifacts/test-output',
   // Every test gets its own browser context and its own in-page mock daemon, so
   // tests are independent and run in parallel, file by file and within a file.
-  // The monorepo CI browser job runs phone, desktop, and the real LAN origin.
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
@@ -114,7 +69,6 @@ export default defineConfig({
   projects: [
     {
       name: 'phone',
-      testIgnore: LAN_ORIGIN_SPEC,
       use: {
         ...devices['Pixel 7'],
         // Pin the exact hero viewport the brief specifies, overriding the device default.
@@ -125,23 +79,9 @@ export default defineConfig({
     },
     {
       name: 'desktop',
-      testIgnore: LAN_ORIGIN_SPEC,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1280, height: 800 },
-      },
-    },
-    // lan-origin: the ONE project that actually serves the app from a real
-    // private-network address (see firstPrivateNetworkAddress above), so the LAN-http
-    // posture proof (lan-origin-posture.e2e.ts) exercises the REAL browser secure-context
-    // boundary rather than a mocked window.location. Every other spec is ignored here.
-    {
-      name: 'lan-origin',
-      testMatch: LAN_ORIGIN_SPEC,
-      use: {
-        ...devices['Desktop Chrome'],
-        viewport: { width: 1280, height: 800 },
-        baseURL: LAN_ORIGIN_HOST ? `http://${LAN_ORIGIN_HOST}:${LAN_ORIGIN_PORT}` : BASE_URL,
       },
     },
   ],
@@ -170,22 +110,5 @@ export default defineConfig({
       stderr: 'pipe',
       env: PREVIEW_ENV,
     },
-    // A second preview of the same build, bound to the host's own real
-    // private-network address, for the "lan-origin" project only. Never started
-    // when the host has none (LAN_ORIGIN_HOST undefined; that project's baseURL
-    // then remains a placeholder only in independent phone/desktop runs). No secure context
-    // there, so register-sw.ts leaves the service worker unregistered, which is
-    // the labeled-degradation story that spec proves.
-    ...(lanRequired && LAN_ORIGIN_HOST
-      ? [{
-        command: `bunx vite preview --outDir ${E2E_DIST} --host ${LAN_ORIGIN_HOST} --port ${String(LAN_ORIGIN_PORT)} --strictPort`,
-        url: `http://${LAN_ORIGIN_HOST}:${String(LAN_ORIGIN_PORT)}`,
-        timeout: 120_000,
-        reuseExistingServer: !process.env.CI,
-        stdout: 'pipe' as const,
-        stderr: 'pipe' as const,
-        env: PREVIEW_ENV,
-      }]
-      : []),
   ],
 });

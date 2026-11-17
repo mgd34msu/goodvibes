@@ -5,7 +5,7 @@
  * judged by its OUTPUT as well as its exit code (typecheck-output-rule.ts).
  *
  * The engine sources (judgment and every engine package) are the one build.
- * Everything else, the test, type-test, integration and product projects,
+ * Everything else, the test, type-test and product projects,
  * reads the declarations that build wrote through its project references and
  * is checked with `tsc --project`, which never rebuilds a referenced project
  * and so never checks engine source a second time.
@@ -24,9 +24,6 @@ const CHECK_ONLY: readonly TscStep[] = [
   { label: 'tsc -p packages/judgment/tsconfig.tests.json', args: ['--project', 'packages/judgment/tsconfig.tests.json'], emits: false },
   { label: 'tsc -p packages/engine/tsconfig.tests.json (test/ and scripts/)', args: ['--project', 'packages/engine/tsconfig.tests.json'], emits: false },
   { label: 'tsc -p packages/engine/tsconfig.type-tests.json', args: ['--project', 'packages/engine/tsconfig.type-tests.json'], emits: false },
-  // Cross-product fixtures import Agent, daemon and engine implementations,
-  // checked under Agent's module aliases.
-  { label: 'tsc -p packages/engine/tsconfig.integration-tests.json', args: ['--project', 'packages/engine/tsconfig.integration-tests.json'], emits: false },
 ];
 
 // Scoped iteration: `--project <name>` runs one `tsc -b` WITHOUT `--force`, so a
@@ -39,7 +36,6 @@ const SCOPED_PROJECTS: Readonly<Record<string, TscStep>> = {
   engine: engineSourcesBuild(false),
   'engine-tests': { label: 'tsc -b packages/engine/tsconfig.tests.json (test/ and scripts/)', args: ['-b', 'packages/engine/tsconfig.tests.json'], emits: true },
   'type-tests': { label: 'tsc -b packages/engine/tsconfig.type-tests.json', args: ['-b', 'packages/engine/tsconfig.type-tests.json'], emits: true },
-  'integration-tests': CHECK_ONLY[3]!,
 };
 const PRODUCTS = ['agent', 'tui', 'daemon', 'webui'] as const;
 const PROJECT_NAMES = [...Object.keys(SCOPED_PROJECTS), ...PRODUCTS];

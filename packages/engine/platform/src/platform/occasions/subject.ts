@@ -64,22 +64,32 @@ export function attributionKey(occasion: Pick<Occasion, 'title' | 'person'>, dec
  *
  * `store` is false when nothing was learned (no model, decision models off, the
  * deadline passed or the model was unreachable): the line is treated as
- * `unattributed` for now, the ordinary cadence, and read again next time. An
+ * `unattributed` for now, the ordinary cadence, and read again later. An
  * answer the model gave, including one it could not settle, is stored: asking
- * the same question again would get the same answer.
+ * the same question again would get the same answer. `requestFailed` is true
+ * when a request was made and came back with nothing (a missed deadline or an
+ * unreachable model): the caller holds off asking again for a while, so an
+ * outage does not slow every read.
  */
+/** One attribution reading: the subject, whether it is kept, and whether a request failed to produce it. */
+export interface OccasionSubjectReading {
+  readonly subject: OccasionSubject;
+  readonly store: boolean;
+  readonly requestFailed: boolean;
+}
+
 export async function readOccasionSubject(
   occasion: Pick<Occasion, 'title' | 'person'>,
   declaredNames: readonly string[],
   signal?: AbortSignal,
-): Promise<{ readonly subject: OccasionSubject; readonly store: boolean }> {
+): Promise<OccasionSubjectReading> {
   let state: EntryType;
   try {
     state = occasionEntry(snapshotJudgmentInput({ title: occasion.title, person: occasion.person, declaredNames: [...declaredNames] }) as object);
   } catch (error) {
     // Credential or card material in a title is never sent to a model. The line
     // keeps the ordinary cadence, and that is a settled fact for this key.
-    if (error instanceof JudgmentInputError) return { subject: 'unattributed', store: true };
+    if (error instanceof JudgmentInputError) return { subject: 'unattributed', store: true, requestFailed: false };
     throw error;
   }
   const outcome = await judge({
@@ -95,7 +105,8 @@ export async function readOccasionSubject(
     describe: (subject) => `attributed occasion subject: ${subject}`,
     ...(signal === undefined ? {} : { signal }),
   });
-  return { subject: outcome.value, store: outcome.source !== 'fallback' || outcome.why === 'unsure' };
+  const store = outcome.source !== 'fallback' || outcome.why === 'unsure';
+  return { subject: outcome.value, store, requestFailed: !store && outcome.requested === true };
 }
 
 /**

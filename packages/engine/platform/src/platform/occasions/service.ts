@@ -43,7 +43,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { preparePending } from './pending.js';
 import { readOccasionsPolicy, readOccasionsTimezone, type OccasionsConfigAccess } from './policy.js';
 import { readOccasionDeclarations, readPlans, type OccasionProfileSource, type OccasionReadResult } from './reader.js';
-import { attributionKey, needsSubjectReading, readOccasionSubject } from './subject.js';
+import { attributionKey, declaredSubject, needsSubjectReading, readOccasionSubject, type OccasionSubjectReading } from './subject.js';
 import type { OccasionStateStore } from './state-store.js';
 import { decideSweep, effectiveLead, occurrenceWindow, type OccasionsPolicy } from './sweep.js';
 import {
@@ -144,11 +144,20 @@ interface OccasionsOperation {
 }
 
 const CLASSIC_PROVENANCE = { provenance: 'classic', semanticAssessment: 'not-evaluated' } as const;
+/** How long a line whose attribution request failed goes without being asked again. */
+const ATTRIBUTION_RETRY_MS = 10 * 60_000;
 
 export class OccasionsService {
   private readonly answerOwners = new Map<string, AbortController>();
   /** One reading in flight per attribution key, shared by concurrent callers. */
-  private readonly attributionReads = new Map<string, Promise<{ readonly subject: OccasionSubject; readonly store: boolean }>>();
+  private readonly attributionReads = new Map<string, Promise<OccasionSubjectReading>>();
+  /**
+   * Attribution keys whose last request came back with nothing (a missed
+   * deadline, an unreachable model), and when they may be asked again. Until
+   * then the line takes its declared subject without a request, so a decision
+   * model outage costs one failed request per line per window, not one per read.
+   */
+  private readonly attributionRetryAt = new Map<string, number>();
   constructor(private readonly deps: OccasionsServiceDeps) {}
 
   private now(): number {
@@ -195,7 +204,8 @@ export class OccasionsService {
    * `for me` that has no stored reading for its current title, person and names
    * is read once (in parallel with any others) and the readings are stored in
    * one write; a reading that could not be taken (no model, deadline) is not
-   * stored and the line takes the ordinary cadence until the next call.
+   * stored and the line takes the ordinary cadence until the next call, or,
+   * when a request was made and failed, until the retry window has passed.
    */
   private async read(op: OccasionsOperation, options: OccasionMutationOptions): Promise<OccasionsReading> {
     await this.deps.state.prepareRead(options);
@@ -234,12 +244,14 @@ export class OccasionsService {
     const subjects = new Map<string, OccasionSubject>();
     const wanted: { readonly occasion: Occasion; readonly key: string }[] = [];
     let stored: ReadonlyMap<string, OccasionAttribution> | undefined;
+    for (const [key, retryAt] of this.attributionRetryAt) if (retryAt <= now) this.attributionRetryAt.delete(key);
     for (const occasion of occasions) {
       if (!needsSubjectReading(occasion)) continue;
       stored ??= new Map((await this.deps.state.attributions()).map((entry) => [entry.occasionId, entry]));
       const key = attributionKey(occasion, names);
       const hit = stored.get(occasion.id);
       if (hit !== undefined && hit.key === key) subjects.set(occasion.id, hit.subject);
+      else if (this.attributionRetryAt.has(key)) subjects.set(occasion.id, declaredSubject(occasion));
       else wanted.push({ occasion, key });
     }
     if (wanted.length === 0) return subjects;
@@ -254,6 +266,7 @@ export class OccasionsService {
       const reading = readings[index]!;
       subjects.set(occasion.id, reading.subject);
       if (reading.store) records.push({ occasionId: occasion.id, key, subject: reading.subject, readAt: now });
+      if (reading.requestFailed) this.attributionRetryAt.set(key, now + ATTRIBUTION_RETRY_MS);
     });
     try {
       await this.deps.state.recordAttributions(records, op.admitted);

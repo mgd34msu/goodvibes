@@ -4,11 +4,11 @@ import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes-jev/en
 import type { ShellPathService } from '@/runtime/index.ts';
 import { MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { AgentPersonaRegistry, type AgentPersonaRecord } from '../agent/persona-registry.ts';
+import { AgentPersonaRegistry, type AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AgentNoteRegistry, type AgentNoteRecord } from '../agent/note-registry.ts';
-import { AgentRoutineRegistry, type AgentRoutineRecord } from '../agent/routine-registry.ts';
-import { AgentSkillRegistry, type AgentSkillBundleRecord, type AgentSkillRecord } from '../agent/skill-registry.ts';
-import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '../agent/record-labels.ts';
+import { AgentRoutineRegistry, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry, type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertActorMayEnable, assertActorMayMarkReviewed } from '../agent/review-authority.ts';
 import { formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import { buildAgentLocalRequirements } from './agent-local-registry-requirements.ts';

@@ -7,9 +7,9 @@ import { assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry
 import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { createLocalMemoryAccess, type MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
-import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
-import { AgentSkillRegistry } from '../agent/skill-registry.ts';
+import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './agent-learning-consolidation-core.ts';
 import type { LearningCandidate } from './agent-harness-learning-curator.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';

@@ -12,9 +12,9 @@ import { runTranslatedWorkspaceCommand } from './agent-harness-command-runner.ts
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
-import { personaStorePath } from '../agent/persona-registry.ts';
-import { skillStorePath } from '../agent/skill-registry.ts';
-import { routineStorePath } from '../agent/routine-registry.ts';
+import { personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { routineStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
 import { effectOutput, error, nestedToolOutput, output, readFieldMap, readString, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 

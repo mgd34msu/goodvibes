@@ -10,7 +10,7 @@ import { assertOperatorEffect, captureOperatorConnection } from '../agent/operat
 import { delegatedOperatorConnection, forgetDelegatedCredential } from '../agent/agent-delegation-credential.ts';
 import { isOperatorAutomationTargetMethod } from '../agent/operator-automation-target.ts';
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
-import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '../agent/operator-contract-routes.ts';
+import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './agent-operator-input-projector.ts';
 import { confirmParameter, requestParameter } from './agent-harness-effect-admission.ts';
 

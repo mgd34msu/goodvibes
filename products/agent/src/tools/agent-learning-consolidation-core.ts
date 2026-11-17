@@ -1,15 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { runStoreFileUpdateSync, writeStoreJson } from '@/utils/store-file.ts';
+import { runStoreFileUpdateSync, writeStoreJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { AgentPersonaRegistry, type AgentPersonaRecord } from '../agent/persona-registry.ts';
-import { AgentRoutineRegistry, type AgentRoutineRecord } from '../agent/routine-registry.ts';
-import { AgentSkillRegistry, type AgentSkillRecord } from '../agent/skill-registry.ts';
+import { AgentPersonaRegistry, type AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentRoutineRegistry, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { AgentSkillRegistry, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   resolveLearningConsolidationCandidate,
   type LearningCandidate,

@@ -11,7 +11,7 @@ import { registerAgentBrowserTool } from '../tools/agent-browser-tool.ts';
 import { registerAgentDocumentsTool } from '../tools/agent-documents-tool.ts';
 import { registerAgentAccountsTool } from '../tools/agent-accounts-tool.ts';
 import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS } from '@goodvibes-jev/engine/platform/platform/google';
-import { containsSecretLikeText } from '../agent/memory-safety.ts';
+import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './bootstrap-google-tool.ts';
 import { registerAgentKnowledgeIngestTool } from '../tools/agent-knowledge-ingest-tool.ts';
 import { registerAgentKnowledgeTool } from '../tools/agent-knowledge-tool.ts';

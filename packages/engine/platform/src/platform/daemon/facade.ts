@@ -5,7 +5,7 @@ import { channelProfileForSession, withChannelExecutionMode } from '../channel-p
 import { applyChannelProfileToSpawn } from '../channel-profiles/intake.js';
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import { withTurnSurfaceId } from '../security/turn-boundary.js';
-import { runDaemonBootGuarantees } from './facade-boot-guarantees.js';
+import { releaseDaemonActivityLog, runDaemonBootGuarantees } from './facade-boot-guarantees.js';
 import { logger } from '../utils/logger.js';
 import { jsonErrorResponse } from './http/error-response.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -85,6 +85,7 @@ import { requirePortAvailable } from './port-check.js';
 import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
+import { configureVoiceRequestLifetime } from './http/voice-request-lifetime.js';
 import { bindClientAddress, bindLocalOrigin, isDirectLoopbackRequest, resolveClientAddress } from './client-address.js';
 import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './http/listener-admission.js';
 import type { ServiceCommandRunner } from './service-handover.js';
@@ -883,6 +884,7 @@ export class DaemonServer {
         ...(tlsState.tls ? { tls: tlsState.tls } : {}),
         async fetch(req: Request, server: UpgradeCapableServer): Promise<Response | undefined> {
           configureJudgmentRequestLifetime(req, server);
+          configureVoiceRequestLifetime(req, server);
           // Resolved once here; every security event, the sign-in limiter and the audit read this one value.
           const peerAddress = server.requestIP?.(req)?.address;
           const clientAddress = resolveClientAddress(req, peerAddress, { trustProxy: self.trustProxyEnabled() });
@@ -1174,6 +1176,7 @@ export class DaemonServer {
       if (forHandover) await this.nativeHandoverDrain?.();
       await this.lifecycle?.drainHandovers(forHandover);
       await this.closeSupplementalResources();
+      if (!forHandover) releaseDaemonActivityLog(this.configManager);
       return;
     }
 
@@ -1252,6 +1255,10 @@ export class DaemonServer {
     else logger.debug('DaemonServer released without ever binding a socket');
     this.acceptedTransportBinding = null;
     await close(async () => { await this.lifecycle?.onStopping(false, forHandover, runtimeCloseFailures.length === 0); });
+    // The activity log this daemon named ends with it: a final flush that does
+    // not rebuild a directory the host removes after stop. A handover keeps it
+    // for the process that takes over.
+    if (!forHandover) releaseDaemonActivityLog(this.configManager);
     if (runtimeCloseFailures.length > 0) throw new AggregateError(runtimeCloseFailures, 'Daemon runtime services cleanup failed');
   }
 

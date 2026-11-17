@@ -49,8 +49,6 @@ export type AgentExecutionStatus = 'running' | 'succeeded' | 'failed' | 'cancell
 export type AgentExecutionRouteKind = SideEffectKind;
 
 export interface AgentExecutionResultSummary {
-  /** Passive provenance from execution, never authority. */
-  readonly autonomousDecision?: JevDecision | undefined;
   readonly kind: string;
   readonly byteSize: number;
   readonly preview?: string | undefined;
@@ -371,7 +369,6 @@ function statusForPhase(phase: ToolEvent['type']): AgentExecutionStatus {
 function resultSummaryFrom(value: Extract<ToolEvent, { type: 'TOOL_SUCCEEDED' | 'TOOL_FAILED' }>['result']): AgentExecutionResultSummary | undefined {
   if (!value) return undefined;
   return {
-    ...(value.autonomousDecision ? { autonomousDecision: structuredClone(value.autonomousDecision) } : {}),
     kind: value.kind,
     byteSize: value.byteSize,
     ...(typeof value.preview === 'string' && value.preview.trim() ? { preview: truncateText(value.preview, 220) } : {}),
@@ -479,14 +476,12 @@ export class AgentExecutionLedger {
       existing.completedAt = timestamp;
       existing.durationMs = event.durationMs;
       existing.resultSummary = resultSummaryFrom(event.result);
-      if (event.result?.autonomousDecision) existing.autonomousDecision = structuredClone(event.result.autonomousDecision);
     }
     if (event.type === 'TOOL_FAILED') {
       existing.completedAt = timestamp;
       existing.durationMs = event.durationMs;
       existing.error = truncateText(event.error, 220);
       existing.resultSummary = resultSummaryFrom(event.result);
-      if (event.result?.autonomousDecision) existing.autonomousDecision = structuredClone(event.result.autonomousDecision);
     }
     if (event.type === 'TOOL_CANCELLED') {
       const pending = this.pending.get(existing.id);

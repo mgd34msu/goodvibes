@@ -1323,7 +1323,6 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     error: { kind: 'string' },
     durationMs: { kind: 'number' },
     result: { kind: 'object', optional: true, fields: [
-      { key: 'autonomousDecision', kind: 'object', optional: true },
       { key: 'kind', kind: 'string' },
       { key: 'byteSize', kind: 'number' },
       { key: 'preview', kind: 'string', optional: true },
@@ -1372,7 +1371,6 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     tool: { kind: 'string' },
     durationMs: { kind: 'number' },
     result: { kind: 'object', optional: true, fields: [
-      { key: 'autonomousDecision', kind: 'object', optional: true },
       { key: 'kind', kind: 'string' },
       { key: 'byteSize', kind: 'number' },
       { key: 'preview', kind: 'string', optional: true },

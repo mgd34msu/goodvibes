@@ -11,8 +11,6 @@ import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
  * into the event stream while still providing enough context for observability.
  */
 export interface ToolResultSummary {
-  /** Decision provenance only; never permission to execute. */
-  readonly autonomousDecision?: JevDecision | undefined;
   /** Discriminant for the result shape (e.g. 'text', 'json', 'error', 'binary'). */
   kind: string;
   /** Approximate byte size of the raw result. */

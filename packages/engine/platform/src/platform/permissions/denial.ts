@@ -1,11 +1,10 @@
 /**
  * Shared construction of what rides on a gated tool call: the decision object
- * (state, who decided, reason, next step), the older {@link ToolDenial}, and
- * the self-explaining error string the asking agent reads. Centralised so every
+ * (state, who decided, reason, next step) and the self-explaining error string the asking agent reads. Centralised so every
  * tool path produces identical data.
  */
 
-import type { ToolDecision, ToolDecisionMaker, ToolDenial } from '../types/tools.js';
+import type { ToolDecision, ToolDecisionMaker } from '../types/tools.js';
 import type { PermissionDecisionReasonCode } from './types.js';
 
 /**
@@ -13,8 +12,8 @@ import type { PermissionDecisionReasonCode } from './types.js';
  *
  * Distinct from the internal `PermissionCheckResult.reasonCode` value
  * (`'plan_mode'`): this is the wire-facing token surfaces branch on to render
- * the plan-mode pill/affordance, and it is the value the asking agent sees on
- * `ToolResult.denial.reason`.
+ * the plan-mode pill/affordance, and it is the value the asking agent reads in
+ * the refusal's error text.
  */
 export const PLAN_MODE_DENIAL_REASON = 'plan-mode';
 
@@ -36,24 +35,6 @@ export interface DenialSource {
 /** True when this refusal was produced by plan mode. */
 export function isPlanModeDenial(source: DenialSource): boolean {
   return source.reasonCode === PLAN_MODE_REASON_CODE;
-}
-
-/**
- * Build the structured, call-scoped denial for a refused tool call.
- *
- * Plan-mode refusals surface `reason: 'plan-mode'` so surfaces and the asking
- * agent recognise them specifically; every other refusal passes the permission
- * layer's reason code through unchanged. `standing` says whether every later
- * call like this one is refused too, so a surface or agent need not parse text.
- */
-export function buildToolDenial(source: DenialSource): ToolDenial {
-  return {
-    denied: true,
-    reason: isPlanModeDenial(source) ? PLAN_MODE_DENIAL_REASON : source.reasonCode,
-    scope: source.sourceLayer,
-    standing: refusalFacts(source.reasonCode, '').standing,
-    ...(source.userReason ? { detail: source.userReason } : source.detail ? { detail: source.detail } : {}),
-  };
 }
 
 /** A gate result, as {@link toolDecisionOf} reads it. */

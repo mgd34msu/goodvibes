@@ -1,4 +1,3 @@
-import type { JevDecision } from '@goodvibes-jev/judgment/decisions';
 import type { DecisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import type { ToolActivity } from '@goodvibes-jev/engine/contracts';
 
@@ -216,28 +215,6 @@ export interface ToolCall {
 }
 
 /**
- * Structured denial detail for a tool call the permission layer blocked.
- *
- * Rides on the failed ToolResult so the ASKING agent receives machine-readable
- * denial data scoped to that exact call, never a hung promise and never a bare
- * throw, and can continue and report honestly instead of parsing an error
- * string. `reason` is the permission layer's reason code (see
- * PermissionDecisionReasonCode, e.g. 'user_denied' / 'config_deny') and `scope`
- * is the layer that produced the decision (see PermissionDecisionSource, e.g.
- * 'user_prompt' / 'config_policy'); both are kept as plain strings so this
- * low-level type stays free of a permissions/ import.
- */
-export interface ToolDenial {
-  readonly denied: true;
-  readonly reason: string;
-  readonly scope: string;
-  /** True when every later call like this one is refused too for the rest of the session. */
-  readonly standing?: boolean | undefined;
-  /** Optional user free-text (e.g. why a call was declined) for the model to adapt to. */
-  readonly detail?: string | undefined;
-}
-
-/**
  * Facts a tool reports to the host that the model must not see. Hosts (evidence
  * collection, receipts) read them here; conversation rendering never includes them.
  */
@@ -260,7 +237,6 @@ export interface ToolHostEvidence {
 export interface ToolResult {
   /** Host execution policy, never a decision-model receipt or semantic completion claim. */
   decisionPolicy?: DecisionModelPolicyState;
-  readonly autonomousDecision?: JevDecision | undefined;
   callId: string;
   success: boolean;
   output?: string | undefined;
@@ -269,14 +245,9 @@ export interface ToolResult {
   warnings?: readonly string[] | undefined;
   /**
    * The gate's decision: on every refused call, and on an allowed one when Jev
-   * or the owner decided it. See {@link ToolDecision}.
+   * or the owner decided it (with Jev's decision log id). See {@link ToolDecision}.
    */
   decision?: ToolDecision | undefined;
-  /**
-   * Present only when the call was refused by the permission layer.
-   * @deprecated Read {@link ToolResult.decision}; this older shape lacks who decided and what to do next.
-   */
-  denial?: ToolDenial | undefined;
   /**
    * True when this specific call was cancelled by the user mid-flight (per-call
    * cooperative cancellation, NOT a whole-turn abort). The turn continues:

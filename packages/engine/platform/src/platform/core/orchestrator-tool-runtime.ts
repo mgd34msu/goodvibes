@@ -20,7 +20,7 @@ import type { ToolCall, ToolDefinition, ToolResult } from '../types/tools.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { PermissionManager } from '../permissions/manager.js';
-import { buildToolDenial, buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
+import { buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
   emitGateDecision,
@@ -307,7 +307,6 @@ function toCancelledResult(callId: string, settled: ToolResult | null): ToolResu
     error: settled?.success === true ? TOOL_CALL_CANCELLED_AFTER_COMPLETION_MESSAGE : TOOL_CALL_CANCELLED_MESSAGE,
     cancelled: true,
     ...(settled?.output !== undefined ? { output: settled.output } : {}),
-    ...(settled?.autonomousDecision ? { autonomousDecision: settled.autonomousDecision } : {}),
     ...(settled?.decision ? { decision: settled.decision } : {}),
   };
 }
@@ -599,18 +598,17 @@ async function executeToolCallsInMode(
       }
       assertTurnActive();
       if (!approved) {
-        // Structured, call-scoped denial: the asking agent gets reason + scope on
-        // the failed result (not just a bare string) and can continue honestly.
-        // Plan-mode refusals surface reason 'plan-mode' with plan-steering text.
+        // Call-scoped refusal: the asking agent gets the decision (state, who decided, why,
+        // what next, and Jev's decision log id when Jev decided) on the failed result and can
+        // continue honestly. Plan-mode refusals carry plan-steering text.
         const denialSource = { reasonCode: checkResult.reasonCode, sourceLayer: checkResult.sourceLayer, userReason: checkResult.userReason, detail: checkResult.detail, decision: checkResult.decision };
         const err = new PermissionError(buildDenialErrorMessage(call.name, denialSource));
-        const deniedResult = {
+        const deniedResult: ToolResult = {
           callId: call.id,
           success: false,
           error: err.message,
-          decision: toolDecisionOf({ ...denialSource, approved: false }),
-          denial: buildToolDenial(denialSource),
-          ...(checkResult.autonomousDecision ? { autonomousDecision: checkResult.autonomousDecision } : {}),
+          decision: toolDecisionOf({ ...denialSource, approved: false,
+            ...(checkResult.autonomousDecision ? { autonomousDecision: checkResult.autonomousDecision } : {}) }),
         };
         appendResult(deniedResult);
         if (deps.runtimeBus) {
@@ -680,7 +678,6 @@ async function executeToolCallsInMode(
             return deps.toolRegistry.executePrepared(prepared, preparedAdmission, executeOptions);
           },
         )));
-        if (checkResult.autonomousDecision) result = { ...result, autonomousDecision: checkResult.autonomousDecision };
         if (stoppedByBudget()) {
           // A call that ignored its time limit and finished its action succeeded; only a failed one was stopped.
           result = result.success
@@ -729,8 +726,7 @@ async function executeToolCallsInMode(
         if (!earlyCallSignal) deps.toolCallSignals?.close(call.id);
       }
 
-      if (checkResult.autonomousDecision) result = { ...result, autonomousDecision: checkResult.autonomousDecision };
-      // A plain allow by code or rule is not reported; one Jev or the owner made is.
+      // A plain allow by code or rule is not reported; one Jev or the owner made is (with Jev's decision log id).
       const decided = checkResult.decision;
       if (decided && (decided.state !== 'allowed' || decided.decidedBy === 'owner')) result = { ...result, decision: decided };
       // Do not race the tool promise: abort-ignoring work must actually return
@@ -811,8 +807,8 @@ async function executeToolCallsInMode(
       if (earlyCallSignal?.aborted && !turnSignal?.aborted) {
         // Cancelled during admission, before the tool body ran: observers saw
         // the call received, so they must also see it end.
-        appendResult(toCancelledResult(call.id, admission?.result.autonomousDecision
-          ? { callId: call.id, success: false, autonomousDecision: admission.result.autonomousDecision } : null));
+        appendResult(toCancelledResult(call.id, admission?.result.decision
+          ? { callId: call.id, success: false, decision: admission.result.decision } : null));
         if (deps.runtimeBus) emitToolCancelled(deps.runtimeBus, deps.emitterContext(turnId), {
           callId: call.id, turnId, tool: call.name, reason: TOOL_CALL_CANCELLED_MESSAGE,
         });

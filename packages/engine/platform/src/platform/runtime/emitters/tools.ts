@@ -75,12 +75,11 @@ export function emitToolPosthooked(
  * for safe emission in the event stream. Never leaks raw output; provides kind, byteSize, preview.
  */
 export function toToolResultSummary(
-  result: { success?: boolean | undefined; output?: string | undefined; error?: string | undefined; readonly autonomousDecision?: JevDecision | undefined }
+  result: { success?: boolean | undefined; output?: string | undefined; error?: string | undefined }
 ): import('../../../events/tools.js').ToolResultSummary {
   if (!result.success) {
     const errStr = result.error ?? 'unknown error';
     return {
-      ...(result.autonomousDecision ? { autonomousDecision: structuredClone(result.autonomousDecision) } : {}),
       kind: 'error',
       byteSize: Buffer.byteLength(errStr, 'utf8'),
       preview: errStr.slice(0, 100),
@@ -91,7 +90,6 @@ export function toToolResultSummary(
     kind: looksLikeJsonContainer(output) ? 'json' : 'text',
     byteSize: Buffer.byteLength(output, 'utf8'),
     preview: output.slice(0, 100),
-    ...(result.autonomousDecision ? { autonomousDecision: structuredClone(result.autonomousDecision) } : {}),
   };
 }
 

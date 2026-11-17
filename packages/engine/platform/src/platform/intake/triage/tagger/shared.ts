@@ -91,6 +91,33 @@ export async function attempt(provider: string, guard: TaggerGuard, send: () => 
   }
 }
 
+type PlannedMark = { readonly tag: string; readonly action: 'add' | 'remove' };
+
+/** Why a write ended part way: the write deadline, a stop, or the account changing under it. */
+export function interruption(guard: TaggerGuard, error: unknown): string {
+  if (guard.signal.aborted) {
+    const reason = guard.signal.reason as { readonly name?: unknown } | undefined;
+    return reason?.name === 'TimeoutError' ? 'the provider did not answer within the 20 s write deadline' : 'labelling was stopped';
+  }
+  return error instanceof Error && error.message ? error.message : 'the account, its settings or the inbox changed';
+}
+
+/**
+ * The effects of a write cut off part way: the marks already settled as they
+ * were, the marks whose request was out as unknown (failed, may be on), and the
+ * rest not tried. A cut-off write is answered, never thrown, so the caller can
+ * say which marks are on the message.
+ */
+export function cutOff(done: readonly TriageEffectResult[], inFlight: readonly PlannedMark[], rest: readonly PlannedMark[], why: string): TriageTagWrite {
+  return { effects: [
+    ...done,
+    ...inFlight.map((mark): TriageEffectResult => ({ tag: mark.tag, action: mark.action, outcome: 'failed',
+      reason: `Unknown: ${why} while this mark was being written, so it may or may not be on the message; label the message again to make sure` })),
+    ...rest.map((mark): TriageEffectResult => ({ tag: mark.tag, action: mark.action, outcome: 'skipped',
+      reason: mark.action === 'add' ? `Not tried: ${why} first` : `Kept: ${why} before it was taken off` })),
+  ] };
+}
+
 /** Effects not tried because an earlier write for the message failed. */
 export function notTried(effects: readonly { readonly tag: string; readonly action: 'add' | 'remove' }[]): TriageEffectResult[] {
   return effects.map(effect => ({ tag: effect.tag, action: effect.action, outcome: 'skipped' as const,

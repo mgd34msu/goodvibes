@@ -1,4 +1,4 @@
-import { TAGS, attempt, current, json, notTried, refusedBy, request, type TaggerGuard, type TaggerHttp,
+import { TAGS, attempt, current, cutOff, interruption, json, notTried, refusedBy, request, type TaggerGuard, type TaggerHttp,
   type TriageEffectResult, type TriageTagWrite } from './shared.js';
 
 /** One prepared Discord mark: the label name, and its reaction when the label has a built-in meaning. */
@@ -75,9 +75,16 @@ export async function applyDiscordTagEffects(target: { channel: string; message:
       if (id !== undefined) effects.push({ tag: effect.name, action: 'remove', outcome: stale.has(id) ? 'applied' : 'already' });
     }
     if (!effects.some(effect => effect.outcome === 'applied')) return { effects };
-    const response = await attempt('Discord', guard, () => request(http, base, { method: 'PATCH',
-      headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ applied_tags: next }) }, guard));
-    current(guard);
+    let response: Response | string;
+    try {
+      response = await attempt('Discord', guard, () => request(http, base, { method: 'PATCH',
+        headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ applied_tags: next }) }, guard));
+      current(guard);
+    } catch (error) {
+      // One PATCH carries every change: cut off, each change it carried is unknown.
+      const settled = effects.filter(effect => effect.outcome !== 'applied');
+      return cutOff(settled, effects.filter(effect => effect.outcome === 'applied'), [], interruption(guard, error));
+    }
     if (typeof response !== 'string' && (response.status === 200 || response.status === 204)) return { effects };
     const reason = typeof response === 'string' ? response : refusedBy('Discord', response);
     return { effects: effects.map(effect => effect.outcome === 'applied' ? { ...effect, outcome: 'failed' as const, reason } : effect) };
@@ -111,14 +118,23 @@ export async function applyDiscordTagEffects(target: { channel: string; message:
       effects.push({ tag: effect.name, action, outcome: 'failed', reason: typeof response === 'string' ? response : refusedBy('Discord', response) });
       return false;
     };
-    for (const [index, effect] of add.entries()) {
-      if (!await send(effect, 'add')) {
-        effects.push(...notTried([...add.slice(index + 1).map(next => ({ tag: next.name, action: 'add' as const })),
-          ...remove.filter(next => next.reaction !== undefined).map(next => ({ tag: next.name, action: 'remove' as const }))]));
-        return { effects };
+    const plan = [...add.map(effect => ({ effect, action: 'add' as const })),
+      ...remove.filter(effect => effect.reaction !== undefined).map(effect => ({ effect, action: 'remove' as const }))];
+    const marks = (entries: typeof plan) => entries.map(entry => ({ tag: entry.effect.name, action: entry.action }));
+    let index = 0;
+    try {
+      for (; index < plan.length; index += 1) {
+        const { effect, action } = plan[index]!;
+        // Other labels' marks come off only once every new mark is on.
+        if (!await send(effect, action) && action === 'add') {
+          effects.push(...notTried(marks(plan.slice(index + 1))));
+          return { effects };
+        }
       }
+    } catch (error) {
+      // Cut off part way (deadline, stop, account change): say what is on the message, not nothing.
+      return cutOff(effects, marks(plan.slice(index, index + 1)), marks(plan.slice(index + 1)), interruption(guard, error));
     }
-    for (const effect of remove) if (effect.reaction !== undefined) await send(effect, 'remove');
     return { effects };
   }
 }

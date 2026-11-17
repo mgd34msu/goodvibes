@@ -4,7 +4,7 @@ import type { IntakeCredentialStore } from '../../context.js';
 import { applySlackReactions } from './slack.js';
 import { applyDiscordTagEffects, observeDiscordForumTags } from './discord.js';
 import { makeRetryingImapStoreFlag, imapStoreFlagWithMailClient, type ImapStoreFlag, type ImapStoreResult } from './imap.js';
-import { TAGS, current, notTried, supersededLabels, type TaggerGuard, type TaggerHttp, type TriageEffectResult,
+import { TAGS, current, cutOff, interruption, notTried, supersededLabels, type TaggerGuard, type TaggerHttp, type TriageEffectResult,
   type TriageProviderTag, type TriageTagWrite } from './shared.js';
 import { captureTriageData } from '../evidence.js';
 import { captureTagNames, readCustomTagMeaning, TriageTagMeaningHeld } from './meaning.js';
@@ -169,7 +169,11 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
         try {
           written = await store({ ...options.imap, password: token, uid: String(uid), uidValidity, flag: flags[0]!, flags, supersedes: [...replaced.keys()], ...finalGuard });
         } catch (error) {
-          if (finalGuard.signal.aborted) throw error;
+          // One STORE carries every keyword change: cut off, each of them is unknown.
+          if (finalGuard.signal.aborted) {
+            return cutOff([], [...effects.map(effect => ({ tag: effect.tag, action: 'add' as const })),
+              ...supersedes.map(tag => ({ tag, action: 'remove' as const }))], [], interruption(finalGuard, error));
+          }
           const reason = error instanceof Error && error.message ? error.message : 'The mail server did not take the label';
           return { effects: [...effects.map(effect => ({ tag: effect.tag, action: 'add' as const, outcome: 'failed' as const, reason })),
             ...notTried(supersedes.map(tag => ({ tag, action: 'remove' as const })))] };

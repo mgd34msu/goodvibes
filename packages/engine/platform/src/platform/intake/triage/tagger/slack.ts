@@ -1,4 +1,4 @@
-import { TAGS, attempt, current, json, notTried, providerCode, request, type TaggerGuard, type TaggerHttp,
+import { TAGS, attempt, current, cutOff, interruption, json, notTried, providerCode, request, type TaggerGuard, type TaggerHttp,
   type TriageEffectResult, type TriageTagWrite } from './shared.js';
 
 /** One prepared Slack mark: the label it stands for and its exact reaction name. */
@@ -50,13 +50,24 @@ export async function applySlackReactions(target: { channel: string; timestamp: 
       reason: `Slack refused the reaction${code ? ` (${code})` : ''}${next ? `; ${next}` : ''}` });
     return false;
   };
-  for (const [index, effect] of add.entries()) {
-    if (!await call('reactions.add', effect, 'add', 'already_reacted')) {
-      effects.push(...notTried([...add.slice(index + 1).map(next => ({ tag: next.tag, action: 'add' as const })),
-        ...remove.map(next => ({ tag: next.tag, action: 'remove' as const }))]));
-      return { effects };
+  const plan = [...add.map(effect => ({ effect, action: 'add' as const })), ...remove.map(effect => ({ effect, action: 'remove' as const }))];
+  const marks = (entries: typeof plan) => entries.map(entry => ({ tag: entry.effect.tag, action: entry.action }));
+  let index = 0;
+  try {
+    for (; index < plan.length; index += 1) {
+      const { effect, action } = plan[index]!;
+      const done = action === 'add'
+        ? await call('reactions.add', effect, 'add', 'already_reacted')
+        : await call('reactions.remove', effect, 'remove', 'no_reaction');
+      // Other labels' marks come off only once every new mark is on.
+      if (!done && action === 'add') {
+        effects.push(...notTried(marks(plan.slice(index + 1))));
+        return { effects };
+      }
     }
+  } catch (error) {
+    // Cut off part way (deadline, stop, account change): say what is on the message, not nothing.
+    return cutOff(effects, marks(plan.slice(index, index + 1)), marks(plan.slice(index + 1)), interruption(guard, error));
   }
-  for (const effect of remove) await call('reactions.remove', effect, 'remove', 'no_reaction');
   return { effects };
 }

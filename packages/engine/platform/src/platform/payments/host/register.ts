@@ -247,14 +247,6 @@ function purchaseView(row: StoredPurchase): PaymentPurchaseView {
   };
 }
 
-/** Checkout runs through `checkoutBeginHandler`, which carries the invocation's authority; never through this service. */
-function checkoutNotWired(methodId: string): Error {
-  return new Error(
-    `${methodId} is served by this daemon's own local handler, never through this service. `
-    + 'See registerPaymentsMethods in register.ts.',
-  );
-}
-
 // ---------------------------------------------------------------------------
 
 /**
@@ -335,10 +327,6 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps): PaymentsGateway
 
     async deleteCard(id) {
       return overStore('Deleting the card', () => deps.cards.remove(id));
-    },
-
-    async beginCheckout() {
-      throw checkoutNotWired('payments.checkout.begin');
     },
 
     async listPurchases(input) {

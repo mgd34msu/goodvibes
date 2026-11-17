@@ -24,17 +24,16 @@ import { PurchaseReconciliations } from './purchase-reconciliation.js';
  * daemon-handler-composition.ts/ci-watch-composition.ts exist as their own
  * modules; no behavioural change from being here rather than there.
  *
- * ── Why these verbs are local wrappers, not the platform's own route ────────
+ * ── Why these verbs read the invocation, not only its body ──────────────────
  *
- * The context-free `createPaymentsCheckoutBeginHandler` in routes/payments.ts
- * (driven only by the live payments proof) calls `service.beginCheckout(input)`
- * with no invocation context at all. Admission here needs `context.explicitUserRequest`
- * and the paired principal, which only reach a handler attached through this
- * daemon's own `registerCatalogHandlers` (register.ts). So the verbs are
- * attached there as local wrappers, reading the same wire shapes
- * `routes/payments.ts` does and calling into the ONE
+ * Admission needs `context.explicitUserRequest` and the paired principal, which
+ * reach a handler attached through this daemon's own `registerCatalogHandlers`
+ * (register.ts) and no service call carries. So these are the only begin and
+ * approve handlers: they read the wire shapes and call into the ONE
  * `PaymentsGatewayServiceImpl` a registration's checkout pair shares for its
  * whole life (see `CheckoutServiceHolder` below for why one, not one per call).
+ * The live payments proof (scripts/payments-proof.ts) drives these same verbs
+ * through the catalog.
  */
 import { checkAddress } from '../address.js';
 import type { GateInput } from '../gates.js';
@@ -170,11 +169,8 @@ function optionalNonEmptyString(value: unknown): string | undefined {
 }
 
 /**
- * Deliberately STRICTER than the platform's own route (routes/payments.ts), which
- * passes any non-empty `preferredTier` string through unvalidated. This is a
- * deliberate pin, not an oversight relative to that route: a value outside
- * `SHIPPING_TIERS` could not have come from a tier this daemon actually
- * offers, so it is read as "not specified" rather than forwarded, and
+ * A value outside `SHIPPING_TIERS` could not have come from a tier this daemon
+ * actually offers, so it is read as "not specified" rather than forwarded, and
  * `beginCheckout` falls back to the configured preferred tier when this is
  * undefined (payments-gateway-service.ts), the same safe default an absent
  * field already gets.

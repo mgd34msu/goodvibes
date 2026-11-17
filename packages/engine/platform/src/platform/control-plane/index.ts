@@ -235,8 +235,6 @@ export type {
   PaymentPurchaseView,
   PaymentsBudgetView,
   PaymentCardView,
-  PaymentBeginCheckoutInput,
-  PaymentBeginResultView,
 } from './routes/payments.js';
 
 // Shared host handler binding, including explicit-user confirmation semantics.

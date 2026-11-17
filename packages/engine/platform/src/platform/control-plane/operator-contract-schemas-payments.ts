@@ -12,7 +12,7 @@
  * No verb types a card: the purchase the daemon runs
  * (`payments.checkout.begin`) reads the material in-process and types it.
  *
- * Handlers: routes/payments.ts.
+ * Handlers: payments/host/register.ts, the daemon's payments host; wire types in routes/payments.ts.
  */
 import {
   BOOLEAN_SCHEMA,

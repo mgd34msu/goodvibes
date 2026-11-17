@@ -20,7 +20,7 @@
  * creation and deletion are admin-only, because anything that can rewrite the
  * card can redirect where money goes.
  *
- * Handlers: routes/payments.ts.
+ * Handlers: payments/host/register.ts, the daemon's payments host; wire types in routes/payments.ts.
  */
 import { BOOLEAN_SCHEMA, STRING_SCHEMA, methodDescriptor, objectSchema } from './method-catalog-shared.js';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';

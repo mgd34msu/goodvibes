@@ -206,6 +206,25 @@ export function createCalDavRequest(
       throw new GatewayVerbError(`CalDAV request failed: ${detail}`, 'CALENDAR_NETWORK_ERROR', 502);
     }
     const status = response.status;
+    if (status >= 300 && status < 400) {
+      // The HTTP port follows a redirect only within the origin it was given,
+      // so this one points elsewhere and nothing was sent there. Name where
+      // (its origin only: a path can carry a token) and what to do.
+      const location = readHeader(response.headers, 'location');
+      let elsewhere: string | undefined;
+      try {
+        elsewhere = location === undefined || location.length === 0 ? undefined : new URL(location, url).origin;
+      } catch {
+        elsewhere = undefined;
+      }
+      throw new GatewayVerbError(
+        elsewhere === undefined
+          ? `The calendar server answered with a redirect (HTTP ${String(status)}) that names no usable address. Check the calendar server address in the calendar settings.`
+          : `The calendar server redirected this request to ${elsewhere}, and the account credentials were not sent there. If ${elsewhere} is your calendar provider, connect with that address instead.`,
+        'CALENDAR_REQUEST_FAILED',
+        502,
+      );
+    }
     if (status < 200 || status >= 300) {
       const code = status === 401 || status === 403
         ? 'CALENDAR_AUTH_FAILED'

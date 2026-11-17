@@ -1718,8 +1718,9 @@ export class KnowledgeStore {
   async upsertJobRun(input: KnowledgeJobRunUpsertInput): Promise<KnowledgeJobRunRecord> {
     await this.init();
     const existing = input.id ? this.jobRuns.get(input.id) : null;
-    if (existing && input.status !== existing.status) {
-      // A late or duplicate writer must not move a settled run back to queued/running.
+    if (existing && (input.status !== existing.status || knowledgeJobRunLifecycle.next(existing.status).length === 0)) {
+      // A late or duplicate writer must not move a settled run back to queued/running, nor
+      // rewrite a settled run. The caller sees the refusal as a returned status other than its own.
       const move = knowledgeJobRunLifecycle.check(existing.status, input.status);
       if (!move.ok) {
         logger.warn('[knowledge-store] job run left as is', { runId: existing.id, reason: move.reason });

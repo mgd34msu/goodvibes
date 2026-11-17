@@ -3,7 +3,7 @@ import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtim
 import { getNextAutomationOccurrence, ensureAutomationCronPhase, normalizeCronSchedule, normalizeEverySchedule, validateSchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
 import type { KnowledgeStore } from './store.js';
-import { knowledgeJobRunLifecycle, type KnowledgeJobMode, type KnowledgeJobRecord, type KnowledgeJobRunRecord, type KnowledgeJobStatus, type KnowledgeScheduleRecord } from './types.js';
+import type { KnowledgeJobMode, KnowledgeJobRecord, KnowledgeJobRunRecord, KnowledgeJobStatus, KnowledgeScheduleRecord } from './types.js';
 import { emitKnowledgeJobCompleted, emitKnowledgeJobFailed, emitKnowledgeJobQueued, emitKnowledgeJobStarted } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -487,19 +487,15 @@ export class KnowledgeScheduleService {
   }
 
   /**
-   * Moves a run to `status` only when the lifecycle allows it from the store's
-   * current state, so a late write can never put a settled run back. Never
-   * throws: a store that cannot be written is logged, the caller's own error wins.
+   * Moves a run to `status`. The store refuses a move its lifecycle does not
+   * allow (a late write never puts a settled run back) and returns the record
+   * unchanged, so a returned status other than `status` means nothing moved.
+   * Never throws: a store that cannot be written is logged, the caller's own error wins.
    */
   private async settleRun(runId: string, status: KnowledgeJobStatus, error: string): Promise<KnowledgeJobRunRecord | null> {
     try {
       const current = this.context.store.getJobRun(runId);
       if (!current) return null;
-      const move = knowledgeJobRunLifecycle.check(current.status, status);
-      if (!move.ok) {
-        logger.warn('Knowledge job run left as is', { runId, reason: move.reason });
-        return current;
-      }
       const completedAt = Date.now();
       const settled = await this.context.store.upsertJobRun({
         id: current.id,
@@ -509,6 +505,7 @@ export class KnowledgeScheduleService {
         completedAt,
         error,
       });
+      if (settled.status !== status) return settled;
       // The run was announced as queued (and maybe started); close it for event followers.
       if (status === 'failed') {
         try {
@@ -734,6 +731,9 @@ export class KnowledgeScheduleService {
       await this.settleRun(runId, 'failed', summarizeError(error));
       throw error;
     }
+    // Settled before it could start (for example failed as interrupted at shutdown): the store kept
+    // that outcome, so the job neither starts nor runs.
+    if (run.status !== 'running') return run;
     this.context.emitIfReady((bus, ctx) => emitKnowledgeJobStarted(bus, ctx, {
       jobId: job.id,
       runId: run.id,
@@ -742,13 +742,6 @@ export class KnowledgeScheduleService {
     try {
       const result = await untilAborted(this.context.runJobByKind(job.kind, input, signal), signal);
       const completedAt = Date.now();
-      const current = this.context.store.getJobRun(run.id);
-      const move = current ? knowledgeJobRunLifecycle.check(current.status, 'completed') : null;
-      if (current && move && !move.ok) {
-        // Settled meanwhile (for example as interrupted at shutdown): keep that outcome.
-        logger.warn('Knowledge job run already settled; completion not recorded over it', { runId: run.id, reason: move.reason });
-        return current;
-      }
       run = await this.context.store.upsertJobRun({
         id: run.id,
         jobId: run.jobId,
@@ -759,6 +752,8 @@ export class KnowledgeScheduleService {
         completedAt,
         result,
       });
+      // Settled meanwhile (for example as interrupted at shutdown): the store kept that outcome.
+      if (run.status !== 'completed') return run;
       this.context.emitIfReady((bus, ctx) => emitKnowledgeJobCompleted(bus, ctx, {
         jobId: job.id,
         runId: run.id,
@@ -767,12 +762,6 @@ export class KnowledgeScheduleService {
       return run;
     } catch (error) {
       const completedAt = Date.now();
-      const current = this.context.store.getJobRun(run.id);
-      if (current && !knowledgeJobRunLifecycle.can(current.status, 'failed')) {
-        // Already settled (e.g. the completed write landed before it threw): do not overwrite.
-        logger.warn('Knowledge job run already settled; failure not recorded over it', { runId: run.id, status: current.status, error: summarizeError(error) });
-        return current;
-      }
       run = await this.context.store.upsertJobRun({
         id: run.id,
         jobId: run.jobId,
@@ -783,6 +772,8 @@ export class KnowledgeScheduleService {
         completedAt,
         error: signal.aborted ? abortReason(signal) : summarizeError(error),
       });
+      // Already settled (e.g. the completed write landed before it threw): the store kept that outcome.
+      if (run.status !== 'failed') return run;
       this.context.emitIfReady((bus, ctx) => emitKnowledgeJobFailed(bus, ctx, {
         jobId: job.id,
         runId: run.id,

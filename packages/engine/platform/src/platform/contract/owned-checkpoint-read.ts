@@ -29,6 +29,17 @@ export function readOwnedContractCheckpoint(path: string, format: 'contract' | '
     return receipt;
   } finally { if (!borrowed) source.close(); }
 }
+/** A checkpoint kept as a base file plus later records: the base is read
+ * through its captured native source, and `complete` (which reads the rest
+ * from the same contract directory) returns the whole envelope text. The
+ * receipt stays current while the base file is unchanged; it is never rewritten. */
+export function readOwnedAssembledCheckpoint(basePath: string, source: QuarantineSource, complete: (baseText: string) => string): OwnedContractCheckpointRead {
+  const text = complete(readCapturedQuarantineSource(basePath, source));
+  source.assertCurrent();
+  const receipt = Object.freeze({}) as OwnedContractCheckpointRead;
+  nativeApply(nativeSet, reads, [receipt, { text, assertCurrent: source.assertCurrent }]);
+  return receipt;
+}
 export function ownedContractCheckpointText(receipt: OwnedContractCheckpointRead): string {
   const found = nativeApply(nativeGet, reads, [receipt]) as Read | undefined;
   if (!found) throw new Error('Contract checkpoint read receipt is unavailable');

@@ -15,7 +15,7 @@ import { uptime } from 'node:os';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { JudgmentError, type JsonValue } from '@goodvibes-jev/judgment';
 import type { Contract, ContractView } from '../../platform/src/platform/contract/index.js';
-import { contractPath } from '../../platform/src/platform/contract/index.js';
+import { contractCheckpointDir, contractPath, storedCheckpointText } from '../../platform/src/platform/contract/index.js';
 import type { DecompositionRunner } from '../../platform/src/platform/core/plan-decomposition.js';
 import { plannerOutput, type AnswerContext } from './plan-support.js';
 import { eventsOf, makeHarness, makeRepo, oneUnitPlan, startContract, twoUnitPlan, waitFor, type AgentScript, type Harness, type HarnessOptions,
@@ -77,8 +77,11 @@ async function interrupt(options: Options, until: (contract: ContractView) => bo
 /** Changes the contract file as the stopped process would have left it. */
 function editContract(root: string, id: string, edit: (contract: Contract) => void): void {
   const path = contractPath(root, id);
-  const envelope = JSON.parse(readFileSync(path, 'utf-8')) as { contract: Contract };
+  const envelope = JSON.parse(storedCheckpointText(root, id)!) as { contract: Contract };
   edit(envelope.contract);
+  // Left in the single-file format, which a restart reads the same way.
+  rmSync(contractCheckpointDir(root, id), { recursive: true, force: true });
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(envelope));
 }
 
@@ -124,7 +127,7 @@ test('a denied worktree publication survives restart, revalidates and publishes 
   expect(existsSync(join(root, 'src/csv.ts'))).toBe(false);
   first.dispose();
   await first.runner.join(contract.id);
-  expect(JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')).contract.status).toBe('committing');
+  expect(JSON.parse(storedCheckpointText(root, contract.id)!).contract.status).toBe('committing');
   let resumedChecks = 0;
   const second = restart(root, {
     plan,
@@ -476,7 +479,7 @@ test('a failed fix-plan request retains its bound proposal without restarting ve
       contract.decisions.some((decision) => decision.action === 'planned' && decision.targetId === `${contract.id}.f1.candidate`),
     'the retained repair proposal after failed verification',
   );
-  const stored = JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract };
+  const stored = JSON.parse(storedCheckpointText(root, id!)!) as { contract: Contract };
   expect(JSON.parse(decisionReceiptText(stored.contract.decisions.find((decision) => decision.targetId === `${id}.f1.candidate`)!)).output).toBe(
     plannerOutput(repair),
   );
@@ -636,16 +639,16 @@ test('read observations are persisted before a candidate or acceptance check exi
   first.runner.hooks().onTurnEnd(record, commandTurn);
   first.runner.hooks().onTurnEnd(record, commandTurn);
   await waitFor(() => {
-    const disk = JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')).contract;
+    const disk = JSON.parse(storedCheckpointText(root, contract.id)!).contract;
     return disk.units[0]?.readEvidence?.[0]?.returnedRanges.join() === '1-2' && disk.units[0]?.commandEvidence?.length === 1;
   }, 'read evidence checkpoint before completion');
-  const saved = JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')).contract;
+  const saved = JSON.parse(storedCheckpointText(root, contract.id)!).contract;
   expect(saved.units[0].checks).toEqual([]);
   expect(saved.units[0].status).toBe('running');
   expect(saved.units[0].lastOutput).toBeUndefined();
   first.dispose();
   await first.runner.join(contract.id);
-  const restored = JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')).contract;
+  const restored = JSON.parse(storedCheckpointText(root, contract.id)!).contract;
   expect(restored.units[0].readEvidence[0].returnedRanges).toEqual(['1-2']);
   expect(restored.units[0].commandEvidence).toEqual([
     {
@@ -746,7 +749,7 @@ describe('planning starts again', () => {
       root,
       ids: [id],
     } = await interrupt({ plan: oneUnitPlan(1), planner: stuckPlanner, scripts: {} }, (c) => c.status === 'planning', 'planning');
-    const saved = JSON.parse(readFileSync(contractPath(root, id!), 'utf8')).contract as Contract;
+    const saved = JSON.parse(storedCheckpointText(root, id!)!).contract as Contract;
     const ready = Promise.withResolvers<void>();
     const h = restart(root, {
       plan: oneUnitPlan(1),
@@ -1232,7 +1235,7 @@ describe('the deliverable steps run again', () => {
       root,
       ids: [id],
     } = await interrupt({ plan: oneUnitPlan(1), scripts }, finished, 'the contract to pass');
-    const checksBefore = (JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract }).contract.checks.length;
+    const checksBefore = (JSON.parse(storedCheckpointText(root, id!)!) as { contract: Contract }).contract.checks.length;
     editContract(root, id!, (contract) => rewind(contract, 'judging'));
     const h = restart(root, { plan: oneUnitPlan(1), scripts: { u1: mustNotRun } });
     const report = await h.runner.resumeAll();
@@ -1380,7 +1383,7 @@ describe('zombies', () => {
     expectReaped(h, id!, 'group g1 is running but has no loadable workstream snapshot');
     // The failed tree is written, so the next start does not reap it again.
     h.store.flush();
-    expect((JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract }).contract.status).toBe('failed');
+    expect((JSON.parse(storedCheckpointText(root, id!)!) as { contract: Contract }).contract.status).toBe('failed');
   }, 30_000);
 
   test('a corrupt workstream snapshot is quarantined and the contract reaped', async () => {
@@ -1408,7 +1411,7 @@ describe('zombies', () => {
       running,
       'u1 running after a check',
     );
-    const worktree = (JSON.parse(readFileSync(contractPath(root, id!), 'utf-8')) as { contract: Contract }).contract.worktreePath!;
+    const worktree = (JSON.parse(storedCheckpointText(root, id!)!) as { contract: Contract }).contract.worktreePath!;
     rmSync(worktree, { recursive: true, force: true });
     const h = restart(root, { plan: oneUnitPlan(1), contract: { isolation: 'auto' }, scripts: { u1: mustNotRun } });
     await h.runner.resumeAll();

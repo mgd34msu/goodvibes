@@ -7,7 +7,7 @@ import { toJson } from '@goodvibes-jev/judgment';
 import { contractWorkReceipts, workReceiptIdentity } from '../../platform/src/platform/contract/work-receipts.js';
 import { currentFileObservations, currentFileMatchesText, isCurrentNativeFileObservation } from '../../platform/src/platform/contract/current-file-observations.js';
 import { reviewedFileFromObservation, reviewedFileVersionState } from '../../platform/src/platform/contract/review-file-observations.js';
-import { ContractStore, contractPath, contractsDir, serializeContract, deserializeContract } from '../../platform/src/platform/contract/store.js';
+import { ContractStore, contractPath, storedCheckpointText, contractsDir, serializeContract, deserializeContract } from '../../platform/src/platform/contract/store.js';
 import { snapshotJudgmentInput } from '../../platform/src/platform/gate/judgment-input.js';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities } from '../../platform/src/platform/runtime/native-reader-compatibility.js';
 import { realUpdateFileIo } from '../../platform/src/platform/runtime/self-update.js';
@@ -79,7 +79,7 @@ test('actual owned checkpoint restart preserves unchanged refusal and repair sou
   };
   const expectedRepair = repairIdentity(f.contract);
   f.store.hold(f.contract); expect(f.store.write(f.contract.id)).toBe(true);
-  const envelope = JSON.parse(readFileSync(contractPath(f.root, f.contract.id), 'utf8'));
+  const envelope = JSON.parse(storedCheckpointText(f.root, f.contract.id)!);
   expect(envelope.nativeFileLabels.entries).toHaveLength(2);
   const restored = f.store.load(f.contract.id)!;
   expect(JSON.stringify(restored)).not.toContain('nativeFileLabels');
@@ -113,9 +113,11 @@ test('same-byte pathname replacement invalidates the original read and the earli
 
 test('schema six persists private facts but keeps all runtime, latest-check and model projections descriptor-only across restart', () => {
   const f = fixture(); f.store.hold(f.contract); expect(f.store.write(f.contract.id)).toBe(true);
-  const stored = JSON.parse(readFileSync(contractPath(f.root, f.contract.id), 'utf8'));
+  const stored = JSON.parse(storedCheckpointText(f.root, f.contract.id)!);
   expect(stored.schemaVersion).toBe(6);
   expect(stored.contract.units[0].checks[0].reviewedFiles[0]).toMatchObject({ nativeFileObservation: { version: 1, origin: 'native-host-filesystem' } });
+  // The first process ends; the restarted one takes the contract over.
+  f.store.dispose();
   const reopened = new ContractStore({ projectRoot: f.root, sweepIntervalMs: 0 }); cleanup.push(() => reopened.dispose());
   const contract = reopened.load(f.contract.id)!;
   const restored = contract.units[0]!.checks[0]!.reviewedFiles![0]!;
@@ -126,7 +128,7 @@ test('schema six persists private facts but keeps all runtime, latest-check and 
   expect(reviewedFileVersionState(currentFileObservations(f.root, ['report.md'])[0]!, restored)).toBe('current');
   expect(reviewedFileVersionState(currentFileObservations(f.root, ['report.md'])[0]!, structuredClone(restored))).toBe('unverified');
   reopened.hold(contract); expect(reopened.write(contract.id)).toBe(true);
-  expect(JSON.parse(readFileSync(contractPath(f.root, f.contract.id), 'utf8')).contract.units[0].checks[0].reviewedFiles[0].nativeFileObservation.origin).toBe('native-host-filesystem');
+  expect(JSON.parse(storedCheckpointText(f.root, f.contract.id)!).contract.units[0].checks[0].reviewedFiles[0].nativeFileObservation.origin).toBe('native-host-filesystem');
 });
 
 test('public JSON deserialization/import cannot mint native review provenance from a shaped saved record', () => {
@@ -138,7 +140,7 @@ test('public JSON deserialization/import cannot mint native review provenance fr
   f.store.hold(foreign); expect(f.store.write(foreign.id)).toBe(true);
   const restored = f.store.load(foreign.id)!;
   expect(reviewedFileVersionState(f.file, restored.units[0]!.checks[0]!.reviewedFiles![0]!)).toBe('unverified');
-  expect(JSON.parse(readFileSync(contractPath(f.root, f.contract.id), 'utf8')).contract.units[0].checks[0].reviewedFiles[0].nativeFileObservation.origin).toBe('unverified-import');
+  expect(JSON.parse(storedCheckpointText(f.root, f.contract.id)!).contract.units[0].checks[0].reviewedFiles[0].nativeFileObservation.origin).toBe('unverified-import');
 });
 
 test('importing an old SHA review cannot launder it into an owned historical review after save and restart', () => {
@@ -146,7 +148,7 @@ test('importing an old SHA review cannot launder it into an owned historical rev
   const old = { ...f.contract, schemaVersion: 5, units: [{ ...f.contract.units[0]!, checks: [{ ...f.check, reviewedFiles: [{ path: 'report.md', sha256 }] }] }] };
   const text = JSON.stringify({ schemaVersion: 5, writtenAt: 1, contract: old });
   expect(f.store.importContract(text)).toBe(true);
-  const stored = JSON.parse(readFileSync(contractPath(f.root, old.id), 'utf8'));
+  const stored = JSON.parse(storedCheckpointText(f.root, old.id)!);
   expect(stored.contract.units[0].checks[0].reviewedFiles[0].historicalReviewOrigin).toBe('unverified-import');
   const reloaded = f.store.load(old.id)!;
   expect(reviewedFileVersionState(f.file, reloaded.units[0]!.checks[0]!.reviewedFiles![0]!)).toBe('unverified');
@@ -198,7 +200,7 @@ test('the native checkpoint writer declares its format before creating any contr
   const f = fixture(); let declared = 0;
   const execPath = join(f.root, 'goodvibes'), writer = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent() {} });
   const store = new ContractStore({ projectRoot: f.root, sweepIntervalMs: 0, beforeWrite() {
-    declared++; expect(() => readFileSync(contractPath(f.root, f.contract.id))).toThrow();
+    declared++; expect(storedCheckpointText(f.root, f.contract.id)).toBeNull();
     writer.declare('contract-review-observations-v1');
   } }); cleanup.push(() => store.dispose());
   store.hold(f.contract); expect(store.write(f.contract.id)).toBe(true); expect(declared).toBe(1);

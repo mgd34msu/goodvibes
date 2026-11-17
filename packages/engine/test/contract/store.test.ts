@@ -15,11 +15,13 @@ import {
   ContractStoreVersionError,
   MAX_CONTRACT_QUARANTINE_FILES,
   contractPath,
+  contractCheckpointDir,
   contractCheckpointsDir,
   contractsDir,
   deserializeContract,
   readContractSnapshot,
   serializeContract,
+  storedCheckpointText,
   type Contract,
   type ContractSnapshotRejection,
 } from '../../platform/src/platform/contract/index.js';
@@ -94,7 +96,7 @@ describe('round trip', () => {
     store.put(contract);
     expect(store.write(contract.id)).toBe(true);
 
-    const onDisk = JSON.parse(readFileSync(contractPath(root, contract.id), 'utf-8')) as Record<string, unknown>;
+    const onDisk = JSON.parse(storedCheckpointText(root, contract.id)!) as Record<string, unknown>;
     expect(onDisk['schemaVersion']).toBe(CURRENT_CONTRACT_SCHEMA_VERSION);
     expect(onDisk['writtenAt']).toBe(42_000);
     expect(storeAt(root).load(contract.id)).toEqual(contract);
@@ -123,13 +125,12 @@ describe('checkpoint namespaces', () => {
       writeFileSync(oldPath, original);
       expect(store.listStoredIds()).toEqual([contract.id]);
       const restored = store.load(contract.id)!; expect(restored.id).toBe(contract.id);
-      expect(existsSync(contractPath(root, contract.id))).toBe(false);
+      expect(storedCheckpointText(root, contract.id)).toBe(original);
       restored.goal = 'Updated by the schema-six reader'; store.hold(restored);
       expect(store.write(contract.id)).toBe(true);
       expect(readFileSync(oldPath, 'utf8')).toBe(original);
       // This is the actual old reader's flat-directory discovery rule.
       expect(readdirSync(contractsDir(root)).filter(name => name.endsWith('.json'))).toEqual([`${contract.id}.json`]);
-      expect(JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')).schemaVersion).toBe(6);
       expect(store.listStoredIds()).toEqual([contract.id]);
       expect(storeAt(root).load(contract.id)?.goal).toBe(restored.goal);
       store.dispose();
@@ -142,8 +143,9 @@ describe('checkpoint namespaces', () => {
     expect(readdirSync(contractsDir(root)).filter(name => name.endsWith('.json'))).toEqual([]);
     const targetRoot = tempRoot(), target = storeAt(targetRoot);
     expect(target.importContract(store.serialize(contract.id)!)).toBe(true);
-    expect(existsSync(contractPath(targetRoot, contract.id))).toBe(true);
+    expect(existsSync(contractCheckpointDir(targetRoot, contract.id))).toBe(true);
     expect(existsSync(join(contractsDir(targetRoot), `${contract.id}.json`))).toBe(false);
+    expect(existsSync(contractPath(targetRoot, contract.id))).toBe(false);
   });
 
   test('a future current checkpoint never falls back to an older flat checkpoint', () => {
@@ -174,19 +176,6 @@ describe('checkpoint namespaces', () => {
 });
 
 describe('atomic write', () => {
-  test('a write leaves only the contract file behind, and a rewrite replaces it whole', () => {
-    const root = tempRoot();
-    const store = storeAt(root);
-    const contract = makeContract();
-    store.put(contract);
-    store.write(contract.id);
-    contract.goal = 'A second goal';
-    contract.status = 'judging';
-    store.write(contract.id);
-    expect(readdirSync(contractCheckpointsDir(root))).toEqual([`${contract.id}.json`]);
-    expect(storeAt(root).load(contract.id)?.goal).toBe('A second goal');
-  });
-
   test('a write that fails keeps the previous file whole', () => {
     const root = tempRoot();
     const { store, failing } = failableStoreAt(root);
@@ -199,7 +188,6 @@ describe('atomic write', () => {
     expect(store.writeFailure(contract.id)?.message).toContain('could not be written');
     failing.on = false;
     expect(storeAt(root).load(contract.id)?.goal).toBe('A parser for every documented input form');
-    expect(readdirSync(contractCheckpointsDir(root))).toEqual([`${contract.id}.json`]);
   });
 
   test('a temp file left by a dead writer is reaped after an hour; a fresh one is left alone', () => {
@@ -236,7 +224,7 @@ describe('atomic write', () => {
   test('no contract id can name a path outside the contract directory', () => {
     expect(() => contractPath('/p', '../ctr-00000000')).toThrow('Not a contract id');
     expect(() => contractPath('/p', 'ctr-0000000g')).toThrow('Not a contract id');
-    expect(contractPath('/p', 'ctr-0000abcd')).toBe(join('/p', '.goodvibes', 'contracts', 'checkpoints-v6', 'ctr-0000abcd.json'));
+    expect(() => contractCheckpointDir('/p', '../ctr-00000000')).toThrow('Not a contract id');
   });
 });
 
@@ -453,13 +441,12 @@ describe('importContract', () => {
     const { store, failing } = failableStoreAt(root);
     const original = makeContract({ status: 'passed', completedAt: 1 });
     store.hold(original); expect(store.write(original.id)).toBe(true);
-    const path = contractPath(root, original.id);
-    const before = readFileSync(path, 'utf8');
+    const before = storedCheckpointText(root, original.id);
     failing.on = true;
     try {
       expect(store.importContract(serializeContract({ ...original, goal: 'uncommitted import' }, 2)!, true)).toBe(false);
       expect(store.get(original.id)?.goal).toBe(original.goal);
-      expect(readFileSync(path, 'utf8')).toBe(before);
+      expect(storedCheckpointText(root, original.id)).toBe(before);
       const other = makeContract({ id: 'failed-new-import' });
       expect(store.importContract(serializeContract(other, 2)!)).toBe(false);
       expect(store.get(other.id)).toBeNull();
@@ -516,9 +503,9 @@ describe('the debounced writer', () => {
     const detach = store.attach(events.subscribe);
     events.emit({ type: 'CONTRACT_PASSED', contractId: 'ctr-00000abc', criteriaMet: 1, criteriaJudged: 1, excluded: 0, nudges: 0 });
     events.emit({ type: 'CONTRACT_SPAWN_GUARD_TRIGGERED', agentId: 'a', depth: 2, activeAgents: 3, reason: 'units are leaves' });
-    expect(existsSync(contractPath(root, contract.id))).toBe(false);
+    expect(storedCheckpointText(root, contract.id)).toBeNull();
     detach();
-    expect(existsSync(contractPath(root, contract.id))).toBe(true);
-    expect(existsSync(contractPath(root, 'ctr-00000abc'))).toBe(false);
+    expect(storedCheckpointText(root, contract.id)).not.toBeNull();
+    expect(storedCheckpointText(root, 'ctr-00000abc')).toBeNull();
   });
 });

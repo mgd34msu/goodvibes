@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { contractPath } from '../../platform/src/platform/contract/store.js';
+import { storedCheckpointText } from '../../platform/src/platform/contract/store.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 
 function deferred() {
@@ -34,9 +34,8 @@ test('dispose freezes resumable snapshots before cancellation, then joins real c
   const { contract } = (await startContract(first));
   await waitFor(() => first.store.get(contract.id)?.units[0]?.activeAgentId !== undefined, 'a running unit');
   first.runner.dispose();
-  const contractFile = contractPath(root, contract.id);
   const itemFile = join(root, '.goodvibes', 'orchestration', contract.id, 'g1.json');
-  const contractBefore = readFileSync(contractFile, 'utf-8');
+  const contractBefore = storedCheckpointText(root, contract.id)!;
   const itemBefore = readFileSync(itemFile, 'utf-8');
   const snapshot = JSON.parse(contractBefore).contract;
   expect(snapshot.status).toBe('running');
@@ -50,7 +49,7 @@ test('dispose freezes resumable snapshots before cancellation, then joins real c
   expect(settled).toBe(false);
   cleanup.resolve();
   await barrier;
-  expect(readFileSync(contractFile, 'utf-8')).toBe(contractBefore);
+  expect(storedCheckpointText(root, contract.id)).toBe(contractBefore);
   expect(readFileSync(itemFile, 'utf-8')).toBe(itemBefore);
 
   const second = makeHarness({ root, plan: oneUnitPlan(1), scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parse = 1;\n' }, text: 'Completed after restart.' }] } });

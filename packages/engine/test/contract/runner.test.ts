@@ -18,7 +18,7 @@ import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { ASK as PARALLEL_ASK, validPlan } from './plan-support.js';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { DecompositionRunner } from '../../platform/src/platform/core/plan-decomposition.js';
-import { acquireSharedTree, sharedTreeWaiters } from '../../platform/src/platform/contract/index.js';
+import { acquireSharedTree, sharedTreeWaiters, storedCheckpointText } from '../../platform/src/platform/contract/index.js';
 import { emitAgentCompleted, emitAgentFailed } from '../../platform/src/platform/runtime/emitters/agents.js';
 import { captureContractInput } from '../../platform/src/platform/contract/input-snapshot.ts';
 import {
@@ -571,7 +571,7 @@ describe('persistence', () => {
     const { contract } = (await startContract(h));
     await waitFor(() => terminal(h, contract.id), 'the contract to end');
     h.store.flush();
-    expect(existsSync(join(h.root, '.goodvibes', 'contracts', 'checkpoints-v6', `${contract.id}.json`))).toBe(true);
+    expect(storedCheckpointText(h.root, contract.id)).not.toBeNull();
     expect(JSON.parse(h.runner.serializeContract(contract.id)!).contract.status).toBe('passed');
     expect(h.runner.get(contract.id)!.status).toBe('passed');
     expect(h.runner.list()).toEqual([]);

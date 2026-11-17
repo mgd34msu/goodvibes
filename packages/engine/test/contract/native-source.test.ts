@@ -4,7 +4,7 @@ import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
-  captureNativeContractSource, nativeContractSourceForAdmission, contractPath, readContractSnapshot, serializeContract,
+  captureNativeContractSource, nativeContractSourceForAdmission, contractPath, storedCheckpointText, readContractSnapshot, serializeContract,
   type Contract, type NativeContractSource,
 } from '../../platform/src/platform/contract/index.js';
 import { bindNativeContractSource, nativeSourceCriteria, nativeSourcePlan } from '../../platform/src/platform/contract/native-source.js';
@@ -189,7 +189,7 @@ describe('native contract source', () => {
     expect(contract.nativeSource).toEqual(source());
     await waitFor(() => first.store.get(contract.id)?.status === 'planning', 'initial planning');
     first.dispose(); harnesses.splice(harnesses.indexOf(first), 1);
-    const stored = JSON.parse(readFileSync(contractPath(root, contract.id), 'utf8')) as { contract: Contract };
+    const stored = JSON.parse(storedCheckpointText(root, contract.id)!) as { contract: Contract };
     expect(stored.contract.nativeSource).toEqual(source());
     const seenCriteria: string[] = []; const seenGoals: string[] = []; const prompts: string[] = []; const sources: unknown[] = [];
     const second = makeHarness({ recordNative: true, decisionLog: restartLog, root, scripts: { u1: () => [{ files: { 'src/csv.ts': 'export const parsed = true;\n' }, text: 'Native requirements complete.' }] },

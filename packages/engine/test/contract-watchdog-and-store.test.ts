@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createUnitWatchdog, type WatchedAgent } from '../platform/src/platform/contract/watchdog.js';
-import { ContractStore, contractPath } from '../platform/src/platform/contract/store.js';
+import { ContractStore, contractCheckpointDir } from '../platform/src/platform/contract/store.js';
 import { makeContract } from './contract/fixtures.js';
 
 type Handler = (event: { payload: { agentId: string } }) => void;
@@ -134,7 +134,9 @@ describe('the contract checkpoint store', () => {
     try {
       store.put(contract);
       expect(store.write(contract.id)).toBe(true);
-      const path = contractPath(root, contract.id);
+      // This process lets go of the contract; a newer build then saves it.
+      store.dispose();
+      const path = join(contractCheckpointDir(root, contract.id), 'base.json');
       const envelope = JSON.parse(readFileSync(path, 'utf8')) as { schemaVersion: number };
       envelope.schemaVersion += 1;
       const newer = JSON.stringify(envelope);
@@ -163,7 +165,7 @@ describe('the contract checkpoint store', () => {
       try {
         expect(store.listStoredIds()).toContain(contract.id);
       } finally { spy.mockRestore(); }
-      expect(reads.filter((path) => path.endsWith(`${contract.id}.json`))).toEqual([]);
+      expect(reads.filter((path) => path.endsWith(`${contract.id}.json`) || path.includes(`/${contract.id}/`))).toEqual([]);
     } finally { store.dispose(); }
   });
 });

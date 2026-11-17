@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { currentFileObservations, currentFileMatchesText } from '../../platform/src/platform/contract/current-file-observations.js';
 import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { contractPath, createContractIntake, type Contract, type NativeContractSource } from '../../platform/src/platform/contract/index.js';
+import { contractCheckpointDir, contractPath, storedCheckpointText, createContractIntake, type Contract, type NativeContractSource } from '../../platform/src/platform/contract/index.js';
 import type { NativeContractDecisionHost } from '../../platform/src/platform/contract/native-decisions.js';
 import { nativeSourceCriteria } from '../../platform/src/platform/contract/native-source.js';
 import { readContractSnapshot } from '../../platform/src/platform/contract/store.js';
@@ -101,7 +101,9 @@ test('historical native unshown wait retains unchanged evidence without an owner
   const id = (await startContract(first, { nativeSource: source })).contract.id;
   await waitFor(() => terminal(first, id), 'original native execution'); await first.runner.join(id);
   first.dispose(); harnesses.splice(harnesses.indexOf(first), 1);
-  const path = contractPath(directory, id); const saved = (JSON.parse(readFileSync(path, 'utf8')) as { contract: Contract }).contract;
+  const path = contractPath(directory, id); const saved = (JSON.parse(storedCheckpointText(directory, id)!) as { contract: Contract }).contract;
+  // Left as a schema-3 single file, as an older build wrote it.
+  rmSync(contractCheckpointDir(directory, id), { recursive: true, force: true });
   delete saved.nativeDecisions; delete saved.nativeProgress; delete saved.nativeWaiting; saved.status = 'awaiting-owner'; saved.statusBeforeOwner = 'running'; saved.units[0]!.status = 'awaiting-owner'; saved.units[0]!.criteria[0]!.status = 'unshown';
   saved.escalations = [{ id: `${id}.old`, at: 10, scope: 'unit', targetId: 'u1', reason: 'unsettled', question: 'Historical request for approval', unmetCriterionIds: [] }];
   // Schema3 predates physical review descriptors. Keep its actual optional

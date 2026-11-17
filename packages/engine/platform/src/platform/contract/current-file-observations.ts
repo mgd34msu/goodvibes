@@ -57,6 +57,11 @@ export function storedCurrentFileLabels(owner: object) {
   const labels = ownerLabels.get(owner);
   return labels?.size ? { version: 1, entries: [...labels].map(([path, label]) => ({ path, id: label.id, facts: label.facts })) } : undefined;
 }
+/** The owner's label table itself, in insertion order, for a checkpoint save that
+ * writes only the entries that changed. An entry with the same id has the same facts. */
+export function currentFileLabelEntries(owner: object): ReadonlyMap<string, { readonly facts: CurrentFileReviewFacts; readonly id: string }> | undefined {
+  return ownerLabels.get(owner);
+}
 /** Graceful disposal owns a new metadata map, not the mutable original map
  * or any native byte observation. Only the original runtime owner supplies it. */
 export function retainCurrentFileLabels(original: object, copy: object): void {

@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { contractPath, contractCheckpointsDir, contractsDir } from '../../platform/src/platform/contract/store.js';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { contractPath, contractsDir, storedCheckpointText } from '../../platform/src/platform/contract/store.js';
 import { DurableContractAdmissions, durableKeyHash, type DurableContractRequest } from '../../platform/src/platform/contract/durable-admission.js';
 import { makeHarness, makeRepo, oneUnitPlan, type Harness } from './runner-support.js';
 import { CrossProcessLockBusyError } from '../../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
@@ -30,8 +30,8 @@ test('schema6 namespace keeps the original durable operation and cross-process e
   const started = await first.runner.startDurable(input), id = started.admission.contractId;
   const admissions = new DurableContractAdmissions(root), directory = join(contractsDir(root), 'admissions');
   const digest = durableKeyHash(input.key), path = join(directory, digest + '.json'), lease = path + '.execution';
-  expect(dirname(contractPath(root, id))).toBe(contractCheckpointsDir(root));
-  expect(JSON.parse(readFileSync(contractPath(root, id), 'utf8')).schemaVersion).toBe(6);
+  expect(existsSync(contractPath(root, id))).toBe(false);
+  expect(JSON.parse(storedCheckpointText(root, id)!).schemaVersion).toBe(6);
   expect(existsSync(join(contractsDir(root), id + '.json'))).toBe(false); expect(existsSync(lease)).toBe(true);
   const original = admissions.read(input.key);
   // The old program's flat checkpoint scanner never visits the new image.

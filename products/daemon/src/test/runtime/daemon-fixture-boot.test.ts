@@ -9,7 +9,7 @@ import { trackIntervals } from '../helpers/intervals.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../../config/surface.js';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import { contractPath } from '@goodvibes-jev/engine/platform/platform/contract';
+import { storedCheckpointText } from '@goodvibes-jev/engine/platform/platform/contract';
 
 function rootWithBenchmarks(label: string): string {
   const root = makeOwnedTempDir(label);
@@ -141,7 +141,7 @@ test('runtime shutdown cancels contract work, flushes its pending store and deta
     installJudgmentPort(previous); readingInstalled = false;
     await fixture.stop();
     expect(signals[0]!.aborted).toBe(true);
-    const saved = JSON.parse(readFileSync(contractPath(fixture.workingDirectory, started.contract.id), 'utf8'));
+    const saved = JSON.parse(storedCheckpointText(fixture.workingDirectory, started.contract.id)!);
     expect(saved.contract.id).toBe(started.contract.id);
     expect(saved.contract.ask).toBe('Fixture held contract');
     expect(() => fixture!.services.agentManager.spawn({ mode: 'spawn', task: 'Late fixture admission' })).toThrow('No contract runner is composed');

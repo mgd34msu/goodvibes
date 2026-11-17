@@ -434,10 +434,20 @@ waits.
   switch back to. A contract cancelled
   while its result was being published still records that publication, and
   its status line says the result already reached the project.
-- **Persistence.** Each contract is written to
-  `.goodvibes/contracts/checkpoints-v6/<contractId>.json` (`ContractStore`,
-  `contract/store.ts`). A contract's input is recorded as its git tree and
-  commit only, so the record does not grow with the repository. An ended
+- **Persistence.** Each contract is kept in
+  `.goodvibes/contracts/checkpoints-v7/<contractId>/` (`ContractStore`,
+  `contract/store.ts`): a base written once, then one line per save holding
+  only what that save changed, so a save costs the size of the change (a few
+  hundred bytes for a unit's status, a decision and usage), not the size of the
+  contract. Captured inputs set after the start are written once in their own
+  file. A native contract's saves are synced before they return. One process
+  writes a contract at a time; another is refused and writes nothing. A
+  checkpoint saved by an earlier build as one file
+  (`checkpoints-v6/<contractId>.json`) is read as before and moved into its
+  directory, unchanged, on its first save. A save cut short by a crash is
+  ignored on reading: the contract loads as it was saved before it. A
+  contract's input is recorded as its git tree and commit only, so the record
+  does not grow with the repository. An ended
   contract gets a small summary in `.goodvibes/contracts/ended/`; it leaves
   memory and is read back from disk when asked for. Ended contracts are kept
   30 days, at most 100 per project, then removed (native work is kept with its

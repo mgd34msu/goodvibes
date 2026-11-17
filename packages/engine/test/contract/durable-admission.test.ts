@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { OrchestrationEngine } from '../../platform/src/platform/orchestration/engine.js';
 import type { DurableContractBoundary, DurableContractRequest } from '../../platform/src/platform/contract/index.js';
-import { contractPath } from '../../platform/src/platform/contract/index.js';
+import { contractCheckpointDir, contractPath, storedCheckpointText } from '../../platform/src/platform/contract/index.js';
 import { DurableContractAdmissions, durablePayloadRevision } from '../../platform/src/platform/contract/durable-admission.js';
 import { makeHarness, makeRepo, oneUnitPlan, waitFor, type Harness } from './runner-support.js';
 import { CrossProcessLockBusyError } from '../../platform/src/platform/workspace/checkpoint/cross-process-lock.js';
@@ -42,7 +42,7 @@ describe('native durable contract admission', () => {
       expect(Object.isFrozen(admission.input)).toBe(true);
       const stored = new DurableContractAdmissions(h.root).read(key)!;
       expect(stored.contractId).toBe(admission.contractId);
-      expect(JSON.parse(readFileSync(contractPath(h.root, admission.contractId), 'utf8')).contract.durableLaunchState).toBe('prepared');
+      expect(JSON.parse(storedCheckpointText(h.root, admission.contractId)!).contract.durableLaunchState).toBe('prepared');
       launch(() => { validations++; });
     } });
     const input = request(h.root);
@@ -410,8 +410,7 @@ describe('native durable contract admission', () => {
     const h = setup(undefined, makeRepo(), 0);
     const first = await h.runner.startDurable(request(h.root));
     h.dispose(); await h.runner.join(first.admission.contractId);
-    const path = contractPath(h.root, first.admission.contractId);
-    const checkpoint = JSON.parse(readFileSync(path, 'utf8'));
+    const checkpoint = JSON.parse(storedCheckpointText(h.root, first.admission.contractId)!);
     checkpoint.contract.ask = 'a different target';
     new DurableContractAdmissions(h.root).update(checkpoint.contract.durableAdmission, JSON.stringify(checkpoint));
     const next = setup(undefined, h.root);
@@ -436,7 +435,9 @@ describe('native durable contract admission', () => {
     delete snapshot.contract.durableAdmission;
     delete snapshot.contract.durableLaunchState;
     const path = contractPath(first.root, started.admission.contractId);
-    if (kind === 'missing') unlinkSync(path); else writeFileSync(path, '{');
+    rmSync(contractCheckpointDir(first.root, started.admission.contractId), { recursive: true, force: true });
+    mkdirSync(dirname(path), { recursive: true });
+    if (kind === 'corrupt') writeFileSync(path, '{');
     const next = setup(undefined, first.root);
     expect(next.runner.importContract(JSON.stringify(snapshot), true)).toBe(false);
     writeFileSync(path, JSON.stringify(snapshot));

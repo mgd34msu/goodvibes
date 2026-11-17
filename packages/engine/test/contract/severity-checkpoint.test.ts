@@ -2,7 +2,7 @@ import { afterEach, expect, spyOn, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { JudgmentError, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { installJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
-import { contractPath, deserializeContract } from '../../platform/src/platform/contract/store.js';
+import { contractPath, storedCheckpointText, deserializeContract } from '../../platform/src/platform/contract/store.js';
 import { makeHarness, makeRepo, oneUnitPlan, startContract, waitFor, type AgentStep, type Harness } from './runner-support.js';
 
 function deferred() {
@@ -51,7 +51,7 @@ async function setup(criteria = 1, followup: readonly AgentStep[] = [{ text: 'Wo
 }
 
 function persisted(h: Harness, id: string) {
-  const contract = deserializeContract(readFileSync(contractPath(h.root, id), 'utf-8'));
+  const contract = deserializeContract(storedCheckpointText(h.root, id)!);
   if (contract === null) throw new Error('The contract checkpoint is unreadable');
   return contract;
 }

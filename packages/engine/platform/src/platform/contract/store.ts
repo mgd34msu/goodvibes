@@ -4,18 +4,23 @@ import { contractCreationPathAbsent, publishInitialContractCheckpoint } from './
  * ContractStore: the contract tree in memory and on disk
  * (docs/design/contract-runner.md section 7.1).
  *
- * Schema6 checkpoints live in `.goodvibes/contracts/checkpoints-v6/`; the
- * original flat directory remains a read fallback for schema1–5. Old running
- * readers must not discover and quarantine a new checkpoint. Original durable
- * admission keys and execution leases stay in their existing directory.
- * Writes use an atomic temp-file/fsync/rename; a native work contract's
- * checkpoint write is durable (file and directory synced) because its launch
- * claim and semantic decisions must survive a crash. Its admission is not part
- * of the checkpoint: it was written once in its receipt file (durable-admission.ts)
- * and the checkpoint names it by payload revision. The record is validated when
- * it is loaded, not on every save. Unsupported future versions
- * remain at their original path and refuse replacement; malformed known
- * versions are quarantined.
+ * A checkpoint is a directory, `.goodvibes/contracts/checkpoints-v7/<id>/`: a
+ * base written once, a progress log with one line per save holding only what
+ * that save changed, and captured inputs set after the base in their own files
+ * (checkpoint-progress.ts). A save costs the size of what changed, whatever
+ * the contract holds. Version-6 single files in `checkpoints-v6/` are read as
+ * before and moved into a directory, unchanged, by one rename on their first
+ * save; the original flat directory remains a read fallback for schema1–5 and
+ * is never modified. One writer per contract: a save takes a kernel-released
+ * lock on the contract, and a process whose copy is older than the disk writes
+ * nothing. A native work contract's saves are synced before they return,
+ * because its launch claim and semantic decisions must survive a crash. Its
+ * admission is not part of the checkpoint: it was written once in its receipt
+ * file (durable-admission.ts) and the checkpoint names it by payload revision.
+ * The record is validated when it is loaded, not on every save. Unsupported
+ * future versions remain where they are and refuse replacement; malformed
+ * known versions are quarantined. A last progress line without its newline is
+ * a save that never finished: it is ignored, never a reason to quarantine.
  *
  * Ended contracts: when a checkpoint is written with a terminal status, a small
  * summary (id, status, session, dates) is written to `ended/<id>.json`. Start-up
@@ -29,9 +34,15 @@ import { contractCreationPathAbsent, publishInitialContractCheckpoint } from './
  *
  * Modeled on orchestration/persistence.ts.
  */
-import { DurableContractAdmissions, isStoredAdmissionReference, parseDurableAdmission, storedAdmissionReference } from './durable-admission.js';
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { DurableContractAdmissions, isStoredAdmissionReference, parseDurableAdmission, storedAdmissionReference, syncContractDirectory } from './durable-admission.js';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { holdProcessLock, type HeldProcessLock } from '../utils/process-lock.js';
+import { openRecordLog, type RecordLog } from '../state/record-log.js';
+import {
+  assembleCheckpoint, CheckpointFormatError, CHECKPOINT_BASE_FILE, CHECKPOINT_LOG_FILE, ContractProgressTracker, isCheckpointSideFileName,
+  readCheckpointLog, storedContractBody, writeCheckpointSideFile, type AssembledCheckpoint, type LogIdentity,
+} from './checkpoint-progress.js';
 import { createHash } from 'node:crypto';
 import type { ContractEvent } from '../../events/contract.js';
 import { CONTRACT_STATUSES } from '../../events/contract.js';
@@ -41,7 +52,7 @@ import { captureQuarantineSource, QuarantineEncodingError, quarantineCorruptFile
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decisions';
 import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
-import { ownedContractCheckpointText, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
+import { ownedContractCheckpointText, readOwnedAssembledCheckpoint, readOwnedContractCheckpoint, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 import { storedCurrentFileLabels, restoreCurrentFileLabels } from './current-file-observations.js';
 import { storedTreeBaselineOrigins, hydrateTreeBaselines } from './tree-baseline.js';
 import { isContractInputSnapshot } from './input-snapshot.js';
@@ -82,6 +93,22 @@ export class ContractStoreVersionError extends Error {
   constructor(readonly contractId: string) {
     super(`Contract ${contractId} uses a newer checkpoint format. Run a compatible GoodVibes build before loading or replacing it.`);
   }
+}
+
+/**
+ * A contract's saved checkpoint as one version-6 envelope text (in the
+ * directory format, the base with its progress applied), or null when none is
+ * saved. For export and inspection: it carries no native provenance.
+ */
+export function storedCheckpointText(projectRoot: string, contractId: string): string | null {
+  const dir = contractCheckpointDir(projectRoot, contractId), base = join(dir, CHECKPOINT_BASE_FILE);
+  for (const path of [base, contractPath(projectRoot, contractId), historicalContractPath(projectRoot, contractId)]) {
+    let text: string;
+    try { text = readFileSync(path, 'utf8'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+    return path === base ? assembleCheckpoint(dir, text, readCheckpointLog(dir)?.bytes ?? null).text : text;
+  }
+  return null;
 }
 
 /** Original contract authority root. Durable admission keys and leases never move. */
@@ -147,7 +174,39 @@ export function contractCheckpointsDir(projectRoot: string): string {
   return join(contractsDir(projectRoot), 'checkpoints-v6');
 }
 
-/** A contract's current checkpoint file path. Accepts only an actual current or historical contract ID, so no id can name a path outside the directory. */
+/** Where this build keeps checkpoints: one directory per contract. Builds that read only single files never look here. */
+export function contractProgressDir(projectRoot: string): string {
+  return join(contractsDir(projectRoot), 'checkpoints-v7');
+}
+
+/** A contract's checkpoint directory (base, progress log, captured inputs). Accepts only a contract id. */
+export function contractCheckpointDir(projectRoot: string, contractId: string): string {
+  if (!isContractId(contractId)) throw new Error(`Not a contract id: ${JSON.stringify(contractId)}`);
+  return join(contractProgressDir(projectRoot), contractId);
+}
+
+/** The kernel-released lock a store holds while it writes a contract's checkpoint, so two writers never append to one log. */
+export function contractProgressLockPath(projectRoot: string, contractId: string): string {
+  return join(contractsDir(projectRoot), '.leases', `${contractId}.progress.sqlite`);
+}
+
+/** Another writer holds this contract's checkpoint. */
+export class ContractWriterBusyError extends Error {
+  override readonly name = 'ContractWriterBusyError';
+  constructor(readonly contractId: string) {
+    super(`Contract ${contractId} is being saved by another GoodVibes process (or another contract store in this one); this one wrote nothing, so that writer's checkpoint stands. Let that process finish the contract, or stop it and resume the contract here.`);
+  }
+}
+
+/** The checkpoint changed on disk after this process read it. */
+export class ContractCheckpointStaleError extends Error {
+  override readonly name = 'ContractCheckpointStaleError';
+  constructor(readonly contractId: string) {
+    super(`Contract ${contractId} was saved by another process after this one read it; this one wrote nothing, so that save stands. Restart this process to read the contract again before continuing it here.`);
+  }
+}
+
+/** The version-6 single-file checkpoint path: read, and moved into the contract's directory on its first save. Accepts only an actual current or historical contract ID, so no id can name a path outside the directory. */
 export function contractPath(projectRoot: string, contractId: string): string {
   if (!isContractId(contractId)) throw new Error(`Not a contract id: ${JSON.stringify(contractId)}`);
   return join(contractCheckpointsDir(projectRoot), `${contractId}${JSON_SUFFIX}`);
@@ -349,6 +408,43 @@ function removeFile(path: string): number {
   }
 }
 
+/** A checkpoint directory holding anything (a base, a log, a quarantined base) names a contract; an empty one left by a failed first save does not. */
+function checkpointDirectoryOccupied(dir: string): boolean {
+  try { return readdirSync(dir).length > 0; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+}
+
+/** Removes a directory and everything in it. Returns the bytes freed. */
+function removeDirectory(path: string): number {
+  let size = 0;
+  try { for (const name of readdirSync(path)) { try { size += statSync(join(path, name)).size; } catch { /* already gone */ } } }
+  catch { return 0; }
+  try { rmSync(path, { recursive: true, force: true }); return size; }
+  catch (error) {
+    logger.warn('contract store: failed to remove a directory during housekeeping', { path, error: summarizeError(error) });
+    return 0;
+  }
+}
+
+function logIdentityOf(path: string): LogIdentity | null {
+  try { const stat = statSync(path); return { ino: stat.ino, size: stat.size }; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+}
+
+function sameLogIdentity(left: LogIdentity | null, right: LogIdentity | null): boolean {
+  return left === null || right === null ? left === right : left.ino === right.ino && left.size === right.size;
+}
+
+/** This store's hold on one contract's checkpoint: the lock, and the log once a save appended to it. */
+interface ProgressWriter {
+  readonly dir: string;
+  /** Null only where the filesystem has no file locks. */
+  readonly lock: HeldProcessLock | null;
+  log: RecordLog<string> | null;
+  /** Dead writers' temp files and unused captured inputs were removed under this lock. */
+  cleared: boolean;
+}
+
 /** Keeps the newest `cap` files; returns the rest, oldest first. */
 function overCap(files: readonly DatedFile[], cap: number): DatedFile[] {
   if (files.length <= cap) return [];
@@ -376,6 +472,14 @@ export class ContractStore {
   private readonly endedRecords = new Map<string, Contract>();
   private readonly writeFailures = new Map<string, ContractWriteFailure>();
   private readonly onWriteFailure: ContractStoreOptions['onWriteFailure'];
+  /** What this store last wrote of each contract it saves: a save writes the difference. */
+  private readonly trackers = new Map<string, ContractProgressTracker>();
+  /** What each loaded record was on disk when it was read, until that record is saved. */
+  private readonly loadedTrackers = new WeakMap<Contract, ContractProgressTracker>();
+  private readonly writers = new Map<string, ProgressWriter>();
+  /** After disposal a save releases its contract's lock at once, so a rebuilt store can take it. */
+  private disposed = false;
+  private warnedUnlocked = false;
 
   constructor(options: ContractStoreOptions) {
     this.onWriteFailure = options.onWriteFailure;
@@ -425,6 +529,7 @@ export class ContractStore {
     // Only actual earlier8hex producers could leave unindexed receipts; a caller-named older id is looked up.
     if (!isOpaqueContractId(id) && new DurableContractAdmissions(this.projectRoot).findByContractId(id) !== null) throw new Error('Contract identity is already admitted');
     const occupied = [contractPath(this.projectRoot, id), historicalContractPath(this.projectRoot, id)].some(path => !contractCreationPathAbsent(path) || !contractCreationPathAbsent(path + QUARANTINE_SUFFIX))
+      || checkpointDirectoryOccupied(contractCheckpointDir(this.projectRoot, id))
       || !contractCreationPathAbsent(join(contractsDir(this.projectRoot), 'admissions', '.by-contract', `${id}.json`));
     if (occupied) throw new Error('Contract identity became occupied');
     const reservation: ContractCreationReservation = Object.freeze({ id,
@@ -455,9 +560,17 @@ export class ContractStore {
     original.assertCurrent(); this.prepareCheckpointWrite(contract); original.assertCurrent(); reservation.assertCurrent();
     // A caller-named admission key keeps its own exclusive index link.
     if (contract.durableAdmission) new DurableContractAdmissions(this.projectRoot).write(contract.durableAdmission, text);
-    publishInitialContractCheckpoint(contractCheckpointsDir(this.projectRoot), contract.id, text, reservation.assertCurrent);
+    const dir = contractCheckpointDir(this.projectRoot, contract.id);
+    publishInitialContractCheckpoint(dir, basename(CHECKPOINT_BASE_FILE, JSON_SUFFIX), text, reservation.assertCurrent);
     original.assertCurrent();
+    this.trackers.set(contract.id, ContractProgressTracker.of(contract, 'progress'));
+    this.noteSupportedVersion(join(dir, CHECKPOINT_BASE_FILE));
     state.contract = contract; this.contracts.set(contract.id, contract);
+  }
+
+  /** The base just written or moved by this store is the current schema: its version is not read back. */
+  private noteSupportedVersion(path: string): void {
+    try { this.supportedStoredVersions.set(path, fileObservationIdentity(path)); } catch { /* the next version check reads it */ }
   }
 
   /** The contract a retry key already started, or undefined. One file read; it survives a restart. */
@@ -494,7 +607,7 @@ export class ContractStore {
       // An unreadable record is left: readIdempotentStart names it to the caller that uses its key.
       try { contractId = (JSON.parse(readFileSync(path, 'utf8')) as { readonly contractId?: unknown }).contractId; } catch { continue; }
       if (typeof contractId !== 'string' || !isContractId(contractId)) continue;
-      if (this.contracts.has(contractId) || this.endedSummary(contractId) !== undefined
+      if (this.contracts.has(contractId) || this.endedSummary(contractId) !== undefined || existsSync(contractCheckpointDir(this.projectRoot, contractId))
         || existsSync(contractPath(this.projectRoot, contractId)) || existsSync(historicalContractPath(this.projectRoot, contractId))) continue;
       try { if (now - statSync(path).mtimeMs < STALE_TEMP_MAX_AGE_MS) continue; } catch { continue; }
       bytes += removeFile(path);
@@ -532,30 +645,27 @@ export class ContractStore {
     return contract ? serializeContract(contract, this.now()) : null;
   }
 
-  /** Writes a held contract now, atomically. Returns false when it is not held or the write failed. */
+  /**
+   * Saves a held contract now: appends what changed since the last save (one
+   * write, synced before returning for a native contract). Returns false when
+   * it is not held or the save failed; a failed save leaves the checkpoint as
+   * it was, and the next save writes the whole difference again.
+   */
   write(contractId: string): boolean {
     this.cancelPendingWrite(contractId);
     const contract = this.contracts.get(contractId);
     if (!contract) return false;
-    const json = serializeContract(contract, this.now());
-    if (json === null) return false;
-    const path = contractPath(this.projectRoot, contract.id);
+    const path = contractCheckpointDir(this.projectRoot, contract.id);
     try {
-      this.assertStoredVersion(contract.id);
+      // While this store holds the contract's lock and its directory, nothing else can replace what is there.
+      if (!this.writers.has(contract.id) || this.trackers.get(contract.id)?.layout !== 'progress') this.assertStoredVersion(contract.id);
       this.prepareCheckpointWrite(contract);
-      let publishedIdentity: string | undefined;
-      writeFileAtomic(path, json, { durable: contract.durableAdmission !== undefined, onEffect: published => {
-        // The atomic writer fences this callback with the original staged
-        // descriptor and published pathname, including nanosecond clocks.
-        if (published) publishedIdentity = fileObservationIdentity(path);
-      } });
-      // Reuse only our successfully published schema, never a replacement
-      // observed after the write. The next version check still stats the leaf.
-      if (publishedIdentity !== undefined) this.supportedStoredVersions.set(path, publishedIdentity);
+      this.save(contract);
       this.writeFailures.delete(contract.id);
       this.recordEnded(contract);
       return true;
     } catch (error) {
+      if (error instanceof ContractWriterBusyError || error instanceof ContractCheckpointStaleError) this.releaseWriter(contract.id);
       logger.error('contract store: write failed', { path, error: summarizeError(error) });
       const failure: ContractWriteFailure = {
         at: this.now(),
@@ -566,7 +676,199 @@ export class ContractStore {
       try { this.onWriteFailure?.(contract.id, failure); }
       catch (callbackError) { logger.warn('contract store: write-failure listener threw', { error: summarizeError(callbackError) }); }
       return false;
+    } finally {
+      if (this.disposed) this.releaseWriter(contractId);
     }
+  }
+
+  /** One save: a new base when there is none in the directory format, the move of a version-6 file, then the difference. */
+  private save(contract: Contract): void {
+    const id = contract.id;
+    const writer = this.acquireWriter(id);
+    let tracker = this.currentTracker(contract);
+    if (tracker.layout === 'none' || tracker.layout === 'historical'
+      || (tracker.layout === 'single-file' && tracker.sourceSchemaVersion !== CURRENT_CONTRACT_SCHEMA_VERSION)) {
+      this.publishBase(writer, contract, tracker.layout === 'single-file');
+      return;
+    }
+    if (tracker.layout === 'single-file') tracker = this.moveSingleFile(id, writer.dir, tracker);
+    // Once per hold, before this save can write a side file of its own.
+    if (!writer.cleared) { this.clearDirectory(writer.dir, tracker); writer.cleared = true; }
+    const durable = contract.durableAdmission !== undefined;
+    const at = this.now();
+    const change = tracker.diff(contract, at, (field, text) => writeCheckpointSideFile(writer.dir, field, text));
+    const bytes = change.line === null ? 0 : Buffer.byteLength(change.line) + 1;
+    if (tracker.shouldCompact(bytes)) {
+      this.compact(writer, contract, tracker, change, at, durable);
+      return;
+    }
+    // Nothing changed: nothing is written. The state is still kept, so a copy with the same content is compared by reference next time.
+    if (change.line !== null) this.openLog(writer, durable).append(change.line);
+    tracker.commitAppend(change, bytes);
+  }
+
+  /** This store's lock on the contract's checkpoint, taken on its first save. */
+  private acquireWriter(id: string): ProgressWriter {
+    const held = this.writers.get(id);
+    if (held !== undefined) return held;
+    let lock: HeldProcessLock | null = null;
+    try {
+      lock = holdProcessLock(contractProgressLockPath(this.projectRoot, id));
+      if (lock === null) throw new ContractWriterBusyError(id);
+    } catch (error) {
+      if (error instanceof ContractWriterBusyError) throw error;
+      // As with the run claim: a lock that cannot be taken at all (no file locks
+      // on this filesystem) must not stop saving; it only cannot exclude a second writer.
+      if (!this.warnedUnlocked) logger.warn('contract store: the checkpoint lock could not be taken; saving without it', { error: summarizeError(error) });
+      this.warnedUnlocked = true;
+    }
+    const writer: ProgressWriter = { dir: contractCheckpointDir(this.projectRoot, id), lock, log: null, cleared: false };
+    this.writers.set(id, writer);
+    return writer;
+  }
+
+  /** Gives up the contract's lock and closes its log (syncing what it appended). */
+  private releaseWriter(id: string): void {
+    const writer = this.writers.get(id);
+    if (writer === undefined) return;
+    this.writers.delete(id);
+    try {
+      if (writer.log !== null) {
+        writer.log.close();
+        const tracker = this.trackers.get(id);
+        if (tracker !== undefined) tracker.log = logIdentityOf(join(writer.dir, CHECKPOINT_LOG_FILE));
+      }
+    } catch (error) {
+      logger.warn('contract store: closing a contract progress log failed', { contractId: id, error: summarizeError(error) });
+      this.trackers.delete(id);
+    } finally {
+      writer.lock?.release();
+    }
+  }
+
+  /**
+   * What this store last wrote or read of the contract, checked against the
+   * disk under the lock. A copy older than the disk is never written over it.
+   */
+  private currentTracker(contract: Contract): ContractProgressTracker {
+    const id = contract.id;
+    const known = this.trackers.get(id), loaded = this.loadedTrackers.get(contract);
+    for (const tracker of [known, loaded]) {
+      if (tracker !== undefined && this.matchesDisk(id, tracker)) {
+        this.trackers.set(id, tracker);
+        return tracker;
+      }
+    }
+    if (known !== undefined || loaded !== undefined) {
+      this.trackers.delete(id);
+      // A newer build's save is reported as such (and not retried on every event); any other change is a stale copy.
+      try { this.loadAvailable(id); } catch (error) { if (error instanceof ContractStoreVersionError) throw error; }
+      throw new ContractCheckpointStaleError(id);
+    }
+    // Not read or written by this store yet: what is on disk now, read under the lock.
+    const stored = this.loadAvailable(id);
+    const tracker = stored === null ? ContractProgressTracker.of(contract, 'none') : this.loadedTrackers.get(stored);
+    if (tracker === undefined) throw new Error('The stored checkpoint could not be read back for comparison');
+    this.trackers.set(id, tracker);
+    return tracker;
+  }
+
+  private matchesDisk(id: string, tracker: ContractProgressTracker): boolean {
+    // The log this store holds open is written by nobody else.
+    if (this.writers.get(id)?.log != null && this.trackers.get(id) === tracker) return true;
+    const dir = contractCheckpointDir(this.projectRoot, id);
+    const hasBase = existsSync(join(dir, CHECKPOINT_BASE_FILE));
+    switch (tracker.layout) {
+      case 'progress': return hasBase && sameLogIdentity(tracker.log, logIdentityOf(join(dir, CHECKPOINT_LOG_FILE)));
+      case 'single-file': {
+        if (hasBase) return false;
+        try { return fileObservationIdentity(contractPath(this.projectRoot, id)) === tracker.sourceIdentity; } catch { return false; }
+      }
+      case 'historical': return !hasBase && !existsSync(contractPath(this.projectRoot, id));
+      case 'none': return !hasBase && !existsSync(contractPath(this.projectRoot, id)) && !existsSync(historicalContractPath(this.projectRoot, id));
+    }
+  }
+
+  /** A whole new base, for a contract with none in the directory format. A log left beside a quarantined base is kept aside. */
+  private publishBase(writer: ProgressWriter, contract: Contract, replacesSingleFile: boolean): void {
+    const text = serializeContract(contract, this.now());
+    if (text === null) throw new Error('the contract could not be serialized');
+    this.setAsideLog(writer, 'orphaned');
+    publishInitialContractCheckpoint(writer.dir, basename(CHECKPOINT_BASE_FILE, JSON_SUFFIX), text, () => {});
+    // The old single file holds an older schema; the new base holds all of it.
+    if (replacesSingleFile) removeFile(contractPath(this.projectRoot, contract.id));
+    this.trackers.set(contract.id, ContractProgressTracker.of(contract, 'progress'));
+    this.noteSupportedVersion(join(writer.dir, CHECKPOINT_BASE_FILE));
+  }
+
+  /**
+   * Converts a version-6 single file in one step: the file is renamed, byte for
+   * byte, to the base of the contract's directory. A crash before the rename
+   * leaves the single file; after it, the base. Nothing is left behind.
+   */
+  private moveSingleFile(id: string, dir: string, tracker: ContractProgressTracker): ContractProgressTracker {
+    const single = contractPath(this.projectRoot, id), base = join(dir, CHECKPOINT_BASE_FILE);
+    const root = contractProgressDir(this.projectRoot), rootExisted = existsSync(root);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const writer = this.writers.get(id);
+    if (writer !== undefined) this.setAsideLog(writer, 'orphaned');
+    let identity: string | null = null;
+    try { identity = fileObservationIdentity(single); } catch { /* gone: another writer moved it */ }
+    if (identity === null || identity !== tracker.sourceIdentity) throw new ContractCheckpointStaleError(id);
+    renameSync(single, base);
+    // The base must be found after a crash before any line is appended beside it.
+    for (const path of [dir, root, dirname(single), ...(rootExisted ? [] : [contractsDir(this.projectRoot)])]) syncContractDirectory(path);
+    this.supportedStoredVersions.delete(single);
+    this.noteSupportedVersion(base);
+    const moved = tracker.moved();
+    this.trackers.set(id, moved);
+    return moved;
+  }
+
+  /** A log that does not belong to the base now in the directory is kept beside it under another name, never appended to. */
+  private setAsideLog(writer: ProgressWriter, why: 'orphaned' | 'damaged'): void {
+    writer.log?.close();
+    writer.log = null;
+    const path = join(writer.dir, CHECKPOINT_LOG_FILE);
+    if (existsSync(path)) renameSync(path, `${path}.${why}-${this.now()}`);
+  }
+
+  /** The log, opened on the first append after the lock was taken. */
+  private openLog(writer: ProgressWriter, durable: boolean): RecordLog<string> {
+    if (writer.log !== null) return writer.log;
+    const path = join(writer.dir, CHECKPOINT_LOG_FILE);
+    const created = !existsSync(path);
+    writer.log = openRecordLog<string>(path, { fsync: durable ? 'each' : 'batch', encode: line => line, decode: line => line });
+    if (created && durable) syncContractDirectory(writer.dir);
+    return writer.log;
+  }
+
+  /** Under the lock no other writer is live: any temp file here is a dead writer's, and a side file the state does not name is unused. */
+  private clearDirectory(dir: string, tracker: ContractProgressTracker): void {
+    let names: string[];
+    try { names = readdirSync(dir); } catch { return; }
+    const referenced = tracker.referencedFiles(), unused: string[] = [];
+    for (const name of names) {
+      if (name.includes('.tmp-')) removeFile(join(dir, name));
+      else if (isCheckpointSideFileName(name) && !referenced.has(name)) unused.push(name);
+    }
+    if (unused.length === 0) return;
+    // The lines that stopped naming these files must be on disk before the files go.
+    const log = join(dir, CHECKPOINT_LOG_FILE);
+    if (existsSync(log)) { const fd = openSync(log, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
+    syncContractDirectory(dir);
+    for (const name of unused) removeFile(join(dir, name));
+  }
+
+  /** Rewrites the log as one snapshot of what changes (captured inputs are named, not copied): one temp file and one rename. */
+  private compact(writer: ProgressWriter, contract: Contract, tracker: ContractProgressTracker, change: ReturnType<ContractProgressTracker['diff']>, at: number, durable: boolean): void {
+    const line = tracker.snapshot(contract, change, at, value => storedContractBody(value, contractWithStoredReviewObservations));
+    const path = join(writer.dir, CHECKPOINT_LOG_FILE);
+    if (tracker.damaged) this.setAsideLog(writer, 'damaged');
+    else { writer.log?.close(); writer.log = null; }
+    writeFileAtomic(path, `${line}\n`, { durable });
+    tracker.commitSnapshot(change, Buffer.byteLength(line) + 1);
+    tracker.log = logIdentityOf(path);
   }
 
   /** Keeps the ended summary in step with a contract just written: written when it ended, removed when it is running again. */
@@ -619,7 +921,7 @@ export class ContractStore {
       if (summary !== undefined) summaries.push(summary);
     }
     // Another process removed some: forget them here too.
-    for (const id of [...this.endedSummaries.keys()]) if (!present.has(id)) { this.endedSummaries.delete(id); this.endedRecords.delete(id); }
+    for (const id of [...this.endedSummaries.keys()]) if (!present.has(id)) { this.endedSummaries.delete(id); this.evictEndedRecord(id); }
     return summaries;
   }
 
@@ -629,9 +931,17 @@ export class ContractStore {
     if (this.endedSummary(contract.id) === undefined) this.recordEnded(contract);
     if (this.contracts.get(contract.id) !== contract || this.timers.has(contract.id)) return;
     this.contracts.delete(contract.id);
+    // Its lock goes; what was written stays known while the record is kept, so a late event saves only its difference.
+    this.releaseWriter(contract.id);
     // Kept among the recently read ended records, so a read right after the end needs no disk read.
-    if (this.endedRecords.size >= MAX_TERMINAL_CONTRACT_FILES) this.endedRecords.delete(this.endedRecords.keys().next().value!);
+    if (this.endedRecords.size >= MAX_TERMINAL_CONTRACT_FILES) this.evictEndedRecord(this.endedRecords.keys().next().value!);
     this.endedRecords.set(contract.id, contract);
+  }
+
+  /** Drops an ended record from memory with what was known of its last save (a later save reads the disk back). */
+  private evictEndedRecord(contractId: string): void {
+    this.endedRecords.delete(contractId);
+    if (!this.contracts.has(contractId)) this.trackers.delete(contractId);
   }
 
   /** An ended contract's full record, read from its checkpoint on first use; not held with the live contracts. */
@@ -641,7 +951,7 @@ export class ContractStore {
     let contract: Contract | null;
     try { contract = this.load(contractId); } catch { return null; }
     if (contract === null || !isTerminalContractStatus(contract.status)) return null;
-    if (this.endedRecords.size >= MAX_TERMINAL_CONTRACT_FILES) this.endedRecords.delete(this.endedRecords.keys().next().value!);
+    if (this.endedRecords.size >= MAX_TERMINAL_CONTRACT_FILES) this.evictEndedRecord(this.endedRecords.keys().next().value!);
     this.endedRecords.set(contractId, contract);
     return contract;
   }
@@ -669,16 +979,21 @@ export class ContractStore {
   /** Removes every file and memory of one ended contract. Returns the bytes freed. */
   private forgetEnded(contractId: string): number {
     this.cancelPendingWrite(contractId);
-    let freed = removeFile(contractPath(this.projectRoot, contractId)) + removeFile(historicalContractPath(this.projectRoot, contractId))
+    this.releaseWriter(contractId);
+    this.trackers.delete(contractId);
+    let freed = removeDirectory(contractCheckpointDir(this.projectRoot, contractId))
+      + removeFile(contractPath(this.projectRoot, contractId)) + removeFile(historicalContractPath(this.projectRoot, contractId))
       + removeFile(join(contractEndedDir(this.projectRoot), `${contractId}${JSON_SUFFIX}`));
-    const lease = contractLeasePath(this.projectRoot, contractId);
-    for (const path of [lease, `${lease}-journal`, `${lease}-wal`, `${lease}-shm`]) freed += removeFile(path);
+    for (const lease of [contractLeasePath(this.projectRoot, contractId), contractProgressLockPath(this.projectRoot, contractId)]) {
+      for (const path of [lease, `${lease}-journal`, `${lease}-wal`, `${lease}-shm`]) freed += removeFile(path);
+    }
     // The contract's workstream snapshots (one per group) go with it.
     freed += removeWorkstreamSnapshots({ root: this.projectRoot, namespace: contractId });
     this.contracts.delete(contractId); this.endedRecords.delete(contractId); this.endedSummaries.delete(contractId);
     this.writeFailures.delete(contractId);
     this.supportedStoredVersions.delete(contractPath(this.projectRoot, contractId));
     this.supportedStoredVersions.delete(historicalContractPath(this.projectRoot, contractId));
+    this.supportedStoredVersions.delete(join(contractCheckpointDir(this.projectRoot, contractId), CHECKPOINT_BASE_FILE));
     return freed;
   }
 
@@ -712,6 +1027,8 @@ export class ContractStore {
   }
 
   private loadAvailable(contractId: string): Contract | null {
+    const dir = contractCheckpointDir(this.projectRoot, contractId), basePath = join(dir, CHECKPOINT_BASE_FILE);
+    if (existsSync(basePath)) return this.loadProgress(contractId, dir, basePath);
     const currentPath = contractPath(this.projectRoot, contractId);
     const path = existsSync(currentPath) ? currentPath : historicalContractPath(this.projectRoot, contractId);
     if (!existsSync(path)) return null;
@@ -743,7 +1060,61 @@ export class ContractStore {
         this.quarantine(path, 'invalid-contract', source);
         return null;
       }
-      return read.snapshot.contract;
+      const contract = read.snapshot.contract;
+      const tracker = ContractProgressTracker.of(contract, path === currentPath ? 'single-file' : 'historical');
+      try { tracker.sourceIdentity = fileObservationIdentity(path); } catch { /* gone since: its first save finds it changed */ }
+      tracker.sourceSchemaVersion = read.snapshot.schemaVersion;
+      this.loadedTrackers.set(contract, tracker);
+      return contract;
+    } finally { source.close(); }
+  }
+
+  /** Reads a checkpoint directory: the base with the progress log applied, through the same parse and quarantine as a single file. */
+  private loadProgress(contractId: string, dir: string, basePath: string): Contract | null {
+    const source = captureQuarantineSource(basePath);
+    if (!source) return null;
+    try {
+      const read: { assembled?: AssembledCheckpoint; log?: LogIdentity | null } = {};
+      let receipt: OwnedContractCheckpointRead;
+      try {
+        receipt = readOwnedAssembledCheckpoint(basePath, source, base => {
+          const log = readCheckpointLog(dir);
+          read.log = log?.identity ?? null;
+          read.assembled = assembleCheckpoint(dir, base, log?.bytes ?? null);
+          return read.assembled.text;
+        });
+      } catch (error) {
+        if (error instanceof QuarantineEncodingError) { this.quarantine(basePath, 'unparseable', source); return null; }
+        if (error instanceof CheckpointFormatError) throw new ContractStoreVersionError(contractId);
+        throw error;
+      }
+      const parsed = parseContractSnapshot(ownedContractCheckpointText(receipt), receipt);
+      source.assertCurrent();
+      // A torn last line was ignored above; only a base or a record set that does not make a contract is quarantined.
+      if ('rejected' in parsed) {
+        if (parsed.rejected === 'future-version') throw new ContractStoreVersionError(contractId);
+        this.quarantine(basePath, parsed.rejected, source);
+        return null;
+      }
+      const contract = parsed.snapshot.contract;
+      if (contract.id !== contractId) {
+        this.quarantine(basePath, 'invalid-contract', source);
+        return null;
+      }
+      let hasAdmission: boolean;
+      try { hasAdmission = contract.durableAdmission === undefined && new DurableContractAdmissions(this.projectRoot).findByContractId(contractId) !== null; }
+      catch { return null; }
+      source.assertCurrent();
+      if (hasAdmission) {
+        this.quarantine(basePath, 'invalid-contract', source);
+        return null;
+      }
+      const assembled = read.assembled!;
+      this.loadedTrackers.set(contract, ContractProgressTracker.of(contract, 'progress', {
+        sources: assembled.sources, log: read.log ?? null, snapshotBytes: assembled.snapshotBytes, appendedBytes: assembled.appendedBytes, damaged: assembled.damaged,
+      }));
+      this.noteSupportedVersion(basePath);
+      return contract;
     } finally { source.close(); }
   }
 
@@ -751,12 +1122,12 @@ export class ContractStore {
   listStoredIds(): string[] {
     this.reap();
     const ids = new Set<string>();
-    for (const dir of [contractCheckpointsDir(this.projectRoot), contractsDir(this.projectRoot)]) {
+    for (const dir of [contractProgressDir(this.projectRoot), contractCheckpointsDir(this.projectRoot), contractsDir(this.projectRoot)]) {
       if (!existsSync(dir)) continue;
       try {
         for (const entry of readdirSync(dir)) {
-          if (!entry.endsWith(JSON_SUFFIX)) continue;
-          const id = entry.slice(0, -JSON_SUFFIX.length);
+          // A checkpoint directory is named by its id; a single file by its id and `.json`.
+          const id = entry.endsWith(JSON_SUFFIX) ? entry.slice(0, -JSON_SUFFIX.length) : entry;
           if (isContractId(id)) ids.add(id);
         }
       } catch (error) {
@@ -810,6 +1181,9 @@ export class ContractStore {
   }
 
   private assertStoredVersion(contractId: string): void {
+    this.assertCheckpointVersion(contractId, join(contractCheckpointDir(this.projectRoot, contractId), CHECKPOINT_BASE_FILE), CURRENT_CONTRACT_SCHEMA_VERSION);
+    // Once a contract is saved in its directory, the single files are no longer its checkpoint.
+    if (this.trackers.get(contractId)?.layout === 'progress') return;
     this.assertCheckpointVersion(contractId, contractPath(this.projectRoot, contractId), CURRENT_CONTRACT_SCHEMA_VERSION);
     this.assertCheckpointVersion(contractId, historicalContractPath(this.projectRoot, contractId), 5);
   }
@@ -848,14 +1222,62 @@ export class ContractStore {
       try { for (const entry of readdirSync(dir)) entries.push({ dir, entry }); }
       catch (error) { logger.warn('contract store: failed to list the contract directory for housekeeping', { dir, error: summarizeError(error) }); }
     }
+    const progressRoot = contractProgressDir(this.projectRoot);
+    let progressNames: string[] = [];
+    try { progressNames = readdirSync(progressRoot).filter(isContractId); } catch { /* no directory checkpoints yet */ }
     const now = this.now();
-    if (entries.length === 0) {
+    if (entries.length === 0 && progressNames.length === 0) {
       const keys = this.reapRetryKeys(now);
       return { ...empty, retryKeysRemoved: keys.removed, bytesReclaimed: keys.bytes, total: keys.removed };
     }
     const terminal: DatedFile[] = [];
     let staleTempRemoved = 0;
     let bytesReclaimed = 0;
+    let progressQuarantineExpired = 0;
+
+    /** Ended-ness and dates come from the small summary; a checkpoint without one is read once and its summary written then. */
+    const consider = (id: string, path: string, observe: () => string, readText: () => string): void => {
+      const held = this.contracts.get(id);
+      if (held && !isTerminalContractStatus(held.status)) return;
+      let summary = this.endedSummary(id);
+      if (summary === undefined) {
+        // A checkpoint already read as not ended is read again only once it changed.
+        let observed: string;
+        try { observed = observe(); } catch { return; }
+        if (this.notEnded.get(path) === observed) return;
+        let text: string;
+        try { text = readText(); } catch { return; }
+        const read = readContractSnapshot(text);
+        // A checkpoint that is refused is left for load() to quarantine with its disclosure, not deleted here.
+        if ('rejected' in read || !isTerminalContractStatus(read.snapshot.contract.status)) { this.notEnded.set(path, observed); return; }
+        this.notEnded.delete(path);
+        this.recordEnded(read.snapshot.contract);
+        summary = this.endedSummary(id);
+        if (summary === undefined) return;
+      }
+      if (summary.durable) return;
+      terminal.push({ path, at: summary.completedAt ?? summary.createdAt, id });
+    };
+
+    const inDirectory = new Set<string>();
+    for (const id of progressNames) {
+      const dir = join(progressRoot, id), base = join(dir, CHECKPOINT_BASE_FILE);
+      if (!existsSync(base)) {
+        // No base: a quarantined one (its archive and log kept for inspection) or a first save that never finished.
+        let names: string[], age: number;
+        try { names = readdirSync(dir); age = now - statSync(dir).mtimeMs; } catch { continue; }
+        const quarantined = names.some(name => name.includes('.corrupt-'));
+        if (age <= (quarantined ? CONTRACT_QUARANTINE_MAX_AGE_MS : STALE_TEMP_MAX_AGE_MS)) continue;
+        bytesReclaimed += removeDirectory(dir);
+        if (quarantined) progressQuarantineExpired += 1; else staleTempRemoved += 1;
+        continue;
+      }
+      inDirectory.add(id);
+      const log = join(dir, CHECKPOINT_LOG_FILE);
+      consider(id, dir,
+        () => `${fileObservationIdentity(base)}|${JSON.stringify(logIdentityOf(log))}`,
+        () => storedCheckpointText(this.projectRoot, id) ?? '');
+    }
 
     for (const { dir, entry } of entries) {
       const path = join(dir, entry);
@@ -875,29 +1297,9 @@ export class ContractStore {
       if (entry.endsWith(QUARANTINE_SUFFIX)) continue;
       if (!entry.endsWith(JSON_SUFFIX)) continue;
       const id = entry.slice(0, -JSON_SUFFIX.length);
-      if (!isContractId(id)) continue;
-      const held = this.contracts.get(id);
-      if (held && !isTerminalContractStatus(held.status)) continue;
-      // Ended-ness and dates come from the small summary. A checkpoint written
-      // before summaries existed is read once and its summary written then.
-      let summary = this.endedSummary(id);
-      if (summary === undefined) {
-        // A checkpoint already read as not ended is read again only once it changed.
-        let observed: string;
-        try { observed = fileObservationIdentity(path); } catch { continue; }
-        if (this.notEnded.get(path) === observed) continue;
-        let text: string;
-        try { text = readFileSync(path, 'utf-8'); } catch { continue; }
-        const read = readContractSnapshot(text);
-        // A file that is refused is left for load() to quarantine with its disclosure, not deleted here.
-        if ('rejected' in read || !isTerminalContractStatus(read.snapshot.contract.status)) { this.notEnded.set(path, observed); continue; }
-        this.notEnded.delete(path);
-        this.recordEnded(read.snapshot.contract);
-        summary = this.endedSummary(id);
-        if (summary === undefined) continue;
-      }
-      if (summary.durable) continue;
-      terminal.push({ path, at: summary.completedAt ?? summary.createdAt, id });
+      // A contract already in its directory is considered once, there.
+      if (!isContractId(id) || inDirectory.has(id)) continue;
+      consider(id, path, () => fileObservationIdentity(path), () => readFileSync(path, 'utf-8'));
     }
 
     const reapedIds: string[] = [];
@@ -914,12 +1316,12 @@ export class ContractStore {
     terminalExcess.forEach(reapFile);
 
     const quarantine = this.reapQuarantines(now);
-    const quarantineExpired = quarantine.expired;
+    const quarantineExpired = quarantine.expired + progressQuarantineExpired;
     bytesReclaimed += quarantine.bytesReclaimed;
     // After the terminal pass, so the keys of contracts removed just now go in this pass too.
     const keys = this.reapRetryKeys(now);
     bytesReclaimed += keys.bytes;
-    const total = terminalExpired + terminalExcess.length + quarantine.reaped + staleTempRemoved + keys.removed;
+    const total = terminalExpired + terminalExcess.length + quarantine.reaped + progressQuarantineExpired + staleTempRemoved + keys.removed;
     const summary: ContractReapSummary = {
       terminalExpired,
       terminalOverCap: terminalExcess.length,
@@ -944,6 +1346,7 @@ export class ContractStore {
    * function that stops both and writes anything still pending.
    */
   attach(subscribe: (listener: (event: ContractEvent) => void) => () => void): () => void {
+    this.disposed = false;
     const unsubscribe = subscribe((event) => {
       if (event.contractId === undefined) return;
       // A late event of an ended contract (its result published as it ended) is written like any other.
@@ -961,9 +1364,11 @@ export class ContractStore {
     };
   }
 
-  /** Writes anything pending and stops the housekeeping timer. */
+  /** Writes anything pending, closes the progress logs, gives up the contracts' locks and stops the housekeeping timer. */
   dispose(): void {
     this.flush();
+    for (const id of [...this.writers.keys()]) this.releaseWriter(id);
+    this.disposed = true;
     if (this.sweepTimer !== null) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;

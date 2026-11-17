@@ -4,7 +4,8 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { contractPath } from '../../platform/src/platform/contract/store.js';
+import { join } from 'node:path';
+import { contractCheckpointDir } from '../../platform/src/platform/contract/store.js';
 import type { WorkPlanService } from '../../platform/src/platform/contract/index.js';
 import { makeHarness, startContract, waitFor, type Harness } from './runner-support.js';
 
@@ -79,7 +80,9 @@ describe('a contract whose checkpoint cannot be written', () => {
     expect(h.store.write(contract.id)).toBe(true);
     expect(h.runner.get(contract.id)?.statusLine ?? '').not.toContain('warning');
     // A file from a newer build is refused, so the store records a failed write.
-    const path = contractPath(h.root, contract.id);
+    // This process first lets go of the contract's checkpoint, as when a newer build takes it over.
+    h.store.dispose();
+    const path = join(contractCheckpointDir(h.root, contract.id), 'base.json');
     const envelope = JSON.parse(readFileSync(path, 'utf8')) as { schemaVersion: number };
     envelope.schemaVersion += 1;
     writeFileSync(path, JSON.stringify(envelope));

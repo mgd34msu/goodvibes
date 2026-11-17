@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
 import { takeBaseline } from '../../platform/src/platform/contract/group-runner.js';
 import { baselineChangedPaths, baselinePathUnchanged, selectBaselineExecutionRoot, partitionBaselinePaths, releaseTreeBaselineBytes, retainOriginalTreeBaselines } from '../../platform/src/platform/contract/tree-baseline.js';
-import { ContractStore, contractPath, deserializeContract, deserializeOwnedContractCheckpoint, serializeContract } from '../../platform/src/platform/contract/store.js';
+import { ContractStore, contractPath, storedCheckpointText, deserializeContract, deserializeOwnedContractCheckpoint, serializeContract } from '../../platform/src/platform/contract/store.js';
 import { readOwnedContractCheckpoint } from '../../platform/src/platform/contract/owned-checkpoint-read.js';
 import { snapshotDirtyTree, excludeUntouchedLaunchResidue, listDirtyTreePaths } from '../../platform/src/platform/orchestration/dirty-guard.js';
 import { captureDirtyFile, captureDirtyTreeRoot } from '../../platform/src/platform/orchestration/dirty-file-observation.js';
@@ -108,7 +108,7 @@ test('public import and its later owned save cannot manufacture original baselin
   replacement.hold(imported); expect(replacement.write(imported.id)).toBe(true);
   const reloaded = replacement.load(imported.id)!;
   expect(baselinePathUnchanged(f.root, reloaded.baseline!, 'owner-dirty')).toBeUndefined();
-  expect(JSON.parse(readFileSync(contractPath(f.root, imported.id), 'utf8')).treeBaselineOrigins.entries[0].origin).toBe('unverified-import');
+  expect(JSON.parse(storedCheckpointText(f.root, imported.id)!).treeBaselineOrigins.entries[0].origin).toBe('unverified-import');
   replacement.dispose(); f.store.dispose();
 });
 
@@ -132,7 +132,7 @@ test('saved symlink state compares link text without reading or exposing externa
   expect(baselinePathUnchanged(f.root, restored.baseline!, 'owner-link')).toBe(true);
   unlinkSync(link); symlinkSync('different-target', link);
   expect(baselinePathUnchanged(f.root, restored.baseline!, 'owner-link')).toBe(false);
-  expect(readFileSync(contractPath(f.root, f.contract.id), 'utf8')).not.toContain('Never include this external target secret');
+  expect(storedCheckpointText(f.root, f.contract.id)!).not.toContain('Never include this external target secret');
   f.store.dispose();
 });
 

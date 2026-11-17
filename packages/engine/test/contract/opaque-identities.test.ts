@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import * as types from '../../platform/src/platform/contract/types.js';
 import * as placement from '../../platform/src/platform/contract/git-placement.js';
-import { ContractStore, contractPath, contractCheckpointsDir } from '../../platform/src/platform/contract/store.js';
+import { ContractStore, contractCheckpointDir, contractPath, contractCheckpointsDir, storedCheckpointText } from '../../platform/src/platform/contract/store.js';
 import { DurableContractAdmissions, type DurableContractRequest } from '../../platform/src/platform/contract/durable-admission.js';
 import { captureNativeSettlementPublication } from '../../platform/src/platform/workflow/work-ledger/native-settlement-types.js';
 import { makeHarness, makeRepo, oneUnitPlan, waitFor, type Harness } from './runner-support.js';
@@ -39,9 +39,9 @@ for (const mode of ['ordinary', 'draft', 'durable'] as const) {
       await expect(Promise.resolve().then(() => begin('second-attempt'))).rejects.toThrow();
       expect(h.manager.list()).toHaveLength(0);
       resume.resolve(); const initial = await first; const contractId = 'admission' in initial ? initial.admission.contractId : initial.contract.id;
-      const original = h.store.get(contractId)!; h.store.flush(); const bytes = readFileSync(contractPath(h.root, contractId));
+      const original = h.store.get(contractId)!; h.store.flush(); const bytes = storedCheckpointText(h.root, contractId);
       await expect(Promise.resolve().then(() => begin('third-attempt'))).rejects.toThrow();
-      expect(h.store.get(contractId)).toBe(original); expect(readFileSync(contractPath(h.root, contractId))).toEqual(bytes);
+      expect(h.store.get(contractId)).toBe(original); expect(storedCheckpointText(h.root, contractId)).toEqual(bytes);
       expect(h.runner.list()).toHaveLength(1); expect(h.manager.list().filter(record => record.contractRole === 'owner')).toHaveLength(1);
       expect(readdirSync(join(h.root, '.goodvibes', 'contracts', '.creation-claims'))).toEqual([]);
     } finally { resume.resolve(); locate.mockRestore(); chosen.mockRestore(); }
@@ -65,12 +65,12 @@ test('a spawn hook that occupies the selected checkpoint preserves its bytes and
   const h = harness(), chosen = spyOn(types, 'newContractId').mockReturnValue(id);
   const spawn = h.manager.spawn.bind(h.manager);
   const intercept = spyOn(h.manager, 'spawn').mockImplementation((...args) => {
-    const record = spawn(...args); mkdirSync(contractCheckpointsDir(h.root), { recursive: true });
-    writeFileSync(contractPath(h.root, id), 'Foreign checkpoint from the intervening source'); return record;
+    const record = spawn(...args); mkdirSync(contractCheckpointDir(h.root, id), { recursive: true });
+    writeFileSync(join(contractCheckpointDir(h.root, id), 'base.json'), 'Foreign checkpoint from the intervening source'); return record;
   });
   try {
     await expect(h.runner.start(input(h.root))).rejects.toThrow('occupied');
-    expect(readFileSync(contractPath(h.root, id), 'utf8')).toBe('Foreign checkpoint from the intervening source');
+    expect(readFileSync(join(contractCheckpointDir(h.root, id), 'base.json'), 'utf8')).toBe('Foreign checkpoint from the intervening source');
     expect(h.runner.list()).toHaveLength(0); expect(h.manager.list().every(record => record.status === 'cancelled')).toBe(true);
     expect(readdirSync(join(h.root, '.goodvibes', 'contracts', '.creation-claims'))).toEqual([]);
   } finally { intercept.mockRestore(); chosen.mockRestore(); }
@@ -79,7 +79,7 @@ test('a spawn hook that occupies the selected checkpoint preserves its bytes and
 test('failed placement releases original creation custody and a later original start can use the still-absent ID', async () => {
   const h = harness(), chosen = spyOn(types, 'newContractId').mockReturnValue(id);
   const locate = spyOn(placement, 'resolveContractGitPlacement').mockRejectedValue(new Error('Original placement failed'));
-  try { await expect(h.runner.start(input(h.root))).rejects.toThrow('Original placement failed'); expect(h.manager.list()).toHaveLength(0); expect(existsSync(contractPath(h.root, id))).toBe(false); }
+  try { await expect(h.runner.start(input(h.root))).rejects.toThrow('Original placement failed'); expect(h.manager.list()).toHaveLength(0); expect(storedCheckpointText(h.root, id)).toBeNull(); }
   finally { locate.mockRestore(); }
   try { expect((await h.runner.start(input(h.root))).contract.id).toBe(id); }
   finally { chosen.mockRestore(); }
@@ -88,10 +88,10 @@ test('failed placement releases original creation custody and a later original s
 test('existing saved history and old8hex IDs survive restart and refuse fresh collision', async () => {
   const path = root(), store = new ContractStore({ projectRoot: path, sweepIntervalMs: 0 }); stores.push(store);
   const historical = fixtureContract({ id: 'ctr-1234abcd', projectRoot: path, status: 'cancelled' });
-  store.put(historical); expect(store.write(historical.id)).toBe(true); const bytes = readFileSync(contractPath(path, historical.id));
+  store.put(historical); expect(store.write(historical.id)).toBe(true); const bytes = storedCheckpointText(path, historical.id);
   expect(new ContractStore({ projectRoot: path }).load(historical.id)?.id).toBe(historical.id);
   const h = harness(path), chosen = spyOn(types, 'newContractId').mockReturnValue(historical.id);
-  try { await expect(Promise.resolve().then(() => h.runner.start(input(path)))).rejects.toThrow(); expect(readFileSync(contractPath(path, historical.id))).toEqual(bytes); expect(h.manager.list()).toHaveLength(0); }
+  try { await expect(Promise.resolve().then(() => h.runner.start(input(path)))).rejects.toThrow(); expect(storedCheckpointText(path, historical.id)).toEqual(bytes); expect(h.manager.list()).toHaveLength(0); }
   finally { chosen.mockRestore(); }
 });
 
@@ -116,7 +116,7 @@ test('native creation floor refuses before owner hooks, claim directories or che
 test('the exclusive checkpoint commit preserves an intervening target even after a real reservation', () => {
   const path = root(), store = new ContractStore({ projectRoot: path }); stores.push(store); const reservation = store.reserveCreation(id);
   const value = fixtureContract({ id, projectRoot: path });
-  try { mkdirSync(contractCheckpointsDir(path), { recursive: true }); writeFileSync(contractPath(path, id), 'Do not replace this new owner'); expect(() => store.publishCreation(reservation, value)).toThrow(); expect(readFileSync(contractPath(path, id), 'utf8')).toBe('Do not replace this new owner'); expect(store.get(id)).toBeNull(); }
+  try { mkdirSync(contractCheckpointDir(path, id), { recursive: true }); writeFileSync(join(contractCheckpointDir(path, id), 'base.json'), 'Do not replace this new owner'); expect(() => store.publishCreation(reservation, value)).toThrow(); expect(readFileSync(join(contractCheckpointDir(path, id), 'base.json'), 'utf8')).toBe('Do not replace this new owner'); expect(store.get(id)).toBeNull(); }
   finally { reservation.release(); }
 });
 

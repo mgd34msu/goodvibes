@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { join } from 'node:path';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { contractPath } from '../platform/src/platform/contract/store.js';
+import { contractCheckpointDir, storedCheckpointText } from '../platform/src/platform/contract/store.js';
 import { makeContract, makeUnit } from './contract/fixtures.js';
 import type { UnitCheck } from '../platform/src/platform/contract/types.js';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, type NativeDataFormat } from '../platform/src/platform/runtime/native-reader-compatibility.js';
@@ -92,17 +92,17 @@ test('actual canonical composition publishes optional-check reader floor before 
     goal: { probabilityUnmet: .01, verdict: 'met', outcome: 'act' }, decisionIds: ['actual-passed-decision'] };
   try {
     const old = makeContract({ projectRoot: f.workingDirectory, checks: [{ ...pass, evidenceDigest: 'actual-old-saved-check' }] });
-    target = contractPath(f.workingDirectory, old.id); composed.store.hold(old);
+    target = contractCheckpointDir(f.workingDirectory, old.id); composed.store.hold(old);
     expect(composed.store.write(old.id)).toBe(true);
     expect(declared).not.toContain('contract-optional-check-digests-v1');
-    expect(readFileSync(target, 'utf8')).toContain('actual-old-saved-check');
+    expect(storedCheckpointText(f.workingDirectory, old.id)).toContain('actual-old-saved-check');
     for (const location of ['contract', 'group', 'unit', 'attempt'] as const) {
       const current = makeContract({ projectRoot: f.workingDirectory });
       if (location === 'contract') current.checks = [pass];
       if (location === 'group') current.groups[0]!.checks = [pass];
       if (location === 'unit') current.units[0]!.checks = [pass];
       if (location === 'attempt') current.units[0]!.attemptUnits = [makeUnit({ id: 'attempt', attemptOf: current.units[0]!.id, attemptIndex: 0, checks: [pass] })];
-      target = contractPath(f.workingDirectory, current.id); composed.store.hold(current);
+      target = contractCheckpointDir(f.workingDirectory, current.id); composed.store.hold(current);
       refuse = true; expect(composed.store.write(current.id)).toBe(false); expect(existsSync(target)).toBe(false);
       refuse = false; declared.length = 0;
       expect(composed.store.write(current.id)).toBe(true); expect(declared).toContain('contract-optional-check-digests-v1');
@@ -132,7 +132,7 @@ test('ordinary review receipts declare optional state bindings before publicatio
       const current = makeContract({ projectRoot: f.workingDirectory });
       current.decisions.push({ id: 'review', at: 10, action: 'checked', targetId: `${current.id}.${scope}`,
         reason: JSON.stringify({ schemaVersion: 2, passed: true, decisionIds: ['actual-review'] }), decisionIds: ['actual-review'] });
-      target = contractPath(f.workingDirectory, current.id); composed.store.hold(current);
+      target = contractCheckpointDir(f.workingDirectory, current.id); composed.store.hold(current);
       refuse = true; expect(composed.store.write(current.id)).toBe(false); expect(existsSync(target)).toBe(false);
       refuse = false; declared.length = 0;
       expect(composed.store.write(current.id)).toBe(true); expect(declared).toContain('optional-review-binding-v1');
@@ -140,7 +140,7 @@ test('ordinary review receipts declare optional state bindings before publicatio
     const older = makeContract({ projectRoot: f.workingDirectory });
     older.decisions.push({ id: 'old-review', at: 10, action: 'checked', targetId: `${older.id}.final-answer-review`,
       reason: JSON.stringify({ stateHash: '1'.repeat(64), evidenceDigest: '2'.repeat(64) }), decisionIds: ['old-recorded-review'] });
-    declared.length = 0; target = contractPath(f.workingDirectory, older.id); composed.store.hold(older);
+    declared.length = 0; target = contractCheckpointDir(f.workingDirectory, older.id); composed.store.hold(older);
     expect(composed.store.write(older.id)).toBe(true); expect(declared).not.toContain('optional-review-binding-v1');
     expect(nativeReaderCapabilities('3.1.2').formats).toContain('optional-review-binding-v1');
   } finally { composed.dispose(); graph.agentOrchestrator.dispose(); rmSync(f.workingDirectory, { recursive: true, force: true }); }
@@ -176,7 +176,7 @@ for (const boundary of ['identity', 'checkpoint'] as const) for (const mode of [
         : 'Contract data format publication requires a synchronous native owner' });
       expect(declarations).toBe(1);
       expect(reads).toBe(0);
-      expect(existsSync(contractPath(f.workingDirectory, contract.id))).toBe(false);
+      expect(storedCheckpointText(f.workingDirectory, contract.id)).toBeNull();
       if (mode === 'throw-promise' || mode === 'return-promise') {
         work.reject(new Error('Late native declaration rejection'));
         await new Promise<void>(resolve => setTimeout(resolve, 0));

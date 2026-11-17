@@ -120,11 +120,13 @@ export {
   MAX_TERMINAL_CONTRACT_FILES,
   TERMINAL_CONTRACT_MAX_AGE_MS,
   contractPath,
+  contractCheckpointDir,
   contractCheckpointsDir,
   contractsDir,
   deserializeContract,
   readContractSnapshot,
   serializeContract,
+  storedCheckpointText,
 } from './store.js';
 export type { ContractCreationReservation, ContractReapSummary, ContractRemoval, ContractSnapshot, ContractSnapshotRejection, ContractStoreOptions, EndedContractSummary } from './store.js';
 export type { ReviewedFileReference } from './review-file-observations.js';

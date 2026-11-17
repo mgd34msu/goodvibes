@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { currentFileObservations } from '../../platform/src/platform/contract/current-file-observations.ts';
 import { contractWithStoredReviewObservations, retainOriginalReviewDescriptors, reviewedFileFromObservation, reviewedFileVersionState } from '../../platform/src/platform/contract/review-file-observations.ts';
-import { ContractStore, contractPath, deserializeContract, serializeContract } from '../../platform/src/platform/contract/store.ts';
+import { ContractStore, contractPath, storedCheckpointText, deserializeContract, serializeContract } from '../../platform/src/platform/contract/store.ts';
 import type { ContractUnit, UnitCheck } from '../../platform/src/platform/contract/types.ts';
 import { makeContract, makeUnit } from './fixtures.ts';
 
@@ -29,7 +29,7 @@ test('nested attempt reviews preserve private facts through actual checkpoint wr
   const f = fixture(); let reopened: ContractStore | undefined;
   try {
     f.store.hold(f.contract); expect(f.store.write(f.contract.id)).toBe(true);
-    const saved = JSON.parse(readFileSync(contractPath(f.root, f.contract.id), 'utf8'));
+    const saved = JSON.parse(storedCheckpointText(f.root, f.contract.id)!);
     expect(f.nested(saved.contract.units).checks[0]!.reviewedFiles![0]).toHaveProperty('nativeFileObservation');
     reopened = new ContractStore({ projectRoot: f.root, sweepIntervalMs: 0 });
     const restored = reopened.load(f.contract.id)!;

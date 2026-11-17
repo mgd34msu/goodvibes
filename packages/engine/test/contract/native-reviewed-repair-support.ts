@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hashState, toJson } from '@goodvibes-jev/judgment';
 import { noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { contractPath, readContractSnapshot } from '../../platform/src/platform/contract/store.js';
+import { contractPath, storedCheckpointText, readContractSnapshot } from '../../platform/src/platform/contract/store.js';
 import { createNativeIntegrationFixture, integrationBarrier } from './native-integration-support.js';
 import { draftUnit, plannerOutput, type DraftPlan } from './plan-support.js';
 import { waitFor } from './runner-support.js';
@@ -83,7 +83,7 @@ export async function createNativeReviewedRepairFixture() {
       && f.harness.agentsOf('u2').length > 0, 'real native re-review and integration', 20_000); },
     proof(contractId: string) {
       f.harness.store.flush();
-      const parsed = readContractSnapshot(readFileSync(contractPath(f.root, contractId), 'utf8'));
+      const parsed = readContractSnapshot(storedCheckpointText(f.root, contractId)!);
       if ('rejected' in parsed) throw new Error('Reviewed native persisted contract was rejected');
       const contract = parsed.snapshot.contract;
       const unit = contract.units.find(candidate => candidate.id === 'u1');

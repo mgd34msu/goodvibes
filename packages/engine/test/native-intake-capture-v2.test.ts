@@ -13,7 +13,7 @@ import { createNativeContinuationSnapshotOwner, captureNativeConversationContinu
 import { nativeIntakeContinuationCatalog, nativeIntakeDecisionSite } from '../platform/src/platform/workflow/work-ledger/native-intake-recovery.js';
 import { captureNativeContractSource, nativeContractSourceData } from '../platform/src/platform/contract/native-source.js';
 import { nativeConversationIntakeResultSchema } from '../platform/src/platform/workflow/work-ledger/native-intake-wire.js';
-import { ContractStore, contractPath } from '../platform/src/platform/contract/store.js';
+import { ContractStore, contractPath, storedCheckpointText } from '../platform/src/platform/contract/store.js';
 import { makeContract, makeCriterion } from './contract/fixtures.js';
 
 const roots: string[] = [], stores: KnowledgeStore[] = [];
@@ -213,7 +213,7 @@ test('actual contract checkpoint publication forwards its v2 continuation to the
   } });
   try {
     store.hold(contract); expect(store.write(contract.id)).toBe(false); expect(observed).toBe(true);
-    expect(() => readFileSync(contractPath(root, contract.id))).toThrow();
+    expect(storedCheckpointText(root, contract.id)).toBeNull();
     expect(() => store.prepareCheckpointWrite(contract)).toThrow('unsupported conversation reader');
     denied = false; expect(store.write(contract.id)).toBe(true);
     expect(store.load(contract.id)?.nativeSource?.continuation).toEqual(original.continuation);

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { choiceAnswer } from '@goodvibes-jev/judgment/testing';
 import { createAgentManagerDecompositionRunner } from '../../platform/src/platform/agents/planner-decomposition-runner.js';
-import { contractPath, type Contract, type NativeContractSource } from '../../platform/src/platform/contract/index.js';
+import { contractPath, storedCheckpointText, type Contract, type NativeContractSource } from '../../platform/src/platform/contract/index.js';
 import { makeHarness, oneUnitPlan, startContract, waitFor, type Harness } from './runner-support.js';
 import { plannerOutput } from './plan-support.js';
 
@@ -21,7 +21,7 @@ function deferred() {
 }
 
 function checkpoint(root: string, id: string): Contract {
-  return (JSON.parse(readFileSync(contractPath(root, id), 'utf8')) as { contract: Contract }).contract;
+  return (JSON.parse(storedCheckpointText(root, id)!) as { contract: Contract }).contract;
 }
 
 for (const native of [false, true]) test(`${native ? 'native' : 'ordinary'} active repair planner is checkpointed before completion and cancellation joins cleanup`, async () => {

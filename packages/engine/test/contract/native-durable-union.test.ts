@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import {
-  buildFixPlannerPrompt, contractPath, readContractSnapshot, CURRENT_CONTRACT_SCHEMA_VERSION,
+  buildFixPlannerPrompt, contractPath, storedCheckpointText, readContractSnapshot, CURRENT_CONTRACT_SCHEMA_VERSION,
   type Contract, type DurableContractRequest, type NativeContractSource,
 } from '../../platform/src/platform/contract/index.js';
 import { DurableContractAdmissions } from '../../platform/src/platform/contract/durable-admission.js';
@@ -134,7 +134,7 @@ describe('native semantic and durable admission union', () => {
     const replay = await h.runner.startDurable(request(h.root));
     expect(replay.admission).toEqual(first!.admission); expect(replay.state).toBe('terminal');
     expect(planner.requests).toHaveLength(2); expect(h.agentsOf('u1')).toHaveLength(1);
-    const disk = JSON.parse(readFileSync(contractPath(h.root, id), 'utf8')) as { schemaVersion: number; contract: Contract };
+    const disk = JSON.parse(storedCheckpointText(h.root, id)!) as { schemaVersion: number; contract: Contract };
     const durable = JSON.parse(new DurableContractAdmissions(h.root).checkpoint(request(h.root).key)) as { schemaVersion: number; contract: Contract };
     expect(disk.schemaVersion).toBe(CURRENT_CONTRACT_SCHEMA_VERSION); expect(disk.contract.schemaVersion).toBe(CURRENT_CONTRACT_SCHEMA_VERSION);
     expect(durable.schemaVersion).toBe(CURRENT_CONTRACT_SCHEMA_VERSION); expect(durable.contract.nativeSource).toEqual(source());

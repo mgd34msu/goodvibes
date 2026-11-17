@@ -2,7 +2,7 @@
  * facts; only the explicit checkpoint writer projects them onto local disk. */
 import { isDeepStrictEqual } from 'node:util';
 import type { JsonValue } from '@goodvibes-jev/judgment';
-import type { Contract, ContractUnit } from './types.js';
+import type { Contract, ContractUnit, UnitCheck } from './types.js';
 import { currentFileReviewFacts, currentFileMatchesSavedDigest, parseCurrentFileReviewFacts, retainCurrentFileLabels, type CurrentFileReviewFacts } from './current-file-observations.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 
@@ -66,14 +66,16 @@ function* reviewUnits(roots: readonly ContractUnit[]): Generator<ContractUnit> {
   }
 }
 
+/** One unit check as a checkpoint stores it: reviewed files carry their saved file facts. */
+export function storedReviewCheck(check: UnitCheck): UnitCheck {
+  return check.reviewedFiles === undefined ? check : { ...check, reviewedFiles: check.reviewedFiles.map(serializeReference) };
+}
+
 /** Walk only the real unit/check locations. A generic JSON replacer could leak
  * facts if a native descriptor were also referenced by unrelated model data. */
 export function contractWithStoredReviewObservations(contract: Contract): Contract {
   const copies = new Map<ContractUnit, ContractUnit>();
-  for (const unit of reviewUnits(contract.units)) copies.set(unit, { ...unit,
-    checks: unit.checks.map(check => check.reviewedFiles === undefined ? check
-      : { ...check, reviewedFiles: check.reviewedFiles.map(serializeReference) }),
-  });
+  for (const unit of reviewUnits(contract.units)) copies.set(unit, { ...unit, checks: unit.checks.map(storedReviewCheck) });
   const copyOf = (unit: ContractUnit): ContractUnit => {
     const copy = copies.get(unit); if (!copy) throw invalid(); return copy;
   };

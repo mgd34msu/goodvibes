@@ -49,13 +49,7 @@ export type {
 export const AGENT_EXPLICIT_REGISTRATION_ORIGIN = 'agent-explicit-registration';
 
 /**
- * Shared registered-workspace registry (platform 1.6.1 platform/workspace/registration),
- * the successor to this fork's local per-user JSON registry
- * (superseded ../config/workspace-registry.ts, deleted).
- *
- * MIGRATION. The local registry's record shape (`{ root, registeredAt, label? }`)
- * is field-identical to the shared store's `RegisteredWorkspaceRecord`, so a local
- * file migrates in as a straight import, see migrateLegacyWorkspaceRegistryIfNeeded.
+ * Shared registered-workspace registry (platform/workspace/registration).
  *
  * WHY A SYNCHRONOUS RESOLVER EXISTS ALONGSIDE THE ASYNC STORE. The platform's
  * WorkspaceRegistrationStore is Promise-based (it persists through

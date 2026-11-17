@@ -10,7 +10,7 @@ import { captureNativeConversationInput, type NativeConversationInput, type Prod
 import { formatRefusal, refusal } from '@goodvibes-jev/engine/errors';
 import { routeNativeConversationInput, dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
-import { createAgentNativeHostSelection } from './runtime/agent-local-host-pairing.ts';
+import { createAgentNativeHostSelection } from './runtime/agent-native-host-selection.ts';
 import { homedir } from 'node:os';
 import { SetupPairingController } from './shell/setup-pairing-controller.ts';
 import { parseSlashCommand } from './input/slash-command-parser.ts';
@@ -361,10 +361,6 @@ async function main() {
           };
     },
     () => render(),
-    undefined,
-    undefined,
-    undefined,
-    nativeLedgerHost.prepare,
   );
   commandContext.nativeConversationIntake = commandContext.nativeWorkLedger.intake;
   unsubs.push(() => commandContext.nativeWorkLedger?.dispose());

@@ -5,6 +5,8 @@ import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyIm
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { connectedHostBaseUrl } from '../../config/connected-host-dial.ts';
 import { canonicalizePairingHost, readAgentHostPairing } from '../../runtime/connected-host-pairing-store.ts';
+import { readConnectedHostOperatorToken } from '../../runtime/connected-host-auth.ts';
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { requireShellPaths } from './runtime-services.ts';
 export type OpenLegacyImportCommandSession = (context: CommandContext, projectId: string) => Promise<LegacyImportOperatorSession>;
 export function registerLegacyWorkLedgerImportCommands(registry: CommandRegistry, open: OpenLegacyImportCommandSession = async (context, projectId) => {
@@ -20,9 +22,18 @@ export function registerLegacyWorkLedgerImportCommands(registry: CommandRegistry
       const baseUrl = canonicalizePairingHost(connectedHostBaseUrl(config.get('controlPlane.host'), config.get('controlPlane.port')));
       if (!baseUrl) return unavailable('Select an exact HTTP(S) daemon origin.');
       const pairing = readAgentHostPairing(current.homeDirectory, baseUrl);
+      if (pairing.status === 'missing' && isLoopbackHost(new URL(baseUrl).hostname)) {
+        // The daemon on this machine: the operator token file this Agent already
+        // holds is the owner's credential there, so no pairing is needed. An
+        // environment token is not taken in its place.
+        const local = readConnectedHostOperatorToken(current.homeDirectory);
+        if (local.source !== 'operator-file' || !local.token) return unavailable('The daemon on this machine is selected, but its operator token file could not be read. Start the daemon once, or pair this Agent with /setup pair.');
+        return { baseUrl, token: local.token, workspace: realpathSync(current.workingDirectory),
+          selectionIdentity: selection.observe([current.homeDirectory, baseUrl, pairing, local.token], config) };
+      }
       if (pairing.status !== 'paired') return unavailable(pairing.status === 'unknown'
         ? 'The selected Agent host pairing outcome is unknown; inspect it before importing.'
-        : 'An existing private Agent pairing for this exact host is required. Use /setup pair to inspect pairing.');
+        : 'An existing private Agent pairing for this exact host is required for a daemon on another machine. Use /setup pair to inspect pairing.');
       // Passive private state only: neither an unbound environment token nor a
       // daemon-global credential can mask or replace this selected native owner.
       return { baseUrl, token: pairing.token, workspace: realpathSync(current.workingDirectory),

@@ -5,20 +5,14 @@ import { realpathSync } from 'node:fs';
 import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, retainLegacyImportJournalOwner, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
-import { pairLocalTuiHostAutomatically } from '../../runtime/tui-host-pairing.ts';
 import { requireShellPaths } from './runtime-services.ts';
 export type OpenTuiLegacyImportSession = (context: CommandContext, projectId: string) => Promise<LegacyImportOperatorSession>;
 export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daemonHomeDirectory?: string, open: OpenTuiLegacyImportSession = async (context, projectId) => {
   const credentialObservation = new OwnedSelectionObservation();
   const paths = requireShellPaths(context);
-  let selected = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory, observation: credentialObservation });
-  if (!selected.available) {
-    // On this machine the first import creates this terminal's device credential (no pairing step).
-    const paired = await pairLocalTuiHostAutomatically({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory });
-    selected = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory, observation: credentialObservation });
-    if (!selected.available) throw new Error(paired && paired.status !== 'paired' ? paired.message : selected.reason);
-  }
-  const chosen = selected;
+  // A device pairing, or on the daemon's own machine the operator token this terminal already holds.
+  const chosen = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory, observation: credentialObservation });
+  if (!chosen.available) throw new Error(chosen.reason);
   const workspace = realpathSync(paths.workingDirectory);
   const configOwner = context.platform.configManager, stateDirectory = paths.resolveUserPath();
   const location = resolveLegacyImportJournalLocation({ workspace, projectId, stateDirectory });

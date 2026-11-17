@@ -41,7 +41,10 @@ export function registerHostPairingCommands(registry: CommandRegistry): void {
       try {
         const paths = requireShellPaths(context);
         const credential = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory });
-        context.print(credential.available ? `TUI credential saved for ${credential.baseUrl}. Live scopes and native authority are checked by each operation.` : credential.reason);
+        context.print(!credential.available ? credential.reason
+          : credential.expectedPrincipalId
+            ? `TUI credential saved for ${credential.baseUrl}. Live scopes and native authority are checked by each operation.`
+            : `No device pairing is saved for ${credential.baseUrl}; it is the daemon on this machine, so the operator token this terminal already holds is used and no pairing is needed. Live scopes and native authority are checked by each operation.`);
         context.print('Local inspection only. For explicit pairing, type /host pair --bootstrap-shared in the live owner terminal, then add --apply to review and confirm. Existing /pair remains companion/WebUI pairing.');
       } catch { context.print('TUI host credentials are unavailable here. Use goodvibes host pair in an owner terminal.'); }
     },

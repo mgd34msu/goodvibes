@@ -8,7 +8,7 @@ import type { HeadlessRunFlags } from '@goodvibes-jev/engine/terminal-shell/head
 import { executeAdmittedHeadlessTurn, settleHeadlessTurn } from './native-headless-turn.ts';
 import type { NativeHeadlessMode } from './native-headless-options.ts';
 
-import { createAgentNativeHostSelection } from '../runtime/agent-local-host-pairing.ts';
+import { createAgentNativeHostSelection } from '../runtime/agent-native-host-selection.ts';
 import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
@@ -47,8 +47,6 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
   return runHeadlessCommand(runtime, mode, {
     write: writeNativeHeadlessResult,
     run: (prompt, mode, outer) => runWithHeadlessTimeout(outer, limits.timeoutMs, async (signal) => {
-      // On this machine the first native run creates the Agent's device credential (no pairing step).
-      if ('reason' in resolveHost()) await nativeHost.prepare(signal);
       const result = await executeNativeHeadless({
         mode,
         prompt,

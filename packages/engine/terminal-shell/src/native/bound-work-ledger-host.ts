@@ -75,8 +75,6 @@ export type NativeLedgerHostState =
 export interface NativeLedgerHostPolicy {
   readonly identityFormat: NativeHostIdentityFormat;
   readonly intake: NativeConversationIntakePolicy;
-  /** Runs before discovery when the host has no credential yet (the TUI pairs with a local daemon). */
-  readonly prepare?: (() => Promise<void>) | undefined;
 }
 
 const SELECTION_MOVED = 'Selected host, credentials, or workspace changed. Select the daemon project again with /work <project-id>.';
@@ -102,7 +100,6 @@ export function createBoundNativeWorkLedgerView(
   // The view is open: a selected project is shown through a bound reader.
   let viewing = false;
   let boundRevision = -1;
-  let preparing: Promise<void> | undefined;
   const model = new NativeWorkLedgerModel(changed, () => viewing && boundRevision === revision);
   const same = (a: BoundHost, b: BoundHost) =>
     a.baseUrl === b.baseUrl &&
@@ -201,7 +198,7 @@ export function createBoundNativeWorkLedgerView(
     const discovering: NativeLedgerHostState = { kind: 'discovering', host, controller, done };
     to(discovering);
   };
-  /** The selected project, discovering it (after `prepare`) when none is selected. */
+  /** The selected project, discovering it when none is selected. */
   const ensure = async (): Promise<Extract<NativeLedgerHostState, { kind: 'selected' }> | { readonly reason: string }> => {
     for (;;) {
       sync();
@@ -213,14 +210,7 @@ export function createBoundNativeWorkLedgerView(
         if (state.kind === 'closed') return { reason: 'Native work ledger view is closed.' };
         continue;
       }
-      let host = resolve();
-      if ('reason' in host && policy.prepare) {
-        await (preparing ??= policy.prepare().finally(() => {
-          preparing = undefined;
-        }));
-        if (state !== now) continue;
-        host = resolve();
-      }
+      const host = resolve();
       const project = now.kind === 'unavailable' ? now.project : undefined;
       if ('reason' in host) {
         if (state.kind !== 'unavailable' || state.reason !== host.reason) to({ kind: 'unavailable', reason: host.reason, project });

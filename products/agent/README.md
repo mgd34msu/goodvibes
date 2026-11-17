@@ -82,7 +82,9 @@ Use `--name Agent` to choose the device name. Pairing invokes
 for that host, and verifies its live principal. It requires the existing shared
 operator's `write:control-plane` authority. Model, harness and nested commands
 cannot confirm this grant. Opening Agent or finishing ordinary onboarding does
-not create a credential, and pairing does not revoke the shared token.
+not create a credential, and pairing does not revoke the shared token. For the
+daemon on the Agent's own machine no pairing is needed: the operator token file
+the Agent already reads is the owner's credential there.
 
 If pairing is interrupted, rerun `/setup pair` to inspect its saved state before
 taking another action. An unknown outcome is preserved for review rather than

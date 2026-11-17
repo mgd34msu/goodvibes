@@ -1,7 +1,7 @@
 import type { PaymentWindowCommandPolicy } from '@goodvibes-jev/engine/terminal-shell/payment-window-command';
 import { requireShellPaths } from '@goodvibes-jev/engine/terminal-shell/command-service-access';
 import type { CommandContext } from '../command-registry.ts';
-import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
+import { localOperatorTokenPath, resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
 import { tuiHostPairingStorePath } from '../../runtime/tui-host-credential-store.ts';
 
 
@@ -15,5 +15,6 @@ export const ownerOperatorConnectionPolicy: Omit<PaymentWindowCommandPolicy<Comm
     return host.available ? { baseUrl: host.baseUrl, token: host.token, identity: host.identity,
       ...(host.expectedPrincipalId === undefined ? {} : { expectedPrincipalId: host.expectedPrincipalId }) } : null;
   },
-  files: (_selection, home) => [tuiHostPairingStorePath(home)],
+  // The pairing store, and the operator token used for the daemon on this machine when no pairing is saved.
+  files: (_selection, home) => [tuiHostPairingStorePath(home), localOperatorTokenPath(home)],
 };

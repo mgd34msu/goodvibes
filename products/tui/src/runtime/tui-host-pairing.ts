@@ -1,5 +1,4 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { hostname } from 'node:os';
 import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from '@goodvibes-jev/engine/terminal-shell/native-paired-principal';
 import { createOperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
@@ -115,51 +114,6 @@ async function mintTuiDevicePairing(input: {
     if (complete.status !== 'paired') return { status: 'unknown' };
     return { status: 'paired', token: minted.token, tokenId: minted.id };
   } catch { return { status: 'unknown' }; }
-}
-
-function isLoopbackOrigin(origin: string): boolean {
-  try {
-    const name = new URL(origin).hostname.replace(/^\[|\]$/g, '').toLowerCase();
-    return name === 'localhost' || name === '::1' || /^127(\.\d{1,3}){3}$/.test(name);
-  } catch { return false; }
-}
-
-/**
- * Native work on the owner's own machine needs no pairing step. When the
- * selected daemon is on loopback, this terminal holds no record for it, and the
- * daemon's operator token is this user's own private file, the terminal mints
- * its device credential with that token (one request), saves it for this
- * origin and uses it from then on. The device shows in the daemon's device list
- * and is revoked like any other. A daemon on another machine is never sent the
- * local token; it is paired with /host pair. An earlier attempt whose reply was
- * lost is settled by repeating it. Returns the outcome when a request was made,
- * otherwise null (already paired, or not this machine's daemon).
- */
-export async function pairLocalTuiHostAutomatically(options: TuiHostPairingOptions, signal?: AbortSignal): Promise<TuiHostPairingResult | null> {
-  try {
-    const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
-    const host = resolveTuiHostOrigin(options.configManager);
-    if (!host || !isLoopbackOrigin(host) || !resolveDaemonEnabled(options.configManager)) return null;
-    const state = readTuiHostPairing(home, host);
-    if (state.status !== 'missing' && state.status !== 'unknown') return null;
-    const token = readTuiLegacyPairingBootstrap(home);
-    if (!token) return null;
-    const homeNow = () => typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
-    const current = () => homeNow() === home && resolveDaemonEnabled(options.configManager) && resolveTuiHostOrigin(options.configManager) === host;
-    // An earlier attempt whose reply was lost is repeated under its own id and name.
-    const name = state.status === 'unknown' ? state.name
-      : `GoodVibes TUI on ${hostname()}`.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, '').slice(0, 80).trim();
-    const repeat = state.status === 'unknown' ? { attemptId: state.attemptId } : undefined;
-    const outcome = await mintTuiDevicePairing({ home, host, token, name, repeat, current, fetchImpl: options.fetchImpl, signal });
-    switch (outcome.status) {
-      case 'paired': return { status: 'paired', host, name, message: 'This terminal created its device credential for the daemon on this machine.' };
-      case 'refused': return refused(host, outcome.httpStatus);
-      case 'unknown': return unknown(host);
-      case 'changed': return changed();
-      case 'cancelled': return cancelled();
-      default: return unavailable();
-    }
-  } catch { return signal?.aborted ? cancelled() : unavailable(); }
 }
 
 /** What forgetting a stored credential did. The token stays valid on the host until it is revoked there. */

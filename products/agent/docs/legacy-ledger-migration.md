@@ -31,12 +31,16 @@ command to run, and a preview the host blocks shows the host's code and reason.
 Each command authenticates once; the host checks scope on every call, and a
 401 or 403 is reported as a credential the host no longer accepts.
 
-Agent and TUI use their own exact-host private pairing stores. Unbound
-environment and daemon-global tokens are not fallback import credentials.
+Agent and TUI use their own exact-host private pairing stores; for the daemon
+on the same machine without such a pairing they use the daemon's operator token
+file they already hold, which the daemon treats as the owner's own machine.
+Unbound environment tokens are not fallback import credentials, and the operator
+token is never sent to a daemon on another machine.
 Reads require current admin, `read:work-ledger` and `read:knowledge`. New import
 and recovery additionally require `write:work-ledger-import`, the selected
-host's real persisted paired authority generation, and a registered workspace
-scope. Shared tokens and user-session credentials cannot become paired authority.
+host's real persisted owner authority generation (a pairing, or the owner's own
+machine), and a registered workspace scope. The operator token from another
+machine and user-session credentials cannot become owner authority.
 No command creates a credential, changes scopes, or treats `confirm`, historical
 approval, or model-supplied actor data as a grant. Both model and keyboard callers
 use the same host gate without a semantic human-approval loop.

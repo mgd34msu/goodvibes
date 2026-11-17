@@ -9,7 +9,6 @@ import type { NativeWorkLedgerView } from '@goodvibes-jev/engine/terminal-shell/
 import { TUI_NATIVE_INTAKE_POLICY } from '@goodvibes-jev/engine/terminal-shell/native-intake';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from './client/native-host-credential.ts';
-import { pairLocalTuiHostAutomatically } from './tui-host-pairing.ts';
 import type { CommandRegistry } from '../input/command-registry.ts';
 
 /** What the /work modal reads: the shared view and one change listener at a time. */
@@ -21,8 +20,8 @@ export interface NativeWorkLedgerModalSource {
 
 /**
  * The TUI's /work host: the shared selection owner with the TUI's differences,
- * its device credential, its intake policy (selected diffs, no hosted turns) and
- * the automatic pairing with a daemon on this machine.
+ * its credential (a device pairing, or on the daemon's own machine the operator
+ * token it already holds) and its intake policy (selected diffs, no hosted turns).
  */
 export function createNativeWorkLedgerHost(
   deps: {
@@ -35,14 +34,10 @@ export function createNativeWorkLedgerHost(
   bind?: NativeLedgerBindingFactory,
 ): NativeWorkLedgerModalSource {
   const observation = new OwnedSelectionObservation();
-  // Why the automatic local pairing gave this terminal no credential, shown in
-  // place of the generic "no device credential" until a credential exists.
-  let localPairingReason = '';
   const homeDirectory = () => (typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory);
   const resolve = (): NativeLedgerHost => {
     const credential = resolveNativeHostCredential({ configManager: deps.configManager, homeDirectory: homeDirectory(), observation });
-    if (!credential.available) return { reason: localPairingReason || credential.reason };
-    localPairingReason = '';
+    if (!credential.available) return { reason: credential.reason };
     return {
       baseUrl: credential.baseUrl,
       token: credential.token,
@@ -59,12 +54,6 @@ export function createNativeWorkLedgerHost(
     {
       identityFormat: 'credential',
       intake: TUI_NATIVE_INTAKE_POLICY,
-      // The owner's own machine needs no pairing step: the first native action
-      // creates this terminal's device credential (one request).
-      prepare: async () => {
-        const result = await pairLocalTuiHostAutomatically({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
-        localPairingReason = result && result.status !== 'paired' ? result.message : '';
-      },
     },
     bind,
   );

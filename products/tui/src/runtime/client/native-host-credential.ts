@@ -1,9 +1,12 @@
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
+import { resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveControlPlaneBaseUrl } from './operator-endpoint.ts';
 import { statSync } from 'node:fs';
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { canonicalizePairingHost, readTuiHostPairing, tuiHostPairingStorePath, type TuiHostPairing } from '../tui-host-credential-store.ts';
+import { readTuiLegacyPairingBootstrap } from '../tui-host-pairing-bootstrap.ts';
 
 // Actual config owners retain only their latest selected frame. No host/token
 // string is a process-global lookup key, and independent owners cannot share a label.
@@ -30,6 +33,33 @@ function readPairing(home: string, host: string): TuiHostPairing {
   return pairing;
 }
 
+/** Where the daemon on this machine keeps the operator token this user holds. */
+export function localOperatorTokenPath(home: string): string {
+  return operatorTokenPath(resolveGoodVibesDaemonHome(home));
+}
+
+// The operator token each home last read, kept while its file is the same file
+// (one stat): the checked read walks the daemon home's ancestors.
+const operatorTokenReads = new Map<string, { readonly file: string; readonly token: string | null }>();
+function readLocalOperatorToken(home: string): string | null {
+  let file: string | null;
+  try {
+    const stat = statSync(localOperatorTokenPath(home), { throwIfNoEntry: false });
+    file = stat ? `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}` : 'none';
+  } catch { file = null; }
+  const held = operatorTokenReads.get(home);
+  if (file !== null && held?.file === file) return held.token;
+  const token = file === 'none' ? null : readTuiLegacyPairingBootstrap(home);
+  if (file !== null) operatorTokenReads.set(home, { file, token });
+  else operatorTokenReads.delete(home);
+  return token;
+}
+
+/** A daemon origin on this machine. */
+function isLocalOrigin(origin: string): boolean {
+  try { return isLoopbackHost(new URL(origin).hostname); } catch { return false; }
+}
+
 export interface NativeHostCredentialOptions {
   readonly configManager: ConfigManager;
   readonly homeDirectory: string | (() => string);
@@ -48,12 +78,12 @@ export type NativeHostCredential =
 
 /**
  * The credential native work presents to the selected daemon: the per-device
- * pairing bound to this exact origin. Native work is attributed to a device and
- * revocable per device, so the shared operator token is never presented here.
- * On the owner's own machine the terminal creates that pairing itself on first
- * use (`pairLocalTuiHostAutomatically`); a daemon on another machine is paired
- * with /host pair. Live scopes are enforced by each operation; a read does not
- * require write/admin.
+ * pairing bound to this exact origin when there is one. On the daemon's own
+ * machine (a loopback origin) without one, the operator token this user
+ * already holds: the daemon treats it as the owner's own machine, so there is
+ * no pairing step. A daemon on another machine is never sent that token; it is
+ * paired with /host pair. Live scopes are enforced by each operation; a read
+ * does not require write/admin.
  */
 export function resolveNativeHostCredential(options: NativeHostCredentialOptions): NativeHostCredential {
   let owner: ConfigManager | undefined;
@@ -66,6 +96,8 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     const selected = resolveControlPlaneBaseUrl(owner);
     const baseUrl = resolveTuiHostOrigin(owner);
     const pairing = baseUrl ? readPairing(home, baseUrl) : null;
+    const local = enabled && baseUrl && pairing && pairing.status !== 'paired' && pairing.status !== 'unavailable' && isLocalOrigin(baseUrl)
+      ? readLocalOperatorToken(home) : null;
     // Full state, not merely the bearer: replacement and indeterminate state
     // invalidate queued reads, permits and mutation preflights as well.
     let observation = retained ?? (applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined);
@@ -74,15 +106,20 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
       applyObservation(setObservation, observations, [owner, observation]);
     }
     retained = observation;
-    const identity = observation.observe([home, enabled, selected, baseUrl, pairing], owner);
+    const identity = observation.observe([home, enabled, selected, baseUrl, pairing, local], owner);
     if (!enabled) return { available: false, identity, reason: 'Selected daemon is disabled.' };
     if (!baseUrl) return { available: false, identity, reason: 'Select an exact HTTP(S) daemon origin without a path, query, fragment or user information.' };
     if (pairing?.status === 'paired') return { available: true, baseUrl, token: pairing.token, identity, expectedPrincipalId: `pairing:${pairing.tokenId}` };
-    // A pairing whose reply was lost is settled by repeating it under its attempt
-    // id (the host answers with the credential it made, never a second one), so
-    // nothing is swapped in under it meanwhile.
-    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'The reply to this terminal\'s pairing request was lost. On this machine /work repeats it on its own; for a daemon on another machine run /host pair --bootstrap-shared to repeat it.' };
-    if (pairing?.status === 'missing') return { available: false, identity, reason: 'This terminal has no device credential for this daemon. On this machine /work creates one on first use; for a daemon on another machine, pair this terminal with /host pair.' };
+    if (local) return { available: true, baseUrl, token: local, identity };
+    // For a daemon on another machine, a pairing whose reply was lost is settled
+    // by repeating it under its attempt id (the host answers with the credential
+    // it made, never a second one), so nothing is swapped in under it meanwhile.
+    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'The reply to this terminal\'s pairing request was lost. Run /host pair --bootstrap-shared to repeat it.' };
+    if (pairing?.status === 'missing') {
+      return { available: false, identity, reason: isLocalOrigin(baseUrl)
+        ? 'The daemon on this machine is selected, but its operator token could not be read (it must be your own private file). Start the daemon once, or pair this terminal with /host pair.'
+        : 'This terminal has no device credential for the daemon on another machine; pair it with /host pair.' };
+    }
     return { available: false, identity, reason: 'The TUI host credential store is unavailable.' };
   } catch {
     if (retained) retained.retire();

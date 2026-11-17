@@ -8,8 +8,7 @@ export {
 } from '@goodvibes-jev/engine/terminal-shell/native/bound-work-ledger-host';
 /**
  * Agent admits hosted turns but never selected-diff execution, and preserves
- * paired journal identities. `prepare` runs before discovery while the host
- * has no credential (the automatic pairing with a daemon on this machine).
+ * paired journal identities.
  */
 export const createNativeWorkLedgerView = (
   resolve: Parameters<typeof createBoundNativeWorkLedgerView>[0],
@@ -17,12 +16,11 @@ export const createNativeWorkLedgerView = (
   bind?: Parameters<typeof createBoundNativeWorkLedgerView>[3],
   discover?: Parameters<typeof createBoundNativeWorkLedgerView>[4],
   bindSubmission?: Parameters<typeof createBoundNativeWorkLedgerView>[5],
-  prepare?: () => Promise<void>,
 ) =>
   createBoundNativeWorkLedgerView(
     resolve,
     changed,
-    { identityFormat: 'paired', intake: AGENT_NATIVE_INTAKE_POLICY, prepare },
+    { identityFormat: 'paired', intake: AGENT_NATIVE_INTAKE_POLICY },
     bind,
     discover,
     bindSubmission,

@@ -108,6 +108,51 @@ import type { RawCheckoutReading } from './checkout-extraction.js';
 import type { MarketplaceListing } from './marketplace-listing.js';
 import { readRepricedCheckout } from './checkout-repricing.js';
 import { markPaymentCheckoutAction } from '../security/order-submission.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { minorUnitExponent } from './money-parsing.js';
+
+/** An amount in minor units as a page may print it: with or without grouping, with a point or a comma before the minor digits. */
+function printedAmounts(amount: number, currency: string): string[] {
+  const exponent = minorUnitExponent(currency);
+  const major = Math.floor(amount / 10 ** exponent);
+  const minor = exponent === 0 ? '' : String(amount % 10 ** exponent).padStart(exponent, '0');
+  const plain = String(major), comma = major.toLocaleString('en-US'), dot = comma.replaceAll(',', '.'), space = comma.replaceAll(',', ' ');
+  if (exponent === 0) return [...new Set([plain, comma, dot, space])];
+  return [...new Set([`${plain}.${minor}`, `${comma}.${minor}`, `${plain},${minor}`, `${dot},${minor}`, `${space},${minor}`])];
+}
+
+/** Whether `text` holds `amount` as a whole number, not inside a longer one. */
+function holdsAmount(text: string, amount: string): boolean {
+  for (let at = text.indexOf(amount); at !== -1; at = text.indexOf(amount, at + 1)) {
+    const before = text.slice(Math.max(0, at - 2), at), after = text.slice(at + amount.length, at + amount.length + 2);
+    if (!/\d$|\d[.,]$/.test(before) && !/^\d|^[.,]\d/.test(after)) return true;
+  }
+  return false;
+}
+
+/**
+ * Code's terms check when no decision model reads the live checkout: every
+ * document's checkout text is readable, the approved payable total is printed
+ * on it, and the delivery option the quote selected is named on it. The page
+ * origin and submit control were already checked by `observePage`.
+ */
+function pageShowsApprovedTerms(expected: CheckoutTerms, state: object): boolean {
+  const documents = (state as { readonly documents?: unknown }).documents;
+  if (!Array.isArray(documents) || documents.length === 0) return false;
+  const texts: string[] = [];
+  for (const document of documents) {
+    const checkout = (document as { readonly checkout?: { readonly text?: unknown; readonly selections?: unknown } } | null)?.checkout;
+    if (typeof checkout?.text !== 'string') return false;
+    texts.push(checkout.text);
+    if (Array.isArray(checkout.selections)) for (const selection of checkout.selections as { readonly labels?: unknown }[]) {
+      if (Array.isArray(selection?.labels)) texts.push(...selection.labels.filter((label): label is string => typeof label === 'string'));
+    }
+  }
+  const text = texts.join('\n');
+  if (!printedAmounts(expected.totalMinorUnits, expected.currency).some(amount => holdsAmount(text, amount))) return false;
+  const shipping = expected.shippingLabel.trim().toLowerCase();
+  return shipping.length === 0 || text.toLowerCase().includes(shipping);
+}
 
 /**
  * The part of a card-material guard this adapter can see.
@@ -388,7 +433,28 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     return observed !== null;
   }
 
+  /**
+   * The terms reading after the card is typed. Without a decision model, code
+   * checks the live page instead (`pageShowsApprovedTerms`): the approved
+   * payable total and the selected delivery option are on it. Anything short
+   * of that is a changed quote, never a submit.
+   */
   async verifyTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
+    return decisionOrClassic(() => this.readTerms(expected, ownership), () => this.checkTermsInCode(expected, ownership));
+  }
+
+  private async checkTermsInCode(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
+    const observed = await this.observePage(expected, ownership);
+    if (!observed) return false;
+    const { retained, engine, state, current, assertActive } = observed;
+    await current();
+    const shown = pageShowsApprovedTerms(retained, state);
+    assertActive();
+    if (shown) this.#quote = { engine, submitTarget: retained.submitTarget, current };
+    return shown;
+  }
+
+  private async readTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
     const observed = await this.observeTerms(expected, ownership);
     if (!observed) return false;
     const { retained, engine, state, port, signal, current, assertActive } = observed;
@@ -410,6 +476,13 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
   }
 
   async readCurrentQuote(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },
+    ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<RawCheckoutReading | null> {
+    // A replacement quote is a reading of the changed page; without a decision
+    // model none is established and the purchase stops with nothing submitted.
+    return decisionOrClassic(() => this.readReplacementQuote(original, ownership), () => null);
+  }
+
+  private async readReplacementQuote(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },
     ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<RawCheckoutReading | null> {
     const retained = captureOwnedJson(original) as unknown as typeof original;
     const observed = await this.observeTerms(retained.terms, ownership);

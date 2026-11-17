@@ -208,6 +208,7 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'budget-held': 'Another purchase in progress is holding the budget this one needs. Nothing was submitted. Wait for that purchase to finish, then start this one again.',
   'cart-unconfirmed': 'A cart line could not be confirmed as the item you asked for. Nothing was bought. Check the cart, or name the item more exactly, then start the purchase again.',
   'recurring-unconfirmed': 'The checkout could not be confirmed as a single payment. Nothing was bought. Start the purchase again with an order summary that holds only this order.',
+  'not-checked-unapproved': 'No decision model was in use, so part of the checkout was not checked, and the purchase was not approved. Nothing was bought.',
   'held-reply-not-understood': 'Your reply to the purchase notice was not taken as a go-ahead, and the follow-up approval got no yes. Nothing was bought.',
   'security-code-not-given': 'The card security code was not typed before the deadline, so nothing was bought. Start the purchase again and type the code with /payments pending when asked.',
   'daemon-stopped': 'The daemon stopped before this purchase was submitted. Nothing was sent to the merchant and it will not resume; start the purchase again if you still want it.',

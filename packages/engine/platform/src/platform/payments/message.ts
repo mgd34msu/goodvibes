@@ -80,6 +80,12 @@ export interface PurchaseFacts {
   readonly requestedMaximumMinorUnits?: MinorUnits | undefined;
   readonly approvalReasons?: readonly PurchaseApprovalReason[] | undefined;
   /**
+   * What no decision model checked, one already-neutralised line each (the
+   * cart lines as the merchant labelled them, whether the charge repeats,
+   * delivery speed). Present only with the `not-checked` approval reason.
+   */
+  readonly notChecked?: readonly string[] | undefined;
+  /**
    * Where it is going, rendered from the STORED address.
    *
    * A correct total to the wrong address is still a wrong order, and the veto
@@ -121,8 +127,10 @@ export function renderApprovalMessage(facts: PurchaseFacts, expiresInMinutes: nu
     'per-purchase-ceiling': 'the item exceeds the per-purchase ceiling',
     'requested-maximum': 'the full total exceeds your requested maximum',
     'merchant-recourse': 'this merchant needs your explicit approval',
+    'not-checked': 'no decision model is in use, so I did not check everything below',
   };
   const why = [...new Set(facts.approvalReasons ?? [])].map(reason => reasons[reason]).filter(Boolean);
+  const notChecked = facts.notChecked ?? [];
   const lines = [
     why.length ? `Approval needed: ${why.join('; ')}.` : 'Approval needed before this purchase.',
     ``,
@@ -131,6 +139,7 @@ export function renderApprovalMessage(facts: PurchaseFacts, expiresInMinutes: nu
     ``,
     ...amountLines(facts),
     ``,
+    ...(notChecked.length > 0 ? ['Not checked (no decision model is in use); approve only if these are right:', ...notChecked.map(line => `  - ${line}`), ``] : []),
     `  Card ending ${facts.cardLast4}`,
     `  Daily item budget left: ${formatMinorUnits(facts.poolsAfter.item.remaining, facts.currency)}`,
     ``,
@@ -415,5 +424,40 @@ export function renderConfirmationReport(input: {
     lines.push(``, `The order you approved went through: I could not confirm it when it was submitted, and purchase history now records it as bought.`);
   }
   lines.push(``, `This is the order you approved. The amount above is the one I calculated, not the one the email states.`);
+  return lines.join('\n');
+}
+
+/**
+ * The question sent when no decision model read a shop's mail: which of our
+ * purchases it may be about, from OUR records, and what to do. Nothing from
+ * the mail itself is quoted; the owner reads the mail in their mailbox.
+ */
+export function renderUnreadOrderMail(input: {
+  readonly senderDomain: string;
+  readonly receivedAtMs: number;
+  readonly purchases: readonly {
+    readonly facts: Pick<PurchaseFacts, 'item' | 'totalMinorUnits' | 'currency' | 'cardLast4'>;
+    readonly orderNumber: string | null;
+    readonly unverified: boolean;
+  }[];
+  /** True when the mail carries the order number we recorded for its one purchase. */
+  readonly orderNumberMatched: boolean;
+}): string {
+  const one = input.purchases.length === 1;
+  const lines = [
+    `A mail from ${renderMerchant(input.senderDomain)} arrived ${new Date(input.receivedAtMs).toISOString().slice(0, 16).replace('T', ' ')} UTC `
+      + (input.orderNumberMatched ? 'with the order number of this purchase:' : one ? 'after this purchase; it may be about it:' : 'after these purchases there; it may be about one of them:'),
+    ``,
+    ...input.purchases.flatMap(({ facts, orderNumber }) => [
+      `  ${renderItem(facts.item)}`,
+      `  ${formatMinorUnits(facts.totalMinorUnits, facts.currency)} on the card ending ${sanitizeNoticeField(facts.cardLast4, 8)}`
+        + (orderNumber === null ? '' : `, order ${sanitizeNoticeField(orderNumber, 40)}`),
+    ]),
+    ``,
+    `No decision model is in use, so I did not read what the mail says (a confirmation, shipping, a cancellation or a refund). Please read it in your mailbox.`,
+  ];
+  if (input.purchases.some(purchase => purchase.unverified)) {
+    lines.push(`A purchase above is recorded as not confirmed: if the mail says it went through, or that it was cancelled, record that in /payments pending.`);
+  }
   return lines.join('\n');
 }

@@ -21,9 +21,16 @@
  * purchase whose delivery was reported is no longer a candidate, so later shop
  * mail costs it no reading, and a kind already reported sends nothing and
  * costs no extraction.
+ *
+ * Without a decision model (none set, No Decision Model, or Hybrid after the
+ * set model failed during this mail) what the mail says is not read. The
+ * owner is asked instead, once per purchase and kind of subject: which
+ * purchase it may be about, from our records, and to record an unverified
+ * one's outcome in /payments pending. Nothing is settled or refunded unread.
  */
 import { correlatePurchaseMail, extractConfirmationFacts, readRefundMail, type InboundMailFacts } from './order-correlation.js';
-import { renderConfirmationReport, renderRefundReport, type OrderMailKind } from './message.js';
+import { renderConfirmationReport, renderRefundReport, renderUnreadOrderMail, type OrderMailKind } from './message.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { PurchaseRecord } from './purchase-record.js';
 import { ownerSuppliedText, parseCurrencyCode } from './types.js';
 
@@ -35,6 +42,8 @@ export type ConfirmationReportOutcome =
     readonly mailKind?: OrderMailKind | undefined;
     /** True when this mail moved an unverified purchase to purchased. */
     readonly settled?: boolean | undefined;
+    /** True when no decision model read the mail and the owner was asked about it instead. */
+    readonly unread?: boolean | undefined;
   }
   | { readonly kind: 'not-reported'; readonly reason: 'unrelated' | 'ambiguous' | 'unreportable' | 'already-reported' };
 
@@ -66,7 +75,7 @@ export function mailboxAddress(from: string): string {
   return (open !== -1 && close !== -1 ? from.slice(open + 1, close) : from).trim();
 }
 
-export async function reportOrderConfirmation(input: {
+interface ReportInput {
   readonly mail: InboundMailFacts;
   readonly purchases: readonly PurchaseRecord[];
   /** Sends the report to the owner; a rejection propagates so the caller can log it. */
@@ -83,7 +92,36 @@ export async function reportOrderConfirmation(input: {
   readonly recordConfirmation?: ((purchaseId: string, orderNumber: string | null) => Promise<boolean>) | undefined;
   /** Absent: every matching mail is reported (no memory across mails). */
   readonly reports?: OrderMailReports | undefined;
-}): Promise<ConfirmationReportOutcome> {
+}
+
+/** One mail is one decision-model operation: a model that fails partway leaves the rest of it unread. */
+export function reportOrderConfirmation(input: ReportInput): Promise<ConfirmationReportOutcome> {
+  return withConfiguredDecisionModelPolicy(() => reportOwned(input));
+}
+
+/**
+ * The owner's question about a mail no decision model read, once per purchase
+ * and subject kind; nothing is recorded on the purchase but that it was asked.
+ */
+async function askAboutUnreadMail(input: ReportInput, candidates: readonly PurchaseRecord[], senderDomain: string,
+  orderNumberMatched: boolean): Promise<ConfirmationReportOutcome> {
+  const kind = orderMailKind(input.mail.subject);
+  const reportedKinds = input.reports?.kinds();
+  const purchases = candidates.flatMap((record) => {
+    const item = ownerSuppliedText(record.item, 'owner-direct');
+    const currency = parseCurrencyCode(record.currency);
+    if (item === null || currency === null || reportedKinds?.get(record.purchaseId)?.includes(kind)) return [];
+    return [{ record, facts: { item, totalMinorUnits: record.totalMinorUnits, currency, cardLast4: record.cardLast4 },
+      orderNumber: record.merchantOrderId, unverified: record.outcome === 'submitted-unverified' }];
+  }).slice(0, 3);
+  if (purchases.length === 0) return { kind: 'not-reported', reason: 'already-reported' };
+  await input.send(renderUnreadOrderMail({ senderDomain, receivedAtMs: input.mail.receivedAtMs, purchases, orderNumberMatched }));
+  if (input.reports !== undefined) for (const { record } of purchases) await input.reports.record(record.purchaseId, kind);
+  const first = purchases[0]!;
+  return { kind: 'reported', purchaseId: first.record.purchaseId, mailKind: kind, unread: true };
+}
+
+async function reportOwned(input: ReportInput): Promise<ConfirmationReportOutcome> {
   const reports = input.reports;
   const reportedKinds = reports?.kinds();
   // A purchase whose delivery was reported has nothing left to report.
@@ -92,16 +130,22 @@ export async function reportOrderConfirmation(input: {
   const correlation = await correlatePurchaseMail(input.mail, open);
   if (correlation.kind === 'unrelated') return { kind: 'not-reported', reason: 'unrelated' };
   if (correlation.kind === 'ambiguous') return { kind: 'not-reported', reason: 'ambiguous' };
+  if (correlation.kind === 'unread') return askAboutUnreadMail(input, correlation.candidates, correlation.senderDomain, correlation.orderNumberMatched);
   const { record, senderDomain } = correlation;
   const item = ownerSuppliedText(record.item, 'owner-direct');
   const currency = parseCurrencyCode(record.currency);
   // A row that cannot be rendered as ours is not reported rather than reported with invented values.
   if (item === null || currency === null) return { kind: 'not-reported', reason: 'unreportable' };
   const facts = { item, totalMinorUnits: record.totalMinorUnits, currency, cardLast4: record.cardLast4 };
-  if (input.recordRefund !== undefined && record.refundedAt === null && await readRefundMail(input.mail, record)) {
-    const recorded = await input.recordRefund(record.purchaseId, new Date(input.mail.receivedAtMs).toISOString());
-    if (recorded) await input.send(renderRefundReport({ facts, senderDomain }));
-    return { kind: 'reported', purchaseId: record.purchaseId, refund: true };
+  if (input.recordRefund !== undefined && record.refundedAt === null) {
+    const refunded = await readRefundMail(input.mail, record);
+    // The set model failed on this mail (Hybrid): what it says is unread, so nothing is recorded from it.
+    if (isClassicOperation()) return askAboutUnreadMail(input, [record], senderDomain, false);
+    if (refunded) {
+      const recorded = await input.recordRefund(record.purchaseId, new Date(input.mail.receivedAtMs).toISOString());
+      if (recorded) await input.send(renderRefundReport({ facts, senderDomain }));
+      return { kind: 'reported', purchaseId: record.purchaseId, refund: true };
+    }
   }
   const reported = reportedKinds?.get(record.purchaseId) ?? [];
   // An unverified purchase is read even when this kind was reported: the mail
@@ -114,6 +158,7 @@ export async function reportOrderConfirmation(input: {
     return { kind: 'not-reported', reason: 'already-reported' };
   }
   const confirmation = await extractConfirmationFacts(input.mail);
+  if (isClassicOperation()) return askAboutUnreadMail(input, [record], senderDomain, false);
   const kind = orderMailKind(input.mail.subject, confirmation.trackingReference);
   const settled = recordConfirmation !== undefined && await recordConfirmation(record.purchaseId, confirmation.orderNumber);
   if (!settled && reported.includes(kind)) return { kind: 'not-reported', reason: 'already-reported' };

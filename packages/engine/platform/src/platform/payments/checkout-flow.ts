@@ -68,12 +68,11 @@ import { assertCartMatchesRequest, detectRecurringCharge, type RequestedLine } f
 import { logger } from '../utils/logger.js';
 import { OrderSummaryTooLongError } from './batteries/recurring-charge.js';
 import { checkPaymentGates, type GateInput } from './gates.js';
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
 import { captureMutationDescriptors } from '../utils/file-mutation.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { decidePurchase, type BudgetDraw, type ExceededLimit } from './decide.js';
-import { readShippingTiers } from './shipping.js';
+import { readShippingTierChoice } from './shipping.js';
 import { evaluatePaymentTaint, type OwnerOriginIntent } from './taint-gate.js';
 import { extractCheckout, type ExtractedCheckout, type RawCheckoutReading } from './checkout-extraction.js';
 import { parseRequestedMaximum } from './money-parsing.js';
@@ -88,6 +87,7 @@ import type { MarketplaceListing } from './marketplace-listing.js';
 import { renderCancellationReport, renderPurchaseNotice, renderPurchaseReport, renderSecurityCodeRequest } from './message.js';
 import type { SecurityCodeRequests, TypedSecurityCode } from './security-code-requests.js';
 import { validateLinkTarget } from '../security/link-validation.js';
+import { sanitizeNoticeField } from '../security/notice-text.js';
 import { registrableDomain } from '../security/public-suffix.js';
 import {
   advanceApproval,
@@ -317,7 +317,6 @@ export async function runCheckout(
   controls: CheckoutControls,
   deps: CheckoutFlowDeps,
 ): Promise<CheckoutOutcome> {
-  requireDecisionFeature('automated checkout cart and merchant interpretation');
   deps = { ...deps };
   const input = captureOwnedJson({ request, reading, controls, gates: deps.gates, limits: deps.limits,
     merchantPolicy: deps.merchantPolicy }) as {
@@ -554,7 +553,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   const [cartRead, recurringRead, shippingRead, metadata] = await Promise.all([
     readPage(assertCartMatchesRequest(checkout.lines, request.requestedLines, ownership)),
     readPage(detectRecurringCharge(checkout.orderSummaryText, ownership)),
-    readPage(readShippingTiers(checkout.shippingOptions, checkout.currency, ownership)),
+    readPage(readShippingTierChoice(checkout.shippingOptions, checkout.currency, ownership)),
     deps.cards.metadata(request.cardId),
   ]);
   current();
@@ -567,7 +566,16 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     return refused(recurring.code ?? 'recurring-charge', recurring.reason ?? 'Refused: this checkout sets up a recurring charge.');
   }
   if ('outcome' in shippingRead) return shippingRead.outcome;
-  const shippingTiers = shippingRead.value;
+  const shippingTiers = shippingRead.value.tiers;
+  // What no decision model read (none is in use): code settled the rest, and
+  // the owner is asked about these by an explicit approval where silence
+  // denies, never by a veto, a pre-approval or a refusal.
+  const notChecked: string[] = [
+    ...cartCheck.notChecked.map((line) => `cart line '${sanitizeNoticeField(line.label, 60)}' x${String(line.quantity)} is what you asked for (${
+      request.requestedLines.map((entry) => `${sanitizeNoticeField(entry.label, 60)} x${String(entry.quantity)}`).join(', ')})`),
+    ...(recurring.outcome === 'not-checked' ? ['this is a single payment, not a subscription, renewal or trial that turns into a paid plan'] : []),
+    ...(shippingRead.value.speedRead ? [] : ['delivery: I took the cheapest option as standard; which option is faster was not read']),
+  ];
 
   // ── 4. The decision, on OUR integers ────────────────────────────────────
   const cardLast4 = metadata?.last4 ?? '????';
@@ -797,7 +805,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     approvalReasons: [
       ...(decision.kind === 'needs-approval' ? decision.approvalReasons : []),
       ...(!merchantVerdict.isMajor ? ['merchant-recourse' as const] : []),
+      ...(notChecked.length > 0 ? ['not-checked' as const] : []),
     ] satisfies readonly PurchaseApprovalReason[],
+    ...(notChecked.length > 0 ? { notChecked } : {}),
   };
 
   // ── 6. One notification for this quote, and its new window ──────────────
@@ -817,6 +827,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     aboveBudget,
     aboveRequestedMaximum: exceedsRequestedMaximum,
     merchantIsMajor: merchantVerdict.isMajor,
+    notChecked: notChecked.length > 0,
   });
   // A veto reply that was not a go-ahead turned this window into an explicit
   // approval (silence denies). A restart during that follow-up resumes it as
@@ -835,8 +846,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   let windowOutcome: string;
   let answeredBy: string | null = null;
   // The owner approved this merchant, item and amount before the purchase
-  // began; a total within that amount needs no second answer.
-  const preApproved = !resumption && request.ownerApprovedMaxMinorUnits !== undefined
+  // began; a total within that amount needs no second answer. A checkout no
+  // decision model read is not known to be that item, so it is still asked.
+  const preApproved = !resumption && notChecked.length === 0 && request.ownerApprovedMaxMinorUnits !== undefined
     && Number.isSafeInteger(request.ownerApprovedMaxMinorUnits) && draw.totalMinorUnits <= request.ownerApprovedMaxMinorUnits;
 
   /**
@@ -950,6 +962,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
             : state === 'denied-timeout'
               ? 'requested-maximum-exceeded-expired'
               : 'requested-maximum-exceeded-denied'
+        : notChecked.length > 0
+          ? 'not-checked-unapproved'
         : state === 'denied-undeliverable'
           ? 'merchant-not-recognised-undeliverable'
           : state === 'denied-timeout'
@@ -969,6 +983,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
             : state === 'denied-timeout'
               ? 'Refused: this total exceeds the maximum in your request and the approval window ended without an answer. Silence does not raise your limit.'
               : 'Refused: you did not approve spending above the maximum in your request.'
+        : notChecked.length > 0
+          ? state === 'denied-undeliverable'
+            ? 'Refused: no decision model is in use, so I could not check this checkout, and I could not reach you to ask. Nothing was bought.'
+            : state === 'denied-timeout'
+              ? 'Refused: no decision model is in use, so I asked you to check this checkout, and the approval window closed with no answer. Silence means no. Nothing was bought.'
+              : 'Refused: you said no.'
         : state === 'denied-undeliverable'
           ? 'Refused: I could not reach you to ask about this merchant, and a purchase somewhere '
             + 'I cannot point to a way of getting your money back does not go through unasked.'
@@ -978,7 +998,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
             : 'Refused: you said no.';
       // Over a limit, the refusal names the limit and by how much.
       const limitReason = decision.kind === 'needs-approval' ? decision.reason : undefined;
-      return refused(code, aboveBudget || exceedsRequestedMaximum ? `${why} ${limitReason ?? ''}`.trim() : `${why} ${merchantVerdict.reason}`,
+      return refused(code, aboveBudget || exceedsRequestedMaximum ? `${why} ${limitReason ?? ''}`.trim() : notChecked.length > 0 ? why : `${why} ${merchantVerdict.reason}`,
         decision.kind === 'needs-approval' ? decision.exceeded : undefined);
     }
   } else {

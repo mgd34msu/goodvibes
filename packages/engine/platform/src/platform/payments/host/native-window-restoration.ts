@@ -9,7 +9,6 @@ import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-com
 import type { ChannelDeliveryRouter } from '../../channels/index.js';
 import type { ChannelDeliveryRouteBinding } from '../../channels/delivery/types.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
-import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { captureBrowserCheckoutRecovery } from '../../browser/browser-checkout-recovery-data.js';
 import type { RestoredCheckoutPage } from '../../browser/browser-engine.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
@@ -57,7 +56,6 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
     const expected = request.host.authority;
     const authorityCurrent = () => {
       owner.signal.throwIfAborted(); owner.assertCurrent();
-      requireDecisionFeature('resuming an original automated checkout window');
       const issued = read(grant), available = scopes();
       if (seamFor() !== seam || !leader() || !readPaymentsEnabled(config) || !issued
         || !isDeepStrictEqual(issued, expected)

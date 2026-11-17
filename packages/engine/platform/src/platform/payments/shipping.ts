@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 /**
  * shipping.ts, the tier preference, and the ladder that steps down one rung.
  *
@@ -19,6 +19,11 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * is a confident none, `fast` is the fastest option, as a two-option checkout
  * always was. A tier whose reading does not act is left out, and the ladder
  * steps past it.
+ *
+ * Without a decision model, code decides the one tier a price settles: the
+ * cheapest option (the first listed among equals) is standard delivery. Which
+ * option is faster is not read, so fast and fastest are left out, the ladder
+ * takes standard, and the purchase notice says delivery speed was not read.
  *
  * ── The ladder ────────────────────────────────────────────────────────────
  *
@@ -91,16 +96,32 @@ async function pick(
  * `currency` is what their costs are in.
  */
 export async function readShippingTiers(options: readonly ShippingOption[], currency: string, ownership: CheckoutOperationOwnership = {}): Promise<ShippingTiers> {
-  requireDecisionFeature('semantic checkout shipping-tier selection');
+  return (await readShippingTierChoice(options, currency, ownership)).tiers;
+}
+
+/** Which offered option each tier is, and whether delivery speed was read (false only when no decision model read it). */
+export interface ShippingTierChoice {
+  readonly tiers: ShippingTiers;
+  readonly speedRead: boolean;
+}
+
+/** `readShippingTiers`, also saying whether delivery speed was read or only the cheapest option was taken as standard. */
+export async function readShippingTierChoice(options: readonly ShippingOption[], currency: string, ownership: CheckoutOperationOwnership = {}): Promise<ShippingTierChoice> {
+  const only = options.length === 1 ? options[0] : undefined;
+  if (only !== undefined) return { tiers: new Map(SHIPPING_TIERS.map(tier => [tier, only] as const)), speedRead: true };
+  if (options.length === 0) return { tiers: new Map(), speedRead: true };
+  return decisionOrClassic<ShippingTierChoice>(
+    async () => ({ tiers: await readOfferedTiers(options, currency, ownership), speedRead: true }),
+    () => {
+      // A price is the one fact code holds: the cheapest option is standard.
+      const cheapest = options.reduce((best, option) => option.costMinorUnits < best.costMinorUnits ? option : best);
+      return { tiers: new Map<ShippingTier, ShippingOption>([['normal', cheapest]]), speedRead: false };
+    });
+}
+
+async function readOfferedTiers(options: readonly ShippingOption[], currency: string, ownership: CheckoutOperationOwnership): Promise<ShippingTiers> {
   const owner = captureCheckoutOwnership(ownership);
   const tiers = new Map<ShippingTier, ShippingOption>();
-  const only = options.length === 1 ? options[0] : undefined;
-  if (only !== undefined) {
-    for (const tier of SHIPPING_TIERS) tiers.set(tier, only);
-    return tiers;
-  }
-  if (options.length === 0) return tiers;
-
   const all = options.map((_, index) => index);
   const [standardPick, fastestPick] = await mapLimit([shippingStandard, shippingFastest], 2,
     selector => pick(selector, options, all, currency, CHECKOUT_CONTEXT, owner));

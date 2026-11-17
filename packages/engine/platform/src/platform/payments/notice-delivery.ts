@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 /**
  * notice-delivery.ts, actually sending the notice, and reporting what happened.
  *
@@ -161,6 +161,11 @@ export type PaymentReplyReading = PaymentAnswer | 'not-understood';
  * not a confident go-ahead, is `not-understood`; the window's timer stops and
  * the owner is asked for an explicit yes. Unaddressed chat that reads as
  * neither stays no answer.
+ *
+ * Without a decision model, code reads the reply as the notice's own words
+ * (`codeReplyReading`): only the exact word the notice offers buys, any word
+ * of refusal stops, and on a veto window anything else holds the purchase for
+ * an explicit yes, because code cannot tell an objection from other chat.
  */
 export async function readPaymentReply(
   reply: string,
@@ -170,10 +175,33 @@ export async function readPaymentReply(
   assertCurrent?: () => void,
   options: { readonly addressed?: boolean | undefined } = {},
 ): Promise<PaymentReplyReading | null> {
-  requireDecisionFeature('interpreting a purchase approval or veto reply');
   const current = () => { signal?.throwIfAborted(); assertCurrent?.(); };
   current();
   if (reply.trim().length === 0) return null;
+  return decisionOrClassic(() => readReplyWithModel(reply, kind, notice, current, signal, options),
+    () => codeReplyReading(reply, kind));
+}
+
+/** The words a refusal is given in; each stops a purchase on either window. */
+const REFUSAL_WORDS: ReadonlySet<string> = new Set(['deny', 'stop', 'no', 'cancel', 'decline', 'reject']);
+
+/**
+ * A reply read by code alone: the exact go-ahead word the notice offers
+ * ("approve" on an approval, "go" on a veto), or a refusal word. Anything else
+ * is no answer on an approval window (silence there already means no) and
+ * `not-understood` on a veto window (the purchase is held for an explicit yes),
+ * so no wording code cannot read ever buys.
+ */
+function codeReplyReading(reply: string, kind: 'approval' | 'veto'): PaymentReplyReading | null {
+  const word = reply.normalize('NFKC').trim().toLowerCase().replace(/[.!\s]+$/u, '');
+  if (word.length === 0) return null;
+  if (REFUSAL_WORDS.has(word)) return kind === 'approval' ? 'deny' : 'object';
+  if (kind === 'approval') return word === 'approve' ? 'approve' : null;
+  return word === 'go' ? 'acknowledge' : 'not-understood';
+}
+
+async function readReplyWithModel(reply: string, kind: 'approval' | 'veto', notice: string, current: () => void,
+  signal: AbortSignal | undefined, options: { readonly addressed?: boolean | undefined }): Promise<PaymentReplyReading | null> {
   const port = judgmentPort(PAYMENT_REPLY_SITE);
   if (kind === 'approval') {
     const read = await approvalReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE, beforeAttempt: current, ...(signal === undefined ? {} : { signal }) });

@@ -392,8 +392,10 @@ export function windowForPurchase(input: {
   /** The complete payable total exceeds the owner's request-specific limit. */
   readonly aboveRequestedMaximum?: boolean | undefined;
   readonly merchantIsMajor: boolean;
+  /** Part of the checkout was not read because no decision model is in use: the owner says yes, silence never buys. */
+  readonly notChecked?: boolean | undefined;
 }): 'approval' | 'veto' {
-  if (input.aboveBudget || input.aboveRequestedMaximum === true) return 'approval';
+  if (input.aboveBudget || input.aboveRequestedMaximum === true || input.notChecked === true) return 'approval';
   return input.merchantIsMajor ? 'veto' : 'approval';
 }
 

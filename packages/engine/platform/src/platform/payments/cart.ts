@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 /**
  * cart.ts, the cart must contain what the owner asked for and nothing else.
  *
@@ -33,6 +33,15 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * from the item. Whether the checkout sets up a repeating charge is read by
  * Jev (`engine.payments.recurring-charge`) in place of a keyword list.
  * Quantities are compared in code: two counts.
+ *
+ * ── Without a decision model ──────────────────────────────────────────────
+ *
+ * Code settles what it can: a cart line whose label is the requested item's
+ * label (case and spacing aside) is that item, and the quantities are counted
+ * as above. A line code cannot tie is `notChecked`, and whether the checkout
+ * repeats is `not-checked`. Neither refuses: the checkout flow puts the
+ * purchase to the owner as an explicit approval (silence denies) that names
+ * what was not checked, so the owner decides with the facts in front of them.
  */
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { mapLimit } from '@goodvibes-jev/judgment';
@@ -76,11 +85,30 @@ export interface CartCheck {
   readonly unconfirmed: readonly CartLine[];
   /** Lines the owner asked for that are missing. */
   readonly missing: readonly RequestedLine[];
+  /**
+   * Lines no decision model read and code could not tie to a requested item.
+   * Non-empty only when no decision model is in use; the purchase then needs
+   * the owner's explicit approval, which lists them.
+   */
+  readonly notChecked: readonly CartLine[];
   readonly reason: string | null;
 }
 
-/** What the reading settled about one cart line. */
-type LineMatch = { readonly kind: 'matched'; readonly index: number } | { readonly kind: 'not-matched' } | { readonly kind: 'unsettled' };
+/** What the reading settled about one cart line; `unchecked` when no decision model read it and code could not tie it. */
+type LineMatch = { readonly kind: 'matched'; readonly index: number } | { readonly kind: 'not-matched' } | { readonly kind: 'unsettled' } | { readonly kind: 'unchecked' };
+
+/** A label as code compares it: the same words, whatever their case or spacing. */
+function comparableLabel(label: string): string {
+  return label.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** Code's match: the one requested item with this exact label, else unchecked. */
+function labelMatchOf(line: CartLine, requested: readonly RequestedLine[]): LineMatch {
+  const label = comparableLabel(line.label);
+  const indexes = requested.flatMap((entry, index) => comparableLabel(entry.label) === label && label.length > 0 ? [index] : []);
+  const only = indexes.length === 1 ? indexes[0] : undefined;
+  return only === undefined ? { kind: 'unchecked' } : { kind: 'matched', index: only };
+}
 
 /**
  * Which requested item this cart line is. A line is that item only when the
@@ -113,26 +141,34 @@ export async function assertCartMatchesRequest(
   requested: readonly RequestedLine[],
   options: CheckoutOperationOwnership = {},
 ): Promise<CartCheck> {
-  requireDecisionFeature('automated checkout cart comparison');
   const owner = captureCheckoutOwnership(options);
   const captured = captureOwnedJson({ cart, requested }) as unknown as { cart: readonly CartLine[]; requested: readonly RequestedLine[] };
   cart = captured.cart; requested = captured.requested;
   if (requested.some(line => !Number.isSafeInteger(line.quantity) || line.quantity <= 0)
     || cart.some(line => !Number.isSafeInteger(line.quantity) || line.quantity <= 0)) {
-    return { ok: false, code: 'cart-mismatch', unexpected: [...cart], unconfirmed: [], missing: [...requested], reason: 'Refused: cart and requested quantities must be positive whole counts.' };
+    return { ok: false, code: 'cart-mismatch', unexpected: [...cart], unconfirmed: [], missing: [...requested], notChecked: [], reason: 'Refused: cart and requested quantities must be positive whole counts.' };
   }
-  const matches: readonly LineMatch[] = requested.length === 0
-    ? cart.map((): LineMatch => ({ kind: 'not-matched' }))
-    : await mapLimit(cart, CART_LINE_CONCURRENCY, (line) => requestedIndexOf(line, requested, owner));
+  const lines = cart, asked = requested;
+  // Without a decision model, code ties a line by its exact label.
+  const matches: readonly LineMatch[] = asked.length === 0
+    ? lines.map((): LineMatch => ({ kind: 'not-matched' }))
+    : await decisionOrClassic(
+      () => mapLimit(lines, CART_LINE_CONCURRENCY, (line) => requestedIndexOf(line, asked, owner)),
+      () => lines.map((line) => labelMatchOf(line, asked)));
   owner.assertCurrent();
 
   const unexpected: CartLine[] = [];
   const unconfirmed: CartLine[] = [];
+  const notChecked: CartLine[] = [];
   const quantities = new Map<number, number>();
   cart.forEach((line, position) => {
     const found = matches[position] ?? { kind: 'unsettled' };
     if (found.kind === 'unsettled') {
       unconfirmed.push(line);
+      return;
+    }
+    if (found.kind === 'unchecked') {
+      notChecked.push(line);
       return;
     }
     const match = found.kind === 'matched' ? requested[found.index] : undefined;
@@ -148,7 +184,14 @@ export async function assertCartMatchesRequest(
   const missing = requested.filter((line, index) => quantities.get(index) !== line.quantity);
 
   if (unexpected.length === 0 && unconfirmed.length === 0 && missing.length === 0) {
-    return { ok: true, code: null, unexpected: [], unconfirmed: [], missing: [], reason: null };
+    return { ok: true, code: null, unexpected: [], unconfirmed: [], missing: [], notChecked: [], reason: null };
+  }
+
+  // No decision model read the cart and code tied every line it could without
+  // finding one too many: what is left goes to the owner, who approves with the
+  // cart lines in front of them (a missing quantity may be an unchecked line).
+  if (unexpected.length === 0 && notChecked.length > 0) {
+    return { ok: true, code: null, unexpected: [], unconfirmed: [], missing: [], notChecked, reason: null };
   }
 
   // An unsettled reading is not a finding about the merchant. When it is the
@@ -165,6 +208,7 @@ export async function assertCartMatchesRequest(
       unexpected: [],
       unconfirmed,
       missing,
+      notChecked: [],
       reason: `Refused before paying: I could not confirm that ${labels} ${unconfirmed.length === 1 ? 'is' : 'are'} ${asked}. `
         + 'Nothing was bought. Check the cart, or name the item more exactly, then ask me again.',
     };
@@ -188,12 +232,16 @@ export async function assertCartMatchesRequest(
   if (unconfirmed.length > 0) {
     parts.push(`I could not confirm ${unconfirmed.map((line) => sanitizeNoticeField(line.label, 60)).join(', ')} either`);
   }
+  if (notChecked.length > 0) {
+    parts.push(`no decision model is in use, so I did not check ${notChecked.map((line) => sanitizeNoticeField(line.label, 60)).join(', ')} either`);
+  }
   return {
     ok: false,
     code: 'cart-mismatch',
     unexpected,
     unconfirmed,
     missing,
+    notChecked,
     reason:
       `Refused before paying: ${parts.join(', and ')}. `
       + 'I never add items you did not ask for, including to reach free shipping.',
@@ -201,14 +249,16 @@ export async function assertCartMatchesRequest(
 }
 
 export interface RecurringCheck {
-  /** True unless the reading confidently settled a single payment. */
+  /** True when the reading did not settle a single payment; false for a one-off and when nothing read it. */
   readonly recurring: boolean;
   /**
    * `one-off`: a confident no. `recurring`: a confident yes. `not-confirmed-one-off`:
    * anything else; the reading could not confirm a single payment, and the
    * reason says which way it leaned. Both refusals stop the purchase.
+   * `not-checked`: no decision model is in use, so nothing read it; the
+   * purchase goes to the owner as an explicit approval that says so.
    */
-  readonly outcome: 'one-off' | 'recurring' | 'not-confirmed-one-off';
+  readonly outcome: 'one-off' | 'recurring' | 'not-confirmed-one-off' | 'not-checked';
   readonly code: 'recurring-charge' | 'recurring-unconfirmed' | null;
   readonly reason: string | null;
 }
@@ -224,7 +274,11 @@ export interface RecurringCheck {
  * confident yes, or a reading that could not confirm a single payment.
  */
 export async function detectRecurringCharge(orderSummaryText: string, options: CheckoutOperationOwnership = {}): Promise<RecurringCheck> {
-  requireDecisionFeature('checkout recurring-charge interpretation');
+  return decisionOrClassic(() => readRecurringCharge(orderSummaryText, options),
+    (): RecurringCheck => ({ recurring: false, outcome: 'not-checked', code: null, reason: null }));
+}
+
+async function readRecurringCharge(orderSummaryText: string, options: CheckoutOperationOwnership): Promise<RecurringCheck> {
   const owner = captureJudgmentPort(RECURRING_CHARGE_SITE, captureCheckoutOwnership(options));
   const state = orderSummaryView(orderSummaryText);
   const run = await recurringCharge.run(owner.port, state, { site: RECURRING_CHARGE_SITE, signal: owner.signal });

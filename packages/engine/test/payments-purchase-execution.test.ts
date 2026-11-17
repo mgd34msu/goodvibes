@@ -13,6 +13,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { withExecutionMode } from '../platform/src/platform/gate/execution-context.ts';
+import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 
 import { CardMaterialRedactor } from '../platform/src/platform/payments/card-redaction.js';
 import type {
@@ -464,6 +465,25 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     expect(harness.recorded.length).toBe(0);
     // The money it was holding went back.
     expect(harness.ledger.state().reservations.length).toBe(0);
+  });
+
+  test('with no decision model in use, a checkout nothing read is put to the owner: silence buys nothing, a yes buys once', async () => {
+    const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+    try {
+      // In budget at a recognised retailer, which would otherwise be a veto window where silence buys.
+      const silent = buildHarness({ merchant: alpha, answer: null });
+      const unanswered = await runOn(silent, alpha);
+      expect(silent.notices.map(notice => notice.kind)).toEqual(['approval']);
+      expect(silent.notices[0]?.message).toContain('no decision model is in use');
+      expect(unanswered).toMatchObject({ kind: 'refused', code: 'not-checked-unapproved' });
+      expect(alpha.submissions).toEqual([]); expect(silent.recorded).toEqual([]);
+      expect(silent.ledger.state().reservations).toEqual([]); expect(await silent.journal.list()).toEqual([]);
+
+      const approved = buildHarness({ merchant: beta, answer: { answer: 'approve' } });
+      const bought = await runOn(approved, beta);
+      expect(approved.notices[0]?.kind).toBe('approval');
+      expect(bought.kind).toBe('purchased'); expect(beta.submissions).toHaveLength(1);
+    } finally { retire(); }
   });
 
   test('a claimed storefront cannot make an unrecognised checkout look recognised', async () => {

@@ -1,4 +1,4 @@
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { decisionOrClassic } from '../runtime/decision-policy.js';
 /**
  * order-correlation.ts, recognising the store's confirmation when it arrives.
  *
@@ -83,6 +83,15 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * (`redactCardShapes`, code alone: card numbers by the Luhn checksum,
  * security codes and expiry dates where the words before them label them)
  * before any reading here sees them.
+ *
+ * ══ Without a decision model ══════════════════════════════════════════════
+ *
+ * Code still finds the candidates (same registrable domain, after the
+ * purchase, within the horizon), and ties the mail to one of them when the
+ * merchant's order number we recorded appears in it as a whole token. What
+ * the mail says is not read, so the result is `unread`: the reporter asks the
+ * owner about it (confirmation-report.ts) and settles nothing on its own. The
+ * confirmation facts are then all null and a refund is never recognised.
  */
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { Selector } from '@goodvibes-jev/judgment';
@@ -128,7 +137,29 @@ export interface InboundMailFacts {
 export type CorrelationResult =
   | { readonly kind: 'matched'; readonly record: PurchaseRecord; readonly senderDomain: string }
   | { readonly kind: 'ambiguous'; readonly candidates: readonly PurchaseRecord[]; readonly senderDomain: string }
+  /**
+   * No decision model is in use: the mail came from a shop with recent
+   * purchases, and nothing read what it says. `orderNumberMatched` when code
+   * found the recorded order number in it, which ties it to that one purchase.
+   */
+  | { readonly kind: 'unread'; readonly candidates: readonly PurchaseRecord[]; readonly senderDomain: string; readonly orderNumberMatched: boolean }
   | { readonly kind: 'unrelated'; readonly reason: string };
+
+/** The purchases whose recorded order number the mail carries as a whole token. */
+function orderNumberMatches(records: readonly PurchaseRecord[], mail: { readonly subject: string; readonly body: string }): PurchaseRecord[] {
+  const text = `${mail.subject}\n${mail.body}`.toLowerCase();
+  return records.filter((record) => {
+    const id = record.merchantOrderId?.trim().toLowerCase();
+    if (id === undefined || id.length < 4) return false;
+    let from = 0;
+    for (let at = text.indexOf(id); at !== -1; at = text.indexOf(id, from)) {
+      const before = text[at - 1], after = text[at + id.length];
+      if ((before === undefined || !/[\p{L}\p{N}]/u.test(before)) && (after === undefined || !/[\p{L}\p{N}]/u.test(after))) return true;
+      from = at + 1;
+    }
+    return false;
+  });
+}
 
 /** The registrable domain of an email address, or null when it has none. */
 export function senderRegistrableDomain(address: string): string | null {
@@ -167,7 +198,6 @@ export async function correlatePurchaseMail(
   mail: InboundMailFacts,
   records: readonly PurchaseRecord[],
 ): Promise<CorrelationResult> {
-  requireDecisionFeature('semantic purchase-mail correlation');
   const senderDomain = senderRegistrableDomain(mail.senderAddress);
   if (senderDomain === null) {
     return { kind: 'unrelated', reason: 'The sender address has no registrable domain to compare.' };
@@ -191,6 +221,14 @@ export async function correlatePurchaseMail(
   }
 
   const redacted = redactedMail(mail);
+  return decisionOrClassic(() => readOrderMail(senderDomain, eligible, mail, redacted), (): CorrelationResult => {
+    const tied = orderNumberMatches(eligible, redacted);
+    return { kind: 'unread', candidates: tied.length > 0 ? tied : eligible, senderDomain, orderNumberMatched: tied.length === 1 };
+  });
+}
+
+async function readOrderMail(senderDomain: string, eligible: readonly PurchaseRecord[], mail: InboundMailFacts,
+  redacted: { readonly subject: string; readonly body: string }): Promise<CorrelationResult> {
   const context: OrderMailContext = {
     merchant: senderDomain,
     mail: { subject: redacted.subject, body: redacted.body, received_at: new Date(mail.receivedAtMs).toISOString() },
@@ -281,18 +319,23 @@ const utcDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
  * "arriving tomorrow".
  */
 export async function extractConfirmationFacts(mail: Pick<InboundMailFacts, 'subject' | 'body' | 'receivedAtMs'>): Promise<ConfirmationFacts> {
-  requireDecisionFeature('semantic purchase confirmation extraction');
+  const none: ConfirmationFacts = { orderNumber: null, shipDate: null, trackingReference: null };
   const { subject, body, clipped } = redactedMail(mail);
   // A body longer than one reading takes may hold its references past the
   // cut; the report goes out with our own record and no identifiers rather
   // than with a reference read from part of the mail.
-  if (clipped) return { orderNumber: null, shipDate: null, trackingReference: null };
+  if (clipped) return none;
+  // Without a decision model nothing is lifted: the report carries our record alone.
+  return decisionOrClassic(() => readConfirmationFacts(subject, body, mail.receivedAtMs), () => none);
+}
+
+async function readConfirmationFacts(subject: string, body: string, receivedAtMs: number): Promise<ConfirmationFacts> {
   const candidates = identifierCandidates(body);
   const context = identifierContext(subject);
   const [order, tracking, date] = await Promise.all([
     pickIdentifier(orderNumber, candidates, context),
     pickIdentifier(trackingReference, candidates, context),
-    shipDate.extract(judgmentPort(CONFIRMATION_FACTS_SITE), body, SHIP_DATE_ROLE, utcDay(mail.receivedAtMs), { site: CONFIRMATION_FACTS_SITE }),
+    shipDate.extract(judgmentPort(CONFIRMATION_FACTS_SITE), body, SHIP_DATE_ROLE, utcDay(receivedAtMs), { site: CONFIRMATION_FACTS_SITE }),
   ]);
   const clean = (value: string | null, max: number): string | null => {
     if (value === null) return null;
@@ -315,10 +358,14 @@ export const REFUND_MAIL_SITE = 'payments.refund-mail';
 
 /**
  * Whether a mail already matched to `record` says that purchase was refunded.
- * Only a reading that acts on yes counts.
+ * Only a reading that acts on yes counts; without a decision model nothing
+ * reads it, so it is false and the reporter asks the owner instead.
  */
 export async function readRefundMail(mail: Pick<InboundMailFacts, 'subject' | 'body'>, record: PurchaseRecord): Promise<boolean> {
-  requireDecisionFeature('semantic purchase refund recognition');
+  return decisionOrClassic(() => readRefund(mail, record), () => false);
+}
+
+async function readRefund(mail: Pick<InboundMailFacts, 'subject' | 'body'>, record: PurchaseRecord): Promise<boolean> {
   const { subject, body } = redactedMail(mail);
   const run = await refundMail.run(judgmentPort(REFUND_MAIL_SITE), {
     mail: { subject, body },

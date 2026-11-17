@@ -31,7 +31,6 @@
 import type { SecurityCodeRequests } from './security-code-requests.js';
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { BudgetLedger, type BudgetLimits } from './budget.js';
-import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { OwnedWork } from '../utils/owned-work.js';
@@ -268,7 +267,6 @@ export class PaymentsGatewayServiceImpl {
   private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId: string | undefined, taintEvidence: RetainedTaintEvidence,
     retainWindowCheckpoint?: CheckoutFlowDeps['retainWindowCheckpoint'], keepWindowOnStop?: CheckoutFlowDeps['keepWindowOnStop'],
     resumption?: CheckoutWindowResumption, restoredDriver?: CheckoutPageDriver): Promise<PaymentBeginResult> {
-    requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
     options.assertCurrent?.();

@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from 'node:util';
-import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../reply-inbox.js';
 import { assertConfirmed, HandlerError, type HandlerContextEnvelope, type TypedHandler } from './handler-plumbing.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
@@ -74,12 +73,9 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
     const windowId = operationId === undefined ? field(input['windowId'], 'windowId') : undefined;
     const replies = deps.replies;
     if (operationId === undefined ? !replies : !operations) throw unavailable();
-    const { authority, expected, current: paired } = pairedOwner(context);
-    const current = (): void => {
-      paired();
-      if (action === 'approve') requireDecisionFeature('automated checkout cart and merchant interpretation');
-    };
-    if (action === 'approve') requireDecisionFeature('automated checkout cart and merchant interpretation');
+    // An explicit owner answer is the purchase's no-model path too: a checkout
+    // no decision model read waits on exactly this approval.
+    const { authority, expected, current } = pairedOwner(context);
     try {
       current();
       return await authority.withCurrent(expected, assertPaired => {

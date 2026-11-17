@@ -19,7 +19,6 @@ import { PaymentReplyWindowError, type PaymentReplyInbox, type PaymentReplyOffer
 import { parseCommandAuthorityChannel } from '../payments/types.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { isClassicOperation } from '../runtime/decision-policy.js';
 import type { TelegramSourceAccountReader, TelegramSourceAccountHandle } from '../channels/telegram/source-account.js';
 import type { PaymentReplyCorrelation } from '../payments/reply-inbox.js';
 
@@ -100,7 +99,8 @@ export async function tryResolvePaymentReplyFromChannel(
     assertCurrent: current,
     ...(channel === 'telegram' ? { verifyAccount: accountVerifier(telegramAccounts, input.acquireTelegramAccount?.bind(input), current, signal) } : {}),
   });
-  const offer = await inbox.offer(channel, input.text, correlation, { archiveOnly: isClassicOperation() });
+  // With no decision model in use the inbox reads the reply in code (readPaymentReply).
+  const offer = await inbox.offer(channel, input.text, correlation);
   if (offer.consumed) {
     logger.info('Purchase window answered from a channel reply', { surface: input.surface, answer: offer.answer });
   } else if (offer.reason === 'several-windows') {

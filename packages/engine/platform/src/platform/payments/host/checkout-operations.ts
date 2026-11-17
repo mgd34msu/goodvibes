@@ -5,7 +5,7 @@ import { JudgmentError } from '@goodvibes-jev/judgment';
 import { DecisionModelsDisabledError, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
 import { isDeepStrictEqual } from 'node:util';
 import { AsyncResource } from 'node:async_hooks';
-import { requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { OwnedWork } from '../../utils/owned-work.js';
 import { logger } from '../../utils/logger.js';
@@ -519,7 +519,6 @@ export class CheckoutOperations {
     operation.abort.signal.throwIfAborted(); operation.writer.assertCurrent();
     if (finishing) return;
     operation.source.assertCurrent();
-    requireDecisionFeature('automated checkout cart and merchant interpretation');
     operation.abort.signal.throwIfAborted();
   }
   private async run(input: BeginCheckoutInput, operation: ActiveOperation, execute = this.execute): Promise<void> {

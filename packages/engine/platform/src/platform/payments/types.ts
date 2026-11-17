@@ -149,7 +149,8 @@ export type BudgetPool = 'item' | 'overage' | 'tolerance';
 
 /** Host facts that require an explicit answer rather than silence. */
 export type BudgetApprovalReason = 'daily-item-budget' | 'per-purchase-ceiling' | 'requested-maximum';
-export type PurchaseApprovalReason = BudgetApprovalReason | 'merchant-recourse';
+/** `not-checked`: no decision model is in use, so part of the checkout was not read; the owner approves with what was not checked listed. */
+export type PurchaseApprovalReason = BudgetApprovalReason | 'merchant-recourse' | 'not-checked';
 
 /** Every way this capability can say no, each with its own name. */
 export type RefusalCode =
@@ -218,6 +219,8 @@ export type ExecutionRefusalCode =
   | 'cart-unconfirmed'
   /** The reading could not confirm the checkout is a single payment; nothing indicated it repeats. */
   | 'recurring-unconfirmed'
+  /** No decision model was in use, so part of the checkout was not checked, and the owner did not approve it (no, no answer, or unreachable). */
+  | 'not-checked-unapproved'
   /** The owner answered a veto notice with something that was not a go-ahead, and the follow-up ask got no yes. */
   | 'held-reply-not-understood'
   /** Under `payments.cvvHandling: 'prompt'`, the security code was not typed before the deadline. */

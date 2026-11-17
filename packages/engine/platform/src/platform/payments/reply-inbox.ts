@@ -88,7 +88,7 @@ export class PaymentReplyInboxClosedError extends Error {
 }
 
 export type PaymentReplyOffer =
-  | { readonly consumed: false; readonly reason: 'no-window' | 'several-windows' | 'not-an-answer' | 'decision-model-required' | 'recorded' }
+  | { readonly consumed: false; readonly reason: 'no-window' | 'several-windows' | 'not-an-answer' | 'recorded' }
   | { readonly consumed: true; readonly answer: PaymentReplyReading };
 
 /** Host-read ingress facts. Account custody is checked by the original
@@ -465,7 +465,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
    * Offer an inbound owner message that arrived on `channel`. The caller has
    * already established that the sender is the owner.
    */
-  offer(channel: CommandAuthorityChannel, text: string, correlation?: PaymentReplyCorrelation, options: { readonly archiveOnly?: boolean } = {}): Promise<PaymentReplyOffer> {
+  offer(channel: CommandAuthorityChannel, text: string, correlation?: PaymentReplyCorrelation): Promise<PaymentReplyOffer> {
     if (this.#closed) return Promise.resolve({ consumed: false, reason: 'no-window' });
     const receivedAtMs = this.currentTime();
     this.expireWindows();
@@ -476,19 +476,10 @@ export class PaymentReplyInbox implements PaymentReplySource {
       const receipts = waiter.receipts.get(channel);
       return !context || !receipts?.length || receipts.some(receipt => matchesReceipt(receipt, context));
     });
-    if (waiting.length === 0 || options.archiveOnly) {
+    if (waiting.length === 0) {
       const work = Promise.resolve().then(async (): Promise<PaymentReplyOffer> => {
         const recorded = channel === 'telegram' && await this.#history.record(text, context, receivedAtMs ?? Number.NaN);
-        if (options.archiveOnly) {
-          // Retain potential owner objections even while Classic is selected.
-          // Ordinary chat still reaches its conversation; only an explicit
-          // notice reply gets a storage-only acknowledgement. An uninterpreted
-          // owner message cannot later become quiet expiry of a live purchase.
-          for (const waiter of waiting) waiter.cancel(new DecisionModelsDisabledError('interpreting a purchase approval or veto reply'));
-          if (context?.replyToMessageId === undefined) return { consumed: false, reason: 'decision-model-required' };
-        }
-        if (recorded) return { consumed: false, reason: 'recorded' };
-        return { consumed: false, reason: options.archiveOnly ? 'decision-model-required' : 'no-window' };
+        return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
       });
       this.#offers.add(work); void work.then(() => this.#offers.delete(work), () => this.#offers.delete(work)); return work;
     }

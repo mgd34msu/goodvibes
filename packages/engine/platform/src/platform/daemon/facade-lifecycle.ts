@@ -243,6 +243,13 @@ export class DaemonLifecycleRuntime {
   private autoUpdater: DaemonAutoUpdater | null = null;
   private appliedUpdater: DaemonAutoUpdater | null = null;
   private store: DaemonReceiptStore | null = null;
+  /**
+   * Announcements a reader acknowledged that are not yet removed from the
+   * shared store (another process held its lock). They are hidden from every
+   * later read and written at the next read or acknowledgement, so an
+   * acknowledged line is never offered again.
+   */
+  private readonly acknowledgedAnnouncements = new Set<string>();
   /** Why the self-update loop is not running. Empty once it is. */
   private updateLoopOffReason = 'the daemon has not finished starting';
   private promotionTimer: ReturnType<typeof setInterval> | null = null;
@@ -315,7 +322,9 @@ export class DaemonLifecycleRuntime {
    */
   peekReceipts(): readonly { id: string; text: string; at: number }[] {
     const receipts = this.receiptStore().peekUndelivered().map(({ id, text, at }) => ({ id, text, at }));
-    const announcements = this.announcementStore().peekPending().map(({ id, text, at }) => ({
+    this.writeAcknowledgedAnnouncements();
+    const acknowledged = this.acknowledgedAnnouncements;
+    const announcements = this.announcementStore().peekPending().filter(({ id }) => !acknowledged.has(id)).map(({ id, text, at }) => ({
       id: `announcement-${id}`,
       text,
       at,
@@ -332,7 +341,13 @@ export class DaemonLifecycleRuntime {
       else receiptIds.add(id);
     }
     if (receiptIds.size > 0) this.receiptStore().markDelivered(receiptIds);
-    if (announcementIds.size > 0) this.announcementStore().acknowledge(announcementIds);
+    for (const id of announcementIds) this.acknowledgedAnnouncements.add(id);
+    this.writeAcknowledgedAnnouncements();
+  }
+
+  private writeAcknowledgedAnnouncements(): void {
+    if (this.acknowledgedAnnouncements.size === 0) return;
+    if (this.announcementStore().acknowledge(this.acknowledgedAnnouncements)) this.acknowledgedAnnouncements.clear();
   }
 
   /** The shared announce-once store (same file the runtime's announcers write). */

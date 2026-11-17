@@ -207,27 +207,33 @@ export class FeatureAnnouncementStore {
    * Forgets every announced id the predicate selects (and any of them still
    * pending), so a condition that went away and comes back is announced again.
    * Reads without the lock first so a store with nothing to forget is not rewritten.
+   * Returns false when another process held the store and nothing was forgotten
+   * (the callers run at every start or settings load, so the next one retries).
    */
-  forgetMatching(selects: (id: string) => boolean): void {
-    if (!Object.keys(this.read().announced).some(selects)) return;
-    this.locked(() => {
+  forgetMatching(selects: (id: string) => boolean): boolean {
+    if (!Object.keys(this.read().announced).some(selects)) return true;
+    return this.locked(() => {
       const state = this.read();
       const announced: Record<string, number> = {};
       for (const [id, at] of Object.entries(state.announced)) if (!selects(id)) announced[id] = at;
       const pending = state.pending.filter((entry) => !selects(entry.id));
       if (Object.keys(announced).length === Object.keys(state.announced).length && pending.length === state.pending.length) return;
       this.persist({ announced, pending }, 'forget');
-    });
+    }).ran;
   }
 
-  /** Removes the named announcements from the pending queue; ids not pending are ignored. */
-  acknowledge(ids: ReadonlySet<string>): void {
-    this.locked(() => {
+  /**
+   * Removes the named announcements from the pending queue; ids not pending are
+   * ignored. Returns false when another process held the store and nothing was
+   * removed: the caller keeps the acknowledgement and tries again.
+   */
+  acknowledge(ids: ReadonlySet<string>): boolean {
+    return this.locked(() => {
       const state = this.read();
       const remaining = state.pending.filter((entry) => !ids.has(entry.id));
       if (remaining.length === state.pending.length) return;
       this.persist({ announced: state.announced, pending: remaining }, 'acknowledge');
-    });
+    }).ran;
   }
 }
 

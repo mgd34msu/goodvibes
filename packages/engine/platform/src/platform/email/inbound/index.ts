@@ -118,6 +118,8 @@ export {
   type MailboxOpenReport,
   type MailboxReader,
   type MailboxReadPosition,
+  type ImapReadPosition,
+  type GmailReadPosition,
   type MailboxWire,
   type MailboxWireReadOptions,
   type RandomSource,

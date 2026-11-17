@@ -23,7 +23,7 @@
 // downgraded to an 'unavailable' status here.
 // ---------------------------------------------------------------------------
 
-import type { InboundChannelItem, InboundProviderAdapter, ProviderState } from './provider-adapter.js';
+import type { InboundChannelItem, InboundProviderAdapter, MailboxHistoryStatus, ProviderState, SkippedMailMessage } from './provider-adapter.js';
 import type { InboxCursorStore } from './cursor-store.js';
 import type { IntakeLogger as HandlerLogger } from './context.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -39,14 +39,9 @@ export interface ProviderStatus {
   /** The account scope a pushed mail provider names its rows under. */
   mailboxScope?: string;
   /** The mailbox reader's history window, for a pushed mail provider. */
-  mailboxHistory?: {
-    readonly kind: 'complete' | 'bounded-seed';
-    readonly lowerBoundUid: number;
-    readonly skippedOlderMessages: number;
-    readonly uidValidity: number;
-  };
+  mailboxHistory?: MailboxHistoryStatus;
   /** Messages the reader stepped over because they could not be read here. */
-  skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
+  skippedMessages?: readonly SkippedMailMessage[];
   /**
    * Whether the provider's credentials resolved on the last poll, as the
    * adapter reported it. Absent until a poll has happened (or when the

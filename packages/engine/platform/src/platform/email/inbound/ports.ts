@@ -570,7 +570,9 @@ export interface MailboxBatchOutcome {
 }
 
 /** The reader's position for one mailbox, as consumers may report it. */
-export interface MailboxReadPosition {
+/** Where an IMAP reader stands after a drain step. */
+export interface ImapReadPosition {
+  readonly source?: 'imap' | undefined;
   readonly uidValidity: number;
   readonly lastSeenUid: number;
   /** Messages found above the cursor and not yet settled. */
@@ -581,6 +583,22 @@ export interface MailboxReadPosition {
     readonly skippedOlderMessages: number;
   } | undefined;
 }
+
+/** Where the Gmail API reader stands after a poll, and the history window it kept. */
+export interface GmailReadPosition {
+  readonly source: 'gmail';
+  readonly historyId: string;
+  /** Present once a history window was kept for the inbox; absent when none was. */
+  readonly history?: {
+    /** Messages of the window not yet handed on. */
+    readonly pendingMessages: number;
+    /** Older messages in the label left out of the window (Google's estimate). */
+    readonly skippedOlderMessages: number;
+  } | undefined;
+}
+
+/** Where a mailbox reader stands: by UID for IMAP, by history id for Gmail. */
+export type MailboxReadPosition = ImapReadPosition | GmailReadPosition;
 
 // ---------------------------------------------------------------------------
 // Observation

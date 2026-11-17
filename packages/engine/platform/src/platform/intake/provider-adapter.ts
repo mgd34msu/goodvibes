@@ -169,13 +169,33 @@ export interface PushedProviderStatus {
   readonly mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
   /** The account scope this mailbox's rows are named under (`email:<scope>:<uidvalidity>:<uid>`). */
   readonly mailboxScope?: string;
-  readonly mailboxHistory?: {
-    readonly kind: 'complete' | 'bounded-seed';
-    readonly lowerBoundUid: number;
-    readonly skippedOlderMessages: number;
-    readonly uidValidity: number;
-  };
-  readonly skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
+  readonly mailboxHistory?: MailboxHistoryStatus;
+  readonly skippedMessages?: readonly SkippedMailMessage[];
+}
+
+/**
+ * The history a mailbox reader gave the inbox when it first read the mailbox:
+ * all of it (`complete`) or the newest messages with older ones left out
+ * (`bounded-seed`). IMAP names the window by UID in its mailbox generation;
+ * the Gmail API reader by how many of the kept messages are still to come.
+ */
+export interface MailboxHistoryStatus {
+  readonly source: 'imap' | 'gmail';
+  readonly kind: 'complete' | 'bounded-seed';
+  readonly skippedOlderMessages: number;
+  /** IMAP: the mailbox generation the window belongs to. */
+  readonly uidValidity?: number;
+  /** IMAP: the lowest UID the window reaches (1 when complete). */
+  readonly lowerBoundUid?: number;
+  /** Gmail: messages of the window not yet handed to the inbox. */
+  readonly pendingMessages?: number;
+}
+
+/** A message the reader stepped over because it could not be read here: its IMAP UID or Gmail message id, and why. */
+export interface SkippedMailMessage {
+  readonly uid?: number;
+  readonly messageId?: string;
+  readonly reason: string;
 }
 
 // ---------------------------------------------------------------------------

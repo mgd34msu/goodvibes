@@ -35,9 +35,15 @@ attached, and does not sign in otherwise.
   once the inbox took it; nothing is listed afterwards. A history message Gmail
   answers is gone is dropped; one it would not hand over is tried on three polls
   and then shown as a row saying it could not be read.
+- `channels.inbox.list` reports that history for both readers in the
+  provider's `mailboxHistory`: `source` (`imap` or `gmail`), `kind` (`complete`
+  or `bounded-seed`) and `skippedOlderMessages`; IMAP adds `uidValidity` and
+  `lowerBoundUid`, Gmail adds `pendingMessages`, the kept messages not yet
+  handed to the inbox.
 - A message that cannot be read is tried on three drains, then stepped over:
   the inbox shows a row saying it could not be read, the daemon log records it,
-  and the messages after it arrive.
+  and the messages after it arrive. `skippedMessages` lists it with its IMAP
+  `uid` or Gmail `messageId` and the reason.
 - Placement: the cluster surface of the mailbox decides which node reads, and on
   one machine a lease beside the cursor file lets only one daemon sign in.
 

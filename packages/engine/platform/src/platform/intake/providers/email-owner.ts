@@ -14,7 +14,7 @@ import { MailboxConsumerUnavailableError, type MailboxConsumer, type MailboxRead
 import type { GmailInboundMessage, ImapInboundMessage, InboundMailboxMessage, MailboxReadPosition } from '../../email/inbound/ports.js';
 import type { OwnedInboxReadLease } from '../registration.js';
 import { digestSender, normalizeWhitespace, stripMarkup } from '../text-normalization.js';
-import type { InboundChannelItem, InboundProviderAdapter, PushedProviderSink, PushedProviderStatus, RouteResolver } from '../provider-adapter.js';
+import type { InboundChannelItem, InboundProviderAdapter, PushedProviderSink, PushedProviderStatus, RouteResolver, SkippedMailMessage } from '../provider-adapter.js';
 import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
 
 export interface EmailInboxAccount {
@@ -156,13 +156,13 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
   let itemCount = 0;
   let progress: PushedProviderStatus['mailboxProgress'];
   let history: PushedProviderStatus['mailboxHistory'];
-  let skipped: { uid: number; reason: string }[] = [];
+  let skipped: SkippedMailMessage[] = [];
   let lastValidity: number | undefined;
 
   // One batch's screened rows and observations, committed together at `settle`.
   const rows: InboundChannelItem[] = [];
   const observations: OwnerMailObservation[] = [];
-  const batchSkipped: { uid: number; reason: string }[] = [];
+  const batchSkipped: SkippedMailMessage[] = [];
 
   const imapItemId = (uidValidity: number, uid: number): string =>
     `email:${scopeId}:${String(uidValidity).padStart(10, '0')}:${String(uid).padStart(10, '0')}`;
@@ -189,6 +189,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
     readonly id: string; readonly parts: readonly string[]; readonly from: string;
     readonly subject: string; readonly body: string; readonly sentAt: number; readonly unread: boolean;
     readonly uid?: number;
+    readonly messageId?: string;
   }): Promise<void> => {
     let captured: ProtectedSource | undefined;
     try {
@@ -201,6 +202,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
         if (judged.reason === 'unsettled' || judged.reason === 'malformed' || judged.reason === 'protected-input') {
           rows.push(unreadableRow(input.id, `screening-${judged.reason}`, senderDomainOf(input.from), input.sentAt));
           if (input.uid !== undefined) batchSkipped.push({ uid: input.uid, reason: `screening-${judged.reason}` });
+          else if (input.messageId !== undefined) batchSkipped.push({ messageId: input.messageId, reason: `screening-${judged.reason}` });
           return;
         }
         if (judged.reason === 'proxy-configured') {
@@ -264,13 +266,14 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
     if (held(id, target)) return;
     if (message.unreadable) {
       rows.push(unreadableRow(id, message.unreadable.reason, message.unreadable.senderDomain));
+      batchSkipped.push({ messageId: message.resourceId, reason: message.unreadable.reason });
       return;
     }
     const body = message.bodyAvailability === 'full'
       ? message.body
       : 'The connected Google account does not grant message bodies, so only the subject is shown here.';
     await screenAndStage({
-      id, from: message.from, subject: message.subject, body, sentAt: messageTime(message.claimedDate, Date.now(), message.arrivedAt), unread: message.unread ?? true,
+      id, messageId: message.resourceId, from: message.from, subject: message.subject, body, sentAt: messageTime(message.claimedDate, Date.now(), message.arrivedAt), unread: message.unread ?? true,
       parts: [`From: ${message.from}\r\nSubject: ${message.subject}\r\n\r\n`, '', message.bodyAvailability === 'full' ? message.body : ''],
     });
   };
@@ -304,12 +307,24 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
       }
     },
     position(position: MailboxReadPosition) {
+      if (position.source === 'gmail') {
+        // Gmail has no mailbox generation: the status carries the kept window only.
+        polled = true; lastPolledAt = Date.now();
+        const pending = position.history?.pendingMessages ?? 0;
+        if (state !== 'ready' || pending > 0) state = pending > 0 ? 'pending' : 'empty';
+        if (error !== PROXY_CONFIGURED_TEXT) error = undefined;
+        history = position.history
+          ? { source: 'gmail', kind: position.history.skippedOlderMessages > 0 ? 'bounded-seed' : 'complete',
+            skippedOlderMessages: position.history.skippedOlderMessages, pendingMessages: pending }
+          : undefined;
+        return;
+      }
       polled = true; lastPolledAt = Date.now();
       if (state !== 'ready' || position.pending > 0) state = position.pending > 0 ? 'pending' : 'empty';
       if (error !== PROXY_CONFIGURED_TEXT) error = undefined;
       progress = { uidValidity: position.uidValidity, pendingMessages: position.pending };
       history = position.history
-        ? { kind: position.history.skippedOlderMessages > 0 ? 'bounded-seed' : 'complete',
+        ? { source: 'imap', kind: position.history.skippedOlderMessages > 0 ? 'bounded-seed' : 'complete',
           lowerBoundUid: position.history.skippedOlderMessages > 0 ? position.history.floorUid : 1,
           skippedOlderMessages: position.history.skippedOlderMessages, uidValidity: position.uidValidity }
         : undefined;

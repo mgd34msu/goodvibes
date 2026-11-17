@@ -80,19 +80,27 @@ export const CHANNEL_INBOX_PROVIDER_STATUS_SCHEMA = objectSchema({
   syncing: BOOLEAN_SCHEMA,
   /** Present when state is `error`. */
   error: STRING_SCHEMA,
-  /** First-seed history boundary, scoped to its observed mailbox generation. */
+  /**
+   * The history the reader gave the inbox on its first read: `source` imap or
+   * gmail; `kind` complete or bounded-seed with `skippedOlderMessages` left out.
+   * IMAP adds its mailbox generation (`uidValidity`) and lowest UID
+   * (`lowerBoundUid`); Gmail adds the kept messages not yet handed on
+   * (`pendingMessages`).
+   */
   mailboxHistory: objectSchema({
-    uidValidity: NUMBER_SCHEMA,
+    source: STRING_SCHEMA,
     kind: STRING_SCHEMA,
-    lowerBoundUid: NUMBER_SCHEMA,
     skippedOlderMessages: NUMBER_SCHEMA,
-  }, ['uidValidity', 'kind', 'lowerBoundUid', 'skippedOlderMessages']),
+    uidValidity: NUMBER_SCHEMA,
+    lowerBoundUid: NUMBER_SCHEMA,
+    pendingMessages: NUMBER_SCHEMA,
+  }, ['source', 'kind', 'skippedOlderMessages']),
   /** Pending eligible messages at lastSyncAt; absent after interruption/when unknown. */
   mailboxProgress: objectSchema({ uidValidity: NUMBER_SCHEMA, pendingMessages: NUMBER_SCHEMA }, ['uidValidity', 'pendingMessages']),
   /** The account scope the live mailbox's rows are named under (`email:<scope>:<uidvalidity>:<uid>`). */
   mailboxScope: STRING_SCHEMA,
-  /** Messages the last sync passed without publishing because their content cannot be proven complete. */
-  skippedMessages: arraySchema(objectSchema({ uid: NUMBER_SCHEMA, reason: STRING_SCHEMA }, ['uid', 'reason'])),
+  /** Messages the reader stepped over because they could not be read here: the IMAP `uid` or Gmail `messageId`, and the reason. */
+  skippedMessages: arraySchema(objectSchema({ uid: NUMBER_SCHEMA, messageId: STRING_SCHEMA, reason: STRING_SCHEMA }, ['reason'])),
   /**
    * Whether this account labels its messages (`on` | `off`); when `off`, the
    * reason and the steps that turn it on. Absent for an account without triage.

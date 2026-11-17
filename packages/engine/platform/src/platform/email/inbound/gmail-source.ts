@@ -253,6 +253,8 @@ export class GmailMailSource implements InboundMailSource {
   private historyRequested = false;
   /** The history window still to hand on, oldest first, as the cursor record holds it. */
   private historyWindow: { readonly ids: readonly string[]; readonly skipped: number } | null = null;
+  /** Whether a history window was ever kept for this cursor, and how many older messages it left out. */
+  private historyKept: { readonly skipped: number } | null = null;
   /** Polls in a row each history message failed to read; bounded by the window. */
   private readonly historyReadFailures = new Map<string, number>();
 
@@ -439,8 +441,10 @@ export class GmailMailSource implements InboundMailSource {
       if (cursor === null) return this.establish(false, signal);
       this.position = cursor.historyId;
       this.historyWindow = windowOf(cursor);
+      this.historyKept = keptOf(cursor);
     }
     await this.history(signal);
+    this.reportPosition();
 
     const result = await collectHistoryDelta(this.deps.history, {
       startHistoryId: this.position,
@@ -497,6 +501,7 @@ export class GmailMailSource implements InboundMailSource {
     });
     this.position = resolution.cursor.historyId;
     this.historyWindow = windowOf(resolution.cursor);
+    this.historyKept = keptOf(resolution.cursor);
 
     if (resolution.kind === 'history-expired') {
       this.note('cursor-reset',
@@ -512,6 +517,7 @@ export class GmailMailSource implements InboundMailSource {
       this.historyRequested = true;
       await this.history(signal);
     }
+    this.reportPosition();
     return this.record(capabilityVerdict('polling-configured', this.pollingDetail()));
   }
 
@@ -561,6 +567,7 @@ export class GmailMailSource implements InboundMailSource {
     const skipped = listed.value.more ? Math.max(0, listed.value.estimate - ids.length) : 0;
     await record({ account: this.deps.account, mailbox: this.deps.mailbox }, { messageIds: ids, skippedOlderMessages: skipped });
     this.historyWindow = ids.length > 0 ? { ids, skipped } : null;
+    this.historyKept = { skipped };
     this.note('cursor-established',
       `${String(ids.length)} message(s) already in '${this.deps.mailbox}' are kept as history for the inbox `
       + `and are not announced${skipped > 0 ? `; about ${String(skipped)} older one(s) are left out` : ''}.`);
@@ -629,6 +636,25 @@ export class GmailMailSource implements InboundMailSource {
       { messageIds: rest, skippedOlderMessages: window.skipped },
     );
     this.historyWindow = rest.length > 0 ? { ids: rest, skipped: window.skipped } : null;
+  }
+
+  /**
+   * Tell the consumers where this reader stands and what history window it
+   * kept, so the inbox status says what history a Gmail-read inbox was given.
+   * Never throws: reporting cannot stop the mail being read.
+   */
+  private reportPosition(): void {
+    if (this.position === null) return;
+    const kept = this.historyKept;
+    try {
+      this.deps.sink.position?.({
+        source: 'gmail',
+        historyId: this.position,
+        ...(kept === null ? {} : { history: { pendingMessages: this.historyWindow?.ids.length ?? 0, skippedOlderMessages: kept.skipped } }),
+      });
+    } catch {
+      // A reporting consumer cannot stop the reader.
+    }
   }
 
   /** The stand-in for a history message that could not be read: it exists, nothing of it is shown. */
@@ -1107,6 +1133,11 @@ export class GmailMailSource implements InboundMailSource {
 function windowOf(cursor: { readonly historyMessageIds?: readonly string[] | undefined; readonly skippedOlderMessages?: number | undefined }): { readonly ids: readonly string[]; readonly skipped: number } | null {
   const ids = cursor.historyMessageIds;
   return ids !== undefined && ids.length > 0 ? { ids, skipped: cursor.skippedOlderMessages ?? 0 } : null;
+}
+
+/** Whether the cursor record holds a kept history window (even one fully handed on), and what it left out. */
+function keptOf(cursor: { readonly historyMessageIds?: readonly string[] | undefined; readonly skippedOlderMessages?: number | undefined }): { readonly skipped: number } | null {
+  return cursor.historyMessageIds !== undefined ? { skipped: cursor.skippedOlderMessages ?? 0 } : null;
 }
 
 /** A batch to the sink, one message at a time for a sink that takes no batches. */

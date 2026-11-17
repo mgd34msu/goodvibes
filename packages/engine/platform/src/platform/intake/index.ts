@@ -15,7 +15,7 @@ export type { SlackInboxAccount, SlackInboxOwnerOptions, SlackInboxOwnerFactorie
 export { sha256First, digestSender, stripMarkup, normalizeWhitespace } from './text-normalization.js';
 export type {
   InboundChannelItem, ProviderState, ProviderPollResult, ProviderPollOptions,
-  AdapterContext, RouteResolver, InboundProviderAdapter, PushedProviderSink, PushedProviderStatus,
+  AdapterContext, RouteResolver, InboundProviderAdapter, PushedProviderSink, PushedProviderStatus, MailboxHistoryStatus, SkippedMailMessage,
 } from './provider-adapter.js';
 export { POLL_CADENCE_MS } from './provider-adapter.js';
 export {

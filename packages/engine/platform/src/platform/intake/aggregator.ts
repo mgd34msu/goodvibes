@@ -39,7 +39,7 @@
 
 import { publishedSequenceBound, type InboxCursorStore, type InboxPosition } from './cursor-store.js';
 import type { InboundPoller, ProviderStatus } from './poller.js';
-import type { InboundChannelItem } from './provider-adapter.js';
+import type { InboundChannelItem, MailboxHistoryStatus, SkippedMailMessage } from './provider-adapter.js';
 import { GatewayVerbError as HandlerError } from '../control-plane/routes/gateway-verb-error.js';
 
 export const DEFAULT_LIMIT = 50;
@@ -88,12 +88,7 @@ export interface ChannelInboxProviderStatus {
   syncing?: boolean;
   error?: string;
   /** Durable first-seed boundary for this mailbox generation; excluded history is not processed. */
-  mailboxHistory?: {
-    readonly kind: 'complete' | 'bounded-seed';
-    readonly lowerBoundUid: number;
-    readonly skippedOlderMessages: number;
-    readonly uidValidity: number;
-  };
+  mailboxHistory?: MailboxHistoryStatus;
   /** Eligible messages remaining at lastSyncAt, not a live provider total. Absent when unknown. */
   mailboxProgress?: { readonly uidValidity: number; readonly pendingMessages: number };
   /**
@@ -102,7 +97,7 @@ export interface ChannelInboxProviderStatus {
    */
   mailboxScope?: string;
   /** Messages the last sync passed because their content cannot be proven complete, with the reason. */
-  skippedMessages?: readonly { readonly uid: number; readonly reason: string }[];
+  skippedMessages?: readonly SkippedMailMessage[];
   /** Whether this account labels its messages; `off` says why and what turns it on. Absent for an account without triage. */
   triage?: { readonly state: 'on' | 'off'; readonly reason?: string; readonly next?: readonly string[] };
 }
@@ -319,7 +314,7 @@ export function aggregateInbox(
     // An explicit missing configuration is not an outage. An unavailable
     // provider with true OR unknown configuration is reported as an error.
     partial: statuses.some((status) => status.state === 'error'
-      || (status.mailboxHistory !== undefined && (status.mailboxHistory.skippedOlderMessages > 0 || status.mailboxProgress === undefined))
+      || (status.mailboxHistory !== undefined && historyIncomplete(status.mailboxHistory, status.mailboxProgress))
       || (status.mailboxProgress?.pendingMessages ?? 0) > 0),
   };
 
@@ -336,6 +331,16 @@ export function aggregateInbox(
   }
 
   return output;
+}
+
+/**
+ * Whether the mailbox history the inbox was given leaves something out: older
+ * messages left out of the window, an IMAP window whose progress is unknown,
+ * or Gmail window messages not yet handed on.
+ */
+function historyIncomplete(history: MailboxHistoryStatus, progress: ChannelInboxProviderStatus['mailboxProgress']): boolean {
+  if (history.skippedOlderMessages > 0) return true;
+  return history.source === 'gmail' ? (history.pendingMessages ?? 0) > 0 : progress === undefined;
 }
 
 /**

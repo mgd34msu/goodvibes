@@ -11,7 +11,7 @@ export function executeAdmittedHeadlessTurn(
   state: NativeConversationIntakeState,
   signal: AbortSignal,
   format: string,
-  limits: Omit<HeadlessTurnLimits, 'unsettledReason'> = {},
+  limits: HeadlessTurnLimits = {},
 ): Promise<NativeHeadlessTurnResult> {
-  return executeHeadlessTurn(ctx, state, signal, format, { ...limits, unsettledReason: 'native-turn-unsettled' });
+  return executeHeadlessTurn(ctx, state, signal, format, limits);
 }

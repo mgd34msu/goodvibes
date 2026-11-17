@@ -1,4 +1,4 @@
-import type { ContractRunner } from '@goodvibes-jev/engine/platform/platform/contract';
+import { isTerminalContractStatus, type ContractRunner, type ContractStatus } from '@goodvibes-jev/engine/platform/platform/contract';
 import type { ConversationMessageSnapshot, Orchestrator } from '@goodvibes-jev/engine/platform/platform/core';
 import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -25,9 +25,15 @@ export interface HeadlessTurnContext {
 
 export type HeadlessTurnLimits = Pick<HeadlessTurnObserverOptions, 'maxTurns' | 'omitAccumulated'> & {
   readonly answerPermissions?: boolean | undefined;
-  /** Stop reason reported when the turn ends without a settling event. */
-  readonly unsettledReason?: string | undefined;
 };
+
+/** Stop reason a headless run reports, in both terminal apps, when the turn ends without a settling event. */
+const UNSETTLED_REASON = 'turn-unsettled';
+
+/** Delegated contract work a headless run stops waiting for: ended, or paused on an owner question nobody here can answer. */
+function settlesHeadlessWait(status: ContractStatus): boolean {
+  return isTerminalContractStatus(status) || status === 'awaiting-owner';
+}
 
 /**
  * One headless turn on a freshly bootstrapped runtime. A string goes to the model as an ordinary
@@ -46,17 +52,18 @@ export async function executeHeadlessTurn(
   const agents = ctx.uiServices.agents.agentManager;
   const existingAgents = new Set(agents.list().map((agent) => agent.id));
   const ownedAgents = () => agents.list().filter((agent) => !existingAgents.has(agent.id));
-  const existing = new Set(runner.list({ sessionId: ctx.runtime.sessionId, includeTerminal: true }).map((contract) => contract.id));
-  const owned = () =>
-    runner.list({ sessionId: ctx.runtime.sessionId, includeTerminal: true }).filter((contract) => !existing.has(contract.id));
+  // Only ids and statuses are read from these lists: the captured input manifest is left out.
+  const listSession = () => runner.list({ sessionId: ctx.runtime.sessionId, includeTerminal: true, includeInputSnapshot: false });
+  const existing = new Set(listSession().map((contract) => contract.id));
+  const owned = () => listSession().filter((contract) => !existing.has(contract.id));
   // This freshly bootstrapped executor belongs only to this invocation.
   const abort = () => {
     ctx.orchestrator.abort();
     for (const contract of owned()) runner.cancel(contract.id, 'Headless invocation cancelled');
     for (const agent of ownedAgents()) agents.cancel(agent.id);
   };
-  const { unsettledReason = 'turn-unsettled', answerPermissions, ...observerLimits } = limits;
-  const observer = observeHeadlessTurn(ctx.runtimeBus, format, unsettledReason, { ...observerLimits, stop: abort });
+  const { answerPermissions, ...observerLimits } = limits;
+  const observer = observeHeadlessTurn(ctx.runtimeBus, format, UNSETTLED_REASON, { ...observerLimits, stop: abort });
   const state = observer.state;
   // A script answers the owner prompts this run raises (stream-json only, checked at parse time); otherwise a headless run has nobody to ask.
   const permissionAnswers = answerPermissions
@@ -80,20 +87,22 @@ export async function executeHeadlessTurn(
       for (const contract of contracts) {
         collected.add(contract.id);
         await new Promise<void>((resolve) => {
-          const done = () => {
-            const current = runner.get(contract.id);
-            return signal.aborted || !current || ['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(current.status);
-          };
+          let finished = false;
           const finish = () => {
+            if (finished) return;
+            finished = true;
             unsubscribe();
             signal.removeEventListener('abort', finish);
             resolve();
           };
-          const unsubscribe = runner.on(() => {
-            if (done()) finish();
+          // The status the runner moved to is on the event: no store read per contract event.
+          const unsubscribe = runner.on((event) => {
+            if (event.type === 'CONTRACT_STATUS_CHANGED' && event.contractId === contract.id && settlesHeadlessWait(event.to)) finish();
           });
           signal.addEventListener('abort', finish, { once: true });
-          if (done()) finish();
+          // It may have settled before the subscription: one read of its state.
+          const now = runner.get(contract.id);
+          if (signal.aborted || !now || settlesHeadlessWait(now.status)) finish();
         });
         const current = runner.get(contract.id);
         if (current?.status === 'passed') {

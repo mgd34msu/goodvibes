@@ -401,7 +401,6 @@ export class OpsControlPlane {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  /** Runs a mutation; if it throws, records the failure in the audit log and rethrows. */
   /**
    * Report a task verb's outcome once its owner acted: at once when the owner
    * acted synchronously, when its promise settles when it acts asynchronously
@@ -419,6 +418,7 @@ export class OpsControlPlane {
     });
   }
 
+  /** Runs a mutation; if it throws, records the failure in the audit log and rethrows. */
   private _audited<T>(run: () => T, recordFailure: (errorMessage: string) => void): T {
     try {
       return run();

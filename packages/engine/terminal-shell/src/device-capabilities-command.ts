@@ -7,7 +7,8 @@
  */
 import type { DevicesClient } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import type { CommandConfirmation } from './command-confirmation.js';
+import { RefusalError, readRefusal, refusal } from '@goodvibes-jev/engine/errors';
+import { commandRefusal, type CommandConfirmation } from './command-confirmation.js';
 
 /** The subcommands this module answers, with their argument hints. */
 export const DEVICE_CAPABILITY_SUBCOMMANDS = {
@@ -52,7 +53,9 @@ const size = (bytes: unknown): string => typeof bytes === 'number' ? (bytes >= 1
 /**
  * Run one paired-phone subcommand. Returns false when `args[0]` is not one of
  * them, so a product's `/devices` can fall through to its own subcommands.
- * A revoke or delete runs only after its confirmation was answered.
+ * A revoke or delete runs only after its confirmation was answered. A line that
+ * did not happen (no daemon, a missing id, a daemon refusal or failure) throws
+ * its refusal, so a modal or the model's command runner sees it failed.
  */
 export async function runDeviceCapabilitySubcommand(
   args: readonly string[],
@@ -62,13 +65,11 @@ export async function runDeviceCapabilitySubcommand(
   const sub = (args[0] ?? '').toLowerCase();
   if (!isDeviceCapabilitySubcommand(sub)) return false;
   if (!devices) {
-    print('[devices] Paired phones are served by the daemon, and this runtime has no daemon connection. Start the daemon and try again.');
-    return true;
+    throw commandRefusal('Paired phones are served by the daemon, and this runtime has no daemon connection.', 'Start the daemon and try again', 'DAEMON_UNAVAILABLE');
   }
   const unavailable = devices.describeAvailability();
   if (unavailable) {
-    print(`[devices] No daemon to ask: ${unavailable}`);
-    return true;
+    throw commandRefusal(`No daemon to ask: ${unavailable}`, 'Start the daemon and try again', 'DAEMON_UNAVAILABLE');
   }
   try {
     if (sub === 'nodes') {
@@ -90,7 +91,7 @@ export async function runDeviceCapabilitySubcommand(
     }
     if (sub === 'revoke-grant') {
       const grantId = args[1];
-      if (!grantId) { print('[devices] Usage: /devices revoke-grant <grant-id> (ids are in /devices grants)'); return true; }
+      if (!grantId) throw commandRefusal('Usage: /devices revoke-grant <grant-id>', '/devices grants lists the grant ids');
       await devices.revokeGrant(grantId);
       print(`[devices] Revoked grant ${grantId}; the next request for that capability asks you again.`);
       return true;
@@ -106,12 +107,16 @@ export async function runDeviceCapabilitySubcommand(
       return true;
     }
     const artifactId = args[1];
-    if (!artifactId) { print('[devices] Usage: /devices delete-capture <capture-id> (ids are in /devices captures)'); return true; }
+    if (!artifactId) throw commandRefusal('Usage: /devices delete-capture <capture-id>', '/devices captures lists the capture ids');
     const deleted = await devices.deleteArtifact(artifactId);
+    // A file already gone leaves nothing behind once its record is removed; any other answer kept something.
+    if (!deleted.deleted && deleted.reason !== 'file-missing') {
+      throw commandRefusal(deleted.detail || `Capture ${artifactId} was not deleted.`, '/devices captures lists the captures the daemon keeps', 'NOT_DONE');
+    }
     print(deleted.deleted ? `[devices] Deleted capture ${deleted.artifactId} (${size(deleted.byteLength)}).` : `[devices] ${deleted.detail}`);
     return true;
   } catch (error) {
-    print(`[devices] ${sub} failed: ${summarizeError(error)}`);
-    return true;
+    if (error instanceof RefusalError) throw error;
+    throw new RefusalError(readRefusal(error) ?? refusal({ code: 'DEVICES_FAILED', state: 'not done', reason: `/devices ${sub} failed: ${summarizeError(error)}` }), { cause: error });
   }
 }

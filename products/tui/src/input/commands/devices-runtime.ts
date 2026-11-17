@@ -10,6 +10,13 @@ import {
   isDeviceCapabilitySubcommand,
   runDeviceCapabilitySubcommand,
 } from '@goodvibes-jev/engine/terminal-shell/device-capabilities-command';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+
+function unresolvedDevice(reason: string, idOrPrefix: string): Error {
+  return reason === 'ambiguous'
+    ? commandRefusal(`Ambiguous device id "${idOrPrefix}": use more characters.`, '/devices list shows each device id', 'AMBIGUOUS')
+    : commandRefusal(`No device matches "${idOrPrefix}".`, '/devices list shows each device id', 'NOT_FOUND');
+}
 
 /**
  * Register the /devices command, manage the per-device pairing tokens minted by
@@ -68,8 +75,7 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
       if (await runDeviceCapabilitySubcommand(args, ctx.platform.devices, (message) => ctx.print(message))) return;
       const pairingTokens = ctx.platform.pairingTokens;
       if (!pairingTokens) {
-        ctx.print('Device management is unavailable in this runtime (no pairing token service wired).');
-        return;
+        throw commandRefusal('Device management is unavailable in this runtime (no pairing token service wired).', undefined, 'DEVICES_UNAVAILABLE');
       }
       const sub = (args[0] ?? 'list').toLowerCase();
 
@@ -81,18 +87,11 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
       if (sub === 'rename') {
         const idOrPrefix = args[1];
         const name = args.slice(2).join(' ').trim();
-        if (!idOrPrefix || !name) {
-          ctx.print('Usage: /devices rename <id> <new name>');
-          return;
-        }
+        if (!idOrPrefix || !name) throw commandRefusal('Usage: /devices rename <id> <new name>');
         const resolved = resolveTokenByIdPrefix(pairingTokens.list(), idOrPrefix);
-        if (!resolved.ok) {
-          ctx.print(resolved.reason === 'ambiguous' ? `Ambiguous device id "${idOrPrefix}": use more characters.` : `No device matches "${idOrPrefix}".`);
-          return;
-        }
+        if (!resolved.ok) throw unresolvedDevice(resolved.reason, idOrPrefix);
         if (!pairingTokens.rename(resolved.token.id, name)) {
-          ctx.print(`No device matches "${idOrPrefix}" any more (it was revoked elsewhere); nothing was renamed.`);
-          return;
+          throw commandRefusal(`No device matches "${idOrPrefix}" any more (it was revoked elsewhere); nothing was renamed.`, '/devices list shows each device id', 'NOT_FOUND');
         }
         ctx.print(`Renamed device to "${name}".`);
         return;
@@ -100,15 +99,9 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
 
       if (sub === 'revoke') {
         const idOrPrefix = args[1];
-        if (!idOrPrefix) {
-          ctx.print('Usage: /devices revoke <id>');
-          return;
-        }
+        if (!idOrPrefix) throw commandRefusal('Usage: /devices revoke <id>');
         const resolved = resolveTokenByIdPrefix(pairingTokens.list(), idOrPrefix);
-        if (!resolved.ok) {
-          ctx.print(resolved.reason === 'ambiguous' ? `Ambiguous device id "${idOrPrefix}": use more characters.` : `No device matches "${idOrPrefix}".`);
-          return;
-        }
+        if (!resolved.ok) throw unresolvedDevice(resolved.reason, idOrPrefix);
         const revoked = pairingTokens.revoke(resolved.token.id);
         ctx.print(revoked ? `Revoked "${resolved.token.name}": its token stops working immediately.` : `Device "${resolved.token.name}" was already absent.`);
         return;
@@ -134,11 +127,13 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
           ctx.print('The shared token is already revoked; only this machine holds its replacement.');
           return;
         }
-        ctx.print((await revokeSharedTokenOnDaemon(getOperatorRpc(ctx))).message);
+        const revocation = await revokeSharedTokenOnDaemon(getOperatorRpc(ctx));
+        if (!revocation.ok) throw commandRefusal(revocation.message, 'Start the daemon and run /devices revoke-shared again', 'NOT_DONE');
+        ctx.print(revocation.message);
         return;
       }
 
-      ctx.print(`Unknown /devices subcommand: ${sub}. Use: list | rename | revoke | migrate-shared | revoke-shared | ${DEVICE_CAPABILITY_USAGE}`);
+      throw commandRefusal(`Unknown /devices subcommand: ${sub}.`, `Use: list | rename | revoke | migrate-shared | revoke-shared | ${DEVICE_CAPABILITY_USAGE}`, 'USAGE');
     },
   });
 }

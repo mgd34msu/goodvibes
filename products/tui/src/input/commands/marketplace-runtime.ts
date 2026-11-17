@@ -4,6 +4,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { exportEcosystemCatalogBundle, importEcosystemCatalogBundle, inspectEcosystemCatalogBundle, inspectInstalledEcosystemEntry, installEcosystemCatalogEntry, listEcosystemInstallBackups, listInstalledEcosystemEntries, loadEcosystemCatalog, rollbackInstalledEcosystemEntry, reviewEcosystemCatalogEntry, searchEcosystemCatalog, uninstallEcosystemCatalogEntry, updateInstalledEcosystemEntry } from '@goodvibes-jev/engine/platform/platform/runtime/ecosystem/catalog';
 import type { EcosystemCatalogBundle, EcosystemCatalogEntry, EcosystemEntryKind } from '@/runtime/index.ts';
 import { openModalCommand, requireEcosystemCatalogPaths, requireReadModels, requireShellPaths } from './runtime-services.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 
 function resolveMarketplaceEntry(
   kind: EcosystemEntryKind,
@@ -23,17 +24,21 @@ function formatCompatibility(review: Awaited<ReturnType<typeof reviewEcosystemCa
  * omitted scope means the project, so an install and its uninstall through
  * different commands hit the same target; any other word is refused, never
  * read as the project, because a typo must not install into or remove from
- * the wrong place.
+ * the wrong place. A refused word throws the refusal, so a modal that ran the
+ * command shows it failed.
  */
 export function parseScope(
   token: string | undefined,
-  ctx: Pick<CommandContext, 'print'>,
+  _ctx: Pick<CommandContext, 'print'>,
   usage = '/marketplace <verb> <kind> <id> [project|user] (rollback: <kind> <id> [project|user] [backupId])',
-): 'project' | 'user' | null {
+): 'project' | 'user' {
   if (token === undefined || token === 'project') return 'project';
   if (token === 'user') return 'user';
-  ctx.print(`Unknown scope "${token}": nothing was changed. The scope is project (the default) or user. Usage: ${usage}`);
-  return null;
+  throw commandRefusal(`Unknown scope "${token}": nothing was changed. The scope is project (the default) or user.`, `Usage: ${usage}`, 'USAGE');
+}
+
+function unknownEntry(kind: string | undefined, entryId: string | undefined): Error {
+  return commandRefusal(`Unknown curated ${kind} entry: ${entryId}`, '/marketplace browse lists the catalog entries', 'NOT_FOUND');
 }
 
 export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): void {
@@ -136,10 +141,8 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
         const mode = args[1];
         const target = args[2];
         const scope = mode === 'inspect' ? 'project' : parseScope(args[3], ctx);
-        if (!scope) return;
         if ((mode === 'export' || mode === 'inspect' || mode === 'import') && !target) {
-          ctx.print(`Usage: /marketplace bundle ${mode} <path>${mode === 'export' || mode === 'import' ? ' [project|user]' : ''}`);
-          return;
+          throw commandRefusal(`Usage: /marketplace bundle ${mode} <path>${mode === 'export' || mode === 'import' ? ' [project|user]' : ''}`);
         }
         if (mode === 'export') {
           const bundle = exportEcosystemCatalogBundle(scope, ecosystemPaths);
@@ -155,8 +158,7 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
           try {
             bundle = JSON.parse(readFileSync(bundlePath, 'utf-8')) as EcosystemCatalogBundle;
           } catch (error) {
-            ctx.print(`Marketplace bundle ${mode} failed: could not read ${bundlePath} as JSON (${error instanceof Error ? error.message : String(error)}). Nothing was changed.`);
-            return;
+            throw commandRefusal(`Marketplace bundle ${mode} failed: could not read ${bundlePath} as JSON (${error instanceof Error ? error.message : String(error)}). Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE');
           }
           if (mode === 'inspect') {
             const summary = inspectEcosystemCatalogBundle(bundle);
@@ -178,8 +180,7 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
           }
           const result = importEcosystemCatalogBundle(bundle, { ...ecosystemPaths, scope });
           if (result.error) {
-            ctx.print(`Marketplace bundle import failed: ${result.error}`);
-            return;
+            throw commandRefusal(`Marketplace bundle import failed: ${result.error}`, undefined, 'BUNDLE_IMPORT_FAILED');
           }
           ctx.print([
             `Marketplace bundle imported from ${bundlePath}`,
@@ -190,22 +191,17 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
           ].join('\n'));
           return;
         }
-        ctx.print('Usage: /marketplace bundle <export|inspect|import> <path> [project|user]');
-        return;
+        throw commandRefusal('Usage: /marketplace bundle <export|inspect|import> <path> [project|user]');
       }
 
       const kind = args[1] as EcosystemEntryKind | undefined;
       const entryId = args[2];
       if ((sub === 'review' || sub === 'provenance' || sub === 'install-hint' || sub === 'install' || sub === 'update' || sub === 'rollback' || sub === 'history' || sub === 'uninstall' || sub === 'receipt') && (!kind || !entryId || !['plugin', 'skill', 'hook-pack', 'policy-pack'].includes(kind))) {
-        ctx.print(`Usage: /marketplace ${sub} <plugin|skill|hook-pack|policy-pack> <id>${sub === 'install' || sub === 'update' || sub === 'rollback' || sub === 'history' || sub === 'uninstall' || sub === 'receipt' ? ' [project|user]' : ''}`);
-        return;
+        throw commandRefusal(`Usage: /marketplace ${sub} <plugin|skill|hook-pack|policy-pack> <id>${sub === 'install' || sub === 'update' || sub === 'rollback' || sub === 'history' || sub === 'uninstall' || sub === 'receipt' ? ' [project|user]' : ''}`);
       }
       if (sub === 'review') {
         const entry = resolveMarketplaceEntry(kind!, entryId!, ecosystemPaths);
-        if (!entry) {
-          ctx.print(`Unknown curated ${kind} entry: ${entryId}`);
-          return;
-        }
+        if (!entry) throw unknownEntry(kind, entryId);
         const review = await reviewEcosystemCatalogEntry(entry, ecosystemPaths);
         ctx.print([
           `Marketplace Review: ${entry.name}`,
@@ -223,10 +219,7 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
       }
       if (sub === 'provenance') {
         const entry = resolveMarketplaceEntry(kind!, entryId!, ecosystemPaths);
-        if (!entry) {
-          ctx.print(`Unknown curated ${kind} entry: ${entryId}`);
-          return;
-        }
+        if (!entry) throw unknownEntry(kind, entryId);
         const review = await reviewEcosystemCatalogEntry(entry, ecosystemPaths);
         ctx.print([
           `Marketplace Provenance: ${entry.name}`,
@@ -242,10 +235,7 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
       }
       if (sub === 'install-hint') {
         const entry = resolveMarketplaceEntry(kind!, entryId!, ecosystemPaths);
-        if (!entry) {
-          ctx.print(`Unknown curated ${kind} entry: ${entryId}`);
-          return;
-        }
+        if (!entry) throw unknownEntry(kind, entryId);
         ctx.print([
           `Marketplace Install Guidance: ${entry.name}`,
           `  kind: ${kind}`,
@@ -257,12 +247,8 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
       }
       if (sub === 'receipt') {
         const scope = parseScope(args[3], ctx);
-        if (!scope) return;
         const result = inspectInstalledEcosystemEntry(kind!, entryId!, { ...ecosystemPaths, scope });
-        if (!result.ok) {
-          ctx.print(`Error: ${result.error}`);
-          return;
-        }
+        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
         const { receipt } = result;
         ctx.print([
           `Marketplace Receipt: ${receipt.entry.name}`,
@@ -277,7 +263,6 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
       }
       if (sub === 'history') {
         const scope = parseScope(args[3], ctx);
-        if (!scope) return;
         const backups = listEcosystemInstallBackups(kind!, entryId!, { ...ecosystemPaths, scope });
         ctx.print(backups.length > 0
           ? [
@@ -289,44 +274,31 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
       }
       if (sub === 'install' || sub === 'update' || sub === 'rollback' || sub === 'uninstall') {
         const scope = parseScope(args[3], ctx);
-        if (!scope) return;
         if (sub === 'install') {
           const result = installEcosystemCatalogEntry(kind!, entryId!, { ...ecosystemPaths, scope });
-          if (!result.ok) {
-            ctx.print(`Error: ${result.error}`);
-            return;
-          }
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
           ctx.print(`Installed curated ${kind} ${entryId} into ${result.receipt.targetPath}`);
           return;
         }
         if (sub === 'update') {
           const result = updateInstalledEcosystemEntry(kind!, entryId!, { ...ecosystemPaths, scope });
-          if (!result.ok) {
-            ctx.print(`Error: ${result.error}`);
-            return;
-          }
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
           ctx.print(`Updated curated ${kind} ${entryId} in ${result.receipt.targetPath}`);
           return;
         }
         if (sub === 'rollback') {
           const backupId = args[4];
           const result = rollbackInstalledEcosystemEntry(kind!, entryId!, { ...ecosystemPaths, scope, backupId });
-          if (!result.ok) {
-            ctx.print(`Error: ${result.error}`);
-            return;
-          }
+          if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
           ctx.print(`Rolled back curated ${kind} ${entryId} in ${result.receipt.targetPath} using backup ${result.restoredFrom.id}`);
           return;
         }
         const result = uninstallEcosystemCatalogEntry(kind!, entryId!, { ...ecosystemPaths, scope });
-        if (!result.ok) {
-          ctx.print(`Error: ${result.error}`);
-          return;
-        }
+        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
         ctx.print(`Uninstalled curated ${kind} ${entryId} from ${result.removedPath}`);
         return;
       }
-      ctx.print('Usage: /marketplace [open|overview|recommend|browse [query]|review <plugin|skill|hook-pack|policy-pack> <id>|provenance <plugin|skill|hook-pack|policy-pack> <id>|install-hint <plugin|skill|hook-pack|policy-pack> <id>|install <plugin|skill|hook-pack|policy-pack> <id> [project|user]|update <plugin|skill|hook-pack|policy-pack> <id> [project|user]|rollback <plugin|skill|hook-pack|policy-pack> <id> [project|user] [backupId]|history <plugin|skill|hook-pack|policy-pack> <id> [project|user]|uninstall <plugin|skill|hook-pack|policy-pack> <id> [project|user]|receipt <plugin|skill|hook-pack|policy-pack> <id> [project|user]|bundle export <path> [project|user]|bundle inspect <path>|bundle import <path> [project|user]|installed]');
+      throw commandRefusal('Usage: /marketplace [open|overview|recommend|browse [query]|review <plugin|skill|hook-pack|policy-pack> <id>|provenance <plugin|skill|hook-pack|policy-pack> <id>|install-hint <plugin|skill|hook-pack|policy-pack> <id>|install <plugin|skill|hook-pack|policy-pack> <id> [project|user]|update <plugin|skill|hook-pack|policy-pack> <id> [project|user]|rollback <plugin|skill|hook-pack|policy-pack> <id> [project|user] [backupId]|history <plugin|skill|hook-pack|policy-pack> <id> [project|user]|uninstall <plugin|skill|hook-pack|policy-pack> <id> [project|user]|receipt <plugin|skill|hook-pack|policy-pack> <id> [project|user]|bundle export <path> [project|user]|bundle inspect <path>|bundle import <path> [project|user]|installed]');
     },
   });
 }

@@ -13,9 +13,11 @@
  * with `known: false`, the registry never guesses, and this command never
  * papers over that with a name that looks real.
  */
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { CommandRegistry } from '../command-registry.ts';
 import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
+import { RefusalError, readRefusal, refusal } from '@goodvibes-jev/engine/errors';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 
 type Principal = OperatorMethodOutput<'principals.list'>['principals'][number];
 type PrincipalKind = Principal['kind'];
@@ -44,13 +46,24 @@ function parseIdentities(tokens: readonly string[]): {
   return { identities, rejected };
 }
 
-function refuseMalformedIdentities(ctx: CommandContext, verb: string, rejected: readonly string[]): boolean {
-  if (rejected.length === 0) return false;
-  ctx.print(
-    `[principals ${verb}] refused: not a channel:value identity: ${rejected.join(', ')}. `
-    + 'Nothing was changed. Write identities as slack:U123 (comma separated for --identities).',
+function refuseMalformedIdentities(verb: string, rejected: readonly string[]): void {
+  if (rejected.length === 0) return;
+  throw commandRefusal(
+    `/principals ${verb} refused: not a channel:value identity: ${rejected.join(', ')}. Nothing was changed.`,
+    'Write identities as slack:U123 (comma separated for --identities)',
+    'USAGE',
   );
-  return true;
+}
+
+/** A daemon failure as the command's refusal, keeping the daemon's own code, state and next steps. */
+function rpcRefusal(verb: string, error: unknown): RefusalError {
+  const own = readRefusal(error);
+  return new RefusalError(refusal({
+    code: own?.code ?? 'NOT_DONE',
+    state: own?.state ?? 'not done',
+    reason: `/principals ${verb} failed: ${describeOperatorRpcError(error)}`,
+    next: own?.next ?? [],
+  }), { cause: error });
 }
 
 /** Extract `--flag value` pairs from an args array, returning the remaining positional tokens. */
@@ -107,7 +120,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
       const sub = args[0] ?? 'list';
       const knownSubcommands = ['list', 'get', 'create', 'update', 'delete', 'resolve'];
       if (!knownSubcommands.includes(sub)) {
-        ctx.print(
+        throw commandRefusal(
           'Usage: /principals <subcommand>\n'
           + '  /principals list                                          — list every principal\n'
           + '  /principals get <id>                                      — show one principal\n'
@@ -116,32 +129,18 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
           + '  /principals delete <id>                                   — permanently remove a principal\n'
           + '  /principals resolve <channel> <value>                     — resolve a sender identity to its principal, or "unknown principal"'
         );
-        return;
       }
 
       // Validate each subcommand's required positional arguments before
       // touching the operator connection, so a usage mistake never depends
       // on daemon reachability to be reported.
-      if (sub === 'get' && !args[1]) {
-        ctx.print('Usage: /principals get <id>');
-        return;
-      }
+      if (sub === 'get' && !args[1]) throw commandRefusal('Usage: /principals get <id>');
       if (sub === 'create' && (!args[1] || !isPrincipalKind(args[2]))) {
-        ctx.print(`Usage: /principals create <name> <${PRINCIPAL_KINDS.join('|')}> [channel:value...]`);
-        return;
+        throw commandRefusal(`Usage: /principals create <name> <${PRINCIPAL_KINDS.join('|')}> [channel:value...]`);
       }
-      if (sub === 'update' && !args[1]) {
-        ctx.print('Usage: /principals update <id> [--name x] [--kind user|bot|service|token] [--identities c:v,c:v|none]');
-        return;
-      }
-      if (sub === 'delete' && !args[1]) {
-        ctx.print('Usage: /principals delete <id>');
-        return;
-      }
-      if (sub === 'resolve' && (!args[1] || !args[2])) {
-        ctx.print('Usage: /principals resolve <channel> <value>');
-        return;
-      }
+      if (sub === 'update' && !args[1]) throw commandRefusal('Usage: /principals update <id> [--name x] [--kind user|bot|service|token] [--identities c:v,c:v|none]');
+      if (sub === 'delete' && !args[1]) throw commandRefusal('Usage: /principals delete <id>');
+      if (sub === 'resolve' && (!args[1] || !args[2])) throw commandRefusal('Usage: /principals resolve <channel> <value>');
 
       // Identities are validated before the daemon is contacted: a typo must never
       // reach the store, and the refusal does not depend on the daemon being up.
@@ -149,7 +148,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
       let identitiesUpdate: Array<{ channel: string; value: string }> | undefined;
       if (sub === 'create') {
         const parsed = parseIdentities(args.slice(3));
-        if (refuseMalformedIdentities(ctx, 'create', parsed.rejected)) return;
+        refuseMalformedIdentities('create', parsed.rejected);
         createIdentities = parsed.identities;
       }
       if (sub === 'update') {
@@ -159,20 +158,16 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
         if (identitiesRaw !== undefined) {
           const clear = identitiesRaw.trim() === '' || identitiesRaw.trim().toLowerCase() === 'none';
           const parsed = clear ? { identities: [], rejected: [] } : parseIdentities(identitiesRaw.split(',').map((t) => t.trim()).filter((t) => t.length > 0));
-          if (refuseMalformedIdentities(ctx, 'update', parsed.rejected)) return;
+          refuseMalformedIdentities('update', parsed.rejected);
           if (!clear && parsed.identities.length === 0) {
-            ctx.print('[principals update] refused: --identities named no channel:value pair. Use --identities none to clear every identity mapping.');
-            return;
+            throw commandRefusal('/principals update refused: --identities named no channel:value pair. Nothing was changed.', 'Use --identities none to clear every identity mapping', 'USAGE');
           }
           identitiesUpdate = parsed.identities;
         }
       }
 
       const rpc = getOperatorRpc(ctx);
-      if (!rpc.available) {
-        ctx.print(`[principals] ${rpc.reason}`);
-        return;
-      }
+      if (!rpc.available) throw commandRefusal(rpc.reason, undefined, 'DAEMON_UNAVAILABLE');
 
       if (sub === 'list') {
         try {
@@ -183,7 +178,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
           }
           ctx.print(['Principals:', ...principals.map(renderPrincipal)].join('\n'));
         } catch (error) {
-          ctx.print(`[principals list] ${describeOperatorRpcError(error)}`);
+          throw rpcRefusal('list', error);
         }
         return;
       }
@@ -194,7 +189,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
           const { principal } = await rpc.platformClient.operator.invoke('principals.get', { principalId: id });
           ctx.print(renderPrincipal(principal));
         } catch (error) {
-          ctx.print(`[principals get] ${describeOperatorRpcError(error)}`);
+          throw rpcRefusal('get', error);
         }
         return;
       }
@@ -207,7 +202,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
           const { principal } = await rpc.platformClient.operator.invoke('principals.create', { name, kind, identities });
           ctx.print(`[principals create] created ${principal.id}\n${renderPrincipal(principal)}`);
         } catch (error) {
-          ctx.print(`[principals create] ${describeOperatorRpcError(error)}`);
+          throw rpcRefusal('create', error);
         }
         return;
       }
@@ -217,8 +212,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
         const { flags } = extractFlags(args.slice(2), ['name', 'kind', 'identities']);
         const kind = flags.get('kind');
         if (kind !== undefined && !isPrincipalKind(kind)) {
-          ctx.print(`Invalid --kind "${kind}". Valid values: ${PRINCIPAL_KINDS.join(', ')}`);
-          return;
+          throw commandRefusal(`Invalid --kind "${kind}". Nothing was changed.`, `Valid values: ${PRINCIPAL_KINDS.join(', ')}`, 'USAGE');
         }
         try {
           const { principal } = await rpc.platformClient.operator.invoke('principals.update', {
@@ -229,19 +223,21 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
           });
           ctx.print(`[principals update] updated ${principal.id}\n${renderPrincipal(principal)}`);
         } catch (error) {
-          ctx.print(`[principals update] ${describeOperatorRpcError(error)}`);
+          throw rpcRefusal('update', error);
         }
         return;
       }
 
       if (sub === 'delete') {
         const id = args[1]!;
+        let deleted: boolean;
         try {
-          const result = await rpc.platformClient.operator.invoke('principals.delete', { principalId: id });
-          ctx.print(result.deleted ? `[principals delete] deleted ${id}.` : `[principals delete] no principal found with id ${id}.`);
+          deleted = (await rpc.platformClient.operator.invoke('principals.delete', { principalId: id })).deleted;
         } catch (error) {
-          ctx.print(`[principals delete] ${describeOperatorRpcError(error)}`);
+          throw rpcRefusal('delete', error);
         }
+        if (!deleted) throw commandRefusal(`No principal found with id ${id}.`, '/principals list shows every principal', 'NOT_FOUND');
+        ctx.print(`[principals delete] deleted ${id}.`);
         return;
       }
 
@@ -256,7 +252,7 @@ export function registerPrincipalsRuntimeCommands(registry: CommandRegistry): vo
           }
           ctx.print(`[principals resolve] ${channel}:${value} -> ${result.principal.name}\n${renderPrincipal(result.principal)}`);
         } catch (error) {
-          ctx.print(`[principals resolve] ${describeOperatorRpcError(error)}`);
+          throw rpcRefusal('resolve', error);
         }
       }
     },

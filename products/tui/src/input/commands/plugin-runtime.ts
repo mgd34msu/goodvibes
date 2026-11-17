@@ -5,6 +5,12 @@ import { installEcosystemCatalogEntry, listInstalledEcosystemEntries, loadEcosys
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
 import { pluginTrustConfirmation, runPluginTrustSubcommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
+import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
+
+function unknownCatalogEntry(entryId: string): Error {
+  return commandRefusal(`Unknown curated plugin entry: ${entryId}`, '/plugin browse lists the catalog entries', 'NOT_FOUND');
+}
 
 export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -34,8 +40,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
       const ecosystemPaths = requireEcosystemCatalogPaths(ctx);
       const pluginPaths = requirePluginPathOptions(ctx);
       if (!pluginManager) {
-        ctx.print('Plugin manager is not available in this runtime.');
-        return;
+        throw commandRefusal('Plugin manager is not available in this runtime.', undefined, 'PLUGINS_UNAVAILABLE');
       }
       const sub = args[0];
 
@@ -78,15 +83,9 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
       }
       if (sub === 'inspect') {
         const name = args[1];
-        if (!name) {
-          ctx.print('Usage: /plugin inspect <name>');
-          return;
-        }
+        if (!name) throw commandRefusal('Usage: /plugin inspect <name>');
         const status = pluginManager.list().find((plugin) => plugin.name === name);
-        if (!status) {
-          ctx.print(`Error: Plugin '${name}' not found.`);
-          return;
-        }
+        if (!status) throw commandRefusal(`Plugin '${name}' not found.`, '/plugin list shows the installed plugins', 'NOT_FOUND');
         const capabilities = pluginManager.capabilities(name);
         const trust = pluginManager.getTrustRecord(name);
         const quarantine = pluginManager.getQuarantineRecord(name);
@@ -149,15 +148,9 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
       }
       if (sub === 'catalog-review') {
         const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /plugin catalog-review <catalog-id>');
-          return;
-        }
+        if (!entryId) throw commandRefusal('Usage: /plugin catalog-review <catalog-id>');
         const entry = loadEcosystemCatalog('plugin', ecosystemPaths).find((candidate) => candidate.id === entryId);
-        if (!entry) {
-          ctx.print(`Unknown curated plugin entry: ${entryId}`);
-          return;
-        }
+        if (!entry) throw unknownCatalogEntry(entryId);
         const review = await reviewEcosystemCatalogEntry(entry, ecosystemPaths);
         ctx.print([
           `Plugin Catalog Review: ${entry.name}`,
@@ -175,15 +168,9 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
       }
       if (sub === 'install-hint') {
         const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /plugin install-hint <catalog-id>');
-          return;
-        }
+        if (!entryId) throw commandRefusal('Usage: /plugin install-hint <catalog-id>');
         const entry = loadEcosystemCatalog('plugin', ecosystemPaths).find((candidate) => candidate.id === entryId);
-        if (!entry) {
-          ctx.print(`Unknown curated plugin entry: ${entryId}`);
-          return;
-        }
+        if (!entry) throw unknownCatalogEntry(entryId);
         ctx.print([
           `Plugin Install Guidance: ${entry.name}`,
           `  id: ${entry.id}`,
@@ -198,10 +185,7 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         const entryId = args[1];
         const sourcePath = args[2];
         const summary = args.slice(3).join(' ').trim();
-        if (!entryId || !sourcePath || !summary) {
-          ctx.print('Usage: /plugin publish-local <catalog-id> <path> <summary...>');
-          return;
-        }
+        if (!entryId || !sourcePath || !summary) throw commandRefusal('Usage: /plugin publish-local <catalog-id> <path> <summary...>');
         const result = upsertEcosystemCatalogEntry({
           id: entryId,
           kind: 'plugin',
@@ -212,80 +196,62 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
           provenance: 'operator-published',
           updateHint: 'Use /plugin publish-local again to refresh catalog metadata after edits.',
         }, ecosystemPaths);
-        ctx.print(result.ok
-          ? `Published curated plugin ${entryId} into ${result.path}`
-          : `Error: ${result.error}`);
+        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+        ctx.print(`Published curated plugin ${entryId} into ${result.path}`);
         return;
       }
       if (sub === 'unpublish') {
         const entryId = args[1];
-        if (!entryId) {
-          ctx.print('Usage: /plugin unpublish <catalog-id>');
-          return;
-        }
+        if (!entryId) throw commandRefusal('Usage: /plugin unpublish <catalog-id>');
         const result = removeEcosystemCatalogEntry('plugin', entryId, ecosystemPaths);
-        ctx.print(result.ok
-          ? `Removed curated plugin ${entryId} from ${result.path}`
-          : `Error: ${result.error}`);
+        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+        ctx.print(`Removed curated plugin ${entryId} from ${result.path}`);
         return;
       }
       if (sub === 'install') {
         const entryId = args[1];
         const scopeArg = args[2];
-        if (!entryId) {
-          ctx.print('Usage: /plugin install <catalog-id> [project|user] (default: project)');
-          return;
-        }
+        if (!entryId) throw commandRefusal('Usage: /plugin install <catalog-id> [project|user] (default: project)');
         const scope = parseScope(scopeArg, ctx, '/plugin install <catalog-id> [project|user]');
-        if (scope === null) return;
         const result = installEcosystemCatalogEntry('plugin', entryId, { ...ecosystemPaths, scope });
-        ctx.print(result.ok
-          ? `Installed curated plugin ${entryId} into ${result.receipt.targetPath}`
-          : `Error: ${result.error}`);
+        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+        ctx.print(`Installed curated plugin ${entryId} into ${result.receipt.targetPath}`);
         return;
       }
       if (sub === 'update') {
         const entryId = args[1];
         const scopeArg = args[2];
-        if (!entryId) {
-          ctx.print('Usage: /plugin update <catalog-id> [project|user] (default: project)');
-          return;
-        }
+        if (!entryId) throw commandRefusal('Usage: /plugin update <catalog-id> [project|user] (default: project)');
         const scope = parseScope(scopeArg, ctx, '/plugin update <catalog-id> [project|user]');
-        if (scope === null) return;
         const result = updateInstalledEcosystemEntry('plugin', entryId, { ...ecosystemPaths, scope });
-        ctx.print(result.ok
-          ? `Updated curated plugin ${entryId} in ${result.receipt.targetPath}`
-          : `Error: ${result.error}`);
+        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+        ctx.print(`Updated curated plugin ${entryId} in ${result.receipt.targetPath}`);
         return;
       }
       if (sub === 'uninstall') {
         const entryId = args[1];
         const scopeArg = args[2];
-        if (!entryId) {
-          ctx.print('Usage: /plugin uninstall <catalog-id> [project|user] (default: project)');
-          return;
-        }
+        if (!entryId) throw commandRefusal('Usage: /plugin uninstall <catalog-id> [project|user] (default: project)');
         const scope = parseScope(scopeArg, ctx, '/plugin uninstall <catalog-id> [project|user]');
-        if (scope === null) return;
         const result = uninstallEcosystemCatalogEntry('plugin', entryId, { ...ecosystemPaths, scope });
-        ctx.print(result.ok
-          ? `Uninstalled curated plugin ${entryId} from ${result.removedPath}`
-          : `Error: ${result.error}`);
+        if (!result.ok) throw commandRefusal(result.error, undefined, 'NOT_DONE');
+        ctx.print(`Uninstalled curated plugin ${entryId} from ${result.removedPath}`);
         return;
       }
       if (sub === 'enable') {
         const name = args[1];
-        if (!name) { ctx.print('Usage: /plugin enable <name>'); return; }
+        if (!name) throw commandRefusal('Usage: /plugin enable <name>');
         const result = await pluginManager.enable(name);
-        ctx.print(result.ok ? `Plugin '${name}' enabled and activated.` : `Error: ${result.error}`);
+        if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not enabled.`, '/plugin list shows each plugin and its state', 'NOT_DONE');
+        ctx.print(`Plugin '${name}' enabled and activated.`);
         return;
       }
       if (sub === 'disable') {
         const name = args[1];
-        if (!name) { ctx.print('Usage: /plugin disable <name>'); return; }
+        if (!name) throw commandRefusal('Usage: /plugin disable <name>');
         const result = await pluginManager.disable(name);
-        ctx.print(result.ok ? `Plugin '${name}' disabled.` : `Error: ${result.error}`);
+        if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not disabled.`, '/plugin list shows each plugin and its state', 'NOT_DONE');
+        ctx.print(`Plugin '${name}' disabled.`);
         return;
       }
       if (sub === 'reload') {
@@ -312,32 +278,31 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
       if (sub === 'quarantine') {
         const name = args[1];
         const action = args[2] ?? 'add';
-        if (!name) {
-          ctx.print('Usage: /plugin quarantine <name> [add|lift] [reason]');
-          return;
-        }
+        if (!name) throw commandRefusal('Usage: /plugin quarantine <name> [add|lift] [reason]');
         if (action === 'lift') {
           const result = pluginManager.liftQuarantine(name);
-          ctx.print(result.ok ? `Plugin '${name}' quarantine lifted; it can load again. Run /plugin reload to load it.` : `Error: ${result.error}`);
+          if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' quarantine was not lifted.`, undefined, 'NOT_DONE');
+          ctx.print(`Plugin '${name}' quarantine lifted; it can load again. Run /plugin reload to load it.`);
           return;
         }
         const reason = args.slice(2).join(' ') || 'quarantined by operator';
         const result = pluginManager.quarantine(name, reason);
-        if (!result.ok) {
-          ctx.print(`Error: ${result.error}`);
-          return;
-        }
+        if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' was not quarantined.`, undefined, 'NOT_DONE');
         try {
           await result.unloading;
         } catch (error) {
-          ctx.print(`Plugin '${name}' quarantined and will not load again, but stopping the running instance reported an error: ${error instanceof Error ? error.message : String(error)}`);
-          return;
+          throw new RefusalError(refusal({
+            code: 'PLUGIN_STOP_FAILED',
+            state: `Plugin '${name}' is quarantined and will not load again`,
+            reason: `Stopping the running instance reported an error: ${error instanceof Error ? error.message : String(error)}`,
+            next: ['Restart to clear anything the running instance left behind'],
+          }));
         }
         ctx.print(`Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you run /plugin quarantine ${name} lift and then /plugin reload.`);
         return;
       }
 
-      ctx.print(
+      throw commandRefusal(
         'Usage: /plugin <subcommand>\n'
         + '  list                       — show installed plugins and their status\n'
         + '  enable <name>              — enable a plugin\n'

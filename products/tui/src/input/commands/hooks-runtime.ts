@@ -1,5 +1,6 @@
 import type { CommandRegistry } from '../command-registry.ts';
 import { requireHookApi } from './runtime-services.ts';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 
 export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -44,13 +45,9 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
       }
       if (subcommand === 'scaffold') {
         const [name, match, type] = args.slice(1);
-        if (!name || !match || !type) {
-          ctx.print('Usage: /hooks scaffold <name> <match> <command|prompt|agent|http|ts>');
-          return;
-        }
+        if (!name || !match || !type) throw commandRefusal('Usage: /hooks scaffold <name> <match> <command|prompt|agent|http|ts>');
         if (!['command', 'prompt', 'agent', 'http', 'ts'].includes(type)) {
-          ctx.print(`Unknown hook type: ${type}`);
-          return;
+          throw commandRefusal(`Unknown hook type: ${type}`, 'The type is command, prompt, agent, http or ts', 'USAGE');
         }
         const hook = await workbench.scaffoldHook(name, match, type as Parameters<typeof workbench.scaffoldHook>[2]);
         ctx.print(`Scaffolded managed hook ${hook.name} at ${match} in ${workbench.getFilePath()}`);
@@ -59,48 +56,30 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
       if (subcommand === 'chain') {
         const name = args[1];
         const matches = args[2]?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? [];
-        if (!name || matches.length === 0) {
-          ctx.print('Usage: /hooks chain <name> <event1,event2,...>');
-          return;
-        }
+        if (!name || matches.length === 0) throw commandRefusal('Usage: /hooks chain <name> <event1,event2,...>');
         const chain = await workbench.scaffoldChain(name, matches);
         ctx.print(`Scaffolded managed hook chain ${chain.name} with ${chain.steps.length} step(s).`);
         return;
       }
       if (subcommand === 'remove') {
         const name = args[1];
-        if (!name) {
-          ctx.print('Usage: /hooks remove <name>');
-          return;
-        }
+        if (!name) throw commandRefusal('Usage: /hooks remove <name>');
         const removed = await workbench.remove(name);
-        if (!removed) {
-          ctx.print(`No managed hook or chain named ${name}.`);
-          return;
-        }
+        if (!removed) throw commandRefusal(`No managed hook or chain named ${name}.`, '/hooks contracts lists the managed hooks file and its entries', 'NOT_FOUND');
         ctx.print(`Removed managed hook workflow entry ${name}.`);
         return;
       }
       if (subcommand === 'enable' || subcommand === 'disable') {
         const name = args[1];
-        if (!name) {
-          ctx.print(`Usage: /hooks ${subcommand} <name>`);
-          return;
-        }
+        if (!name) throw commandRefusal(`Usage: /hooks ${subcommand} <name>`);
         const changed = await workbench.toggle(name, subcommand === 'enable');
-        if (!changed) {
-          ctx.print(`No managed hook named ${name}.`);
-          return;
-        }
+        if (!changed) throw commandRefusal(`No managed hook named ${name}.`, '/hooks contracts lists the managed hooks file and its entries', 'NOT_FOUND');
         ctx.print(`${subcommand === 'enable' ? 'Enabled' : 'Disabled'} managed hook ${name}.`);
         return;
       }
       if (subcommand === 'simulate') {
         const eventPath = args[1];
-        if (!eventPath) {
-          ctx.print('Usage: /hooks simulate <eventPath>');
-          return;
-        }
+        if (!eventPath) throw commandRefusal('Usage: /hooks simulate <eventPath>');
         const result = workbench.simulate(eventPath);
         ctx.print([
           `Hook simulation for ${result.eventPath}`,
@@ -118,10 +97,7 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
       }
       if (subcommand === 'inspect') {
         const path = args[1];
-        if (!path) {
-          ctx.print('Usage: /hooks inspect <path>');
-          return;
-        }
+        if (!path) throw commandRefusal('Usage: /hooks inspect <path>');
         const inspection = workbench.inspect(path);
         ctx.print([
           `Hook bundle inspection: ${inspection.path}`,
@@ -136,10 +112,9 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
         const strategyWords = args.slice(2);
         const strategyWord = strategyWords[0] ?? 'merge';
         if (!path || strategyWords.length > 1 || (strategyWord !== 'merge' && strategyWord !== 'replace')) {
-          ctx.print(path && strategyWords.length > 0
+          throw commandRefusal(path && strategyWords.length > 0
             ? `Unknown import strategy "${strategyWords.join(' ')}": use merge or replace. Nothing was imported.`
-            : 'Usage: /hooks import <path> [merge|replace]');
-          return;
+            : 'Usage: /hooks import <path> [merge|replace]', undefined, 'USAGE');
         }
         const strategy = strategyWord;
         const rejected = await workbench.import(path, strategy);
@@ -160,7 +135,8 @@ export function registerHooksRuntimeCommands(registry: CommandRegistry): void {
 
       const lines: string[] = [`Hook Contracts (${contracts.length}):`];
       for (const contract of contracts) {
-        lines.push(`  ${contract.pattern}`);
+        // The decision model could not say whether this entry fits the filter; it is listed, marked, rather than dropped.
+        lines.push(`  ${contract.pattern}${contract.unsure ? ' (unsure match)' : ''}`);
         lines.push(`    authority=${contract.authority} mode=${contract.executionMode} deny=${contract.canDeny ? 'yes' : 'no'} mutate=${contract.canMutateInput ? 'yes' : 'no'} inject=${contract.canInjectContext ? 'yes' : 'no'} timeout=${contract.timeoutMs}ms policy=${contract.failurePolicy}`);
         lines.push(`    ${contract.description}`);
       }

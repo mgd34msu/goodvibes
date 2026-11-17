@@ -13,7 +13,7 @@ import { openExternalUrl, summarizeError } from '@goodvibes-jev/engine/platform/
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { readAuthorizationInput } from './settings-subscriptions.js';
-import { requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
 export interface SubscriptionCommandContext extends CommandConfirmationContext {
   readonly openModal?: ((name: string) => void) | undefined;
 }
@@ -186,14 +186,10 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
         }
         if (sub === 'inspect') {
           const provider = args[1];
-          if (!provider) {
-            print('Usage: /subscription inspect <provider>');
-            return;
-          }
+          if (!provider) throw commandRefusal('Usage: /subscription inspect <provider>');
           const resolved = getSubscriptionProviderConfig(provider, services.get(provider));
           if (!resolved && !manager.get(provider) && !manager.getPending(provider)) {
-            print(`No stored or available subscription provider named ${provider}.`);
-            return;
+            throw commandRefusal(`No stored or available subscription provider named ${provider}.`, '/subscription providers lists the providers that support a subscription', 'NOT_FOUND');
           }
           let inspection;
           try {
@@ -204,8 +200,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             });
           } catch (error) {
             if (!policy.catchErrors) throw error;
-            print(`Could not inspect provider auth for ${provider}: ${policy.error(error)}`);
-            return;
+            throw commandRefusal(`Could not inspect provider auth for ${provider}: ${policy.error(error)}`, undefined, 'NOT_DONE');
           }
           print(
             [
@@ -242,10 +237,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
         if (sub === 'login') {
           const provider = args[1];
           const mode = args[2]?.toLowerCase();
-          if (!provider || !mode) {
-            print('Usage: /subscription login <provider> start|finish <code>');
-            return;
-          }
+          if (!provider || !mode) throw commandRefusal('Usage: /subscription login <provider> start|finish <code>');
           if (!parsed.yes) {
             requireYesFlag(
               ctx,
@@ -257,14 +249,14 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
           const service = services.get(provider);
           const resolved = getSubscriptionProviderConfig(provider, service);
           if (!resolved) {
-            print(
+            throw commandRefusal(
+              `OAuth is not configured for ${provider}.`,
               [
-                `OAuth is not configured for ${provider}.`,
                 `Add an oauth block to ~/.goodvibes/${policy.surfaceRoot}/services.json (your own services file; a project's file cannot carry one) for that provider, for example:`,
                 `  { "name": "${provider}", "authType": "oauth", "tokenKey": "${provider.toUpperCase()}_API_KEY", "providerId": "${provider}", "oauth": { "authUrl": "...", "tokenUrl": "...", "clientId": "...", "redirectUri": "http://127.0.0.1/callback", "scopes": ["..."] } }`,
               ].join('\n'),
+              'OAUTH_NOT_CONFIGURED',
             );
-            return;
           }
           if (mode === 'start') {
             const flags = new Set(args.slice(3));
@@ -329,7 +321,11 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
                 } catch (error) {
                   // A `finish` typed meanwhile already stored the sign-in: nothing to report.
                   if (!manager.getPending(provider) && manager.get(provider)) return;
-                  print(`Subscription OAuth for ${provider} did not finish automatically (${summarizeError(error)}). Run /subscription login ${provider} finish <code-or-url> with the redirect address or code.`);
+                  throw commandRefusal(
+                    `Subscription OAuth for ${provider} did not finish automatically (${summarizeError(error)}); the sign-in is still pending.`,
+                    `Run /subscription login ${provider} finish <code-or-url> with the redirect address or code`,
+                    'OAUTH_PENDING',
+                  );
                 }
               }
               return;
@@ -339,16 +335,10 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
           }
           if (mode === 'finish') {
             const codeInput = args[3];
-            if (!codeInput) {
-              print(`Usage: /subscription login ${provider} finish <code-or-url>`);
-              return;
-            }
+            if (!codeInput) throw commandRefusal(`Usage: /subscription login ${provider} finish <code-or-url>`);
             const pendingLogin = manager.getPending(provider);
             const authorization = readAuthorizationInput(codeInput, pendingLogin?.state);
-            if (!authorization.ok) {
-              print(authorization.reason);
-              return;
-            }
+            if (!authorization.ok) throw commandRefusal(authorization.reason, undefined, 'OAUTH_CODE_REFUSED');
             const code = authorization.code;
             const activeConfig = resolveLoginConfig(resolved.oauth, false);
             let record;
@@ -356,8 +346,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
               record = await manager.completeOAuthLogin(provider, activeConfig, code);
             } catch (error) {
               if (!policy.catchErrors) throw error;
-              print(`Could not complete OAuth login for ${provider}: ${policy.error(error)}`);
-              return;
+              throw commandRefusal(`Could not complete OAuth login for ${provider}: ${policy.error(error)}`, undefined, 'NOT_DONE');
             }
             print(
               [
@@ -369,15 +358,11 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             );
             return;
           }
-          print('Usage: /subscription login <provider> start|finish <code-or-url>');
-          return;
+          throw commandRefusal('Usage: /subscription login <provider> start|finish <code-or-url>');
         }
         if (sub === 'logout') {
           const provider = args[1];
-          if (!provider) {
-            print('Usage: /subscription logout <provider>');
-            return;
-          }
+          if (!provider) throw commandRefusal('Usage: /subscription logout <provider>');
           if (!parsed.yes) {
             requireYesFlag(ctx, `log out provider subscription ${provider}`, '/subscription logout <provider> --yes');
             return;
@@ -394,10 +379,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
           const bundleArgs = explicit.rest;
           const mode = bundleArgs[1]?.toLowerCase();
           const pathArg = bundleArgs[2];
-          if (!mode || !pathArg) {
-            print('Usage: /subscription bundle <export|inspect|import> <path>');
-            return;
-          }
+          if (!mode || !pathArg) throw commandRefusal('Usage: /subscription bundle <export|inspect|import> <path>');
           const targetPath = (shellPaths ?? requireShellPaths(ctx)).resolveWorkspacePath(pathArg);
           if (mode === 'export') {
             if (!explicit.yes) {
@@ -416,12 +398,14 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             return;
           }
           if (mode === 'inspect') {
+            let review: string;
             try {
-              print(inspectBundle(targetPath));
+              review = inspectBundle(targetPath);
             } catch (error) {
               if (!policy.catchErrors) throw error;
-              print(`Could not read that bundle file: ${policy.error(error)}`);
+              throw commandRefusal(`Could not read that bundle file: ${policy.error(error)}`, undefined, 'BUNDLE_UNREADABLE');
             }
+            print(review);
             return;
           }
           if (mode === 'import') {
@@ -430,16 +414,13 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
               bundle = readSubscriptionBundle(JSON.parse(readFileSync(targetPath, 'utf-8')) as unknown);
             } catch (error) {
               if (!policy.catchErrors) throw error;
-              print(`Could not read that bundle file: ${policy.error(error)}`);
-              return;
+              throw commandRefusal(`Could not read that bundle file: ${policy.error(error)}. Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE');
             }
             if (!bundle) {
-              print(`Not imported: ${targetPath} is not a subscription bundle (expected version 1 with exportedAt and a list of complete sign-ins). Nothing was changed.`);
-              return;
+              throw commandRefusal(`Not imported: ${targetPath} is not a subscription bundle (expected version 1 with exportedAt and a list of complete sign-ins). Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE');
             }
             if (bundle.subscriptions.length === 0) {
-              print(`Not imported: ${targetPath} holds no sign-ins. Nothing was changed.`);
-              return;
+              throw commandRefusal(`Not imported: ${targetPath} holds no sign-ins. Nothing was changed.`, undefined, 'BUNDLE_EMPTY');
             }
             if (!explicit.yes) {
               print(['Subscription bundle import would:', ...describeImport(manager, bundle)].join('\n'));
@@ -451,10 +432,9 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             print([`Imported ${bundle.subscriptions.length} subscription sign-in(s) from ${targetPath}:`, ...lines].join('\n'));
             return;
           }
-          print('Usage: /subscription bundle <export|inspect|import> <path>');
-          return;
+          throw commandRefusal('Usage: /subscription bundle <export|inspect|import> <path>');
         }
-        print(
+        throw commandRefusal(
           'Usage: /subscription [review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
         );
       },

@@ -1,6 +1,7 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireLocalUserAuthManager } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 
 // An omitted roles argument must not grant the highest role; admin is always spelled out.
 const DEFAULT_NEW_USER_ROLES: readonly string[] = ['user'];
@@ -23,15 +24,14 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
     const username = args[1];
     const password = args[2];
     if (!username) {
-      ctx.print('Usage: /local-auth add-user <username> <password> [roles] (roles default to "user"; pass admin explicitly)\nTip: invoke without a password to type it in the masked prompt: /local-auth add-user <username>');
-      return;
+      throw commandRefusal('Usage: /local-auth add-user <username> <password> [roles] (roles default to "user"; pass admin explicitly)', '/local-auth add-user <username> opens a masked prompt for the password');
     }
     if (!password) {
       // No password supplied: open the masked password prompt.
       if (ctx.openLocalAuthMaskedEntry) {
         ctx.openLocalAuthMaskedEntry('add-user', username);
       } else {
-        ctx.print('Masked entry unavailable in this context. Use: /local-auth add-user <username> <password>');
+        throw commandRefusal('Masked entry is not available here; no user was added.', 'Use: /local-auth add-user <username> <password>', 'MASKED_ENTRY_UNAVAILABLE');
       }
       return;
     }
@@ -42,23 +42,22 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
       const added = auth.addUser(username, password, roles);
       ctx.print(`Added local auth user ${added.username} (${formatRoles(added.roles)}).`);
     } catch (error) {
-      ctx.print(summarizeError(error));
+      throw commandRefusal(`No user was added: ${summarizeError(error)}`, undefined, 'NOT_DONE');
     }
     return;
   }
 
   if (sub === 'delete-user') {
     const username = args[1];
-    if (!username) {
-      ctx.print('Usage: /local-auth delete-user <username>');
-      return;
-    }
+    if (!username) throw commandRefusal('Usage: /local-auth delete-user <username>');
+    let deleted: boolean;
     try {
-      const deleted = auth.deleteUser(username);
-      ctx.print(deleted ? `Deleted local auth user ${username}.` : `Unknown local auth user: ${username}`);
+      deleted = auth.deleteUser(username);
     } catch (error) {
-      ctx.print(summarizeError(error));
+      throw commandRefusal(`${username} was not deleted: ${summarizeError(error)}`, undefined, 'NOT_DONE');
     }
+    if (!deleted) throw commandRefusal(`Unknown local auth user: ${username}`, '/local-auth review lists the local users', 'NOT_FOUND');
+    ctx.print(`Deleted local auth user ${username}.`);
     return;
   }
 
@@ -66,15 +65,14 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
     const username = args[1];
     const password = args[2];
     if (!username) {
-      ctx.print('Usage: /local-auth rotate-password <username> <password>\nTip: invoke without a password to type it in the masked prompt: /local-auth rotate-password <username>');
-      return;
+      throw commandRefusal('Usage: /local-auth rotate-password <username> <password>', '/local-auth rotate-password <username> opens a masked prompt for the password');
     }
     if (!password) {
       // No password supplied: open the masked password prompt.
       if (ctx.openLocalAuthMaskedEntry) {
         ctx.openLocalAuthMaskedEntry('rotate-password', username);
       } else {
-        ctx.print('Masked entry unavailable in this context. Use: /local-auth rotate-password <username> <password>');
+        throw commandRefusal('Masked entry is not available here; the password was not changed.', 'Use: /local-auth rotate-password <username> <password>', 'MASKED_ENTRY_UNAVAILABLE');
       }
       return;
     }
@@ -84,18 +82,16 @@ export function handleLocalAuthCommand(args: string[], ctx: CommandContext): voi
       auth.rotatePassword(username, password);
       ctx.print(`Rotated password for ${username}. Existing sessions were revoked.`);
     } catch (error) {
-      ctx.print(summarizeError(error));
+      throw commandRefusal(`The password for ${username} was not changed: ${summarizeError(error)}`, undefined, 'NOT_DONE');
     }
     return;
   }
 
   if (sub === 'revoke-session') {
     const token = args[1];
-    if (!token) {
-      ctx.print('Usage: /local-auth revoke-session <session-id-or-token>');
-      return;
-    }
-    ctx.print(auth.revokeSession(token) ? 'Revoked the selected session.' : 'Unknown session id or token.');
+    if (!token) throw commandRefusal('Usage: /local-auth revoke-session <session-id-or-token>');
+    if (!auth.revokeSession(token)) throw commandRefusal('Unknown session id or token.', '/local-auth review lists the open sessions', 'NOT_FOUND');
+    ctx.print('Revoked the selected session.');
     return;
   }
 

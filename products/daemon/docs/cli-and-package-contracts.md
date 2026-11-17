@@ -55,7 +55,14 @@ Service and strict wake-provisioning state receipts stay on stdout even with a
 nonzero status. `service-status --json` remains consumable at exit 3 (installed
 but stopped) and exit 4 (not installed), rather than being moved to stderr.
 `install-service` exits 3 when the unit was written but the daemon is not running,
-and `uninstall-service` exits 4 when nothing was installed.
+and `uninstall-service` exits 4 when nothing was installed. `install-service`,
+`refresh-service` and `uninstall-service` exit 5, changing nothing, when the
+definition at the service's path was not written by GoodVibes (`definitionOwner`
+in `service-status --json`). The release installer (`scripts/install.sh`) writes no
+unit or plist of its own: it runs `install-service` on a first install and
+`refresh-service` on an upgrade, and reads the service's name, path and
+`definitionOwner` from `service-status --json`, so these exit codes and fields are
+its contract.
 
 ## Status, sessions and config
 

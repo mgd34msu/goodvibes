@@ -170,6 +170,8 @@ interface CardRow {
   readonly right?: { readonly text: string; readonly fg: string };
   /** The hunk cursor row (drawn as the selected row). */
   readonly cursor?: boolean;
+  /** A row of the cursor's hunk (its header and its diff): the card keeps all of it in view. */
+  readonly cursorBlock?: boolean;
 }
 
 /** Wrap code keeping its leading indentation on every wrapped line. */
@@ -331,11 +333,14 @@ function hunkRows(hunkState: HunkSelectionState, width: number): CardRow[] {
   rows.push(...textRows(`${selected.size} of ${hunks.length} hunks selected`, width + 4, { fg: t.textMuted }));
   hunks.forEach((hunk, i) => {
     const on = selected.has(i);
+    const atCursor = i === cursor;
     wrapLines(`${i + 1}. ${hunk.path}`, Math.max(4, width)).forEach((part, k) => rows.push({
       spans: [{ text: k === 0 ? (on ? '[x] ' : '[ ] ') : '    ', fg: on ? t.success : t.textFaint, bold: true }, { text: part, fg: on ? t.text : t.textMuted }],
-      cursor: i === cursor,
+      cursor: atCursor,
+      cursorBlock: atCursor,
     }));
-    rows.push(...insetRows(diffRows(cappedChange(editChangeLines(editItemText(hunk))), width)));
+    const diff = insetRows(diffRows(cappedChange(editChangeLines(editItemText(hunk))), width));
+    rows.push(...(atCursor ? diff.map((row) => ({ ...row, cursorBlock: true })) : diff));
   });
   return rows;
 }
@@ -406,7 +411,7 @@ function cardHints(request: PermissionPromptRequest, state: PermissionCardState)
   if (state.replyMode === 'exec-answer') return [['⏎', 'send answer'], ['esc', (state.replyBuffer ?? '').length > 0 ? 'clear' : 'decline'], ['ctrl+c', 'abort turn']];
   if (state.replyMode === 'deny-reason') return [['⏎', 'deny with this reason'], ['esc', 'back'], ['ctrl+c', 'abort turn']];
   if (state.submenuOpen) return [['↑↓', 'tier'], ['⏎', 'allow and remember'], ['esc', 'back']];
-  if (state.hunkState) return [['↑↓', 'hunk'], ['space', 'toggle'], ['a', 'all'], ['←→', 'choose'], ['⏎', 'confirm'], ['n', 'deny']];
+  if (state.hunkState) return [['↑↓', 'hunk'], ['space', 'toggle'], ['a', 'all'], ['pgup/pgdn', 'scroll'], ['←→', 'choose'], ['⏎', 'confirm'], ['n', 'deny']];
   if (asksAgainEvenIfRemembered(request)) return [['←→', 'choose'], ['⏎', 'confirm'], ['y', 'allow once'], ['n', 'deny'], ['type', 'a reason to deny']];
   const tiers = request.rememberOptions?.length ?? 0;
   return [
@@ -456,11 +461,17 @@ export function renderPermissionCard(request: PermissionPromptRequest, state: Pe
   const capacity = Math.max(1, scrollBottom - f.top + 1);
   const maxScroll = Math.max(0, body.length - capacity);
   let scroll = Math.max(0, Math.min(state.scroll ?? 0, maxScroll));
-  // Keep the hunk cursor in view.
+  // Keep the cursor's whole hunk in view: its header and its diff, which Enter applies. A hunk
+  // taller than the card is read with PageUp/PageDown inside it, never scrolled out of view.
   const cursorRow = body.findIndex((r) => r.cursor);
   if (cursorRow >= 0) {
-    if (cursorRow < scroll) scroll = cursorRow;
-    else if (cursorRow >= scroll + capacity) scroll = cursorRow - capacity + 1;
+    let blockEnd = cursorRow;
+    while (blockEnd + 1 < body.length && body[blockEnd + 1]!.cursorBlock) blockEnd++;
+    const lastStart = blockEnd - capacity + 1;
+    scroll = lastStart <= cursorRow
+      ? Math.min(cursorRow, Math.max(scroll, lastStart))
+      : Math.min(lastStart, Math.max(scroll, cursorRow));
+    scroll = Math.max(0, Math.min(scroll, maxScroll));
   }
   for (let i = 0; i < capacity && scroll + i < body.length; i++) {
     const row = body[scroll + i]!;

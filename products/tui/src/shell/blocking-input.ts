@@ -109,6 +109,11 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
         render();
         return { handled: true, pendingPermission: withChoice(req, data === KEY_LEFT ? -1 : 1) };
       }
+      // PageUp/PageDown scroll the body (up and down move between hunks); the card keeps the cursor's hunk in view.
+      if (data === KEY_PAGE_UP || data === KEY_PAGE_DOWN) {
+        render();
+        return { handled: true, pendingPermission: { ...req, scroll: Math.max(0, (req.scroll ?? 0) + (data === KEY_PAGE_UP ? -5 : 5)) } };
+      }
       // Deny on a hunk card declines this edit only, exactly as on the plain
       // card: the model gets the declined result and can adapt. Ctrl+C is the
       // one abort.

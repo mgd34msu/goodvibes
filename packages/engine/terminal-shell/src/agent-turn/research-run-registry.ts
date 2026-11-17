@@ -342,7 +342,9 @@ function sessionEnded(storePath: string, session: string | undefined): boolean {
   if (!existsSync(path)) return true;
   const lock = holdProcessLock(path);
   if (!lock) return false;
-  try { rmSync(path, { force: true }); } finally { lock.release(); }
+  try { rmSync(path, { force: true }); }
+  catch { /* a system that cannot remove an open file keeps the marker; the next probe takes its lock again */ }
+  finally { lock.release(); }
   return true;
 }
 

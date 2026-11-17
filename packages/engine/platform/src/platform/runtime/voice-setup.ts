@@ -198,14 +198,26 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
   }
   let inFlight: InstallRun | undefined;
   let lastInstall: VoiceInstallOutcome | undefined;
-  const beginRun = (): InstallRun => {
+  const beginRun = (previous: InstallRun | undefined): InstallRun => {
     const startedAt = Date.now();
     const stop = new AbortController();
-    const run = runInstall(stop.signal).then(
+    // A run that was stopped but is still settling is waited out, never joined:
+    // its receipt says every waiter cancelled, which is not true of a caller
+    // that just arrived. Bytes it already wrote are kept, so this run resumes.
+    const settled = previous ? previous.run.then(() => undefined, () => undefined) : Promise.resolve();
+    let entry: InstallRun | undefined;
+    const run = settled.then(() => runInstall(stop.signal)).then(
       (receipt) => { lastInstall = { startedAt, finishedAt: Date.now(), receipt }; return receipt; },
       (error: unknown) => { lastInstall = { startedAt, finishedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }; throw error; },
-    ).finally(() => { inFlight = undefined; });
-    return { run, startedAt, stop, pinned: false, waiters: 0 };
+    ).finally(() => { if (inFlight === entry) inFlight = undefined; });
+    entry = { run, startedAt, stop, pinned: false, waiters: 0 };
+    return entry;
+  };
+  /** The run a new caller shares: the live one, or a fresh one when the live run was stopped. */
+  const acquireRun = (): { readonly current: InstallRun; readonly joined: boolean } => {
+    if (inFlight && !inFlight.stop.signal.aborted) return { current: inFlight, joined: true };
+    inFlight = beginRun(inFlight);
+    return { current: inFlight, joined: false };
   };
   const holdRun = (current: InstallRun, signal: AbortSignal | undefined): void => {
     if (!signal) { current.pinned = true; return; }
@@ -439,15 +451,14 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
       // stream to disk a network chunk at a time, so an install holds no file
       // in memory and needs no memory-pressure admission.
       assertVoiceProofCurrent(options);
-      const current = (inFlight ??= beginRun());
+      const { current } = acquireRun();
       holdRun(current, options.signal);
       // A cancelled caller stops waiting; the run goes on for everyone else.
       return executePolicyCheck(() => current.run, options.signal);
     },
     startInstall(options = {}): VoiceInstallStart {
       assertVoiceProofCurrent(options);
-      const joined = inFlight !== undefined;
-      const current = (inFlight ??= beginRun());
+      const { current, joined } = acquireRun();
       holdRun(current, undefined);
       // The outcome is read through status(); nobody awaits this run here.
       current.run.catch(() => undefined);

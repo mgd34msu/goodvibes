@@ -3,10 +3,13 @@
  * and a scripted model at the HTTP wire:
  *
  *   first turn   a home paired with the daemon starts with nothing on stderr,
- *                and a typed prompt reaches the model and its reply is drawn,
- *                with no contract or agent created for a plain turn.
- *   no host      a home with no paired host never sends the prompt to the model
- *                and writes no submission.
+ *                and under Hybrid, the default policy, a typed prompt reaches
+ *                the model, the host asks its scripted decision model about
+ *                that turn, and the reply is drawn, with no contract or agent
+ *                created for a plain turn.
+ *   no host      under No Decision Model, a home with no connected host runs
+ *                the prompt in this process (as its notice says): the reply is
+ *                drawn, no decision model is asked and nothing is submitted.
  *
  * Each journey is split into steps, one test each, so every step stays inside the
  * per-test limit; a failed step fails the ones after it.
@@ -44,9 +47,7 @@ describe('first turn against a paired host', () => {
 
   test('a real daemon starts and this home is paired with it', async () => {
     home = await makeHome(model);
-    // The proof is about the program's own path to the model, not a decision model's judgment: Jev is switched off.
-    home.setAgentSetting('judgment.policy', 'No Decision Model');
-    host = await startE2ENativeHost(home, { policy: 'No Decision Model' });
+    host = await startE2ENativeHost(home);
   });
 
   test('the binary starts in a real terminal with nothing on stderr', async () => {
@@ -63,6 +64,7 @@ describe('first turn against a paired host', () => {
     const answered = await agent!.waitForScreen('the scripted reply', (s) => screenText(s).includes(REPLY));
     expect(model.requests.some((request) => lastUserText(request).includes(PROMPT))).toBe(true);
     expect(screenText(answered)).toContain(PROMPT);
+    expect(host!.judgments.requests.some((request) => JSON.stringify(request.state).includes(PROMPT))).toBe(true);
     expect(host!.daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0);
     expect(host!.daemon.services.agentManager.list()).toHaveLength(0);
     expect(agent!.alive()).toBe(true);
@@ -76,18 +78,19 @@ describe('no paired host', () => {
 
   test('the binary starts without a host', async () => {
     home = await makeHome(model);
-    home.setAgentSetting('judgment.policy', 'No Decision Model');
+    home.setDaemonOwnedSetting('judgment.policy', 'No Decision Model');
     agent = launchAgent(home, { cols: 100, rows: 30 });
     await agent.waitForScreen('the main screen', inputAreaVisible);
     await answerWorkspaceQuestion(agent, 'decline');
   });
 
-  test('the first prompt never reaches the model and writes no submission', async () => {
+  test('the first prompt runs in this process: its reply is drawn, no decision model is asked and nothing is submitted', async () => {
     const before = model.requests.length;
     agent!.type(PROMPT); agent!.key('Enter');
-    // The composer clears once the prompt was taken and refused; nothing is sent anywhere.
-    await agent!.waitForScreen('the refused prompt taken from the composer', (s) => !screenText(s).includes(REPLY) && /operator token/i.test(screenText(s)));
-    expect(model.requests).toHaveLength(before);
+    // With no connected host, messages run in this process; the outcome waited on is the turn itself.
+    await agent!.waitForScreen('the scripted reply', (s) => screenText(s).includes(REPLY));
+    expect(model.requests.slice(before).some((request) => lastUserText(request).includes(PROMPT))).toBe(true);
+    expect(home!.judgments.requests).toHaveLength(0);
     expect(existsSync(join(home!.home, '.goodvibes/agent/native-work-submission.json.intake'))).toBe(false);
     expect(agent!.alive()).toBe(true);
   });

@@ -9,15 +9,21 @@ import { TuiConfigManager } from '../../config/host-settings.ts';
 import { beginTuiHostPairing, completeTuiHostPairing } from '../../runtime/tui-host-credential-store.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { seedBenchmarkCacheFixture } from '../helpers/benchmark-cache-fixture.ts';
-import { startE2EJudgments } from './judgment-fixture.ts';
+import { startScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
 import { closeE2EFixture, type E2EHome } from './harness.ts';
 
+/**
+ * `judgments` is the decision model the program asks (judgment.endpoint and
+ * TYPESAFE_BASE_URL); the daemon asks a second one, so what the program asked
+ * is counted apart from the daemon's own background readings.
+ */
 export async function startE2ENativeHost(home: E2EHome) {
-  const judgments = startE2EJudgments();
+  const judgments = startScriptedDecisionServer();
+  const daemonJudgments = startScriptedDecisionServer();
   const previousKey = process.env.TYPESAFE_API_KEY;
   process.env.TYPESAFE_API_KEY = 'local-e2e-judgment-fixture-not-a-secret';
   const restore = async () => {
-    try { await judgments.stop(); }
+    try { await closeE2EFixture(null, () => judgments.stop(), () => daemonJudgments.stop()); }
     finally {
       if (previousKey === undefined) delete process.env.TYPESAFE_API_KEY;
       else process.env.TYPESAFE_API_KEY = previousKey;
@@ -29,7 +35,7 @@ export async function startE2ENativeHost(home: E2EHome) {
     const daemon = await startDaemonFixture({ root, hostSessions: false,
       configure(configManager) {
         const homeDirectory = join(root, 'home'), workingDirectory = join(root, 'workspace');
-        configManager.set('judgment.endpoint', judgments.baseURL);
+        configManager.set('judgment.endpoint', daemonJudgments.baseURL);
         seedProviderMetadataCacheFixture({ configManager, homeDirectory, workingDirectory });
         seedBenchmarkCacheFixture({ homeDirectory, workingDirectory, surfaceRoot: 'goodvibes' });
         const models = getProviderModelsCachePath(configManager.getControlPlaneConfigDir(), 'openai');
@@ -62,7 +68,7 @@ export async function startE2ENativeHost(home: E2EHome) {
     config.set('hostedSessions.routeConversationTurns', false, offline);
     config.set('judgment.endpoint', judgments.baseURL, offline);
     return { daemon, judgments, env: { TYPESAFE_API_KEY: 'local-e2e-judgment-fixture-not-a-secret', TYPESAFE_BASE_URL: judgments.baseURL },
-      async stop() { await closeE2EFixture(null, () => daemon.stop(), () => judgments.assertNoUnexpected(), restore); },
+      async stop() { await closeE2EFixture(null, () => daemon.stop(), () => judgments.assertNoUnexpected(), () => daemonJudgments.assertNoUnexpected(), restore); },
     };
   } catch (error) {
     try { await closeE2EFixture(null, () => daemonOwner?.stop(), restore); }

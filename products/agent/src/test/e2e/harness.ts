@@ -13,8 +13,9 @@
  * in this test process (startStubModel).
  */
 import { AgentConfigManager } from '../../config/host-settings.ts';
+import type { ConfigKey, ConfigValue } from '../../config/index.ts';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
-import { startE2EJudgments } from './judgment-fixture.ts';
+import { startScriptedDecisionServer, type ScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
 import { createAsyncDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime/disposal';
 import { TerminalFrame } from './terminal-frame.ts';
 import { COMPOSER_ECHO } from '../helpers/owner-workspace-startup.ts';
@@ -232,10 +233,13 @@ export interface E2EHome {
   readonly daemonPort: number;
   /** The daemon's own state directory inside the isolated home. */
   readonly daemonHome: string;
-  readonly judgments: ReturnType<typeof startE2EJudgments>;
+  /** The decision model the binary asks (TYPESAFE_BASE_URL): scripted answers on the HTTP wire. */
+  readonly judgments: ScriptedDecisionServer;
   readonly networkViolations: string;
   /** Write a settings key (dot path) into the Agent's settings file. */
   setAgentSetting(key: string, value: unknown): void;
+  /** Write a key only the daemon's settings file sets (judgment.policy, hostedSessions.*), as the Agent's own write does with no daemon running. */
+  setDaemonOwnedSetting<K extends ConfigKey>(key: K, value: ConfigValue<K>): void;
 }
 
 function setDotted(target: Record<string, unknown>, key: string, value: unknown): void {
@@ -296,9 +300,13 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
   const settingsPath = join(agentDir, 'settings.json');
   const e2eHome: E2EHome = {
     root, home, workspace, daemonPort, daemonHome,
-    judgments: startE2EJudgments({ ownedRoot: root }),
+    judgments: startScriptedDecisionServer(),
     networkViolations: join(root, 'network-violations.log'),
     setAgentSetting: (key, value) => mergeJson(settingsPath, key, value),
+    setDaemonOwnedSetting(key, value) {
+      new AgentConfigManager({ configDir: agentDir, homeDir: home, workingDir: workspace, surfaceRoot: 'agent' })
+        .set(key, value, { daemonNotRunning: true });
+    },
   };
   e2eHome.setAgentSetting('provider.model', 'e2e-stub:stub-model');
   e2eHome.setAgentSetting('update.auto', false);

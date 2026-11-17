@@ -6,25 +6,31 @@ import { registerInboxSurface } from '@goodvibes-jev/engine/platform/platform/in
 import { WorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { startDaemonFixture } from '@goodvibes-jev/daemon/testing';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
-import type { E2EHome } from './harness.ts';
+import { closeE2EFixture, type E2EHome } from './harness.ts';
+import { startScriptedDecisionServer } from '@goodvibes-jev/judgment/testing';
 import type { DecisionModelPolicy } from '@goodvibes-jev/engine/errors';
 
 export async function startE2ENativeHost(home: E2EHome, options: { readonly policy?: DecisionModelPolicy } = {}) {
   // These fixtures prove local permit delivery. Remote-owner coverage uses a
   // hosted-enabled daemon and must never rely on a failed route falling back.
-  home.setAgentSetting('hostedSessions.routeConversationTurns', false);
+  home.setDaemonOwnedSetting('hostedSessions.routeConversationTurns', false);
+  // The daemon asks its own scripted decision model, so what the binary asked (home.judgments) is counted apart.
+  const daemonJudgments = startScriptedDecisionServer();
   const previousKey = process.env.TYPESAFE_API_KEY;
   process.env.TYPESAFE_API_KEY = 'local-e2e-judgment-fixture-not-a-secret';
-  const restore = () => {
-    if (previousKey === undefined) delete process.env.TYPESAFE_API_KEY;
-    else process.env.TYPESAFE_API_KEY = previousKey;
+  const restore = async () => {
+    try { await daemonJudgments.stop(); }
+    finally {
+      if (previousKey === undefined) delete process.env.TYPESAFE_API_KEY;
+      else process.env.TYPESAFE_API_KEY = previousKey;
+    }
   };
   try {
     // The host has a separate owned home/project: pre-provisioning its workspace
     // authority must not answer the Agent's first-start checkpoint question.
     const daemon = await startDaemonFixture({ root: join(home.root, 'native-host'), hostSessions: false,
       configure(configManager) {
-        configManager.set('judgment.endpoint', home.judgments.baseURL);
+        configManager.set('judgment.endpoint', daemonJudgments.baseURL);
         if (options.policy) configManager.set('judgment.policy', options.policy);
         seedProviderMetadataCacheFixture({ configManager, homeDirectory: join(home.root, 'native-host/home'),
           workingDirectory: join(home.root, 'native-host/workspace'), surfaceRoot: 'goodvibes' });
@@ -46,13 +52,13 @@ export async function startE2ENativeHost(home: E2EHome, options: { readonly poli
       });
       if (!migration.ok) throw new Error(`E2E native pairing setup failed: ${migration.status}`);
       const paired = (await migration.json() as { token: { token: string } }).token;
-      return { daemon, env: { GOODVIBES_AGENT_RUNTIME_URL: daemon.baseUrl, GOODVIBES_CONNECTED_HOST_TOKEN: paired.token },
-        async stop() { try { await daemon.stop(); } finally { restore(); } },
+      return { daemon, judgments: daemonJudgments, env: { GOODVIBES_AGENT_RUNTIME_URL: daemon.baseUrl, GOODVIBES_CONNECTED_HOST_TOKEN: paired.token },
+        async stop() { await closeE2EFixture(null, () => daemon.stop(), () => daemonJudgments.assertNoUnexpected(), restore); },
       };
     } catch (error) {
       // A failed stop must not replace the setup error that caused it.
       try { await daemon.stop(); } catch { /* the original setup error is the one to report */ }
       throw error;
     }
-  } catch (error) { restore(); throw error; }
+  } catch (error) { await restore(); throw error; }
 }

@@ -3,8 +3,11 @@
  * scripted model at the HTTP wire: it starts in a real terminal with nothing on
  * stderr, a typed prompt reaches the model, and the model's reply is drawn; the
  * same prompt through the headless entry point exits 0 with the reply as JSON.
- * No contract or agent is created for a plain conversation turn, and the
- * compiled process makes no external network request.
+ * The interactive turn runs under Hybrid, the default policy, against a scripted
+ * decision model on the HTTP wire, which it asks; the headless run is set to No
+ * Decision Model and asks it nothing. No contract or agent is created for a
+ * plain conversation turn, and the compiled process makes no external network
+ * request.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -30,9 +33,6 @@ describe('first turn', () => {
     const home = await makeHome(model);
     ownedHome = home;
     host = await startE2ENativeHost(home);
-    // The proof is about the program's own path to the model, not a decision model's judgment: Jev is switched off.
-    new TuiConfigManager({ configDir: join(home.home, '.goodvibes/tui'), homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' })
-      .set('judgment.policy', 'No Decision Model', { daemonNotRunning: true });
   });
 
   test('the binary starts in a real terminal with nothing on stderr', async () => {
@@ -43,20 +43,24 @@ describe('first turn', () => {
     expect(readFileSync(join(home.root, stderrFile), 'utf8')).toBe('');
   });
 
-  test('a typed prompt reaches the model and its reply is drawn, with no contract or agent created', async () => {
+  test('under Hybrid a typed prompt reaches the model, the decision model is asked, and the reply is drawn, with no contract or agent created', async () => {
     tui!.type(PROMPT);
     tui!.key('Enter');
     const screen = await tui!.waitForScreen('the scripted reply', (s) => screenText(s).includes(REPLY));
     expect(model.requests.some((request) => lastUserText(request).includes(PROMPT))).toBe(true);
     expect(screenText(screen)).toContain(PROMPT);
+    expect(host!.judgments.requests.length).toBeGreaterThan(0);
     expect(tui!.alive()).toBe(true);
     expect(host!.daemon.services.contractRunner.list({ includeTerminal: true })).toHaveLength(0);
     expect(host!.daemon.services.agentManager.list()).toHaveLength(0);
     await tui!.stop();
   });
 
-  test('the headless entry point exits 0 with the reply, and nothing reached the outside network', async () => {
+  test('under No Decision Model the headless entry point exits 0 with the reply, asks no decision model, and nothing reached the outside network', async () => {
     const home = ownedHome!;
+    new TuiConfigManager({ configDir: join(home.home, '.goodvibes/tui'), homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' })
+      .set('judgment.policy', 'No Decision Model', { daemonNotRunning: true });
+    const asked = host!.judgments.requests.length;
     const child = Bun.spawn([resolveBinary(), '--prompt', PROMPT, '--output-format', 'json'], {
       cwd: home.workspace, env: isolatedEnv(home, host!.env), stdout: 'pipe', stderr: 'pipe',
     });
@@ -64,6 +68,7 @@ describe('first turn', () => {
       const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       expect({ exitCode, stderr: exitCode ? stderr : '' }).toEqual({ exitCode: 0, stderr: '' });
       expect(JSON.parse(stdout)).toMatchObject({ ok: true, response: REPLY });
+      expect(host!.judgments.requests.length).toBe(asked);
       // The interactive session's check ran inside stop(); the headless child writes to the same log.
       const violations = join(home.root, 'network-violations.log');
       expect(existsSync(violations) ? readFileSync(violations, 'utf8') : '').toBe('');

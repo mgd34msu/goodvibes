@@ -345,10 +345,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Policy-as-Code',
     description:
       'Enables the versioned policy bundle registry with promote/rollback semantics. '
-      + 'Requires simulation evidence (divergence gate passing) before enforcement. '
+      + 'Before enforcement, /policy simulate shows the rule diff and the calls this installation recorded '
+      + 'that the bundle would decide differently, and /policy promote --yes confirms them. '
       + 'Exposes /policy load, /policy simulate, /policy diff, /policy promote, '
-      + 'and /policy rollback commands. Divergence trends visible by command class/prefix '
-      + 'via the diagnostics panel.',
+      + 'and /policy rollback commands.',
     defaultState: 'disabled',
     tier: 5,
     runtimeToggleable: true,

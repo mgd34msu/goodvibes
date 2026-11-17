@@ -204,7 +204,9 @@ class PolicyModalSurface implements ConfigModalSurface {
     // there is no separate `/policy rollout`.
     const sub = id === 'simulate' ? 'simulate' : id === 'preflight' ? 'preflight' : id === 'lint' ? 'lint' : id === 'promote' ? 'promote' : id === 'rollback' ? 'rollback' : null;
     if (!sub) return;
-    runModalCommand(ctx, 'policy', [sub], `/policy ${sub}`);
+    // The modal's own confirmation on promote is the operator's yes to the changes simulate showed.
+    const args = sub === 'promote' ? [sub, '--yes'] : [sub];
+    runModalCommand(ctx, 'policy', args, `/policy ${args.join(' ')}`);
   }
 }
 

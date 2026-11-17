@@ -598,12 +598,13 @@ export class DaemonControlPlaneHelper {
       // step-up credentials key per token and a revoked device drops out cleanly.
       return { principalId: pairingPrincipalId(authenticated.tokenId), ...pairingTokenCaller(this.context.gatewayMethods, stored) };
     }
-    const admin = authenticated.roles.includes('admin');
+    const adminRole = authenticated.roles.includes('admin');
     return {
       principalId: authenticated.username,
       principalKind: 'user',
-      admin,
-      scopes: narrowGatewayGrant(this.getGrantedGatewayScopes(admin), stored),
+      // A narrowed list is the whole grant: admin-only routes would bypass it.
+      admin: adminRole && (stored === undefined || stored.includes('*')),
+      scopes: narrowGatewayGrant(this.getGrantedGatewayScopes(adminRole), stored),
     };
   }
 
@@ -1407,11 +1408,13 @@ function normalizeFrameDomains(values: readonly unknown[]): RuntimeEventDomain[]
   return [...new Set(domains)];
 }
 
-/** A scope list the credential stores for itself, when it carries one. */
+/**
+ * A scope list the credential stores for itself, when it carries one: a
+ * pairing token or a user issued a narrower list (pairing.tokens.create,
+ * local_auth.users.create / local_auth.users.scopes.set). Without one the
+ * role's default set applies.
+ */
 function storedScopesOf(authenticated: AuthenticatedOperatorRequest): readonly string[] | undefined {
-  // The credential owners add `scopes` to a pairing token or a user that was
-  // issued a narrower list; without one the role's default set applies.
-  const stored = (authenticated as AuthenticatedOperatorRequest & { readonly scopes?: readonly string[] | undefined }).scopes;
-  return Array.isArray(stored) ? stored : undefined;
+  return authenticated.kind === 'shared-token' ? undefined : authenticated.scopes;
 }
 

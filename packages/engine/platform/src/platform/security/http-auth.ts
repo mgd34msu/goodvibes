@@ -19,12 +19,16 @@ export type AuthenticatedOperatorRequest =
       readonly name: string;
       /** Set when the pairing is the Agent's credential for the calls it makes on the owner's behalf. */
       readonly client?: 'agent' | undefined;
+      /** The scope list the pairing stores, when narrower than full operator authority. */
+      readonly scopes?: readonly string[] | undefined;
     }
   | {
       readonly kind: 'session';
       readonly token: string;
       readonly username: string;
       readonly roles: readonly string[];
+      /** The scope list the user stores, when narrower than its role's default set. */
+      readonly scopes?: readonly string[] | undefined;
       /** When the login session ends by time. */
       readonly expiresAt: number;
     };
@@ -89,7 +93,7 @@ export interface PairingTokenAuthenticator {
   ensureLocalNativeOwner?(): AuthenticatedNativePairingToken | null;
   withNativeAuthority?<T>(credential: NativeCredential, expected: AuthenticatedNativePairingToken,
     operation: (assertCurrent: () => AuthenticatedNativePairingToken) => T | Promise<T>): Promise<T>;
-  authenticate(token: string): { readonly id: string; readonly name: string; readonly client?: 'agent' | undefined } | null;
+  authenticate(token: string): { readonly id: string; readonly name: string; readonly client?: 'agent' | undefined; readonly scopes?: readonly string[] | undefined } | null;
   /** Whether the shared operator token has been revoked (and, in the serving daemon, replaced). */
   isLegacyRevoked(): boolean;
   /**
@@ -195,7 +199,8 @@ export function authenticateOperatorToken(
   const pairing = context.pairingTokens?.authenticate(normalized);
   if (pairing) {
     return { kind: 'pairing-token', token: normalized, tokenId: pairing.id, name: pairing.name,
-      ...(pairing.client === 'agent' ? { client: 'agent' as const } : {}) };
+      ...(pairing.client === 'agent' ? { client: 'agent' as const } : {}),
+      ...(pairing.scopes !== undefined ? { scopes: pairing.scopes } : {}) };
   }
 
   // Then the shared token, unless this value was revoked. The revocation is
@@ -215,6 +220,7 @@ export function authenticateOperatorToken(
     token: normalized,
     username: user.username,
     roles: user.roles,
+    ...(user.scopes !== undefined ? { scopes: user.scopes } : {}),
     expiresAt: session.expiresAt,
   };
 }
@@ -232,8 +238,11 @@ export function authenticateOperatorRequest(
 
 export function isOperatorAdmin(authenticated: AuthenticatedOperatorRequest | null): boolean {
   if (!authenticated) return false;
+  if (authenticated.kind === 'shared-token') return true;
+  // A credential given a narrower scope list holds that list, not admin authority.
+  if (authenticated.scopes !== undefined && !authenticated.scopes.includes('*')) return false;
   // A paired device holds the same operator authority as the shared token.
-  if (authenticated.kind === 'shared-token' || authenticated.kind === 'pairing-token') return true;
+  if (authenticated.kind === 'pairing-token') return true;
   return authenticated.roles.includes('admin');
 }
 

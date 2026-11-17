@@ -166,7 +166,9 @@ export interface MemoryEmbeddingRegistryLike {
 }
 
 export interface UserAuthManagerLike {
-  addUser(username: string, password: string, roles: readonly string[]): unknown;
+  addUser(username: string, password: string, roles: readonly string[], scopes?: readonly string[]): unknown;
+  /** A narrower scope list for the user, or `null` for its role's default set. */
+  setUserScopes(username: string, scopes: readonly string[] | null): unknown;
   deleteUser(username: string): boolean;
   rotatePassword(username: string, password: string): void;
   revokeSession(sessionId: string): boolean;

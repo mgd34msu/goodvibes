@@ -18,6 +18,8 @@ import { ROUTE_SURFACE_KINDS } from '../../events/routes.js';
 export const LOCAL_AUTH_USER_SCHEMA = objectSchema({
   username: STRING_SCHEMA,
   roles: STRING_LIST_SCHEMA,
+  /** The operator scopes the user holds, when narrower than its role's default set; absent: the role's set. */
+  scopes: STRING_LIST_SCHEMA,
 }, ['username', 'roles']);
 
 const LOCAL_AUTH_SESSION_SCHEMA = objectSchema({

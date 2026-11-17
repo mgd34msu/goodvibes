@@ -124,6 +124,12 @@ interface StoredPairingToken {
   nativeContinuationRevision?: { readonly id: string; readonly createdAt: number; readonly tokenHash: string };
   /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
   client?: 'agent' | undefined;
+  /**
+   * The operator scopes this device holds, when it was paired with a narrower
+   * list than full operator authority (`*` in the list is full authority).
+   * Absent: full authority.
+   */
+  scopes?: string[] | undefined;
 }
 
 /**
@@ -224,6 +230,8 @@ export interface PublicPairingToken {
   readonly mintedBy?: string | undefined;
   /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
   readonly client?: 'agent' | undefined;
+  /** The scopes this device holds when it was paired with a narrower list; absent means full operator authority. */
+  readonly scopes?: readonly string[] | undefined;
 }
 
 /** The result of minting a token, the ONLY time the plaintext secret is exposed. */
@@ -255,6 +263,11 @@ export interface MintPairingInput {
   readonly attemptId?: string | undefined;
   /** `agent` marks the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
   readonly client?: 'agent' | undefined;
+  /**
+   * The operator scopes the paired device will hold, narrower than full
+   * operator authority; absent (or containing `*`) is full authority.
+   */
+  readonly scopes?: readonly string[] | undefined;
 }
 
 /**
@@ -344,6 +357,7 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
       || (record.mintedBy !== undefined && (typeof record.mintedBy !== 'string' || !PAIRING_ID_PATTERN.test(record.mintedBy)))
       || (record.attemptId !== undefined && (typeof record.attemptId !== 'string' || !PAIRING_ATTEMPT_ID_PATTERN.test(record.attemptId)))
       || (record.client !== undefined && record.client !== 'agent')
+      || (record.scopes !== undefined && (!Array.isArray(record.scopes) || record.scopes.some(scope => typeof scope !== 'string' || !scope)))
       || ids.has(record.id) || hashes.has(record.tokenHash)) {
       throw new Error('pairing token store has an invalid or duplicate record');
     }
@@ -402,6 +416,8 @@ export interface AuthenticatedPairingToken {
   readonly principalId: string;
   /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
   readonly client?: 'agent' | undefined;
+  /** The scope list the pairing stores, when it was issued a narrower one than full operator authority. */
+  readonly scopes?: readonly string[] | undefined;
 }
 
 /**
@@ -1473,6 +1489,7 @@ export class PairingTokenManager {
 
   private mintInternal(input: MintPairingInput, options: { readonly enforceCap: boolean }): MintedPairingToken {
     let replaced = false;
+    const scopes = input.scopes === undefined ? undefined : [...new Set(input.scopes.map(scope => scope.trim()).filter(Boolean))];
     return this.mutate((snapshot) => {
       replaced = false;
       if (input.mintedBy !== undefined && !snapshot.tokens.some(record => record.id === input.mintedBy)) {
@@ -1523,6 +1540,7 @@ export class PairingTokenManager {
         ...(input.mintedBy !== undefined && input.mintedBy !== replacedId ? { mintedBy: input.mintedBy } : {}),
         ...(attemptId !== undefined ? { attemptId } : {}),
         ...(input.client === 'agent' ? { client: 'agent' as const } : {}),
+        ...(scopes !== undefined ? { scopes } : {}),
       };
       // A device paired again keeps answering for what its old pairing minted.
       if (replacedId !== undefined) for (const item of snapshot.tokens) if (item.mintedBy === replacedId) item.mintedBy = record.id;
@@ -1597,7 +1615,8 @@ export class PairingTokenManager {
     } else {
       this.#stampLastSeen(record, now);
     }
-    return { id: record.id, name: record.name, principalId: pairingPrincipalId(record.id), ...(record.client === 'agent' ? { client: 'agent' as const } : {}) };
+    return { id: record.id, name: record.name, principalId: pairingPrincipalId(record.id), ...(record.client === 'agent' ? { client: 'agent' as const } : {}),
+      ...(record.scopes !== undefined ? { scopes: Object.freeze([...record.scopes]) } : {}) };
   }
 
   /** Every per-pairing token, redacted (name / created / last-seen), never the secret. */
@@ -1611,6 +1630,7 @@ export class PairingTokenManager {
       ...lastSeenField(t.lastSeenAt, this.#pendingLastSeen.get(t.id)),
       ...(t.mintedBy !== undefined ? { mintedBy: t.mintedBy } : {}),
       ...(t.client === 'agent' ? { client: 'agent' as const } : {}),
+      ...(t.scopes !== undefined ? { scopes: Object.freeze([...t.scopes]) } : {}),
     }));
   }
 

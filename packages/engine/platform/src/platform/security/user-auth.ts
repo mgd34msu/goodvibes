@@ -11,6 +11,11 @@ export interface AuthUser {
   username: string;
   passwordHash: string;
   roles?: string[] | undefined;
+  /**
+   * The operator scopes this user holds when it was given a narrower list than
+   * its role's default set (`*` is the whole set). Absent: the role's set.
+   */
+  scopes?: string[] | undefined;
 }
 
 export interface AuthSession {
@@ -149,6 +154,27 @@ interface AuthUserStore {
 export interface AuthUserRecord {
   readonly username: string;
   readonly roles: readonly string[];
+  /** The scope list the user stores, when narrower than its role's default set. */
+  readonly scopes?: readonly string[] | undefined;
+}
+
+/** The public view of a stored user: never the password hash. */
+function userRecord(user: AuthUser): AuthUserRecord {
+  return {
+    username: user.username,
+    roles: Object.freeze([...(user.roles ?? [])]),
+    ...(user.scopes !== undefined ? { scopes: Object.freeze([...user.scopes]) } : {}),
+  };
+}
+
+function normalizeScopeList(scopes: readonly string[]): string[] {
+  const list = [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))];
+  if (list.length === 0) throw new Error('A scope list names at least one operator scope; to give the role\'s full set, clear the list instead.');
+  return list;
+}
+
+function isScopeList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((scope) => typeof scope === 'string' && scope.length > 0);
 }
 
 export interface AuthSessionRecord {
@@ -252,6 +278,7 @@ function readBootstrapUsers(filePath: string, observedRecovery?: () => void, fre
       && typeof user.username === 'string'
       && typeof user.passwordHash === 'string'
       && (user.roles === undefined || Array.isArray(user.roles))
+      && (user.scopes === undefined || isScopeList(user.scopes))
     );
     if (users.length === 0 || users.length !== parsed.users.length) observedRecovery?.();
     return users.length > 0 ? users : null;
@@ -291,7 +318,8 @@ function writeBootstrapCredentialFile(filePath: string, username: string, passwo
 
 function sameUser(a: AuthUser | undefined, b: AuthUser | undefined): boolean {
   if (!a || !b) return a === b;
-  return a.passwordHash === b.passwordHash && JSON.stringify(a.roles ?? []) === JSON.stringify(b.roles ?? []);
+  return a.passwordHash === b.passwordHash && JSON.stringify(a.roles ?? []) === JSON.stringify(b.roles ?? [])
+    && JSON.stringify(a.scopes ?? null) === JSON.stringify(b.scopes ?? null);
 }
 
 /**
@@ -386,7 +414,8 @@ function validateSettingsUserStore(parsed: Partial<AuthUserStore> | null): void 
   for (const user of parsed.users) {
     if (!user || typeof user.username !== 'string' || !user.username || names.has(user.username)
       || typeof user.passwordHash !== 'string' || !user.passwordHash
-      || (user.roles !== undefined && (!Array.isArray(user.roles) || user.roles.some(role => typeof role !== 'string')))) {
+      || (user.roles !== undefined && (!Array.isArray(user.roles) || user.roles.some(role => typeof role !== 'string')))
+      || (user.scopes !== undefined && !isScopeList(user.scopes))) {
       throw new SettingsAuthorityUnavailableError();
     }
     names.add(user.username);
@@ -724,11 +753,7 @@ export class UserAuthManager {
 
   getUser(username: string): AuthUserRecord | null {
     const user = this.users.get(username);
-    if (!user) return null;
-    return {
-      username: user.username,
-      roles: Object.freeze([...(user.roles ?? [])]),
-    };
+    return user ? userRecord(user) : null;
   }
 
   createSession(username: string): AuthSession {
@@ -850,10 +875,7 @@ export class UserAuthManager {
 
   listUsers(): AuthUserRecord[] {
     return [...this.users.values()]
-      .map((user) => ({
-        username: user.username,
-        roles: Object.freeze([...(user.roles ?? [])]),
-      }))
+      .map(userRecord)
       .sort((a, b) => a.username.localeCompare(b.username));
   }
 
@@ -868,7 +890,11 @@ export class UserAuthManager {
       .sort((a, b) => a.username.localeCompare(b.username) || a.expiresAt - b.expiresAt);
   }
 
-  addUser(username: string, password: string, roles: readonly string[] = ['admin']): AuthUserRecord {
+  /**
+   * `scopes`: the operator scopes the user holds, narrower than its role's
+   * default set; absent, the role's set applies.
+   */
+  addUser(username: string, password: string, roles: readonly string[] = ['admin'], scopes?: readonly string[]): AuthUserRecord {
     const normalized = username.trim();
     if (!normalized) throw new Error('Username is required.');
     if (this.users.has(normalized)) throw new Error(`User already exists: ${normalized}`);
@@ -877,9 +903,25 @@ export class UserAuthManager {
       username: normalized,
       passwordHash: hashPassword(password, this.scryptParams),
       roles: [...new Set(roles.filter(Boolean))],
+      ...(scopes !== undefined ? { scopes: normalizeScopeList(scopes) } : {}),
     };
     this.persist(new Map(this.users).set(normalized, user));
-    return { username: user.username, roles: Object.freeze([...(user.roles ?? [])]) };
+    return userRecord(user);
+  }
+
+  /**
+   * Give a user a narrower scope list, or (`null`) return it to its role's
+   * default set. Takes effect on the user's next request: the grant is read
+   * from the user record when a credential is authenticated.
+   */
+  setUserScopes(username: string, scopes: readonly string[] | null): AuthUserRecord {
+    const normalized = username.trim();
+    const existing = this.users.get(normalized);
+    if (!existing) throw new Error(`Unknown local auth user: ${normalized}`);
+    const { scopes: _previous, ...rest } = existing;
+    const next: AuthUser = scopes === null ? rest : { ...rest, scopes: normalizeScopeList(scopes) };
+    this.persist(new Map(this.users).set(normalized, next));
+    return userRecord(next);
   }
 
   deleteUser(username: string): boolean {
@@ -930,7 +972,7 @@ export class UserAuthManager {
   /** A copy of the accounts (with their password hashes) and sessions, for putting them back with {@link restoreState}. */
   snapshotState(): UserAuthState {
     return {
-      users: [...this.users.values()].map(user => ({ ...user, ...(user.roles ? { roles: [...user.roles] } : {}) })),
+      users: [...this.users.values()].map(user => ({ ...user, ...(user.roles ? { roles: [...user.roles] } : {}), ...(user.scopes ? { scopes: [...user.scopes] } : {}) })),
       sessions: [...this.sessions.values()].map(session => ({ ...session })),
       faults: { persist: this.persistFaulted, settings: this.settingsFaulted },
     };
@@ -941,7 +983,7 @@ export class UserAuthManager {
    * file and has already put it back, so this does not write it.
    */
   restoreState(state: UserAuthState): void {
-    this.users = new Map(state.users.map(user => [user.username, { ...user, ...(user.roles ? { roles: [...user.roles] } : {}) }]));
+    this.users = new Map(state.users.map(user => [user.username, { ...user, ...(user.roles ? { roles: [...user.roles] } : {}), ...(user.scopes ? { scopes: [...user.scopes] } : {}) }]));
     this.sessions = new Map(state.sessions.map(session => [session.token, { ...session }]));
     // A write that failed after the snapshot left disk and memory disagreeing; with the file put back they agree again.
     if (state.faults) {

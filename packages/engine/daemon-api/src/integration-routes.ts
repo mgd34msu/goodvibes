@@ -28,7 +28,32 @@ type LocalAuthUserBody = {
   readonly username: string;
   readonly password: string;
   readonly roles: readonly string[];
+  readonly scopes?: readonly string[] | undefined;
 };
+
+type LocalAuthScopesBody = {
+  readonly scopes: readonly string[] | null;
+};
+
+/** At most this many scopes in one stored list. */
+const MAX_LOCAL_AUTH_SCOPES = 256;
+
+/**
+ * A stored scope list: a nonempty array of nonempty scope names, `null` (only
+ * where `allowNull`) for the role's default set, or a 400 naming the field.
+ */
+function readScopeList(value: unknown, allowNull: boolean): readonly string[] | null | Response {
+  if (value === null && allowNull) return null;
+  if (Array.isArray(value) && value.length > 0 && value.length <= MAX_LOCAL_AUTH_SCOPES
+    && value.every((entry) => typeof entry === 'string' && entry.trim().length > 0)) {
+    return (value as string[]).map((entry) => entry.trim());
+  }
+  return jsonErrorResponse({
+    error: `scopes must be an array of 1 to ${MAX_LOCAL_AUTH_SCOPES} operator scopes (such as read:sessions)${allowNull ? ', or null for the role\'s default set' : '; omit it for the role\'s default set'}. Nothing was changed.`,
+    code: 'INVALID_ARGUMENT',
+    field: 'scopes',
+  }, { status: 400 });
+}
 
 type LocalAuthPasswordBody = {
   readonly password: string;
@@ -67,7 +92,16 @@ const integrationBodySchemas = createRouteBodySchemaRegistry({
       }
       roles = entries;
     }
-    return { username, password, roles };
+    if (!Object.hasOwn(body, 'scopes')) return { username, password, roles };
+    const scopes = readScopeList(body.scopes, false);
+    if (scopes instanceof Response) return scopes;
+    return { username, password, roles, ...(scopes ? { scopes } : {}) };
+  }),
+  localAuthScopes: createRouteBodySchema<LocalAuthScopesBody>('POST /api/local-auth/users/:username/scopes', (body) => {
+    // A missing `scopes` is refused like a malformed one: clearing the list is an explicit null.
+    const scopes = readScopeList(Object.hasOwn(body, 'scopes') ? body.scopes : undefined, true);
+    if (scopes instanceof Response) return scopes;
+    return { scopes };
   }),
   localAuthPassword: createRouteBodySchema<LocalAuthPasswordBody>('POST /api/local-auth/users/:username/password', (body) => {
     const password = readOptionalStringField(body, 'password');
@@ -357,7 +391,7 @@ export function createDaemonIntegrationRouteHandlers(
       const input = integrationBodySchemas.localAuthUser.parse(body);
       if (input instanceof Response) return input;
       try {
-        return Response.json({ user: context.userAuth.addUser(input.username, input.password, input.roles) }, { status: 201 });
+        return Response.json({ user: context.userAuth.addUser(input.username, input.password, input.roles, input.scopes) }, { status: 201 });
       } catch (error) {
         return readServiceErrorResponse(error, { fallbackStatus: 400 });
       }
@@ -384,6 +418,19 @@ export function createDaemonIntegrationRouteHandlers(
       try {
         context.userAuth.rotatePassword(username, input.password);
         return Response.json({ rotated: true });
+      } catch (error) {
+        return readServiceErrorResponse(error, { fallbackStatus: 400 });
+      }
+    },
+    postLocalAuthUserScopes: async (username, req) => {
+      const admin = context.requireAdmin(req);
+      if (admin) return admin;
+      const body = await context.parseJsonBody(req);
+      if (body instanceof Response) return body;
+      const input = integrationBodySchemas.localAuthScopes.parse(body);
+      if (input instanceof Response) return input;
+      try {
+        return Response.json({ user: context.userAuth.setUserScopes(username, input.scopes) });
       } catch (error) {
         return readServiceErrorResponse(error, { fallbackStatus: 400 });
       }

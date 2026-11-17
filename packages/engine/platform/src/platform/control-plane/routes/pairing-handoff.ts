@@ -38,6 +38,7 @@ import {
 } from '../../push/index.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { mintedPairingScopes } from './pairing.js';
 
 /** What the hand-off verbs need from the surrounding composition. */
 export interface PairingHandoffDeps {
@@ -101,7 +102,8 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     // token too; a device whose own pairing is gone is refused (403).
     const minted: MintedPairingToken = ((): MintedPairingToken => {
       try {
-        return deps.tokens.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId) });
+        const scopes = mintedPairingScopes(invocation.context, undefined);
+        return deps.tokens.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId), ...(scopes !== undefined ? { scopes } : {}) });
       } catch (error) {
         if (error instanceof PairingLimitReachedError) {
           throw new GatewayVerbError(error.message, error.code, 409);

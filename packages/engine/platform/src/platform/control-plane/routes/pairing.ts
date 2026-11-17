@@ -63,6 +63,31 @@ function readAttemptId(params: Record<string, unknown>): string | undefined {
   return raw;
 }
 
+/**
+ * The scope list a new pairing token stores. A caller grants only what it
+ * holds: a narrowed caller (not admin) mints a token bounded by its own
+ * scopes, inheriting them when it names none, and is refused a scope it does
+ * not hold. An admin caller's token holds the list it names, or full operator
+ * authority when it names none.
+ */
+export function mintedPairingScopes(context: GatewayMethodInvocation['context'], requested: unknown): readonly string[] | undefined {
+  let named: string[] | undefined;
+  if (requested !== undefined) {
+    if (!Array.isArray(requested) || requested.length === 0 || requested.some((scope) => typeof scope !== 'string' || !scope.trim() || scope.trim() === '*')) {
+      throw new GatewayVerbError('scopes must be a nonempty list of operator scopes (such as read:sessions); leave it out for full operator authority.', 'INVALID_ARGUMENT', 400, 'scopes');
+    }
+    named = [...new Set((requested as string[]).map((scope) => scope.trim()))];
+  }
+  if (context.admin !== false || context.scopes === undefined) return named;
+  const held = new Set(context.scopes);
+  if (named === undefined) return [...held];
+  const missing = named.filter((scope) => !held.has(scope));
+  if (missing.length > 0) {
+    throw new GatewayVerbError(`A paired device cannot be given scopes this credential does not hold: ${missing.join(', ')}. Name only scopes you hold, or ask an admin.`, 'MISSING_SCOPE', 403, 'scopes');
+  }
+  return named;
+}
+
 function createMintHandler(service: PairingGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
@@ -72,9 +97,11 @@ function createMintHandler(service: PairingGatewayService): GatewayMethodHandler
     if (params.client !== undefined && params.client !== 'agent') {
       throw new GatewayVerbError('client is "agent" or absent', 'INVALID_ARGUMENT', 400, 'client');
     }
+    const scopes = mintedPairingScopes(invocation.context, params.scopes);
     try {
       return { token: service.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
-        ...(attemptId !== undefined ? { attemptId } : {}), ...(params.client === 'agent' ? { client: 'agent' as const } : {}) }) };
+        ...(attemptId !== undefined ? { attemptId } : {}), ...(params.client === 'agent' ? { client: 'agent' as const } : {}),
+        ...(scopes !== undefined ? { scopes } : {}) }) };
     } catch (error) {
       rethrowAsVerbError(error);
     }
@@ -93,10 +120,12 @@ function createMigrateHandler(service: PairingGatewayService): GatewayMethodHand
       // strand a working device on a token that is about to be revoked, so the
       // migration mint is exempt from the cap. A repeated attempt id (the client
       // lost the reply) re-issues the offer that attempt made instead of adding one.
+      const scopes = mintedPairingScopes(invocation.context, undefined);
       return { token: service.mintForMigration({
         name,
         mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
         ...(attemptId !== undefined ? { attemptId } : {}),
+        ...(scopes !== undefined ? { scopes } : {}),
       }) };
     } catch (error) {
       rethrowAsVerbError(error);

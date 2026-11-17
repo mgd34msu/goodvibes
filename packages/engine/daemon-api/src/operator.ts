@@ -380,6 +380,8 @@ async function dispatchOperatorRoutesInner(
   if (userMatch && method === 'DELETE') return handlers.deleteLocalAuthUser(safeDecodeURIComponent(userMatch[1]!), req);
   const passwordMatch = pathname.match(/^\/api\/local-auth\/users\/([^/]+)\/password$/);
   if (passwordMatch && method === 'POST') return handlers.postLocalAuthPassword(safeDecodeURIComponent(passwordMatch[1]!), req);
+  const scopesMatch = pathname.match(/^\/api\/local-auth\/users\/([^/]+)\/scopes$/);
+  if (scopesMatch && method === 'POST') return handlers.postLocalAuthUserScopes(safeDecodeURIComponent(scopesMatch[1]!), req);
   const sessionMatch = pathname.match(/^\/api\/local-auth\/sessions\/([^/]+)$/);
   if (sessionMatch && method === 'DELETE') return handlers.deleteLocalAuthSession(safeDecodeURIComponent(sessionMatch[1]!), req);
   if (pathname === '/api/local-auth/bootstrap-file' && method === 'DELETE') return handlers.deleteBootstrapFile(req);

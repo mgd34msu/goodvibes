@@ -211,6 +211,7 @@ export interface DaemonLocalAuthAdminRouteHandlers {
   postLocalAuthUser(req: Request): MaybeResponse;
   deleteLocalAuthUser(username: string, req: Request): MaybeResponse;
   postLocalAuthPassword(username: string, req: Request): MaybeResponse;
+  postLocalAuthUserScopes(username: string, req: Request): MaybeResponse;
   deleteLocalAuthSession(sessionId: string, req: Request): MaybeResponse;
   deleteBootstrapFile(req: Request): MaybeResponse;
 }

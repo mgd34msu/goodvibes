@@ -255,6 +255,8 @@ export function PairingTokensSettings() {
                 meta={[
                   whenLabel(token.createdAt) && `Created ${whenLabel(token.createdAt)}`,
                   whenLabel(token.lastSeenAt) ? `last seen ${whenLabel(token.lastSeenAt)}` : 'never seen',
+                  // What the device may do: its own scope list, or everything.
+                  token.scopes && token.scopes.length > 0 ? `limited to ${token.scopes.join(', ')}` : 'full access',
                 ].filter(Boolean).join(' · ')}
                 trailing={(
                   <>

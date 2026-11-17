@@ -92,7 +92,7 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'local_auth.users.create',
     title: 'Create Local Auth User',
-    description: 'Create a local auth user.',
+    description: 'Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats); omitted, the user holds its role\'s default set. A narrowed user is not an admin, whatever its roles.',
     category: 'auth',
     scopes: ['write:auth'],
     access: 'admin',
@@ -100,7 +100,23 @@ export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescrip
     inputSchema: bodyEnvelopeSchema({
       username: STRING_SCHEMA,
       password: STRING_SCHEMA,
+      roles: arraySchema(STRING_SCHEMA),
+      scopes: arraySchema(STRING_SCHEMA),
     }, ['username', 'password']),
+    outputSchema: entityOutputSchema('user', LOCAL_AUTH_USER_SCHEMA),
+  }),
+  methodDescriptor({
+    id: 'local_auth.users.scopes.set',
+    title: 'Set Local Auth User Scopes',
+    description: 'Give a local auth user a narrower list of operator scopes, or return it to its role\'s default set with scopes: null. Takes effect on the user\'s next request. An unknown user is 400; a scopes value that is neither a nonempty list nor null is 400 INVALID_ARGUMENT naming scopes.',
+    category: 'auth',
+    scopes: ['write:auth'],
+    access: 'admin',
+    http: { method: 'POST', path: '/api/local-auth/users/{username}/scopes' },
+    inputSchema: bodyEnvelopeSchema({
+      username: STRING_SCHEMA,
+      scopes: { anyOf: [arraySchema(STRING_SCHEMA), { type: 'null' }] },
+    }, ['username', 'scopes']),
     outputSchema: entityOutputSchema('user', LOCAL_AUTH_USER_SCHEMA),
   }),
   methodDescriptor({

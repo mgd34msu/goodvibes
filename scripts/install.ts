@@ -70,7 +70,7 @@ export function wrapper(options: Options, name: typeof COMMANDS[number], arch = 
   const pinRelease = `goodvibes_release=$(CDPATH= cd ${quote(current)} && pwd -P)\n`;
   if (name === 'goodvibes-uninstall') return `${header}${pinRelease}exec "$goodvibes_release/runtime/bun" "$goodvibes_release/uninstall.js" --prefix ${quote(options.prefix)} "$@"\n`;
   const product = name === 'goodvibes' ? 'tui' : name === 'goodvibes-agent' ? 'agent' : 'daemon';
-  return `${header}if [ -f ${quote(join(options.dataDir, 'environment'))} ]; then\n  set -a\n  . ${quote(join(options.dataDir, 'environment'))}\n  set +a\nfi\n${pinRelease}export GOODVIBES_HOME=${quote(options.dataDir)}\nexport GOODVIBES_DAEMON_HOME=${quote(join(options.dataDir, '.goodvibes/daemon'))}\nexport TYPESAFE_DEFAULT_MODEL=jev-latest\nexport GOODVIBES_SUITE_RUNTIME="$goodvibes_release/runtime"\nexec "$goodvibes_release/${product}/${name}-linux-${arch}" "$@"\n`;
+  return `${header}if [ -f ${quote(join(options.dataDir, 'environment'))} ]; then\n  set -a\n  . ${quote(join(options.dataDir, 'environment'))}\n  set +a\nfi\n${pinRelease}export GOODVIBES_HOME=${quote(options.dataDir)}\nexport GOODVIBES_DAEMON_HOME=${quote(join(options.dataDir, '.goodvibes/daemon'))}\nexport GOODVIBES_SUITE_RUNTIME="$goodvibes_release/runtime"\nexec "$goodvibes_release/${product}/${name}-linux-${arch}" "$@"\n`;
 }
 export async function assertPortFree(port: number): Promise<void> {
   await new Promise<void>((yes, no) => {
@@ -186,6 +186,10 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
     if (old) recoverInterruptedUpdate(old);
     else discardAbandonedFirstInstall(options.prefix);
     preflight(options, old, execute);
+    // A port held by anything but this installation's own service is refused
+    // before the build, not after it; the installed service's own port is
+    // checked again once that service has stopped.
+    if (options.service && (!old?.service || old.port !== options.port)) await assertPortFree(options.port);
     const commit = await (hooks.build ?? build)(ROOT, execute);
     // Check again after a potentially long build, before touching live files.
     preflight(options, old, execute);
@@ -300,7 +304,6 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       }
       const daemon = join(options.prefix, 'commands/goodvibes-daemon');
       if (options.decisionPolicy !== undefined) execute(daemon, ['config', 'set', 'judgment.policy', options.decisionPolicy], { cwd: options.dataDir, capture: true });
-      execute(daemon, ['config', 'set', 'judgment.model', 'jev-latest'], { cwd: options.dataDir, capture: true });
       execute(daemon, ['config', 'set', 'controlPlane.port', String(options.port)], { cwd: options.dataDir, capture: true });
       execute(daemon, ['webui', 'enable', '--loopback', '--bundle-dir', join(options.prefix, 'current/webui')], { cwd: options.dataDir, capture: true });
       if (!hooks.stage) {

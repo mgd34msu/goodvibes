@@ -1,6 +1,7 @@
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import type { HostedSessionFeedState } from '../views/hosted-session-feed.ts';
 import { hostedTranscriptLines, type HostedTranscriptLine } from './agents-modal-text.ts';
+import { activeTokens } from '../renderer/theme.ts';
 
 interface Anchor { readonly row: number; readonly offset: number; }
 
@@ -10,6 +11,8 @@ export class HostedTranscriptViewport {
   private sessionId: string | null = null;
   private anchor: Anchor | null = null;
   private lines: readonly HostedTranscriptLine[] = [];
+  /** What `lines` was wrapped from: the feed replaces its rows array on every change. */
+  private wrappedFrom: { rows: HostedSessionFeedState['rows']; width: number; tokens: object } | null = null;
   private droppedRows = 0;
   private height = 0;
   private start = 0;
@@ -22,7 +25,7 @@ export class HostedTranscriptViewport {
 
   reset(): void {
     this.generation = undefined; this.sessionId = null;
-    this.anchor = null; this.lines = []; this.droppedRows = 0;
+    this.anchor = null; this.lines = []; this.wrappedFrom = null; this.droppedRows = 0;
     this.height = 0; this.start = 0; this.follow = true;
   }
 
@@ -33,7 +36,12 @@ export class HostedTranscriptViewport {
 
   render(state: HostedSessionFeedState, generation: number, width: number, height: number): readonly Line[] {
     this.synchronize(state, generation);
-    this.lines = hostedTranscriptLines(state.rows, width);
+    const tokens = activeTokens();
+    const from = this.wrappedFrom;
+    if (!from || from.rows !== state.rows || from.width !== width || from.tokens !== tokens) {
+      this.lines = hostedTranscriptLines(state.rows, width);
+      this.wrappedFrom = { rows: state.rows, width, tokens };
+    }
     this.droppedRows = state.droppedRows; this.height = Math.max(0, height);
     const maxStart = Math.max(0, this.lines.length - this.height);
     let start = maxStart;

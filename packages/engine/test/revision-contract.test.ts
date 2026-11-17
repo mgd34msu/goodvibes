@@ -51,6 +51,19 @@ function watch(source: RevisionSource): { moved(): boolean } {
   };
 }
 
+/**
+ * A store that watches its directory takes in another process's write when the
+ * watch reports it: turn the event loop until the revision has moved, bounded
+ * in steps, never in milliseconds.
+ */
+async function movesOnceHeard(revision: { moved(): boolean }, what: string): Promise<void> {
+  for (let step = 0; step < 200_000; step += 1) {
+    if (revision.moved()) return;
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+  }
+  throw new Error(`The revision never moved for: ${what}`);
+}
+
 describe('revision token', () => {
   test('is current until any source moves, and the refusal names the source that moved', () => {
     let a = 0, b = 0;
@@ -124,7 +137,7 @@ describe('owners move their revision on every change and not on reads', () => {
     await other.awaitReady();
     const elsewhere = ruleFor('git diff');
     await other.add(elsewhere);
-    expect(revision.moved()).toBe(true);
+    await movesOnceHeard(revision, 'a rule another store added');
     expect(store.rememberedRules().map(rule => rule.id)).toContain(elsewhere.rule.id);
     expect(revision.moved()).toBe(false);
 

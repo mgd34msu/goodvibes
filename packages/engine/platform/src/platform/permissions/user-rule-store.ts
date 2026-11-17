@@ -24,7 +24,7 @@
  */
 
 import { readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
-import { basename, dirname, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import type { PolicyRule } from '../runtime/permissions/types.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
@@ -239,6 +239,11 @@ export class UserPermissionRuleStore {
    * directory, so a permission check does not `stat` the file each time.
    * Where the directory cannot be watched every read stats the file instead.
    * The watch never keeps the process alive.
+   *
+   * Any event in the directory marks the file for one stat: a quick atomic
+   * write (temporary file, then rename) is reported as one event naming the
+   * temporary file, so an event filtered to the rules file's own name would
+   * miss another process's change, a revoked rule included, for good.
    */
   #diskWatcher: FSWatcher | null | undefined;
   #diskDirty = true;
@@ -246,10 +251,9 @@ export class UserPermissionRuleStore {
     if (this.#diskWatcher !== undefined) return;
     this.#diskWatcher = null;
     if (this.store.lockPath === null) return;
-    const name = basename(this.filePath);
     try {
-      const watcher = watch(dirname(this.filePath), { persistent: false }, (_event, changed) => {
-        if (!changed || String(changed) === name) this.#diskDirty = true;
+      const watcher = watch(dirname(this.filePath), { persistent: false }, () => {
+        this.#diskDirty = true;
       });
       watcher.on('error', () => {
         try { watcher.close(); } catch { /* already closed */ }

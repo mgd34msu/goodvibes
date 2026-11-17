@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import type { TerminalSlashCommand } from './command-registry.js';
-import { withOwnerConfirmation, type CommandConfirmation, type ConfirmationHost } from './command-confirmation.js';
+import { commandRefusal, withOwnerConfirmation, type CommandConfirmation, type ConfirmationHost } from './command-confirmation.js';
 
 type PluginTrustTierName = 'untrusted' | 'limited' | 'trusted';
 
@@ -44,7 +44,8 @@ async function restartLine(restarting: Promise<{ ok: boolean; error?: string }> 
 
 /**
  * Runs `/plugin trust|trust-key|verify|capabilities`. Returns false for any
- * other subcommand, which the caller handles.
+ * other subcommand, which the caller handles. A line that did not do what it
+ * asked (usage, unknown plugin, unsaved tier) throws its refusal.
  */
 export async function runPluginTrustSubcommand(
   manager: PluginTrustControls,
@@ -55,13 +56,9 @@ export async function runPluginTrustSubcommand(
   const name = args[1];
   if (sub === 'trust') {
     const rawTier = args[2];
-    if (!name || !rawTier) {
-      print('Usage: /plugin trust <name> <untrusted|limited|trusted> [note]');
-      return true;
-    }
+    if (!name || !rawTier) throw commandRefusal('Usage: /plugin trust <name> <untrusted|limited|trusted> [note]');
     if (rawTier !== 'untrusted' && rawTier !== 'limited' && rawTier !== 'trusted') {
-      print(`Error: Invalid trust tier '${rawTier}'. Must be: untrusted, limited, or trusted.`);
-      return true;
+      throw commandRefusal(`Invalid trust tier '${rawTier}'.`, 'Use untrusted, limited or trusted.');
     }
     const tier: PluginTrustTierName = rawTier;
     // `--override` was the old retyped answer; the confirmation now asks once when the signature fails.
@@ -77,24 +74,19 @@ export async function runPluginTrustSubcommand(
       note = `owner override after failed signature check (${signed.error ?? 'unknown reason'})${userNote ? `; ${userNote}` : ''}`;
     }
     const result = manager.trust(name, tier, note);
-    print(result.ok
-      ? `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(result.restarting)}`
-      : `Error: ${result.error ?? 'the trust tier was not saved'}`);
+    if (!result.ok) throw commandRefusal(result.error ?? `the trust tier of '${name}' was not saved`, 'Nothing changed; fix the reason and run the line again.');
+    print(`Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(result.restarting)}`);
     return true;
   }
   if (sub === 'trust-key') {
     const keyPath = args[2];
-    if (!name || !keyPath) {
-      print('Usage: /plugin trust-key <name> <publisher-public-key.pem>');
-      return true;
-    }
+    if (!name || !keyPath) throw commandRefusal('Usage: /plugin trust-key <name> <publisher-public-key.pem>');
     let pem: string;
     try { pem = readFileSync(resolve(keyPath), 'utf-8'); } catch (error) {
-      print(`Error: could not read ${keyPath}: ${error instanceof Error ? error.message : String(error)}. Give the path of the publisher's Ed25519 public key file.`);
-      return true;
+      throw commandRefusal(`could not read ${keyPath}: ${error instanceof Error ? error.message : String(error)}`, "Give the path of the publisher's Ed25519 public key file.");
     }
     const saved = manager.setPublisherKey(name, pem);
-    if (!saved.ok) { print(`Error: ${saved.error ?? 'the key was not saved'}`); return true; }
+    if (!saved.ok) throw commandRefusal(saved.error ?? `the publisher key for '${name}' was not saved`);
     const check = manager.verify(name);
     print(`Publisher key saved for '${name}'. ${check.valid
       ? `Its manifest signature verifies with it; /plugin trust ${name} trusted now records the signed grant.`
@@ -102,24 +94,18 @@ export async function runPluginTrustSubcommand(
     return true;
   }
   if (sub === 'verify') {
-    if (!name) { print('Usage: /plugin verify <name>'); return true; }
+    if (!name) throw commandRefusal('Usage: /plugin verify <name>');
     const result = manager.verify(name);
-    if (!result.ok && result.reason?.includes('not found')) {
-      print(`Error: ${result.reason}`);
-      return true;
-    }
+    if (!result.ok && result.reason?.includes('not found')) throw commandRefusal(result.reason ?? `Plugin '${name}' not found.`, '/plugin list shows the installed plugins.');
     print(result.valid
       ? `Plugin '${name}' manifest signature is VALID.${result.fingerprint ? `\nFingerprint: ${result.fingerprint}` : ''}`
       : `Plugin '${name}' manifest signature is INVALID.\nReason: ${result.reason ?? 'Unknown'}`);
     return true;
   }
   if (sub === 'capabilities') {
-    if (!name) { print('Usage: /plugin capabilities <name>'); return true; }
+    if (!name) throw commandRefusal('Usage: /plugin capabilities <name>');
     const info = manager.capabilities(name);
-    if (!info) {
-      print(`Error: Plugin '${name}' not found.`);
-      return true;
-    }
+    if (!info) throw commandRefusal(`Plugin '${name}' not found.`, '/plugin list shows the installed plugins.');
     const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${PLUGIN_TIER_EFFECT[info.tier]})`, '', `Declared capabilities (${info.requested.length}):`];
     if (info.requested.length === 0) {
       lines.push(info.tier === 'untrusted'
@@ -164,10 +150,7 @@ export function createPluginTrustCommand<Context extends ConfirmationHost>(
     confirm: (args: readonly string[], context: Context): CommandConfirmation | undefined => pluginTrustConfirmation(manager(context), args),
     async handler(args: string[], context: Context): Promise<void> {
       const plugins = manager(context);
-      if (!plugins) {
-        context.print('Plugin manager is not available in this runtime.');
-        return;
-      }
+      if (!plugins) throw commandRefusal('Plugin manager is not available in this runtime.');
       const sub = args[0] ?? 'list';
       if (sub === 'list') {
         const listed = plugins.list();
@@ -184,7 +167,7 @@ export function createPluginTrustCommand<Context extends ConfirmationHost>(
         return;
       }
       if (await runPluginTrustSubcommand(plugins, args, (text) => context.print(text))) return;
-      context.print(`Unknown /plugin subcommand: ${sub}\nUsage: /plugin ${command.usage}`);
+      throw commandRefusal(`Unknown /plugin subcommand: ${sub}`, `Usage: /plugin ${command.usage}`);
     },
   };
   return withOwnerConfirmation<Context, typeof command>(command);

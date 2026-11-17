@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { discoverPlugins, PluginManager } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { validateManifestV2 } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { formatRefusal, RefusalError } from '@goodvibes-jev/engine/errors';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes-jev/engine/terminal-shell';
 import { handlePluginBundlesCommand } from './plugin-bundles-command.ts';
 import { pluginTrustConfirmation, runPluginTrustSubcommand, type PluginTrustControls } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
@@ -211,10 +212,14 @@ async function handlePluginTrustCli(runtime: CliCommandRuntime, args: readonly s
     return { output: `${question.title.replace(/\?$/, '')}: not done. ${question.detail}\nRun the same line with --yes to confirm it.`, exitCode: 2 };
   }
   const lines: string[] = [];
-  const handled = await runPluginTrustSubcommand(controls, args, (text) => lines.push(text));
-  if (!handled) return { output: 'Usage: goodvibes plugin trust <name> <untrusted|limited|trusted> [note] | verify <name> | capabilities <name>', exitCode: 2 };
-  const failed = lines.some((line) => line.startsWith('Error:') || line.startsWith('Usage:'));
-  return { output: lines.join('\n'), exitCode: failed ? 1 : 0 };
+  try {
+    const handled = await runPluginTrustSubcommand(controls, args, (text) => lines.push(text));
+    if (!handled) return { output: 'Usage: goodvibes plugin trust <name> <untrusted|limited|trusted> [note] | verify <name> | capabilities <name>', exitCode: 2 };
+  } catch (error) {
+    if (!(error instanceof RefusalError)) throw error;
+    return { output: formatRefusal(error.refusal).split('/plugin ').join('goodvibes plugin '), exitCode: error.refusal.code === 'USAGE' ? 2 : 1 };
+  }
+  return { output: lines.join('\n'), exitCode: 0 };
 }
 
 export async function handlePluginCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {

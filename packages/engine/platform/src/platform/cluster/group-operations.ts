@@ -21,6 +21,7 @@ import {
 } from './group-crypto.js';
 import type { ClusterGroupRuntime, DiscoveredGroup, SurfaceHolding } from './group-runtime.js';
 import type { ConfigReplicationStatus } from './config-replication.js';
+import type { ClusterElectionTiming } from './types.js';
 import {
   admitMember,
   createGroupStateDocument,
@@ -140,6 +141,12 @@ export interface GroupStatusReport {
   readonly rotationHours: number;
   /** Replicated settings: counts and provenance only, never a value. */
   readonly replication: ConfigReplicationStatus | null;
+  /**
+   * The election timing in force here: heartbeat, master timeout and boot
+   * probe, with every setting a rule raised or lowered from its stored value.
+   * Null when the election layer has not supplied it.
+   */
+  readonly electionTiming?: ClusterElectionTiming | null | undefined;
   readonly wire: {
     readonly sent: number;
     readonly received: number;
@@ -200,6 +207,7 @@ export function groupStatus(context: GroupOperationsContext): GroupOperationResu
       removedNodeCount: state?.tombstones.length ?? 0,
       rotationHours: context.settings.keyRotationHours,
       replication: runtime.replicationStatus(),
+      electionTiming: runtime.electionTiming(),
       wire: runtime.wireCounters ? { ...runtime.wireCounters } : null,
       advice,
     },

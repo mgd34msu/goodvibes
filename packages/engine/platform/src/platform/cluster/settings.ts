@@ -10,7 +10,7 @@
  * returned are the ones in effect; timing.ts derives from them unchanged.
  */
 import { clusterConfigDefaults, type ClusterConfig } from '../config/schema-domain-cluster.js';
-import type { ClusterSettings } from './types.js';
+import type { ClusterElectionTiming, ClusterSettingAdjustment, ClusterSettings } from './types.js';
 
 /**
  * Administratively-scoped multicast group (239.0.0.0/8, RFC 2365), never
@@ -31,17 +31,47 @@ export function resolveClusterSettings(config?: Readonly<Partial<ClusterConfig>>
   // A master timeout below two heartbeats would declare a healthy master
   // dead between its own beats.
   const masterTimeoutSeconds = Math.max(source.masterTimeoutSeconds, source.heartbeatSeconds * 2);
+  const bootProbeSeconds = Math.min(source.bootProbeSeconds, masterTimeoutSeconds);
+  // What config get shows is the stored value; these say what runs instead, and why.
+  const adjustments: ClusterSettingAdjustment[] = [];
+  if (masterTimeoutSeconds !== source.masterTimeoutSeconds) {
+    adjustments.push({
+      key: 'cluster.masterTimeoutSeconds',
+      configured: source.masterTimeoutSeconds,
+      effective: masterTimeoutSeconds,
+      reason: `raised to two heartbeats (cluster.heartbeatSeconds is ${source.heartbeatSeconds}), so a healthy holder is not declared gone between its own beats`,
+    });
+  }
+  if (bootProbeSeconds !== source.bootProbeSeconds) {
+    adjustments.push({
+      key: 'cluster.bootProbeSeconds',
+      configured: source.bootProbeSeconds,
+      effective: bootProbeSeconds,
+      reason: `lowered to the master timeout (${masterTimeoutSeconds}s), the longest a booting node waits for a holder to answer`,
+    });
+  }
   return {
     enabled: source.enabled,
     heartbeatSeconds: source.heartbeatSeconds,
     masterTimeoutSeconds,
-    bootProbeSeconds: Math.min(source.bootProbeSeconds, masterTimeoutSeconds),
+    bootProbeSeconds,
     port: source.port,
     // The schema has no rule for these two: a blank group and blank peers mean
     // "not set", not an address.
     multicastGroup: source.multicastGroup.trim() || DEFAULT_CLUSTER_MULTICAST_GROUP,
     secret: source.secret,
     peers: source.peers.filter((entry) => typeof entry === 'string' && entry.trim().length > 0),
+    adjustments,
+  };
+}
+
+/** The election timing these settings put in force, for status. */
+export function clusterElectionTiming(settings: ClusterSettings): ClusterElectionTiming {
+  return {
+    heartbeatSeconds: settings.heartbeatSeconds,
+    masterTimeoutSeconds: settings.masterTimeoutSeconds,
+    bootProbeSeconds: settings.bootProbeSeconds,
+    adjustments: settings.adjustments ?? [],
   };
 }
 

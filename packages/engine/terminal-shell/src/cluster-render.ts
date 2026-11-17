@@ -126,6 +126,15 @@ export function renderStatus(report: GroupStatusReport, now: number): string[] {
       lines.push(`                 ${replication.localChangesHeld} change(s) made here are held until this machine has the group's settings, then sent`);
     }
   }
+  if (report.electionTiming) {
+    const timing = report.electionTiming;
+    lines.push(
+      '',
+      `election:  heartbeat ${timing.heartbeatSeconds}s, master timeout ${timing.masterTimeoutSeconds}s, boot probe ${timing.bootProbeSeconds}s`,
+      // The stored value is what config get shows; say which one runs instead.
+      ...timing.adjustments.map((adjustment) => `           ${adjustment.key} is set to ${adjustment.configured}s but runs as ${adjustment.effective}s: ${adjustment.reason}`),
+    );
+  }
   if (report.wire) {
     lines.push(
       `traffic:   ${report.wire.sent} sent, ${report.wire.received} received; dropped `

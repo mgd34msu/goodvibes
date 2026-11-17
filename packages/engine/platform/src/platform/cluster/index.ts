@@ -245,12 +245,15 @@ export {
   DEFAULT_CLUSTER_MULTICAST_GROUP,
   DEFAULT_CLUSTER_PORT,
   DEFAULT_CLUSTER_SETTINGS,
+  clusterElectionTiming,
   resolveClusterSettings,
 } from './settings.js';
 export { deriveClusterTiming, type ClusterTiming } from './timing.js';
 export { CLUSTER_PROTOCOL_VERSION } from './types.js';
 export type {
   ClusterClock,
+  ClusterElectionTiming,
+  ClusterSettingAdjustment,
   ClusterConsumerGate,
   ClusterConsumerStartContext,
   ClusterCoordination,

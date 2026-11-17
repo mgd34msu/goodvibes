@@ -18,6 +18,7 @@
  */
 import {
   ClusterGroupRuntime,
+  clusterElectionTiming,
   createClusterGroupVerbs,
   createSystemClusterClock,
   normalizeDisplayName,
@@ -143,6 +144,8 @@ export function createClusterGroupComposition(options: {
     clock,
     logger,
     ...(options.surfaceHoldings ? { surfaceHoldings: options.surfaceHoldings } : {}),
+    // The settings the election runs with, read once here as the coordinator reads them.
+    electionTiming: () => clusterElectionTiming(settings),
     // Only daemon-owned, group-scoped keys ever reach this; the platform's
     // replication policy decides which, and refuses anything machine-specific.
     config: {

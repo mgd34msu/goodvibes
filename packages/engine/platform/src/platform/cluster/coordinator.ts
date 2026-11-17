@@ -24,6 +24,7 @@ import { ClusterConsumerStopError, OwnedClusterDrainError } from './owned-drain-
 import { ClusterElection } from './election-node.js';
 import { ClusterSurfaceRegistry } from './surface-registry.js';
 import { createSystemClusterClock } from './clock.js';
+import { clusterElectionTiming } from './settings.js';
 import { resolveNodeIdentity } from './identity.js';
 import { surfaceIdFor, surfaceLabel, type ClusterSurfaceKey } from './surface-id.js';
 import { UdpClusterTransport } from './udp-transport.js';
@@ -314,6 +315,10 @@ export class ClusterCoordinator {
     }
     this.started = true;
     this.ungatedFallback = false;
+    // Said once per start: config get shows the stored value, the node runs this one.
+    for (const adjustment of this.options.settings.adjustments ?? []) {
+      this.options.logger.warn(`cluster: ${adjustment.key} is set to ${adjustment.configured}s but runs as ${adjustment.effective}s`, { reason: adjustment.reason });
+    }
     for (const prepare of [...this.prepares]) {
       if (!this.started) return;
       try {
@@ -451,6 +456,7 @@ export class ClusterCoordinator {
       surfaces,
       peers: [],
       transport: { mode: 'in-memory', group: '', port: 0, peers: [] },
+      electionTiming: clusterElectionTiming(this.options.settings),
     };
   }
 

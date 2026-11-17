@@ -95,6 +95,10 @@ interface ControlStatusPayload {
     readonly consumersRunning?: boolean;
     /** The daemon BUILD's version, which is not always `version` above. */
     readonly version?: string;
+    /** Timing settings the node runs at a different value than stored. */
+    readonly electionTiming?: {
+      readonly adjustments?: readonly { readonly key?: string; readonly configured?: number; readonly effective?: number }[];
+    };
   };
 }
 
@@ -323,6 +327,9 @@ function clusterNotes(identity: ControlStatusPayload): string[] {
   if (identity.cluster?.coordination === 'ungated-fallback') {
     notes.push('            another node on this network may be reading the same surfaces, so a message '
       + 'may be answered twice; check that the cluster UDP port is free, then restart the daemon');
+  }
+  for (const adjustment of identity.cluster?.electionTiming?.adjustments ?? []) {
+    notes.push(`            ${adjustment.key ?? 'a cluster timing setting'} is set to ${adjustment.configured ?? '?'}s but runs as ${adjustment.effective ?? '?'}s (see \`goodvibes-daemon cluster status\`)`);
   }
   const fenced = (identity.cluster?.surfaces ?? []).filter((surface) => surface.role === 'fenced').length;
   if (fenced > 0) {

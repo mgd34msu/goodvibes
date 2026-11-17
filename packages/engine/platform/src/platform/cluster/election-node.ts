@@ -26,6 +26,7 @@ import { SurfaceElection, type SurfaceElectionHost } from './election.js';
 import { ClusterHoldingsLedger } from './holdings.js';
 import { decodeMessage, decodeMessageFields, encodeMessage } from './protocol.js';
 import { deriveClusterTiming, type ClusterTiming } from './timing.js';
+import { clusterElectionTiming } from './settings.js';
 import { CLUSTER_PROTOCOL_VERSION } from './types.js';
 import type { ClusterSurfaceRegistry } from './surface-registry.js';
 import type {
@@ -244,6 +245,7 @@ export class ClusterElection {
         holds: this.ledger.surfacesHeldBy(peer.nodeId, mono),
       })),
       transport: this.options.transport.describe(),
+      electionTiming: clusterElectionTiming(this.options.settings),
     };
   }
 

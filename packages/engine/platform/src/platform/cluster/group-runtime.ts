@@ -86,7 +86,7 @@ import {
 } from './config-replica.js';
 import { isReplicatedConfigPath } from './config-replication-policy.js';
 import { encodeEnvelope, isWireSurfaceId, type ClusterEnvelope, type ClusterKeyring } from './protocol-envelope.js';
-import type { ClusterClock, ClusterLogger, ClusterSurfaceHolding, ClusterTransport } from './types.js';
+import type { ClusterClock, ClusterElectionTiming, ClusterLogger, ClusterSurfaceHolding, ClusterTransport } from './types.js';
 
 const REKEY_SEAL_CONTEXT = 'goodvibes-cluster-rekey-v1';
 
@@ -143,6 +143,12 @@ export interface ClusterGroupRuntimeOptions {
    * than reporting an empty list as though the node held nothing.
    */
   readonly surfaceHoldings?: (() => readonly SurfaceHolding[]) | undefined;
+  /**
+   * The election timing in force on this machine, from the settings the
+   * election runs with. Absent means `cluster status` reports it as not
+   * available rather than showing the stored values as though they ran.
+   */
+  readonly electionTiming?: (() => ClusterElectionTiming) | undefined;
   /** The config this machine reads and writes. Absent disables replication. */
   readonly config?: ReplicatedConfigStore | undefined;
   /**
@@ -436,6 +442,10 @@ export class ClusterGroupRuntime {
 
   groupsOnTheNetwork(): readonly DiscoveredGroup[] {
     return [...this.discovered.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  }
+
+  electionTiming(): ClusterElectionTiming | null {
+    return this.options.electionTiming?.() ?? null;
   }
 
   surfaceHoldings(): readonly SurfaceHolding[] | null {

@@ -189,6 +189,24 @@ export interface ClusterSettings {
   readonly multicastGroup: string;
   readonly secret: string;
   readonly peers: readonly string[];
+  /** Settings this node runs with a different value than the configured one; empty when none was adjusted. */
+  readonly adjustments?: readonly ClusterSettingAdjustment[] | undefined;
+}
+
+/** A timing setting the node runs with a different value than configured, because of a rule between settings. */
+export interface ClusterSettingAdjustment {
+  readonly key: 'cluster.masterTimeoutSeconds' | 'cluster.bootProbeSeconds';
+  readonly configured: number;
+  readonly effective: number;
+  readonly reason: string;
+}
+
+/** The election timing in force on this node, with any setting that runs at a different value than configured. */
+export interface ClusterElectionTiming {
+  readonly heartbeatSeconds: number;
+  readonly masterTimeoutSeconds: number;
+  readonly bootProbeSeconds: number;
+  readonly adjustments: readonly ClusterSettingAdjustment[];
 }
 
 /** A peer this node has heard from. */
@@ -256,6 +274,8 @@ export interface ClusterStatus {
   readonly surfaces: readonly ClusterSurfaceStatus[];
   readonly peers: readonly ClusterPeerStatus[];
   readonly transport: ClusterTransportDescription;
+  /** The election timing in force (what config get may not show when a rule raised or lowered a value). */
+  readonly electionTiming?: ClusterElectionTiming | undefined;
 }
 
 /** Minimal logging surface, injected so tests stay silent. */

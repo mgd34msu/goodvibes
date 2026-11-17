@@ -152,7 +152,7 @@ export function readOccasions(
 }
 
 /** Read every plan, in document order. */
-export function readPlans(source: OccasionProfileSource): PlanReadResult {
+export function readPlans(source: Pick<OccasionProfileSource, 'plans'>): PlanReadResult {
   const plans: Plan[] = [];
   const unparsed: UnparsedPlanLine[] = [];
   for (const line of source.plans()) {

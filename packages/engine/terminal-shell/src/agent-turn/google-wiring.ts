@@ -1,26 +1,25 @@
 /**
- * Wiring the `google` tool to this process's stores.
+ * Wiring the `google` tool to a process's stores: the Agent process's own, or,
+ * in a session the daemon hosts for the Agent, the daemon's.
  *
- * Split out of `bootstrap-core.ts` because it is the one tool whose options
- * carry a genuine argument rather than a value: WHY the write ports are here
- * at all, and why they are unscoped. That reasoning is several paragraphs and
- * it belongs next to the wiring, not buried in a file that registers thirty
- * other things.
+ * Split out because it is the one tool whose options carry a genuine argument
+ * rather than a value: WHY the write ports are here at all, and why they are
+ * unscoped. That reasoning belongs next to the wiring.
  *
- * Mail runs in this process on the native connector. Calendar actions run on
- * the adopted daemon's `calendar.events.*` methods when `daemon.enabled` is on
- * and a connected-host credential is present, so both terminal apps reach the
- * same calendar backend; otherwise they run here too.
+ * Mail runs on the native connector of the process the turn runs in. Calendar
+ * actions run on the daemon's `calendar.events.*` methods when one is
+ * reachable (`calendarHost`: the Agent's adopted daemon, or the daemon's own
+ * catalog in a hosted turn), so every surface reaches the same calendar
+ * backend; otherwise they run on the connector too.
  */
 
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { registerAgentGoogleTool } from '../tools/agent-google-tool.ts';
+import { registerAgentGoogleTool, type GoogleCalendarHost } from './google-tool.js';
 import { startLoopbackListener } from '@goodvibes-jev/engine/platform/platform/google/node';
-import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '../trust/outward-approvals.ts';
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { retainGoogleConnectionOwners } from '../tools/agent-google-admission.ts';
-import { createConnectedHost, resolveConnectedHost, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { OwnerApprovalStore } from '@goodvibes-jev/engine/platform/platform/security';
+import { retainGoogleConnectionOwners } from './google-admission.js';
 
 /** The slice of the runtime this wiring needs. Nothing wider. */
 export interface GoogleToolWiringDeps {
@@ -28,7 +27,15 @@ export interface GoogleToolWiringDeps {
   readonly secretsManager: SecretsManager;
   readonly homeDirectory: string;
   /** Where a sent mail or created event leaves its Personal Ops receipt. */
-  readonly artifactStore?: ArtifactStore;
+  readonly artifactStore?: ArtifactStore | undefined;
+  /** The daemon's calendar when one is reachable; null or absent keeps calendar work on the connector. */
+  readonly calendarHost?: (() => GoogleCalendarHost | null) | undefined;
+  /**
+   * Where approvals the owner answers are held, and the gesture that answers
+   * one on this surface (the Agent's `/google approve`). Absent where no
+   * approval prompt is wired, and the refusal then says so.
+   */
+  readonly approvals?: { readonly store: OwnerApprovalStore; readonly gesture: string } | undefined;
 }
 
 function readGoogleConfiguration(config: ConfigManager, key: string): unknown {
@@ -40,23 +47,13 @@ function readGoogleConfiguration(config: ConfigManager, key: string): unknown {
   return value;
 }
 
-export function captureGoogleConnectionCurrent(deps: GoogleToolWiringDeps): () => void {
+export function captureGoogleConnectionCurrent(deps: Pick<GoogleToolWiringDeps, 'configManager' | 'secretsManager'>): () => void {
   return retainGoogleConnectionOwners(deps);
-}
-
-/** The adopted daemon for calendar calls, or null when calendar work stays in this process. One config read and one credential lookup per call. */
-function adoptedCalendarHost(deps: GoogleToolWiringDeps): () => ConnectedHost | null {
-  const selection = { configManager: deps.configManager, homeDirectory: deps.homeDirectory };
-  const host = createConnectedHost(selection);
-  return () => {
-    if (deps.configManager.get('daemon.enabled') !== true) return null;
-    return resolveConnectedHost(selection).unavailable === undefined ? host : null;
-  };
 }
 
 export function wireAgentGoogleTool(registry: ToolRegistry, deps: GoogleToolWiringDeps): void {
   registerAgentGoogleTool(registry, {
-    calendarHost: adoptedCalendarHost(deps),
+    calendarHost: deps.calendarHost,
     homeDirectory: deps.homeDirectory,
     configManager: deps.configManager,
     secretsManager: deps.secretsManager,
@@ -73,7 +70,7 @@ export function wireAgentGoogleTool(registry: ToolRegistry, deps: GoogleToolWiri
 
     // Existing native approval records remain exact and one-use. Model refusal
     // text does not turn this separate control into a runtime fallback.
-    approvals: getOutwardApprovalStore(),
-    approvalGesture: OUTWARD_APPROVAL_GESTURE,
+    approvals: deps.approvals?.store,
+    approvalGesture: deps.approvals?.gesture,
   });
 }

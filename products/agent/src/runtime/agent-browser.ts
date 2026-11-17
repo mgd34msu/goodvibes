@@ -25,6 +25,8 @@ import {
   type BrowserSessionManagerDeps,
 } from '@goodvibes-jev/engine/platform/platform/browser';
 import type { UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
+import { browserGatewayOverEngine } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import type { BrowserToolBackend } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createAgentUntrustedContentPort } from '../trust/untrusted-content-port.ts';
 
@@ -109,4 +111,41 @@ export function createAgentBrowserEngine(options: AgentBrowserEngineOptions): Br
       untrusted: options.untrusted ?? createAgentUntrustedContentPort(),
     },
   );
+}
+
+/**
+ * Engines built for this process's `browser` tool and `browser` command, so
+ * app shutdown can close the browsers this agent started. Attached browsers are
+ * untouched by this: the session manager's shutdown only ends what it launched.
+ */
+const liveEngines = new Set<BrowserEngine>();
+
+export async function shutdownAgentBrowserSessions(): Promise<void> {
+  for (const live of [...liveEngines]) {
+    liveEngines.delete(live);
+    try {
+      await live.shutdown();
+    } catch {
+      // A browser that already exited is not a shutdown failure.
+    }
+  }
+}
+
+/**
+ * The browser the `browser` tool drives in this process: this product's engine,
+ * built on the first call that needs it (registering the tool never starts a
+ * browser or touches the network), behind the same service shape the daemon's
+ * `browser.*` verbs use.
+ */
+export function agentBrowserToolBackend(options: AgentBrowserEngineOptions & { readonly engine?: BrowserEngine }): () => BrowserToolBackend {
+  let backend: BrowserToolBackend | null = null;
+  return () => {
+    if (!backend) {
+      let engine = options.engine;
+      if (!engine) { engine = createAgentBrowserEngine(options); liveEngines.add(engine); }
+      const built = engine;
+      backend = browserGatewayOverEngine(async () => built, () => built.shutdown());
+    }
+    return backend;
+  };
 }

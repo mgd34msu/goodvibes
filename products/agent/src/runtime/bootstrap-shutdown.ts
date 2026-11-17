@@ -15,7 +15,7 @@ import { createOrderedShutdown, drainShutdownRegistry } from '@goodvibes-jev/eng
  * its browsers.
  */
 import { shutdownRuntime } from '@/runtime/index.ts';
-import { shutdownAgentBrowserSessions } from '../tools/agent-browser-tool.ts';
+import { shutdownAgentBrowserSessions } from './agent-browser.ts';
 
 export interface RuntimeShutdownDependencies {
   readonly sessionId: string;

@@ -259,6 +259,8 @@ export interface RuntimeServices {
   readonly contractOperator: ContractOperatorService;
   readonly judgment: JudgmentServices;
   readonly browserJudgment?: BrowserJudgmentService | undefined;
+  /** The daemon's `browser.*` service; absent when the composition had no home directory for a browser. */
+  readonly browserGateway?: import('@goodvibes-jev/engine/platform/platform/control-plane').DaemonBrowserGatewayService | undefined;
   /** Canonical saved conversation plus its contract trees. */
   sessionSnapshot(sessionId: string, conversation: Omit<SessionSnapshot, 'contracts'>): SessionSnapshot;
   readonly processManager: ProcessManager;

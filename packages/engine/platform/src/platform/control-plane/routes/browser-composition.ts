@@ -70,7 +70,9 @@ import type { CheckoutPageDriver } from '../../payments/checkout-page.js';
 import type { OwnerApproval } from '../../browser/index.js';
 import type { BrowserPageConnection, BrowserCheckoutRecovery, RestoredCheckoutPage } from '../../browser/index.js';
 import type { BrowserProvisionLifetime } from '../../browser/browser-failure-reading.js';
-import type { BrowserGatewayService } from './browser.js';
+import type { BrowserActionLifetime } from '../../browser/index.js';
+import type { ToolExecuteOptions } from '../../types/tools.js';
+import type { BrowserGatewayResult, BrowserGatewayService, BrowserGatewayTarget } from './browser.js';
 
 /**
  * The daemon's own segment under `~/.goodvibes/`. The same literal the daemon
@@ -124,6 +126,14 @@ export interface BrowserCompositionDeps {
   readonly describeSubmission?:
     | ((submission: CheckoutSubmission) => Promise<CheckoutSubmissionDescription>)
     | undefined;
+  /**
+   * Receives the composed browser service once, at composition time, so a
+   * consumer in this process (the `browser` tool of a session the daemon hosts
+   * for the Agent) drives the same engine the `browser.*` verbs drive rather
+   * than building a second browser. Not called when the composition has no
+   * home directory, since there is then no browser.
+   */
+  readonly onBrowserGateway?: ((service: DaemonBrowserGatewayService) => void) | undefined;
 }
 
 /** The gateway slice plus the teardown the daemon's disposal scope runs. */
@@ -133,6 +143,22 @@ export interface DaemonBrowserGatewayService extends BrowserGatewayService {
    * the session registry's shutdown only ends what it started.
    */
   shutdown(): Promise<void>;
+  /**
+   * The interactive verbs, as an in-process tool calls them: `ownership` is
+   * the tool call's own admission (`retainAdmittedToolAction`), so an action
+   * the gate admitted is held to that decision exactly as on the engine
+   * itself. The wire verbs pass none.
+   */
+  click(target: BrowserGatewayTarget, args: Parameters<BrowserGatewayService['click']>[1], ownership?: BrowserActionLifetime): Promise<BrowserGatewayResult>;
+  type(target: BrowserGatewayTarget, args: Parameters<BrowserGatewayService['type']>[1], ownership?: BrowserActionLifetime): Promise<BrowserGatewayResult>;
+  select(target: BrowserGatewayTarget, args: Parameters<BrowserGatewayService['select']>[1], ownership?: BrowserActionLifetime): Promise<BrowserGatewayResult>;
+  press(target: BrowserGatewayTarget, args: Parameters<BrowserGatewayService['press']>[1], ownership?: BrowserActionLifetime): Promise<BrowserGatewayResult>;
+  /**
+   * Binds one admitted tool call to the browser that serves it
+   * (`BrowserEngine.retainAdmittedToolAction`). Absent on a test double; the
+   * caller then passes its own signal and check as the ownership.
+   */
+  retainAdmittedToolAction?(args: Record<string, unknown>, options: ToolExecuteOptions, current: () => void): Promise<BrowserActionLifetime | undefined>;
 }
 
 /**
@@ -246,7 +272,7 @@ export function composeDaemonBrowser(
       + 'build its own engine so the checkout seam has something real to bind to.',
     );
   }
-  if (deps.browserGateway) return deps.browserGateway;
+  if (deps.browserGateway) { deps.onBrowserGateway?.(deps.browserGateway); return deps.browserGateway; }
 
   const onCheckout = deps.onBrowserCheckout;
   const cardFieldGuard = onCheckout === undefined ? undefined : new CardMaterialRedactor();
@@ -289,7 +315,9 @@ export function composeDaemonBrowser(
     });
   }
 
-  return gatewayOverEngine(built.engineFor, built.shutdown);
+  const service = browserGatewayOverEngine(built.engineFor, built.shutdown);
+  deps.onBrowserGateway?.(service);
+  return service;
 }
 
 /**
@@ -302,7 +330,13 @@ export function createDaemonBrowserGatewayService(
   return composeDaemonBrowser(deps);
 }
 
-function gatewayOverEngine(
+/**
+ * The browser service over one engine, built on first use. The daemon's
+ * `browser.*` verbs are served from this; a process that owns its own engine
+ * (the Agent's) wraps it the same way so the `browser` tool makes one set of
+ * calls wherever it runs.
+ */
+export function browserGatewayOverEngine(
   engineFor: () => Promise<BrowserEngine>,
   shutdown: () => Promise<void>,
 ): DaemonBrowserGatewayService {
@@ -334,17 +368,17 @@ function gatewayOverEngine(
     async snapshot(target, args) {
       return (await engineFor()).snapshot(target, args);
     },
-    async click(target, args) {
-      return (await engineFor()).click(target, args);
+    async click(target, args, ownership) {
+      return (await engineFor()).click(target, args, ownership);
     },
-    async type(target, args) {
-      return (await engineFor()).type(target, args);
+    async type(target, args, ownership) {
+      return (await engineFor()).type(target, args, ownership);
     },
-    async select(target, args) {
-      return (await engineFor()).select(target, args);
+    async select(target, args, ownership) {
+      return (await engineFor()).select(target, args, ownership);
     },
-    async press(target, args) {
-      return (await engineFor()).press(target, args);
+    async press(target, args, ownership) {
+      return (await engineFor()).press(target, args, ownership);
     },
     async scroll(target, args) {
       return (await engineFor()).scroll(target, args);
@@ -378,6 +412,9 @@ function gatewayOverEngine(
     },
     async goForward(target) {
       return (await engineFor()).goForward(target);
+    },
+    async retainAdmittedToolAction(args, options, current) {
+      return (await engineFor()).retainAdmittedToolAction(args, options, current);
     },
     shutdown,
   };

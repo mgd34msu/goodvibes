@@ -112,7 +112,7 @@ export async function screenOutboundForCardMaterial(input: {
   readonly surface: string;
   readonly message: string;
   readonly title?: string | undefined;
-}, options: { readonly signal?: AbortSignal; readonly assertCurrent?: () => void } = {}): Promise<CardMaterialRefusal | null> {
+}, options: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined } = {}): Promise<CardMaterialRefusal | null> {
   const assertCurrent = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
   if (mayEnterCardDetails(input.surface)) return null;

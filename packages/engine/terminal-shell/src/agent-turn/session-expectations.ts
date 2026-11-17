@@ -21,7 +21,7 @@
  */
 
 import { VerificationExpectationBook } from '@goodvibes-jev/engine/platform/platform/google';
-import { surfaceHasCommandAuthority } from '../../trust/untrusted-content.ts';
+import { surfaceHasCommandAuthority } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
 let book: VerificationExpectationBook | null = null;
@@ -48,11 +48,11 @@ export type DaemonExpectationToken =
 /** Where one daemon expectation stands, as `email.expectation.wait` answers. */
 export interface DaemonExpectationState {
   readonly state: 'waiting' | 'arrived' | 'expired' | 'capability-lost' | 'cancelled' | 'unknown';
-  readonly expectation?: { readonly id: string; readonly serviceDomain: string; readonly recipientAddress: string; readonly expiresAt: string; readonly remainingMs?: number };
-  readonly token?: DaemonExpectationToken;
-  readonly detail?: string;
-  readonly arrivals?: readonly { readonly messageId: string; readonly at: string; readonly reason: string }[];
-  readonly watching?: { readonly running: boolean; readonly reason: string };
+  readonly expectation?: { readonly id: string; readonly serviceDomain: string; readonly recipientAddress: string; readonly expiresAt: string; readonly remainingMs?: number | undefined } | undefined;
+  readonly token?: DaemonExpectationToken | undefined;
+  readonly detail?: string | undefined;
+  readonly arrivals?: readonly { readonly messageId: string; readonly at: string; readonly reason: string }[] | undefined;
+  readonly watching?: { readonly running: boolean; readonly reason: string } | undefined;
 }
 
 /**
@@ -67,7 +67,7 @@ export interface DaemonExpectationClient {
   open(input: { readonly serviceDomain: string; readonly recipientAddress: string; readonly purpose: string }): Promise<{
     readonly id: string;
     readonly expiresAt: string;
-    readonly watching?: { readonly running: boolean; readonly reason: string };
+    readonly watching?: { readonly running: boolean; readonly reason: string } | undefined;
   }>;
   wait(id: string, timeoutMs: number): Promise<DaemonExpectationState>;
 }

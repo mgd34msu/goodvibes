@@ -1,35 +1,48 @@
 import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
 import { lstatSync, realpathSync } from 'node:fs';
 import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
+import { assertCurrentToolEffect, assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
-import type { ShellPathService } from '@/runtime/index.ts';
+import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import {
   buildAgentChannelDeliveryPreview,
   deliverAgentChannelMessage,
   formatAgentChannelDeliveryPreview,
   formatAgentChannelDeliveryResult,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { agentChannelDeliveryReceiptPath, recordAgentChannelDeliveryReceipt } from '../agent/channel-delivery-receipts.ts';
-import { evaluateOutwardEffect, getSessionUntrustedContentLedger } from '../trust/untrusted-content.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+} from './channel-delivery.js';
+import { agentChannelDeliveryReceiptPath, recordAgentChannelDeliveryReceipt } from './channel-delivery-receipts.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 
 export interface AgentChannelSendToolArgs {
-  readonly message?: unknown;
-  readonly title?: unknown;
-  readonly channel?: unknown;
-  readonly route?: unknown;
-  readonly webhook?: unknown;
-  readonly link?: unknown;
-  readonly confirm?: unknown;
-  readonly preview?: unknown;
-  readonly explicitUserRequest?: unknown;
+  readonly message?: unknown | undefined;
+  readonly title?: unknown | undefined;
+  readonly channel?: unknown | undefined;
+  readonly route?: unknown | undefined;
+  readonly webhook?: unknown | undefined;
+  readonly link?: unknown | undefined;
+  readonly confirm?: unknown | undefined;
+  readonly preview?: unknown | undefined;
+  readonly explicitUserRequest?: unknown | undefined;
 }
 
 export interface AgentChannelSendToolOptions {
-  readonly shellPaths?: Pick<ShellPathService, 'resolveUserPath'> & Partial<Pick<ShellPathService, 'homeDirectory'>>;
+  readonly shellPaths?: (Pick<ShellPathService, 'resolveUserPath'> & Partial<Pick<ShellPathService, 'homeDirectory'>>) | undefined;
+}
+
+/**
+ * Whether this call still holds the send its admission recorded: the call's
+ * own engine execution and its recorded `send` effect, checked again before
+ * every step. The tool is registered without an input projection and nothing
+ * forwards a translated call to it, so this is the whole of what the Agent's
+ * harness ingress answered for it; it is stated here so the same check runs
+ * in the Agent process and in a turn the daemon hosts.
+ */
+function sendStillAdmitted(args: Record<string, unknown>, options: ToolExecuteOptions | undefined): boolean {
+  options?.signal?.throwIfAborted();
+  assertCurrentToolExecution(args, options);
+  return assertCurrentToolEffect(args, options, 'send');
 }
 
 function readString(value: unknown): string | undefined {
@@ -131,7 +144,7 @@ export function createAgentChannelSendTool(
       const strategies = listStrategies.call(channelDeliveryRouter).map(strategy => ({ strategy, canHandle: strategy.canHandle, deliver: strategy.deliver }));
       const assertCurrent = () => {
         executionOptions?.signal?.throwIfAborted();
-        if (!harnessCatalogInvocationAuthority(rawArgs, executionOptions, 'send')) throw new ToolInputProjectionError('held');
+        if (!sendStillAdmitted(rawArgs, executionOptions)) throw new ToolInputProjectionError('held');
         const current = listStrategies.call(channelDeliveryRouter);
         if (channelDeliveryRouter.deliver !== deliver || channelDeliveryRouter.listStrategies !== listStrategies
           || getSessionUntrustedContentLedger() !== ledger || ledgerSnapshot() !== sources
@@ -192,7 +205,7 @@ export function createAgentChannelSendTool(
         listStrategies: () => listStrategies.call(channelDeliveryRouter),
       };
       try {
-        const result = await deliverAgentChannelMessage(trackedRouter, input, { signal: executionOptions?.signal, assertCurrent });
+        const result = await deliverAgentChannelMessage(trackedRouter, input, { ...(executionOptions?.signal ? { signal: executionOptions.signal } : {}), assertCurrent });
         const lines = [formatAgentChannelDeliveryResult(result)];
         if (options.shellPaths) {
           try {

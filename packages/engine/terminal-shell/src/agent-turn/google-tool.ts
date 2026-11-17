@@ -1,17 +1,25 @@
 import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
-import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
+import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
+import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './personal-ops-effect-receipt.js';
+import { agentInProcessAdmission } from './family-gateway.js';
+import { agentResearchSourceOwner } from './protected-research-report.js';
+import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostSelection } from './connected-host-client.js';
 /**
  * The `google` tool: Gmail and the owner's calendar.
  *
- * Calendar reads and writes go to the connected daemon's `calendar.events.*`
- * methods when a daemon is adopted, so the Agent and the terminal app use one
- * backend (the configured CalDAV server or Google account), one confirmation
- * rule and one set of refusals. With no daemon, they run here on the in-process
- * Google connector. Mail and the connect actions always run here, on the
- * connector that holds the OAuth refresh; nothing to install and no MCP server.
+ * Calendar reads and writes go to the daemon's `calendar.events.*` methods
+ * when there is one to reach (the Agent's adopted daemon over its connected
+ * host, or, in a session the daemon hosts for the Agent, the daemon's own
+ * catalog in-process), so every surface uses one backend (the configured
+ * CalDAV server or Google account), one confirmation rule and one set of
+ * refusals. With no daemon, they run here on the in-process Google connector.
+ * Mail and the connect actions always run here, on the connector that holds
+ * the OAuth refresh (in a hosted session, the daemon's own credential store);
+ * nothing to install and no MCP server.
  *
  * Two boundaries are structural rather than advisory:
  *
@@ -48,7 +56,7 @@ import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } fr
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { captureStrictJudgmentJson, snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { CardMaterialRefusedError, screenOutboundForCardMaterial } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { CardMaterialRefusedError, screenOutboundForCardMaterial } from './payments-channel-guard.js';
 import { assertDeliveryCurrent } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   beginGoogleConsent,
@@ -63,28 +71,25 @@ import {
   type GoogleLoopbackListenerFactory,
 } from '@goodvibes-jev/engine/platform/platform/google';
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { createGoogleSettingsProjector, commitGoogleSettings, NO_GOOGLE_CLIENT_SECRET, retainGoogleConnectionOwners, retainGoogleCredentials, retainGooglePreparedEffectSource, type GooglePendingCredential } from './agent-google-admission.ts';
+import { createGoogleSettingsProjector, commitGoogleSettings, NO_GOOGLE_CLIENT_SECRET, retainGoogleConnectionOwners, retainGoogleCredentials, retainGooglePreparedEffectSource, type GooglePendingCredential } from './google-admission.js';
 import { nodeGoogleFilePort } from '@goodvibes-jev/engine/platform/platform/google/node';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes-jev/engine/platform/platform/google';
 import { readSurfaceEmailSettings } from '@goodvibes-jev/engine/platform/platform/email';
 import {
   evaluateOutwardEffect,
-  getSessionUntrustedContentLedger,
+  getProcessUntrustedContentLedger as getSessionUntrustedContentLedger,
   originOf,
-} from '../trust/untrusted-content.ts';
-import {
   isSendToOwnerOnly,
   resolveOwnerAddresses,
   type OwnerApprovalStore,
   type TaintOptions,
 } from '@goodvibes-jev/engine/platform/platform/security';
-import { rememberRefusedOutwardAction, type OutwardActionOutcome } from '../trust/outward-approvals.ts';
+import { rememberRefusedOutwardAction, type OutwardActionOutcome } from './outward-approvals.js';
 import type { GoogleApiFailure, GoogleApiResult } from '@goodvibes-jev/engine/platform/platform/google';
-import { describeDaemonExpectationState, getSessionExpectationBook, type DaemonExpectationClient } from '../agent/signup/session-expectations.ts';
+import { describeDaemonExpectationState, getSessionExpectationBook, type DaemonExpectationClient } from './session-expectations.js';
 import { deliveryEvidenceFromMessage, describeDeliveryEvidence, NO_ALIAS_MAILBOXES } from '@goodvibes-jev/engine/platform/platform/google';
 import { readVerificationArtifact } from '@goodvibes-jev/engine/platform/platform/google';
-import { isHostFailure, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { confirmParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { confirmParameter } from './effect-admission.js';
 
 const GOOGLE_ACTIONS = [
   'status',
@@ -109,13 +114,89 @@ const READ_ONLY_ACTIONS = new Set<string>(['status', 'mail.list', 'mail.read', '
 /** Native setup resolves protected credential sources before ordinary Google calls. */
 const CONNECT_ACTIONS = new Set<string>(['connect.client', 'connect.clientFile']);
 
+type CalendarListInput = OperatorMethodInput<'calendar.events.list'>;
+type CalendarListOutput = OperatorMethodOutput<'calendar.events.list'>;
+type CalendarCreateInput = OperatorMethodInput<'calendar.events.create'>;
+type CalendarCreateOutput = OperatorMethodOutput<'calendar.events.create'>;
+
+/** A refusal or failure the calendar host answered, and whether the call took effect. */
+export interface GoogleCalendarHostFailure {
+  readonly message: string;
+  readonly applied: 'no' | 'unknown' | 'yes';
+}
+
+/**
+ * The daemon's `calendar.events.*` methods, as the `google` tool calls them:
+ * over the Agent's connected host, or in-process on the daemon's own catalog.
+ */
+export interface GoogleCalendarHost {
+  listEvents(input: CalendarListInput, signal?: AbortSignal): Promise<CalendarListOutput>;
+  createEvent(input: CalendarCreateInput): Promise<CalendarCreateOutput>;
+  /** The host's failure carried by a thrown value; undefined when the value is not one. */
+  failureOf(error: unknown): GoogleCalendarHostFailure | undefined;
+}
+
+/**
+ * The daemon's own `calendar.events.*` handlers, called in-process for a turn
+ * the daemon hosts for the Agent. Each call is admitted as the paired Agent's
+ * call over the wire is (`agentInProcessAdmission`: the Agent pairing's grant,
+ * held at the start and on every scope the handler asks for) and is judged as
+ * the Agent's (`credentialKind: 'agent'`). Null while the catalog serves no
+ * calendar, so calendar work then runs on the in-process Google connector, as
+ * in an Agent with no daemon.
+ */
+export function inProcessGoogleCalendarHost(catalog: GatewayMethodCatalog): () => GoogleCalendarHost | null {
+  const call = async (methodId: 'calendar.events.list' | 'calendar.events.create', body: unknown, signal: AbortSignal | undefined): Promise<unknown> => {
+    const admission = agentInProcessAdmission(catalog, methodId);
+    // Refused before the handler runs, as dispatch answers the paired Agent: nothing was applied.
+    if (admission.refused) throw Object.assign(new Error(admission.refused), { status: 403 });
+    return await catalog.invoke(methodId, {
+      body,
+      ...(signal ? { signal } : {}),
+      isAuthorized: (requiredScopes) => { signal?.throwIfAborted(); return admission.isAuthorized(requiredScopes); },
+      context: { clientKind: 'goodvibes-agent', ...admission.context },
+    });
+  };
+  const host: GoogleCalendarHost = {
+    listEvents: async (input, signal) => await call('calendar.events.list', input, signal) as CalendarListOutput,
+    createEvent: async (input) => await call('calendar.events.create', input, undefined) as CalendarCreateOutput,
+    failureOf(error) {
+      // A refusal carries an HTTP status: a 4xx was refused before the backend
+      // was touched; anything else may have reached it.
+      const status = (error as { readonly status?: unknown } | null)?.status;
+      const refused = typeof status === 'number' && status >= 400 && status < 500;
+      return { message: summarizeError(error), applied: refused ? 'no' : 'unknown' };
+    },
+  };
+  return () => catalog.hasHandler('calendar.events.list') && catalog.hasHandler('calendar.events.create') ? host : null;
+}
+
+/**
+ * The Agent's adopted daemon over its connected host, for calendar calls, or
+ * null while calendar work stays in this process (`daemon.enabled` off, or no
+ * usable connected-host credential). One config read and one credential
+ * lookup per call.
+ */
+export function connectedHostGoogleCalendar(selection: ConnectedHostSelection): () => GoogleCalendarHost | null {
+  const remote = createConnectedHost(selection);
+  const host: GoogleCalendarHost = {
+    listEvents: (input, signal) => remote.invoke('calendar.events.list', input, signal ? { signal } : {}),
+    createEvent: (input) => remote.invoke('calendar.events.create', input),
+    failureOf: (error) => isHostFailure(error) ? { message: error.message, applied: error.applied } : undefined,
+  };
+  return () => {
+    if (selection.configManager.get('daemon.enabled') !== true) return null;
+    return resolveConnectedHost(selection).unavailable === undefined ? host : null;
+  };
+}
+
 export interface AgentGoogleToolOptions {
   readonly getSourceOwner?: (() => ProtectedSourceOwner | undefined) | undefined;
   readonly homeDirectory: string;
   readonly configGet: (key: string) => unknown;
   readonly secretGet: (key: string) => Promise<string | null>;
   /** Injected in tests; production uses the process fetch. */
-  readonly fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
+  readonly fetchImpl?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
   /**
    * Binds the local port Google redirects back to after consent. Injected
    * because binding a port is real machine I/O, the whole exchange runs
@@ -141,10 +222,10 @@ export interface AgentGoogleToolOptions {
   readonly configManager?: ConfigManager | undefined;
   readonly secretsManager?: SecretsManager | undefined;
   /**
-   * The adopted daemon, when there is one: calendar actions then call its
+   * The daemon's calendar, when there is one: calendar actions then call its
    * `calendar.events.*` methods. Null or absent keeps them in this process.
    */
-  readonly calendarHost?: (() => ConnectedHost | null) | undefined;
+  readonly calendarHost?: (() => GoogleCalendarHost | null) | undefined;
   /** The daemon's expectation book; `mail.verification` with an expectation id waits on it. */
   readonly expectations?: DaemonExpectationClient | undefined;
   /** Where a sent mail or created event leaves its Personal Ops receipt; absent writes none. */
@@ -277,7 +358,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
    * in-process path; only the backend differs.
    */
   async function daemonCalendar(
-    host: ConnectedHost,
+    host: GoogleCalendarHost,
     action: 'calendar.list' | 'calendar.create',
     args: Record<string, unknown>,
     rawArgs: Record<string, unknown>,
@@ -289,11 +370,12 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       const limit = readNumber(args.maxResults, 10);
       let events: readonly { readonly title: string; readonly start: string; readonly location?: string | undefined; readonly description?: string | undefined }[];
       try {
-        ({ events } = await host.invoke('calendar.events.list', {
+        ({ events } = await host.listEvents({
           ...(timeMin ? { from: timeMin } : {}), ...(timeMax ? { to: timeMax } : {}), limit: limit + 1,
-        }, signal ? { signal } : {}));
+        }, signal));
       } catch (error) {
-        if (isHostFailure(error)) return failure(error.message);
+        const hostFailure = host.failureOf(error);
+        if (hostFailure) return failure(hostFailure.message);
         throw error;
       }
       if (events.length === 0) return ok('No events in that range.');
@@ -321,14 +403,15 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       const blocked = await screenOutboundForCardMaterial({ surface: 'calendar', message: [description, location].join('\n'), title });
       if (blocked) return { ok: false, text: new CardMaterialRefusedError(blocked).message };
       try {
-        const made = await host.invoke('calendar.events.create', {
+        const made = await host.createEvent({
           title, start, end, ...(location ? { location } : {}), ...(description ? { description } : {}), confirm: true,
         });
         const text = `Created "${title}" starting ${start} (event ${made.eventId}).`;
         await recordEffect('calendar.create', 'succeeded', text, typeof made.eventId === 'string' ? made.eventId : undefined);
         return { ok: true, text };
       } catch (error) {
-        if (isHostFailure(error) && error.applied === 'no') return { ok: false, text: error.message };
+        const hostFailure = host.failureOf(error);
+        if (hostFailure?.applied === 'no') return { ok: false, text: hostFailure.message };
         const text = 'The calendar write could not be confirmed: the event may or may not have been created. Inspect the calendar before retrying.';
         await recordEffect('calendar.create', 'unknown', text);
         return { ok: false, text };
@@ -624,8 +707,9 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       }
 
       if (action === 'mail.list') {
+        const query = readString(args.query);
         const result = await client.listMessages({
-          query: readString(args.query) || undefined,
+          ...(query ? { query } : {}),
           maxResults: readNumber(args.maxResults, 10),
         });
         assertCurrent();
@@ -815,9 +899,10 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       }
 
       if (action === 'calendar.list') {
+        const timeMin = readString(args.timeMin), timeMax = readString(args.timeMax);
         const result = await client.listEvents({
-          timeMin: readString(args.timeMin) || undefined,
-          timeMax: readString(args.timeMax) || undefined,
+          ...(timeMin ? { timeMin } : {}),
+          ...(timeMax ? { timeMax } : {}),
           maxResults: readNumber(args.maxResults, 10),
         });
         assertCurrent();
@@ -926,6 +1011,7 @@ export async function googleConnectionState(scope: object | undefined): Promise<
 export function agentGoogleInputProjector(tool: Tool) { return googleProjectors.get(tool); }
 export function registerAgentGoogleTool(registry: ToolRegistry, options: AgentGoogleToolOptions): void {
   if (!registry.has('google')) {
+    // A verification reading runs under the protected-source owner bound to this registry, if any.
     const tool = createAgentGoogleTool({ ...options, getSourceOwner: () => agentResearchSourceOwner(registry) });
     registry.register(tool, { inputProjection: agentGoogleInputProjector(tool) });
   }

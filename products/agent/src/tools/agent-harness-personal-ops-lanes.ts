@@ -2,7 +2,7 @@ import { withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platfor
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
-import { googleConnectionState, type AgentGoogleConnectionState } from './agent-google-tool.ts';
+import { googleConnectionState, type AgentGoogleConnectionState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { calendarWorkflows, connectorSignals, contractLaneMethods, inboxWorkflows, NO_CONNECTORS, readConnectorInventory, reminderWorkflows, taskWorkflows, type ConnectorInventory, type GoogleLaneRoute } from './agent-harness-personal-ops-discovery.ts';
 import { NOTE_CAPTURE_ROUTE } from './agent-harness-personal-ops-routes.ts';
 import { cappedCount, channelRecords, connectorRecords, localRecord, NO_SAVED_ARTIFACTS, readPersonalOpsSavedArtifacts, refreshableSavedRecordCount, reminderOperationRecords, routineReceiptRecord, SAVED_ARTIFACT_SCAN_WINDOW_SIGNAL, savedProviderEffectReceiptRecords, savedReviewArtifactRecords, savedReviewQueueRecords, taskOperationRecords, type PersonalOpsSavedArtifacts } from './agent-harness-personal-ops-records.ts';

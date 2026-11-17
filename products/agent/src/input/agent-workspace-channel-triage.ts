@@ -1,4 +1,4 @@
-import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts } from '../agent/channel-delivery-receipts.ts';
+import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from './command-registry.ts';
 import {
   fetchConnectedHostReadOnlyRoute,

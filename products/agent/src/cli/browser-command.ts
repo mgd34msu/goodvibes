@@ -16,9 +16,8 @@
  * the whole path end to end without a provider, an API key, or a network round
  * trip to a model.
  */
-import { createAgentBrowserTool, BROWSER_TOOL_ACTIONS } from '../tools/agent-browser-tool.ts';
-import { agentBrowserProfileRoot, agentBrowserScreenshotRoot } from '../runtime/agent-browser.ts';
-import { shutdownAgentBrowserSessions } from '../tools/agent-browser-tool.ts';
+import { createAgentBrowserTool, BROWSER_TOOL_ACTIONS } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend, shutdownAgentBrowserSessions } from '../runtime/agent-browser.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
@@ -93,9 +92,11 @@ export async function handleBrowserCommand(runtime: CliCommandRuntime): Promise<
 
   const home = runtime.homeDirectory;
   const tool = createAgentBrowserTool({
-    screenshotDirectory: agentBrowserScreenshotRoot(home),
-    profileRoot: agentBrowserProfileRoot(home),
-    homeDirectory: home,
+    browser: agentBrowserToolBackend({
+      screenshotDirectory: agentBrowserScreenshotRoot(home),
+      profileRoot: agentBrowserProfileRoot(home),
+      homeDirectory: home,
+    }),
   });
 
   const positional = rest.filter((entry) => !entry.startsWith('--'));

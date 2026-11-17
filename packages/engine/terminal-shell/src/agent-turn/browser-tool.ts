@@ -1,13 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool, ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/types';
-import { BrowserEngine, BrowserSessionError, StaleElementError, UntrustedEffectError } from '@goodvibes-jev/engine/platform/platform/browser';
-import type { BrowserExtractField, BrowserTarget, UntrustedContentPort } from '@goodvibes-jev/engine/platform/platform/browser';
-import { createAgentBrowserEngine } from '../runtime/agent-browser.ts';
-import { captureCatalogSnapshotGuard } from './agent-harness-catalog-ranking.ts';
+import { BrowserSessionError, StaleElementError, UntrustedEffectError } from '@goodvibes-jev/engine/platform/platform/browser';
+import type { BrowserActionLifetime, BrowserExtractField, BrowserTarget } from '@goodvibes-jev/engine/platform/platform/browser';
+import type { DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { captureCatalogSnapshotGuard } from './catalog-data.js';
 
 /**
- * The `browser` tool: real browser control, in this process, through Playwright.
+ * The `browser` tool: real browser control through Playwright.
  *
  * It is deliberately NOT an MCP passthrough. Nothing has to be installed,
  * configured, or authorized by hand first, the first call provisions a browser
@@ -17,7 +17,15 @@ import { captureCatalogSnapshotGuard } from './agent-harness-catalog-ranking.ts'
  *   - a browser the agent attached to can never be closed by the agent;
  *   - every input action targets an element resolved from a snapshot of a page
  *     this tool controls, so nothing can type into whatever window has focus.
+ *
+ * The calls run on a browser service: in the Agent's own process, its own
+ * engine (runtime/agent-browser.ts); in a session the daemon hosts for the
+ * Agent, the daemon's `browser.*` service, so the tool and the verbs drive one
+ * browser. An interactive action carries the tool call's admission either way.
  */
+
+/** The browser service the tool's calls run on (the daemon's `browser.*` service, or one over the process's own engine). */
+export type BrowserToolBackend = Omit<DaemonBrowserGatewayService, 'shutdown' | 'listSessions'>;
 
 const READ_ONLY_ACTIONS = ['status', 'tabs', 'snapshot', 'read_text'] as const;
 
@@ -144,78 +152,21 @@ function requireString(value: unknown, field: string, action: string): string {
 }
 
 export interface AgentBrowserToolOptions {
-  readonly engine?: BrowserEngine;
   /**
-   * Directory screenshots are written to. The composition root owns this path:
-   * it must be somewhere the agent's own read path can open, which rules out
-   * hidden directories.
+   * The browser service, resolved on the first call that needs it: registering
+   * the tool must never start a browser or touch the network.
    */
-  readonly screenshotDirectory?: string;
-  /** Directory holding saved browser profiles. */
-  readonly profileRoot?: string;
-  /** Home directory owning the managed browser cache. */
-  readonly homeDirectory?: string;
+  readonly browser: () => BrowserToolBackend;
   /**
-   * The untrusted-content contract handed to the engine. Defaults to the
-   * agent's process-wide session ledger; tests inject their own so one test's
-   * page read cannot make the next test's outward action refuse.
+   * Whether the owner's read policy lets this turn open this absolute local
+   * path. A `file:` page is read back into the conversation like the read
+   * tool's output, so it must pass the same filter. Left absent, `file:`
+   * addresses are refused rather than opened unchecked.
    */
-  readonly untrusted?: UntrustedContentPort;
-  /**
-   * Whether the agent's own read policy lets it open this absolute local path.
-   * A `file:` page is read back into the conversation like the read tool's
-   * output, so it must pass the same filter. Left absent, `file:` addresses are
-   * refused rather than opened unchecked.
-   */
-  readonly readAccess?: (absolutePath: string, signal?: AbortSignal) => Promise<boolean>;
+  readonly readAccess?: ((absolutePath: string, signal?: AbortSignal) => Promise<boolean>) | undefined;
 }
 
-/**
- * Engines created by a registered browser tool, so app shutdown can close the
- * browsers this agent started. Attached browsers are untouched by this, the
- * session manager's shutdown only ends what it launched.
- */
-const liveEngines = new Set<BrowserEngine>();
-
-export async function shutdownAgentBrowserSessions(): Promise<void> {
-  for (const live of [...liveEngines]) {
-    liveEngines.delete(live);
-    try {
-      await live.shutdown();
-    } catch {
-      // A browser that already exited is not a shutdown failure.
-    }
-  }
-}
-
-export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): Tool {
-  // A lazily created engine: registering the tool must never start a browser or
-  // touch the network. Provisioning happens on the first call that needs it.
-  let engine = options.engine ?? null;
-  const resolveEngine = (): BrowserEngine => {
-    if (!engine) {
-      const screenshotDirectory = options.screenshotDirectory;
-      const profileRoot = options.profileRoot;
-      if (!screenshotDirectory || !profileRoot) {
-        throw new BrowserSessionError(
-          'The browser tool was registered without the directories it writes to.',
-          'Register it with screenshotDirectory and profileRoot from the runtime paths.',
-        );
-      }
-      // Built through the agent's one browser composition point, so the
-      // storage root, the untrusted-content port and the host-script advice
-      // are bound in exactly one place rather than once per construction site.
-      engine = createAgentBrowserEngine({
-        screenshotDirectory,
-        profileRoot,
-        homeDirectory: options.homeDirectory ?? profileRoot,
-        ...(options.untrusted ? { untrusted: options.untrusted } : {}),
-      });
-      liveEngines.add(engine);
-    }
-    return engine;
-  };
-
+export function createAgentBrowserTool(options: AgentBrowserToolOptions): Tool {
   return {
     definition: {
       name: 'browser',
@@ -297,11 +248,12 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
         ...(typeof args.headless === 'boolean' ? { headless: args.headless } : {}),
       };
       try {
-        const browser = resolveEngine();
+        const browser = options.browser();
         const assertCurrent = () => { invocationCurrent(); };
-        const ownership = executionOptions && interactiveAction
-          ? (typeof browser.retainAdmittedToolAction === 'function' ? browser.retainAdmittedToolAction(rawArgs, executionOptions, assertCurrent) : undefined)
-            ?? { signal, assertCurrent } : undefined;
+        const retained = executionOptions && interactiveAction && browser.retainAdmittedToolAction
+          ? await browser.retainAdmittedToolAction(rawArgs, executionOptions, assertCurrent) : undefined;
+        const ownership: BrowserActionLifetime | undefined = executionOptions && interactiveAction
+          ? retained ?? { signal, assertCurrent } : undefined;
         const interactive = async (run: () => Promise<Record<string, unknown>>) => {
           if (ownership) assertCurrent();
           const result = await run();
@@ -312,7 +264,8 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
           case 'status':
             return output(await browser.status());
           case 'provision':
-            return output({ provision: await browser.provision({ repair: args.repair === true }) });
+            // The service answers `{ provision: report }`, the shape this action always returned.
+            return output(await browser.provision({ repair: args.repair === true }));
           case 'launch':
             return output(await browser.launch({
               profileName: readString(args.profileName) || undefined,
@@ -334,7 +287,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
             return output(await browser.attach({ cdpEndpoint }));
           }
           case 'release':
-            return output(browser.release(requireString(args.sessionId, 'sessionId', 'release')));
+            return output(await browser.release(requireString(args.sessionId, 'sessionId', 'release')));
           case 'close':
             return output(await browser.close(requireString(args.sessionId, 'sessionId', 'close')));
           case 'navigate': {
@@ -414,7 +367,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
             return output(await browser.newTab(target, { launch, ...(url ? { url } : {}) }));
           }
           case 'switch_tab':
-            return output(browser.switchTab(target, { pageId: requireString(args.pageId, 'pageId', 'switch_tab') }));
+            return output(await browser.switchTab(target, { pageId: requireString(args.pageId, 'pageId', 'switch_tab') }));
           case 'close_tab':
             return output(await browser.closeTab(target, { pageId: requireString(args.pageId, 'pageId', 'close_tab') }));
           case 'back':
@@ -452,6 +405,6 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions = {}): T
   };
 }
 
-export function registerAgentBrowserTool(registry: ToolRegistry, options: AgentBrowserToolOptions = {}): void {
+export function registerAgentBrowserTool(registry: ToolRegistry, options: AgentBrowserToolOptions): void {
   if (!registry.has('browser')) registry.register(createAgentBrowserTool(options));
 }

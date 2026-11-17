@@ -3,24 +3,27 @@ import { randomUUID } from 'node:crypto';
 import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/platform/tools';
 import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
-import { registerAgentChannelSendTool } from '../tools/agent-channel-send-tool.ts';
 import { registerAgentAutonomyScheduleTool } from '../tools/agent-autonomy-schedule-tool.ts';
-import { agentBrowserProfileRoot, agentBrowserScreenshotRoot } from './agent-browser.ts';
-import { registerAgentBrowserTool } from '../tools/agent-browser-tool.ts';
+import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend } from './agent-browser.ts';
 import { registerAgentAccountsTool } from '../tools/agent-accounts-tool.ts';
 import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS } from '@goodvibes-jev/engine/platform/platform/google';
 import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './bootstrap-google-tool.ts';
 import { registerAgentKnowledgeIngestTool } from '../tools/agent-knowledge-ingest-tool.ts';
 import { registerAgentKnowledgeTool } from '../tools/agent-knowledge-tool.ts';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
 import { registerAgentModelCompareTool } from '../tools/agent-model-compare-tool.ts';
-import { registerAgentOperatorActionTool } from '../tools/agent-operator-action-tool.ts';
-import { registerAgentOperatorBriefingTool } from '../tools/agent-operator-briefing-tool.ts';
-import { registerAgentOperatorMethodTool } from '../tools/agent-operator-method-tool.ts';
+import { registerAgentOperatorActionTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { registerAgentOperatorBriefingTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { registerAgentOperatorMethodTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentReminderScheduleTool } from '../tools/agent-reminder-schedule-tool.ts';
 import { registerAgentResearchReportTool } from '../tools/agent-research-report-tool.ts';
-import { registerAgentTurnTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import {
+  connectedHostGoogleCalendar,
+  getOutwardApprovalStore,
+  OUTWARD_APPROVAL_GESTURE,
+  registerAgentTurnTools,
+  type GoogleToolWiringDeps,
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { connectedHostFamilyRemote } from '../agent/operator-gateway-call.ts';
 import { registerAgentScheduleEditTool } from '../tools/agent-schedule-edit-tool.ts';
 import { registerAgentScheduleTool } from '../tools/agent-schedule-tool.ts';
@@ -163,23 +166,29 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     mediaProviders: services.mediaProviders,
     channelDeliveryRouter: services.channelDeliveryRouter,
     workPlan: services.workPlan,
+    // This process's own browser, built on the first call that needs one.
+    browser: {
+      browser: agentBrowserToolBackend({
+        screenshotDirectory: agentBrowserScreenshotRoot(services.shellPaths.homeDirectory),
+        profileRoot: agentBrowserProfileRoot(services.shellPaths.homeDirectory),
+        homeDirectory: services.shellPaths.homeDirectory,
+      }),
+      // A file: page is a local read, held to the same decision the read tool gets.
+      readAccess: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',
+    },
+    // The native Gmail/Calendar route (agent-turn's google-wiring.ts): this
+    // process's stores, the adopted daemon's calendar when one is reachable, and
+    // the owner's /google approve gesture for a refused send.
+    google: {
+      configManager: configManager as GoogleToolWiringDeps['configManager'],
+      secretsManager: services.secretsManager,
+      homeDirectory: services.shellPaths.homeDirectory,
+      artifactStore: services.artifactStore,
+      calendarHost: connectedHostGoogleCalendar({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
+      approvals: { store: getOutwardApprovalStore(), gesture: OUTWARD_APPROVAL_GESTURE },
+    },
     memoryRegistry: services.memoryRegistry,
     memoryAccess: services.memorySpineClient,
-  });
-  registerAgentBrowserTool(toolRegistry, {
-    screenshotDirectory: agentBrowserScreenshotRoot(services.shellPaths.homeDirectory),
-    profileRoot: agentBrowserProfileRoot(services.shellPaths.homeDirectory),
-    homeDirectory: services.shellPaths.homeDirectory,
-    // A file: page is a local read, held to the same decision the read tool gets.
-    readAccess: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',
-  });
-  // The native Gmail/Calendar route, wired in bootstrap-google-tool.ts, its
-  // write ports carry an argument long enough to deserve its own file.
-  wireAgentGoogleTool(toolRegistry, {
-    configManager: configManager as GoogleToolWiringDeps['configManager'],
-    secretsManager: services.secretsManager,
-    homeDirectory: services.shellPaths.homeDirectory,
-    artifactStore: services.artifactStore,
   });
   // Accounts the agent creates are recorded here at creation time. Autonomous
   // signup is authorized; doing it invisibly is not, and this is what makes it
@@ -202,7 +211,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     },
   });
   registerAgentKnowledgeIngestTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentChannelSendTool(toolRegistry, services.channelDeliveryRouter, { shellPaths: services.shellPaths });
   registerAgentKnowledgeTool(toolRegistry, services.shellPaths, configManager);
   registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   registerAgentResearchReportTool(toolRegistry, services.artifactStore, deps.researchReportSourceOwner ?? deps.researchSourceOwner,

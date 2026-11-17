@@ -8,7 +8,7 @@ import { createNativeConversationIntakeHost, createNativeRequirementProposer, ty
 import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
 import { createRuntimeAcquisitionScope } from './acquisition.js';
@@ -221,6 +221,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     disposalScope.registry.add('pairing last-seen', () => pairingTokens.flushLastSeen());
     // Browser composition fills this shared holder before async host registration.
     const browserCheckoutSeam = createBrowserCheckoutSeamHolder();
+    // The one browser the `browser.*` verbs serve; a session hosted for the Agent drives it too.
+    let browserGateway = undefined as DaemonBrowserGatewayService | undefined;
 
     // The platform verb groups plus what only a daemon serves (gateway-verbs.ts):
     // checkin.*/fleet-needs-input/pairing.* register only when their deps are present.
@@ -238,6 +240,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
       homeDirectory, emailServiceDeps, describeEmailConfigProblem, processRegistry: graph.processRegistry,
       onBrowserCheckout: browserCheckoutSeam.set,
+      onBrowserGateway: (service) => { browserGateway = service; },
       // The registration-gated surface, not the raw manager: an explicit create in
       // an unregistered workspace refuses with something actionable. Verbs naming a
       // hosted session, or a checkpoint its workspace holds, reach that workspace's manager.
@@ -374,6 +377,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       workLedger: workLedgerOwner.service,
       workspaceSwap,
       browserJudgment,
+      ...(browserGateway ? { browserGateway } : {}),
       devicePosture,
       clusterCoordinator,
       clusterGroup,

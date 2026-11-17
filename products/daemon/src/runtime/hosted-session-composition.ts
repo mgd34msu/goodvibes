@@ -240,6 +240,12 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         mediaProviders: services.mediaProviders,
         channelDeliveryRouter: services.channelDeliveryRouter,
         workPlan: services.workPlan,
+        // The daemon's own browser and Google account: `browser` drives the
+        // engine the `browser.*` verbs serve; `google` reads the daemon's
+        // settings and credential stores and its own `calendar.events.*`.
+        ...(services.browserGateway ? { browser: services.browserGateway } : {}),
+        configManager: services.configManager,
+        secretsManager: services.secretsManager,
       }),
     },
     // Called for every session the engine binds to a workspace (create and

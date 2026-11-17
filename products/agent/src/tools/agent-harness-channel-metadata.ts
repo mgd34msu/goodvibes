@@ -1,7 +1,7 @@
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentWorkspaceChannelStatus } from '../input/agent-workspace-channels.ts';
-import { readAgentChannelDeliveryReceipts } from '../agent/channel-delivery-receipts.ts';
+import { readAgentChannelDeliveryReceipts } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { buildAgentWorkspaceChannelTriage, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

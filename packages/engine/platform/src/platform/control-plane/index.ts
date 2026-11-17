@@ -220,7 +220,7 @@ export type { SkillsGatewayService } from './routes/skills.js';
 // composition so it can construct a PaymentsGatewayServiceImpl over the SAME
 // browser engine the `browser.*` verbs drive, holding the SAME card-material
 // guard the engine scrubs against (see routes/browser-composition.ts).
-export { composeDaemonBrowser, createDaemonBrowserGatewayService } from './routes/browser-composition.js';
+export { browserGatewayOverEngine, composeDaemonBrowser, createDaemonBrowserGatewayService } from './routes/browser-composition.js';
 export type {
   BrowserCheckoutSeam,
   BrowserCompositionDeps,

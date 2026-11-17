@@ -15,7 +15,7 @@ import {
   formatAgentChannelDeliveryReceiptLine,
   readAgentChannelDeliveryReceipts,
   recordAgentChannelDeliveryReceipt,
-} from '../../agent/channel-delivery-receipts.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
 import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts';
 

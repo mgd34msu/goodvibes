@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonStoreSpec } from './store-file.js';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from './channel-delivery.js';
 
 export type AgentChannelDeliveryReceiptSource = 'command' | 'model-tool';
 export type AgentChannelDeliveryReceiptStatus = 'sent';
@@ -10,12 +10,12 @@ export type AgentChannelDeliveryReceiptStatus = 'sent';
 export interface AgentChannelDeliveryReceiptTarget {
   readonly kind: string;
   readonly display: string;
-  readonly surfaceKind?: string;
-  readonly routeId?: string;
-  readonly label?: string;
-  readonly addressHost?: string;
-  readonly addressScheme?: string;
-  readonly redactedAddress?: boolean;
+  readonly surfaceKind?: string | undefined;
+  readonly routeId?: string | undefined;
+  readonly label?: string | undefined;
+  readonly addressHost?: string | undefined;
+  readonly addressScheme?: string | undefined;
+  readonly redactedAddress?: boolean | undefined;
 }
 
 export interface AgentChannelDeliveryReceipt {
@@ -29,7 +29,7 @@ export interface AgentChannelDeliveryReceipt {
   readonly messagePreview: string;
   readonly messageLength: number;
   readonly strategyCount: number;
-  readonly responseId?: string;
+  readonly responseId?: string | undefined;
   readonly authorization: 'explicit-user-confirmed';
   readonly userRoute: string;
   readonly modelRoute: string;
@@ -39,7 +39,7 @@ export interface AgentChannelDeliveryReceiptSnapshot {
   readonly path: string;
   readonly exists: boolean;
   readonly receipts: readonly AgentChannelDeliveryReceipt[];
-  readonly parseError?: string;
+  readonly parseError?: string | undefined;
 }
 
 type AgentChannelDeliveryReceiptShellPaths = Pick<ShellPathService, 'resolveUserPath'>;
@@ -222,7 +222,7 @@ export function recordAgentChannelDeliveryReceipt(
     readonly deliveryInput: AgentChannelDeliveryInput;
     readonly result: AgentChannelDeliveryResult;
   },
-): AgentChannelDeliveryReceipt & { readonly storeNote?: string } {
+): AgentChannelDeliveryReceipt & { readonly storeNote?: string | undefined } {
   const path = agentChannelDeliveryReceiptPath(shellPaths);
   const title = previewMessage(input.result.title || 'GoodVibes Agent message');
   const receipt: AgentChannelDeliveryReceipt = {

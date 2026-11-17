@@ -48,7 +48,7 @@ import {
   runGoogleSetup,
 } from './google-connection-actions.ts';
 import type { GoogleProgressPort, GoogleSetupPath, GoogleSetupStepSpec, GoogleStepResult } from '@goodvibes-jev/engine/platform/platform/google';
-import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '../../trust/outward-approvals.ts';
+import { getOutwardApprovalStore, listRefusedOutwardActions, takeRefusedOutwardAction, type PendingOutwardAction } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { commandRefusal } from './confirmation.ts';
 
 const USAGE = [

@@ -469,12 +469,14 @@ export async function heartbeatDistributedPeer(
     metadata: mergeBoundedPeerMetadata(peer.metadata, input.metadata),
   };
   state.peers.set(peer.id, updated);
-  renewDistributedWorkLeases(state, peer.id, auth.token.id);
+  const leaseWriteDue = renewDistributedWorkLeases(state, peer.id, auth.token.id);
   // Presence (last seen, renewed leases) stays in memory and rides the next
   // real write, as authentication does. Only a peer coming back (it was not
   // presented as connected) or a changed description is audited, written and
   // published, so heartbeats neither rewrite the store nor push the approval
-  // and token records out of the bounded audit list.
+  // and token records out of the bounded audit list. A renewed lease whose
+  // written copy has less than half its window left is written (at most once
+  // per half window), so a daemon restart does not requeue work still running.
   // Authentication already marked the peer connected, so whether it came back
   // is read from what authentication saw; a caller holding an older auth falls
   // back to the record as it stands.
@@ -484,7 +486,10 @@ export async function heartbeatDistributedPeer(
     || updated.clientMode !== peer.clientMode
     || !sameList(updated.capabilities, peer.capabilities)
     || !sameList(updated.commands, peer.commands);
-  if (!cameBack && !described) return sanitizePeer(updated);
+  if (!cameBack && !described) {
+    if (leaseWriteDue) await pruneAndPersistDistributedRuntime(state);
+    return sanitizePeer(updated);
+  }
   if (cameBack) {
     recordDistributedRuntimeAudit(state, buildAudit('peer-connected', peer.id, {
       peerId: peer.id,
@@ -543,9 +548,13 @@ function mergeBoundedPeerMetadata(
  * holds are renewed by the length it asked for when it pulled. Without this a
  * slow first item lets the lease on the items pulled with it lapse, and they
  * are offered again while the peer is about to run them.
+ *
+ * Returns whether a renewed lease's written copy has less than half its
+ * window left and must be written now.
  */
-function renewDistributedWorkLeases(state: DistributedRuntimeManagerState, peerId: string, tokenId: string): void {
+function renewDistributedWorkLeases(state: DistributedRuntimeManagerState, peerId: string, tokenId: string): boolean {
   const now = Date.now();
+  let writeDue = false;
   for (const item of state.work.values()) {
     if (item.peerId !== peerId || item.status !== 'claimed' || item.claimTokenId !== tokenId) continue;
     if (item.leaseExpiresAt === undefined || item.leaseExpiresAt <= now) continue;
@@ -556,7 +565,10 @@ function renewDistributedWorkLeases(state: DistributedRuntimeManagerState, peerI
     const leaseMs = item.metadata['leaseMs'];
     if (typeof leaseMs !== 'number' || !Number.isFinite(leaseMs) || now + leaseMs <= item.leaseExpiresAt) continue;
     state.work.set(item.id, { ...item, leaseExpiresAt: now + leaseMs, updatedAt: now });
+    const written = state.writtenLeases.get(item.id) ?? item.leaseExpiresAt;
+    if (written - now < leaseMs / 2) writeDue = true;
   }
+  return writeDue;
 }
 
 function newPeerId(kind: DistributedPeerKind): string {

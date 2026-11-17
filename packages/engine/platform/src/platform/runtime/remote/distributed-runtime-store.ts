@@ -647,4 +647,8 @@ export async function persistDistributedRuntime(state: DistributedRuntimeManager
     audit: [...state.audit],
   };
   await state.writes.run(() => state.store.persist(snapshot));
+  state.writtenLeases.clear();
+  for (const item of snapshot.work) {
+    if (item.status === 'claimed' && item.leaseExpiresAt !== undefined) state.writtenLeases.set(item.id, item.leaseExpiresAt);
+  }
 }

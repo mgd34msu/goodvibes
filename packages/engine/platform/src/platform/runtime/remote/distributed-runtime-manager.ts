@@ -96,6 +96,7 @@ export class DistributedRuntimeManager implements DistributedRuntimeManagerState
   private readonly peerMutations = new Map<string, number>();
   readonly work = new Map<string, DistributedPendingWork>();
   readonly workAdmissions = new Map<string, DistributedWorkAdmissionOwner>();
+  readonly writtenLeases = new Map<string, number>();
   readonly audit: DistributedRuntimeAuditRecord[] = [];
   readonly waiters = new Map<string, DistributedRuntimeWaiter[]>();
   readonly writes = new StoreWriteQueue();

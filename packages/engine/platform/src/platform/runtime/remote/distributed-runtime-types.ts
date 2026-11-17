@@ -243,6 +243,12 @@ export interface DistributedRuntimeManagerState {
   peerMutationPending(peerId: string): boolean;
   readonly work: Map<string, DistributedPendingWork>;
   readonly workAdmissions: Map<string, DistributedWorkAdmissionOwner>;
+  /**
+   * The lease expiry of each claimed work item as the store last wrote it.
+   * Heartbeats renew leases in memory; this says when the written copy must
+   * be refreshed so a daemon restart does not read a running claim as lapsed.
+   */
+  readonly writtenLeases: Map<string, number>;
   readonly audit: DistributedRuntimeAuditRecord[];
   readonly waiters: Map<string, DistributedRuntimeWaiter[]>;
   sessionBridge: DistributedSessionBridge | null;

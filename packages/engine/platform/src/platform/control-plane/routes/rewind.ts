@@ -68,6 +68,8 @@ export function createRewindApplyHandler(service: Pick<UnifiedRewindService, 'ap
 /** The reversal half of a conversation port: restore the pre-rewind copy, and say whether that is still safe. */
 export interface RewindConversationUndoPort {
   restoreBefore(undoSnapshotId: string): boolean;
+  /** restoreBefore with the conversation's save awaited, where the port's conversations are saved by their owner. */
+  restoreBeforeSaved?(undoSnapshotId: string): Promise<{ readonly restored: boolean; readonly notSaved?: string }>;
   messagesSinceRewind(undoSnapshotId: string): number | null;
 }
 
@@ -91,6 +93,8 @@ export interface RewindUndoResult {
   readonly sessionId: string;
   readonly undoSnapshotId: string;
   readonly refusal: { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[] } | null;
+  /** Set when the undo took effect but could not be saved: what happened and what to do. */
+  readonly notSaved?: string;
 }
 
 function isUndoPort(port: object | null | undefined): port is RewindConversationUndoPort {
@@ -150,13 +154,21 @@ export function createRewindUndoHandler(
         'Restoring the pre-rewind copy would discard them, so nothing was changed',
         ['Fork the session to keep the current conversation, then rewind or undo in the fork']);
     }
-    if (!local.restoreBefore(undoSnapshotId)) {
+    const restored = local.restoreBeforeSaved
+      ? await local.restoreBeforeSaved(undoSnapshotId)
+      : { restored: local.restoreBefore(undoSnapshotId) };
+    if (!restored.restored) {
       return refused('UNDO_POINT_GONE', 'the undo snapshot is gone',
         'That rewind can no longer be undone; the conversation itself is unchanged',
         ['Use rewind.plan and rewind.apply to move the conversation to the point you want']);
     }
     service.anchorsRestored(undoSnapshotId);
-    return { undone: true, sessionId, undoSnapshotId, refusal: null };
+    return {
+      undone: true, sessionId, undoSnapshotId, refusal: null,
+      ...(restored.notSaved === undefined ? {} : {
+        notSaved: `The conversation was put back but the change could not be saved (${restored.notSaved}): it holds until the daemon restarts, which brings back the rewound transcript. Fix the session store's disk or permissions, then undo again.`,
+      }),
+    };
   };
 }
 

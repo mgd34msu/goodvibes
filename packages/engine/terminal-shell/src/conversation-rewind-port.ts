@@ -41,7 +41,11 @@ import type {
 import { readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ConversationManager as CoreConversation } from '@goodvibes-jev/engine/platform/platform/core';
-export interface RewindConversation extends Pick<CoreConversation, 'getMessageCount' | 'toJSON' | 'fromJSON' | 'removeMessagesAfter'> { rebuildHistory(): void }
+export interface RewindConversation extends Pick<CoreConversation, 'getMessageCount' | 'toJSON' | 'fromJSON' | 'removeMessagesAfter'> {
+  rebuildHistory(): void;
+  /** Saves the changed conversation where its owner keeps it; a rewind awaits it and reports a failure. */
+  persist?(): Promise<void>;
+}
 import { resolveTurnAnchor, resolveTurnBoundary, type BoundaryMessage } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { logger, readDocument, summarizeError, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 
@@ -51,6 +55,8 @@ type ConversationJson = Parameters<CoreConversation['fromJSON']>[0];
 export interface ConversationRewindPort extends RewindConversationPort {
   /** Restore the pre-truncation conversation (the /undo direction). */
   restoreBefore(undoSnapshotId: string): boolean;
+  /** restoreBefore, then the conversation's save awaited: `notSaved` says why when it failed. */
+  restoreBeforeSaved(undoSnapshotId: string): Promise<{ readonly restored: boolean; readonly notSaved?: string }>;
   /** Restore the post-truncation conversation (the /redo direction). */
   restoreAfter(undoSnapshotId: string): boolean;
   /**
@@ -182,10 +188,33 @@ export function createConversationRewindPort(
     return resolved.reason === undefined ? { keep: resolved.keep, total } : { reason: resolved.reason, total };
   }
 
-  function restore(snapshot: SnapshotPair | undefined, which: 'before' | 'after'): boolean {
+  /** The conversation's save, awaited; the reason when it failed. */
+  async function save(conv: RewindConversation): Promise<string | undefined> {
+    if (!conv.persist) return undefined;
+    try {
+      await conv.persist();
+      return undefined;
+    } catch (error) {
+      return summarizeError(error);
+    }
+  }
+
+  function apply(snapshot: SnapshotPair | undefined, which: 'before' | 'after'): boolean {
     if (!snapshot) return false;
     snapshot.conv.fromJSON(snapshot[which]);
     snapshot.conv.rebuildHistory();
+    return true;
+  }
+
+  /** The synchronous restore: a save its owner keeps runs behind it and a failure is logged. */
+  function restore(snapshot: SnapshotPair | undefined, which: 'before' | 'after'): boolean {
+    if (!apply(snapshot, which)) return false;
+    const conv = snapshot!.conv;
+    if (conv.persist) {
+      void save(conv).then((notSaved) => {
+        if (notSaved) logger.warn('a restored conversation could not be saved; a restart brings back the transcript from before the restore', { error: notSaved });
+      });
+    }
     return true;
   }
 
@@ -210,11 +239,22 @@ export function createConversationRewindPort(
       conv.rebuildHistory();
       const after = conv.toJSON() as ConversationJson;
       remember(undoSnapshotId, anchor.sessionId, { conv, before, after, afterCount: conv.getMessageCount(), afterSerialized: JSON.stringify(after) });
-      return { droppedMessages: Math.max(0, cut.total - cut.keep), undoSnapshotId, undoExpiresAfter: undoLifetime };
+      const notSaved = await save(conv);
+      return {
+        droppedMessages: Math.max(0, cut.total - cut.keep), undoSnapshotId, undoExpiresAfter: undoLifetime,
+        ...(notSaved === undefined ? {} : { notSaved }),
+      };
     },
 
     restoreBefore(undoSnapshotId: string): boolean {
       return restore(snapshotFor(undoSnapshotId), 'before');
+    },
+
+    async restoreBeforeSaved(undoSnapshotId: string): Promise<{ readonly restored: boolean; readonly notSaved?: string }> {
+      const snapshot = snapshotFor(undoSnapshotId);
+      if (!apply(snapshot, 'before')) return { restored: false };
+      const notSaved = await save(snapshot!.conv);
+      return notSaved === undefined ? { restored: true } : { restored: true, notSaved };
     },
 
     restoreAfter(undoSnapshotId: string): boolean {

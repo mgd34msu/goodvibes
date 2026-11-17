@@ -383,6 +383,9 @@ export class UnifiedRewindService {
         : 'conversation rewind skipped: no conversation is reachable for this session');
       return { conversation: { rewound: false, droppedMessages: 0, undoSnapshotId: null }, undoConversation: null };
     }
+    if (outcome.notSaved) {
+      warnings.push(`the conversation was rewound but the change could not be saved (${outcome.notSaved}): it holds until the daemon restarts, which brings back the transcript from before the rewind. Fix the session store's disk or permissions, then apply the rewind again.`);
+    }
     return {
       conversation: { rewound: true, droppedMessages: outcome.droppedMessages, undoSnapshotId: outcome.undoSnapshotId },
       undoConversation: { undoSnapshotId: outcome.undoSnapshotId,

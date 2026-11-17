@@ -69,6 +69,8 @@ export interface RewindableConversation {
   fromJSON(json: ConversationJson): void;
   rebuildHistory(): void;
   removeMessagesAfter(count: number): void;
+  /** Saves the changed conversation; a rewind or undo awaits it and reports a failure. */
+  persist?(): Promise<void>;
 }
 
 /** What this port says when it holds no conversation for the session asked about. */
@@ -178,8 +180,9 @@ const hostedConversations = new Map<string, HostedConversation>();
 
 /**
  * A hosted conversation as the rewind port drives it. A rewind and its undo
- * both end with `rebuildHistory`, which is where the changed transcript is
- * saved, so a restart brings back the conversation as the rewind left it.
+ * await `persist`, which saves the changed transcript, so a restart brings
+ * back the conversation as the rewind left it, and a save that failed is
+ * reported in the rewind's answer instead of only in the log.
  */
 function rewindableHosted(sessionId: string, conversation: HostedConversation, save: () => Promise<void>): RewindableConversation {
   return {
@@ -187,10 +190,14 @@ function rewindableHosted(sessionId: string, conversation: HostedConversation, s
     toJSON: () => conversation.toJSON(),
     fromJSON: (json) => conversation.fromJSON(json as Parameters<HostedConversation['fromJSON']>[0]),
     removeMessagesAfter: (count) => conversation.removeMessagesAfter(count),
-    rebuildHistory: () => {
-      void save().catch((error: unknown) => {
+    rebuildHistory: () => {},
+    persist: async () => {
+      try {
+        await save();
+      } catch (error) {
         logger.warn('a rewound hosted conversation could not be saved; a restart brings back the transcript from before the rewind', { sessionId, error: summarizeError(error) });
-      });
+        throw error;
+      }
     },
   };
 }

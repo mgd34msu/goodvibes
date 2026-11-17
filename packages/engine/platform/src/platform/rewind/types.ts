@@ -94,6 +94,11 @@ export interface RewindConversationOutcome extends RewindConversationAvailabilit
   readonly undoSnapshotId: string;
   /** How long the port holding the conversation keeps that handle, in words a person reads. */
   readonly undoExpiresAfter?: string | undefined;
+  /**
+   * Set when the rewind took effect in memory but its store could not save it:
+   * why. A restart then brings back the transcript from before the rewind.
+   */
+  readonly notSaved?: string | undefined;
 }
 
 /**

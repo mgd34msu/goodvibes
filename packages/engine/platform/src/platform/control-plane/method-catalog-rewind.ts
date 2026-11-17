@@ -44,6 +44,7 @@ const REWIND_UNDO_OUTPUT_SCHEMA = objectSchema(
       { code: STRING_SCHEMA, state: STRING_SCHEMA, reason: STRING_SCHEMA, next: STRING_LIST_SCHEMA },
       ['code', 'state', 'reason', 'next'],
     )),
+    notSaved: STRING_SCHEMA,
   },
   ['undone', 'sessionId', 'undoSnapshotId', 'refusal'],
 );
@@ -76,7 +77,7 @@ export const builtinGatewayRewindMethodDescriptors: readonly GatewayMethodDescri
     id: 'rewind.undo',
     title: 'Undo a Conversation Rewind',
     description:
-      'Put a session\'s conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt\'s undo.conversation.expiresAfter), the conversation changed since, or the surface holding the conversation did not answer. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.',
+      'Put a session\'s conversation back to how it was before a rewind, from the undo.conversation.undoSnapshotId of the rewind.apply receipt. The pre-rewind copy replaces the whole conversation, so the undo is refused while the conversation has newer messages than the rewind left it with. Answers undone:true, or undone:false with a refusal (code, state, reason, next) and nothing changed: the snapshot is gone (see the receipt\'s undo.conversation.expiresAfter), the conversation changed since, or the surface holding the conversation did not answer. When the undo took effect but the conversation\'s store could not save it, `notSaved` says so and what to do: a restart would bring back the rewound transcript. A conversation a surface is hosting is restored by that surface, asked over its rewind.conversation.requests channel; one this daemon holds is restored here. Files are reversed separately with checkpoints.restore.',
     category: 'rewind',
     scopes: ['write:checkpoints'],
     transport: ['ws'],

@@ -198,6 +198,24 @@ export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayStepUpMethodDescriptors,
 ];
 
+/**
+ * Metadata key the daemon's start-up sweep sets on a method it cannot answer
+ * (see markUnservedGatewayMethods), so a client reads why it is not callable.
+ */
+export const UNSERVED_METHOD_REASON_KEY = 'unservedReason';
+
+/**
+ * A handler attached after the start-up sweep makes the method callable again:
+ * registration usually reuses the descriptor the catalog holds, and leaving
+ * the sweep's mark on it would refuse a call this daemon can now serve.
+ */
+function withoutUnservedMark(descriptor: GatewayMethodDescriptor): GatewayMethodDescriptor {
+  const marked = descriptor.metadata;
+  if (marked?.[UNSERVED_METHOD_REASON_KEY] === undefined) return descriptor;
+  const { [UNSERVED_METHOD_REASON_KEY]: _reason, ...metadata } = marked;
+  return { ...descriptor, invokable: true, metadata };
+}
+
 function normalizeDescriptor(descriptor: GatewayMethodDescriptor): GatewayMethodDescriptor {
   const id = descriptor.id.trim();
   if (!id) throw new Error('Gateway method id is required');
@@ -400,7 +418,7 @@ export class GatewayMethodCatalog {
     handler?: GatewayMethodHandler,
     options: { readonly replace?: boolean } = {},
   ): () => void {
-    const normalized = normalizeDescriptor(descriptor);
+    const normalized = normalizeDescriptor(typeof handler === 'function' ? withoutUnservedMark(descriptor) : descriptor);
     if (this.methods.has(normalized.id) && !options.replace) {
       throw new Error(`Gateway method already registered: ${normalized.id}`);
     }

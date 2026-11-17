@@ -1,7 +1,7 @@
 import { dispatchDaemonApiRoutes } from '@goodvibes-jev/engine/daemon-api';
 import type { DaemonApiRouteHandlers, GatewayRestVerbMatch } from '@goodvibes-jev/engine/daemon-api';
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
-import type { GatewayMethodCatalog } from './method-catalog.js';
+import { UNSERVED_METHOD_REASON_KEY, type GatewayMethodCatalog } from './method-catalog.js';
 import { MODEL_ROUTES } from '../daemon/http/model-routes.js';
 import { MCP_ROUTES } from '../daemon/http/mcp-routes.js';
 import { BATCH_ROUTES } from '../daemon/http/batch-routes.js';
@@ -111,8 +111,7 @@ export async function findUnservedGatewayMethods(
   return unserved.sort();
 }
 
-/** Metadata key a start-up mark sets, so a client reads why the method is not callable. */
-export const UNSERVED_METHOD_REASON_KEY = 'unservedReason';
+export { UNSERVED_METHOD_REASON_KEY };
 
 /**
  * Makes the served catalog say what this daemon really does: every method
@@ -121,8 +120,8 @@ export const UNSERVED_METHOD_REASON_KEY = 'unservedReason';
  * not callable, and why, instead of learning so from a 501. Returns the ids it
  * marked, for the start-up log. Call it once after composition and before the
  * scope policy bootstrap: the policy snapshot includes `invokable`, so marking
- * later is a policy change. A handler registered afterwards replaces the
- * marked descriptor as usual.
+ * later is a policy change. A handler registered afterwards clears the mark
+ * (the catalog's register does it), so the method is callable again.
  */
 export async function markUnservedGatewayMethods(catalog: GatewayMethodCatalog, routes?: RouteProbe): Promise<readonly string[]> {
   const unserved = await findUnservedGatewayMethods(catalog, routes);

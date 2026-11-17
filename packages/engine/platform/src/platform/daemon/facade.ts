@@ -1,5 +1,6 @@
 import { requestedEffortOverride } from '../providers/reasoning-effort-surface.js';
 import { completeGatewayScopePolicyBootstrap } from '../control-plane/scope-policy-bootstrap.js';
+import { markUnservedGatewayMethods } from '../control-plane/method-catalog-route-reconcile.js';
 import { channelProfileForSession, withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
 import { applyChannelProfileToSpawn } from '../channel-profiles/intake.js';
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
@@ -163,6 +164,7 @@ export class DaemonServer {
   private readonly deferNativeActivationUntilHostReady: boolean;
   private hostStartupCompleted = false;
   private hostedSessionsRestored = false;
+  private unservedMethodsMarked = false;
   private nativeStartupHandover: Exclude<ReturnType<DaemonLifecycleRuntime['activateNativeLifecycle']>, void> | undefined;
   private readonly integrationHelpers: IntegrationHelperService;
   private configManager: ConfigManager;
@@ -580,6 +582,18 @@ export class DaemonServer {
     if (this.server !== null) {
       logger.info('DaemonServer: already running');
       return;
+    }
+    // Every handler is registered by now and the shipped host activates the
+    // scope policy only after this start, so the catalog says which methods
+    // this daemon cannot answer before any client reads it. Once per process:
+    // one route probe per handler-less descriptor.
+    if (!this.unservedMethodsMarked) {
+      this.unservedMethodsMarked = true;
+      const unserved = await markUnservedGatewayMethods(this.gatewayMethods);
+      if (unserved.length > 0) {
+        logger.info('DaemonServer: methods this daemon has no handler or route for are listed as not callable', { methods: unserved });
+      }
+      if (this.externalStopEpoch !== stopEpoch || this.restartCycle.closed) return;
     }
     // A revoked pairing, shared token or user closes that principal's connections at once.
     this.controlPlaneHelper.watchRevocations();

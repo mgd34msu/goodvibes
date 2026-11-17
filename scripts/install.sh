@@ -361,6 +361,10 @@ resolve_tag() {
       tag="${redirect##*/}"
     fi
     [ -n "$tag" ] || fail INSTALL_E007 "could not resolve the latest release tag for $tag_repo"
+    # Another release in the repository (the voice-runtime host, say) can hold
+    # the Latest mark; installing from it would fail later on a missing file.
+    printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' ||
+      fail INSTALL_E009 "the latest release of $tag_repo is '$tag', which is not a suite release; set GOODVIBES_VERSION=vX.Y.Z"
   else
     tag="$tag_requested"
   fi

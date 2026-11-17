@@ -74,6 +74,7 @@ jobs:
             gh release create "$VOICE_RUNTIMES_TAG" \
               --repo "$REPO" \
               --title "Voice runtimes (append-only)" \
+              --latest=false \
               --notes "Append-only host for goodvibes voice engine bundles. Assets are never re-uploaded in place or renamed; each carries a .sha256 sidecar." \
               || gh release view "$VOICE_RUNTIMES_TAG" --repo "$REPO" >/dev/null  # another version's run may have created it first
           fi

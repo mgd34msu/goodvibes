@@ -185,4 +185,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
-        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+        run: |
+          set -euo pipefail
+          # The installer and every daemon's update check follow `releases/latest`, so the mark is set
+          # here, never left to GitHub's default (which gives it to whatever was published last): it goes
+          # to this tag only when the tag is a stable vN.N.N at least as high as every published stable
+          # suite release, the rule align-dist-tags.ts applies to npm. A patch for an older line or a
+          # prerelease is published without it.
+          latest=false
+          if printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            highest="$({ gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1000 \
+              --json tagName --jq '.[].tagName'; printf '%s\n' "$RELEASE_TAG"; } \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+            [ "$highest" = "$RELEASE_TAG" ] && latest=true
+          fi
+          echo "Latest mark for $RELEASE_TAG: $latest"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"

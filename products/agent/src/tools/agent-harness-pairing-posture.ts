@@ -162,7 +162,7 @@ function pairingRoutes(): readonly PairingRoute[] {
     {
       id: 'qr-pairing',
       label: 'QR pairing',
-      detail: 'Owner-terminal route: the user types /pair (optionally --name <device name>) in the live Agent terminal; it mints a named, revocable device token on the connected host and shows its link and QR code. Granting a new device access is the owner's to type, so a model invocation of /pair is refused. The device token is revoked in the web app under settings, security, devices.',
+      detail: 'Owner-terminal route: the user types /pair (optionally --name <device name>) in the live Agent terminal; it mints a named, revocable device token on the connected host and shows its link and QR code. Granting a new device access is the owner\'s to type, so a model invocation of /pair is refused. The device token is revoked in the web app under settings, security, devices.',
       effect: 'owner-terminal-only',
       command: '/pair',
     },

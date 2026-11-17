@@ -370,6 +370,8 @@ export class GeminiProvider implements LLMProvider {
           body['tools'] = [{
             functionDeclarations: toGeminiFunctionDeclarations(tools),
           }];
+          // A request on cached content cannot carry a tool config; there the caller drops any call.
+          if (params.toolChoice === 'none') body['toolConfig'] = { functionCallingConfig: { mode: 'NONE' } };
         }
       }
 

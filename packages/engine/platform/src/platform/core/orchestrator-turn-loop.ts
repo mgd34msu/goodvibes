@@ -711,8 +711,10 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       response = await chat({
         model: model.id,
         messages: context.conversation.getMessagesForRequest(),
-        // The closing request after a stop rule keeps the definitions (providers reject a tool history without them); its calls are not run.
+        // The closing request after a stop rule keeps the definitions (providers reject a tool history without them)
+        // and forbids new calls, so the model answers in text; a call it makes anyway is not run.
         tools: toolDefinitions.length > 0 ? toolDefinitions : undefined,
+        ...(request.tools ? {} : { toolChoice: 'none' as const }),
         systemPrompt: systemPromptForCall,
         ...((tokenLimits.maxOutputTokens ?? 0) > 0 ? { maxTokens: tokenLimits.maxOutputTokens } : {}),
         ...turnReasoning(),

@@ -323,6 +323,12 @@ export interface ChatRequest {
   routingContext?: DecisionRoutingContext | undefined;
   messages: ProviderMessage[];
   tools?: ToolDefinition[] | undefined;
+  /**
+   * `none`: the model must answer in text and call no tool. The definitions
+   * stay in `tools` (a history with tool calls needs them on most providers);
+   * this only forbids new calls. Omitted: the model may call tools.
+   */
+  toolChoice?: 'none' | undefined;
   model: string;
   maxTokens?: number | undefined;
   signal?: AbortSignal | undefined;

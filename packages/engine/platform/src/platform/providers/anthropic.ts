@@ -181,6 +181,7 @@ export class AnthropicProvider implements LLMProvider {
 
       if (anthropicTools && anthropicTools.length > 0) {
         body['tools'] = anthropicTools;
+        if (params.toolChoice === 'none') body['tool_choice'] = { type: 'none' };
       }
 
       // Multi-breakpoint prompt caching (up to 4 breakpoints).

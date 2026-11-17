@@ -174,7 +174,7 @@ export interface CompatChatRequestShape {
  */
 export function buildCompatChatRequest(
   shape: CompatChatRequestShape,
-  params: Pick<ChatRequest, 'messages' | 'tools' | 'maxTokens' | 'systemPrompt' | 'reasoningEffort' | 'reasoningEffortSpec' | 'reasoningSummary'>,
+  params: Pick<ChatRequest, 'messages' | 'tools' | 'toolChoice' | 'maxTokens' | 'systemPrompt' | 'reasoningEffort' | 'reasoningEffortSpec' | 'reasoningSummary'>,
   model: string,
 ): { readonly body: Record<string, unknown>; readonly headers: Record<string, string>; readonly effortValue: string | undefined } {
   const tools = params.tools && params.tools.length > 0 ? toOpenAITools(params.tools) : undefined;
@@ -188,6 +188,7 @@ export function buildCompatChatRequest(
     model,
     messages: toOpenAIMessages(params.messages, params.systemPrompt),
     ...(tools ? { tools } : {}),
+    ...(tools && params.toolChoice === 'none' ? { tool_choice: 'none' } : {}),
     ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
   };
   if (effortValue && (shape.reasoningFormat === 'mercury' || shape.reasoningFormat === 'reasoning-effort')) {

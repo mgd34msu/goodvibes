@@ -198,6 +198,7 @@ export class OpenAIProvider implements LLMProvider {
             model,
             messages: openaiMessages as Parameters<OpenAIChatCreate>[0]['messages'],
             ...(openaiTools ? { tools: openaiTools as Parameters<OpenAIChatCreate>[0]['tools'] } : {}),
+            ...(openaiTools && params.toolChoice === 'none' ? { tool_choice: 'none' as const } : {}),
             // Chat completions takes max_completion_tokens from every current model; the GPT-5 and o-series models refuse max_tokens.
             ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
             ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),

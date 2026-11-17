@@ -213,7 +213,7 @@ export async function chatWithOpenAICodex(
         text: { verbosity: 'medium' },
         include: ['reasoning.encrypted_content'],
         prompt_cache_key: sessionId,
-        tool_choice: 'auto',
+        tool_choice: params.toolChoice === 'none' ? 'none' : 'auto',
         parallel_tool_calls: true,
         ...(buildResponsesTools(params.tools) ? { tools: buildResponsesTools(params.tools) } : {}),
         ...(params.reasoningEffort && params.reasoningEffort !== 'instant'

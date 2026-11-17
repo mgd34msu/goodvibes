@@ -274,6 +274,7 @@ export class AnthropicCompatProvider implements LLMProvider {
 
       if (tools && tools.length > 0) {
         body['tools'] = toAnthropicTools(tools);
+        if (params.toolChoice === 'none') body['tool_choice'] = { type: 'none' };
       }
 
       const resolvedEffort = applyAnthropicReasoning(

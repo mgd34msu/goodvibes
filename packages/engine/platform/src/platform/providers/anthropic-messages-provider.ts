@@ -139,6 +139,7 @@ export class AnthropicMessagesProvider implements LLMProvider {
 
       if (params.tools && params.tools.length > 0) {
         body['tools'] = toAnthropicTools(params.tools);
+        if (params.toolChoice === 'none') body['tool_choice'] = { type: 'none' };
       }
 
       applyAnthropicReasoning(

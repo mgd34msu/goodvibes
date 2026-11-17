@@ -387,7 +387,7 @@ export class LMStudioProvider implements LLMProvider {
       store: false,
       ...(params.systemPrompt?.trim() ? { instructions: params.systemPrompt.trim() } : {}),
       ...(params.maxTokens ? { max_output_tokens: params.maxTokens } : {}),
-      ...(tools ? { tools, tool_choice: 'auto', parallel_tool_calls: true } : {}),
+      ...(tools ? { tools, tool_choice: params.toolChoice === 'none' ? 'none' : 'auto', parallel_tool_calls: true } : {}),
       ...(reasoning ? { reasoning } : {}),
     };
 

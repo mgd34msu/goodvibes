@@ -223,7 +223,8 @@ export class OllamaProvider implements LLMProvider {
       model,
       messages,
       stream: true,
-      ...(params.tools && params.tools.length > 0 ? { tools: toOpenAITools(params.tools) } : {}),
+      // Ollama has no tool choice: a text-only request is sent without the definitions.
+      ...(params.tools && params.tools.length > 0 && params.toolChoice !== 'none' ? { tools: toOpenAITools(params.tools) } : {}),
       ...(think !== undefined ? { think } : {}),
       ...(params.maxTokens ? { options: { num_predict: params.maxTokens } } : {}),
     };

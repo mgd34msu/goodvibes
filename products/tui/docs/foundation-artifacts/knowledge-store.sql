@@ -47,6 +47,25 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_sources_planning_identity
   ON knowledge_sources (CASE WHEN json_valid(metadata) THEN COALESCE(json_extract(metadata, '$.knowledgeSpaceId'), json_extract(metadata, '$.spaceId'), json_extract(metadata, '$.namespace')) END, CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.planningArtifactKind') END, CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.planningArtifactId') END)
   WHERE connector_id = 'goodvibes-project-planning';
 
+CREATE TABLE IF NOT EXISTS project_work_plan_tasks (
+  space_id TEXT NOT NULL,
+  work_plan_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  status TEXT,
+  sort_order REAL,
+  task_json TEXT,
+  PRIMARY KEY (space_id, work_plan_id, task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_work_plan_tasks_revision ON project_work_plan_tasks(space_id, work_plan_id, revision);
+
+CREATE INDEX IF NOT EXISTS idx_project_work_plan_tasks_order ON project_work_plan_tasks(space_id, work_plan_id, sort_order);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_work_plan_tasks_record ON project_work_plan_tasks(record_id);
+
 CREATE TABLE IF NOT EXISTS knowledge_nodes (
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL,

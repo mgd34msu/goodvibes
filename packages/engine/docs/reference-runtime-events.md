@@ -914,6 +914,30 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
               }
             ]
           }
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "delivered",
+                "waiting",
+                "undeliverable"
+              ]
+            },
+            "to": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "to"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -1345,8 +1369,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
         "permissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]

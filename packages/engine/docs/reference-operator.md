@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `595`
+- Methods: `599`
 - Events: `36`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -2749,8 +2749,9 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
     "mode": {
       "type": "string",
       "enum": [
-        "safe-owner",
-        "safe-jev",
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
         "yolo",
         "plan"
       ]
@@ -2812,6 +2813,7 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
             "managed_policy_deny",
             "safety_guardrail",
             "mode_allow_all",
+            "mode_queued_for_owner",
             "invocation_already_admitted",
             "mode_denied",
             "plan_mode",
@@ -4096,7 +4098,7 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
 
 #### `inbox.answer`
 
-Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). Who answered is taken from the authenticated caller.
+Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. Who answered is taken from the authenticated caller.
 
 - Title: `Answer Owner Inbox Item`
 - Source: `builtin`
@@ -4252,6 +4254,30 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
               }
             ]
           }
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "delivered",
+                "waiting",
+                "undeliverable"
+              ]
+            },
+            "to": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "to"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -4262,6 +4288,299 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
         "detail",
         "options",
         "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "delivery": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "delivered",
+            "waiting",
+            "undeliverable"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "to"
+      ],
+      "additionalProperties": false
+    },
+    "refusal": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "retryAfterMs": {
+          "type": "number"
+        },
+        "status": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "code",
+        "state",
+        "reason",
+        "next",
+        "retryable"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "applied"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `inbox.delivery`
+
+The asking session reports what became of the answer to a question it posted: `delivered` once the answer is in its conversation, `undeliverable` (with `reason`) when its session was deleted. Only the principal that posted the question may report, only on an answered question a session asked, and only once: a second report returns `applied: false` with a `refusal`, so exactly one terminal puts the answer in its conversation.
+
+- Title: `Report Owner Answer Delivery`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:approvals`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "itemId": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "delivered",
+        "undeliverable"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "itemId",
+    "state"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "applied": {
+      "type": "boolean"
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "question",
+            "claim",
+            "purchase",
+            "queued-action"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "answered",
+            "withdrawn",
+            "expired"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "askedBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "answer": {
+          "type": "object",
+          "properties": {
+            "option": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "answeredBy": {
+          "type": "object",
+          "properties": {
+            "actor": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor",
+            "surface"
+          ],
+          "additionalProperties": false
+        },
+        "closedAt": {
+          "type": "number"
+        },
+        "withdrawnReason": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "delivered",
+                "waiting",
+                "undeliverable"
+              ]
+            },
+            "to": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "to"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "title",
+        "detail",
+        "options",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "delivery": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "delivered",
+            "waiting",
+            "undeliverable"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "to"
       ],
       "additionalProperties": false
     },
@@ -4312,7 +4631,7 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
 
 #### `inbox.list`
 
-Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.
+Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.
 
 - Title: `List Owner Inbox`
 - Source: `builtin`
@@ -4485,6 +4804,30 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
                 }
               ]
             }
+          },
+          "delivery": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "delivered",
+                  "waiting",
+                  "undeliverable"
+                ]
+              },
+              "to": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "to"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -4719,6 +5062,30 @@ Leave the owner a question or a queued action from a process that is not the dae
               }
             ]
           }
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "delivered",
+                "waiting",
+                "undeliverable"
+              ]
+            },
+            "to": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "to"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -4896,6 +5263,30 @@ Take back an open item this caller posted, because the answer is no longer neede
               }
             ]
           }
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "delivered",
+                "waiting",
+                "undeliverable"
+              ]
+            },
+            "to": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "to"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -4906,6 +5297,30 @@ Take back an open item this caller posted, because the answer is no longer neede
         "detail",
         "options",
         "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "delivery": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "delivered",
+            "waiting",
+            "undeliverable"
+          ]
+        },
+        "to": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "to"
       ],
       "additionalProperties": false
     },
@@ -7272,12 +7687,6 @@ Create a durable automation job.
     "id": {
       "type": "string"
     },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "name": {
       "type": "string"
     },
@@ -8628,12 +9037,6 @@ Delete a durable automation job.
     },
     "expectedMutationRevision": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -8688,12 +9091,6 @@ Disable a durable automation job.
     },
     "expectedMutationRevision": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -8749,12 +9146,6 @@ Enable a durable automation job.
     },
     "expectedMutationRevision": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -10548,12 +10939,6 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
     },
     "expectedMutationRevision": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     },
     "name": {
       "type": "string"
@@ -16938,12 +17323,6 @@ Create a schedule record.
     "name": {
       "type": "string"
     },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "prompt": {
       "type": "string"
     },
@@ -18226,12 +18605,6 @@ Delete a schedule record.
     },
     "expectedMutationRevision": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -18286,12 +18659,6 @@ Disable a schedule record.
     },
     "expectedMutationRevision": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -18347,12 +18714,6 @@ Enable a schedule record.
     },
     "expectedMutationRevision": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -20968,7 +21329,7 @@ Run one submit-and-poll pass over the queue now instead of waiting for the timer
 
 #### `batch.runtime.get`
 
-The batch queue's current mode (`off`, `explicit` or `eligible-by-default`; the last is accepted and behaves like `explicit`, nothing enqueues by default yet), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.
+The batch queue's current mode (`off`: nothing is queued; `explicit`: the job API is open and a non-streaming OpenAI-compatible chat completion is queued when it sends `x-goodvibes-execution: batch`; `eligible-by-default`: every such completion is queued unless it sends `x-goodvibes-execution: live`), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.
 
 - Title: `Batch Runtime`
 - Source: `builtin`
@@ -27400,12 +27761,6 @@ Remove a channel draft from the daemon-side store.
   "properties": {
     "draftId": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -27645,7 +28000,7 @@ Return daemon-mirrored channel drafts for cross-device sync. Webhook values are 
 
 #### `channels.drafts.save`
 
-Mirror a channel draft to the daemon-side store. Webhook values must be redacted before transmission; raw webhook tokens are rejected. Requires explicit confirmation or fresh recorded native admission for a paired autonomous caller.
+Mirror a channel draft to the daemon-side store. Webhook values must be redacted before transmission; raw webhook tokens are rejected. Requires explicit confirmation; a call made with the Agent's credential (the Agent acting on the owner's behalf) instead takes fresh recorded native admission.
 
 - Title: `Save Channel Draft`
 - Source: `builtin`
@@ -27710,12 +28065,6 @@ Mirror a channel draft to the daemon-side store. Webhook values must be redacted
     },
     "sendError": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -29008,8 +29357,9 @@ Return the profile binding for a channel (surfaceKind plus optional channelId). 
         "permissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -29113,8 +29463,9 @@ Return every per-channel profile binding: the model, provider and permission-mod
           "permissionMode": {
             "type": "string",
             "enum": [
-              "safe-owner",
-              "safe-jev",
+              "ask-me",
+              "jev-decides",
+              "just-vibes",
               "yolo",
               "plan"
             ]
@@ -29201,8 +29552,9 @@ Bind (upsert) the model/provider and permission-mode defaults for a channel. Key
     "permissionMode": {
       "type": "string",
       "enum": [
-        "safe-owner",
-        "safe-jev",
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
         "yolo",
         "plan"
       ]
@@ -29269,8 +29621,9 @@ Bind (upsert) the model/provider and permission-mode defaults for a channel. Key
         "permissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -29450,7 +29803,7 @@ Return repair actions exposed by a channel surface.
 
 #### `channels.routing.assign`
 
-Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation or fresh recorded native admission for a paired autonomous caller.
+Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation; a call made with the Agent's credential (the Agent acting on the owner's behalf) instead takes fresh recorded native admission.
 
 - Title: `Assign Channel Routing Rule`
 - Source: `builtin`
@@ -29468,12 +29821,6 @@ Create or update a channel-to-profile routing rule in the daemon-persisted routi
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "channelId": {
       "type": "string"
     },
@@ -29562,12 +29909,6 @@ Remove a channel-to-profile routing rule from the daemon-persisted routing table
   "properties": {
     "assignmentId": {
       "type": "string"
-    },
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
     }
   },
   "required": [
@@ -31698,7 +32039,7 @@ Diff two checkpoints, or one checkpoint against the live working tree when `b` i
         "nativeRevision": {
           "type": "string",
           "maxLength": 200,
-          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
         },
         "unifiedDiff": {
           "type": "string"
@@ -37285,6 +37626,69 @@ Return the continuity integration snapshot.
 
 ### contracts
 
+#### `contracts.budget`
+
+Replace a running contract's token and cost ceiling (`maxCostUsd`, `maxTokens`, or both). Each running group's remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.
+
+- Title: `Set a Running Contract's Budget`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `write:fleet`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "contractId": {
+      "type": "string"
+    },
+    "maxCostUsd": {
+      "type": "number"
+    },
+    "maxTokens": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "contractId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "budget": {
+      "type": "object",
+      "properties": {
+        "maxTokens": {
+          "type": "number"
+        },
+        "maxCostUsd": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "budget"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `contracts.cancel`
 
 Stop a contract and every unit agent it runs; its status line records how many files were already changed and where. `cancelled` is false when the contract had already ended. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NATIVE for native work (stop it through its own execution, or answer its open question with `cancel`); 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection.
@@ -37338,7 +37742,7 @@ Stop a contract and every unit agent it runs; its status line records how many f
 
 #### `contracts.dispatch`
 
-Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's workspace) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside the daemon's workspace; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).
+Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's working directory or a registered workspace, the folders sessions.hosted.workspaces lists) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside those folders; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).
 
 - Title: `Dispatch Contract Work`
 - Source: `builtin`
@@ -37433,7 +37837,7 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -37507,7 +37911,7 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -45472,7 +45876,7 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -45546,7 +45950,7 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -53500,7 +53904,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       "revision": {
                         "type": "string",
                         "maxLength": 200,
-                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                       },
                       "fileIndex": {
                         "type": "integer",
@@ -53574,7 +53978,7 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       "revision": {
                         "type": "string",
                         "maxLength": 200,
-                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                       },
                       "fileIndex": {
                         "type": "integer",
@@ -61579,6 +61983,67 @@ The owner's free-text reply to an open escalation of a contract, read by Jev as 
 }
 ```
 
+#### `contracts.retryUnit`
+
+Run one unit of a running contract again: a unit that is working gets a fresh agent with its brief and previous checks, and a passed unit whose commit failed has its changes committed again. `outcome` is `restarted`, `committed`, or `refused` with `reason` naming why and what to do instead (a unit that has not started, is being fixed, or ended with its contract). 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.
+
+- Title: `Run One Contract Unit Again`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `write:fleet`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "contractId": {
+      "type": "string"
+    },
+    "unitId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "contractId",
+    "unitId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "restarted",
+        "committed",
+        "refused"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "outcome",
+    "reason"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `contracts.start`
 
 Start a contract for `ask`, the person's words verbatim, which every stated acceptance criterion must trace to. Returns at once with the new contract and its owner agent id; the contract shapes, plans and runs on its own, and its progress arrives on the `contracts` event domain. When `sessionId` names a live session this daemon hosts, the contract starts in that session (origin `hosted`): its turns receive the contract's questions and a following turn answers them. Otherwise it starts on the daemon's own runner (origin `external`) under `sessionId`, or the `operator` session when none is given, in `workspaceRoot` (absolute), or the daemon's working directory. `isolation` overrides `contract.isolation` for this contract. 400 with INVALID_ARGUMENT when `ask` is empty, `workspaceRoot` is relative or outside the daemon's workspace, or differs from the hosted session's; 403 with SESSION_NOT_OWNED when the session belongs to another caller; 409 with SESSION_NOT_LIVE when `sessionId` names a hosted session that is no longer live.
@@ -61687,7 +62152,7 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -61761,7 +62226,7 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -70248,6 +70713,7 @@ Return the current control-plane principal, granted scopes, and authentication m
             "local",
             "shared-token",
             "device-token",
+            "agent",
             "user-session"
           ]
         },
@@ -70621,6 +71087,7 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                             "local",
                             "shared-token",
                             "device-token",
+                            "agent",
                             "user-session"
                           ]
                         },
@@ -78538,6 +79005,182 @@ Return the health integration snapshot.
 }
 ```
 
+#### `ops.doctor`
+
+Find the runbook for a symptom in plain words (for example "stuck turn", "mcp keeps disconnecting", "approval never answered", "compaction failed") and run its checks against the daemon's live state. Each check is pass, fail or unknown (it could not look), with a one-line summary; each runbook lists the next steps as real commands. Read-only, no model request. An empty `playbooks` means nothing matched; `available` lists what can be diagnosed.
+
+- Title: `Diagnose a Symptom`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:health`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "symptom": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "symptom"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "symptom": {
+      "type": "string"
+    },
+    "playbooks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown"
+                  ]
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "info",
+                    "warning",
+                    "error",
+                    "critical"
+                  ]
+                },
+                "summary": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "outcome",
+                "severity",
+                "summary"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "number"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "command",
+                    "config",
+                    "observe",
+                    "wait",
+                    "escalate"
+                  ]
+                },
+                "command": {
+                  "type": "string"
+                },
+                "expectedOutcome": {
+                  "type": "string"
+                },
+                "automatable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "step",
+                "title",
+                "action",
+                "kind",
+                "automatable"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "checks",
+          "steps"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "available": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "symptom",
+    "playbooks",
+    "available"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `ops.memory.get`
 
 The MemoryGovernor snapshot: the current memory-pressure tier and budget, resident set size and heap, the tier thresholds and hard limit in force, per-cache footprints the governor can shrink, which deferrable background jobs are paused, and the leak-tripwire state. When memory.budgetMb, memory.tier.* or memory.hardLimitPct were refused, `configFallback` names the settings and why; the shipped values shown are in force until the setting is fixed and the daemon restarts. Read-only observability so operators can see the daemon shedding memory before it approaches OOM.
@@ -79729,12 +80372,12 @@ Download and checksum-verify the pinned wake-word classifier in both runtime for
 
 - Title: `Download the Wake-Word Models`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/voice/wake/provision`
 - Scopes: `write:config`
 - Emits events: none
-- Dangerous: `yes`
+- Dangerous: `no`
 - Invokable: `yes`
 
 ##### Input schema
@@ -81107,7 +81750,10 @@ The review queue (accepted-for-review and reviewed rows) and the messages still 
             "properties": {
               "kind": {
                 "type": "string",
-                "const": "pairing-token"
+                "enum": [
+                  "pairing-token",
+                  "local"
+                ]
               },
               "principalId": {
                 "type": "string",
@@ -81513,7 +82159,10 @@ Read the original text of a message in the review queue while it is still in mem
               "properties": {
                 "kind": {
                   "type": "string",
-                  "const": "pairing-token"
+                  "enum": [
+                    "pairing-token",
+                    "local"
+                  ]
                 },
                 "principalId": {
                   "type": "string",
@@ -82485,7 +83134,10 @@ Where one message stands: waiting for the owner, in the review queue (accepted-f
               "properties": {
                 "kind": {
                   "type": "string",
-                  "const": "pairing-token"
+                  "enum": [
+                    "pairing-token",
+                    "local"
+                  ]
                 },
                 "principalId": {
                   "type": "string",
@@ -83067,203 +83719,6 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
         "battery": {
           "type": "string",
           "enum": [
-            "webui.errors.daemon-refusal"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "errorRef": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            }
-          },
-          "required": [
-            "errorRef"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
-            "webui.palette.command-rank"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "query": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "inline"
-                      ]
-                    },
-                    "text": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "text"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "reference"
-                      ]
-                    },
-                    "queryRef": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "queryRef"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
-            "registryVersion": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "candidates": {
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "builtin"
-                        ]
-                      },
-                      "commandId": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "commandId"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "chat"
-                        ]
-                      },
-                      "sessionId": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "sessionId"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              },
-              "minItems": 1,
-              "maxItems": 64
-            }
-          },
-          "required": [
-            "query",
-            "registryVersion",
-            "candidates"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
             "webui.models.catalog-provider-match"
           ]
         },
@@ -83295,246 +83750,6 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
           "required": [
             "providerId",
             "keys"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
-            "webui.credentials.provider-key"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "providerId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            },
-            "keys": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "minItems": 1,
-              "maxItems": 64
-            }
-          },
-          "required": [
-            "providerId",
-            "keys"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
-            "webui.settings.card-material-key"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "keys": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "minItems": 1,
-              "maxItems": 64
-            }
-          },
-          "required": [
-            "keys"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
-            "webui.config.credential-key"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "keys": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 256
-              },
-              "minItems": 1,
-              "maxItems": 64
-            }
-          },
-          "required": [
-            "keys"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "protocolVersion",
-        "requestId",
-        "battery",
-        "batteryVersion",
-        "input"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "protocolVersion": {
-          "type": "number",
-          "enum": [
-            1
-          ]
-        },
-        "requestId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "battery": {
-          "type": "string",
-          "enum": [
-            "webui.code.language"
-          ]
-        },
-        "batteryVersion": {
-          "type": "number",
-          "enum": [
-            2
-          ]
-        },
-        "input": {
-          "type": "object",
-          "properties": {
-            "sessionId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "messageId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "start": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "end": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000000
-            },
-            "contentRevision": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            }
-          },
-          "required": [
-            "sessionId",
-            "messageId",
-            "start",
-            "end",
-            "contentRevision"
           ],
           "additionalProperties": false
         }
@@ -83623,90 +83838,43 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "readings": {
               "type": "object",
               "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "yes-no"
+                    ]
                   },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
+                  "probability": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "yes",
+                      "no",
+                      "uncertain"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "act",
+                      "confirm",
+                      "escalate"
+                    ]
                   }
-                ]
+                },
+                "required": [
+                  "kind",
+                  "probability",
+                  "verdict",
+                  "outcome"
+                ],
+                "additionalProperties": false
               }
             },
             "outcome": {
@@ -83814,953 +83982,43 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "readings": {
               "type": "object",
               "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
                 "type": "object",
                 "properties": {
-                  "decisionId": {
-                    "type": "string"
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "yes-no"
+                    ]
                   },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.errors.daemon-refusal"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "type": "object",
-              "properties": {
-                "session_not_found": {
-                  "type": "boolean"
-                },
-                "session_closed": {
-                  "type": "boolean"
-                },
-                "session_active": {
-                  "type": "boolean"
-                },
-                "session_not_local": {
-                  "type": "boolean"
-                },
-                "method_unknown": {
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "session_not_found",
-                "session_closed",
-                "session_active",
-                "session_not_local",
-                "method_unknown"
-              ],
-              "additionalProperties": false
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "structuralBasis": {
-              "type": "object",
-              "properties": {
-                "method_unknown": {
-                  "type": "string",
-                  "enum": [
-                    "http-status-not-404"
-                  ]
-                }
-              },
-              "required": [
-                "method_unknown"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.errors.daemon-refusal"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "structuralBasis": {
-              "type": "object",
-              "properties": {
-                "method_unknown": {
-                  "type": "string",
-                  "enum": [
-                    "http-status-not-404"
-                  ]
-                }
-              },
-              "required": [
-                "method_unknown"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.palette.command-rank"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "type": "object",
-              "properties": {
-                "registryVersion": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                },
-                "accepted": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "candidateIndex": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 63
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      }
-                    },
-                    "required": [
-                      "candidateIndex",
-                      "probability"
-                    ],
-                    "additionalProperties": false
-                  }
-                },
-                "rejected": {
-                  "type": "array",
-                  "items": {
+                  "probability": {
                     "type": "number",
                     "minimum": 0,
-                    "maximum": 63
-                  }
-                }
-              },
-              "required": [
-                "registryVersion",
-                "accepted",
-                "rejected"
-              ],
-              "additionalProperties": false
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
+                    "maximum": 1
                   },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "yes",
+                      "no",
+                      "uncertain"
+                    ]
                   },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "act",
+                      "confirm",
+                      "escalate"
+                    ]
                   }
                 },
                 "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
+                  "kind",
+                  "probability",
+                  "verdict",
+                  "outcome"
                 ],
                 "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.palette.command-rank"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
               }
             },
             "outcome": {
@@ -84865,102 +84123,58 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "value": {
               "type": "object",
               "properties": {
-                "alreadyReply": {
-                  "type": "boolean"
+                "matches": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  }
                 }
               },
               "required": [
-                "alreadyReply"
+                "matches"
               ],
               "additionalProperties": false
             },
             "readings": {
               "type": "object",
               "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "yes-no"
+                    ]
                   },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
+                  "probability": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "yes",
+                      "no",
+                      "uncertain"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "act",
+                      "confirm",
+                      "escalate"
+                    ]
                   }
-                ]
+                },
+                "required": [
+                  "kind",
+                  "probability",
+                  "verdict",
+                  "outcome"
+                ],
+                "additionalProperties": false
               }
             },
             "outcome": {
@@ -85068,1666 +84282,43 @@ Run one explicitly installed, authorized browser battery. Unconfigured services 
             "readings": {
               "type": "object",
               "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
                 "type": "object",
                 "properties": {
-                  "decisionId": {
-                    "type": "string"
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "yes-no"
+                    ]
                   },
-                  "model": {
-                    "type": "string"
+                  "probability": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
                   },
-                  "requestedModel": {
-                    "type": "string"
+                  "verdict": {
+                    "type": "string",
+                    "enum": [
+                      "yes",
+                      "no",
+                      "uncertain"
+                    ]
                   },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "act",
+                      "confirm",
+                      "escalate"
+                    ]
                   }
                 },
                 "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
+                  "kind",
+                  "probability",
+                  "verdict",
+                  "outcome"
                 ],
                 "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.credentials.provider-key"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "type": "object",
-              "properties": {
-                "matches": {
-                  "type": "array",
-                  "items": {
-                    "type": "boolean"
-                  }
-                }
-              },
-              "required": [
-                "matches"
-              ],
-              "additionalProperties": false
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.credentials.provider-key"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.settings.card-material-key"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "type": "object",
-              "properties": {
-                "matches": {
-                  "type": "array",
-                  "items": {
-                    "type": "boolean"
-                  }
-                }
-              },
-              "required": [
-                "matches"
-              ],
-              "additionalProperties": false
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.settings.card-material-key"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.config.credential-key"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "type": "object",
-              "properties": {
-                "matches": {
-                  "type": "array",
-                  "items": {
-                    "type": "boolean"
-                  }
-                }
-              },
-              "required": [
-                "matches"
-              ],
-              "additionalProperties": false
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.config.credential-key"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "reason",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.code.language"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                2
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "settled"
-              ]
-            },
-            "value": {
-              "type": "object",
-              "properties": {
-                "matches": {
-                  "type": "array",
-                  "items": {
-                    "type": "boolean"
-                  }
-                }
-              },
-              "required": [
-                "matches"
-              ],
-              "additionalProperties": false
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
-              }
-            },
-            "outcome": {
-              "type": "string",
-              "enum": [
-                "act",
-                "confirm",
-                "escalate"
-              ]
-            },
-            "evidence": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "decisionId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "requestedModel": {
-                    "type": "string"
-                  },
-                  "usage": {
-                    "type": "object",
-                    "properties": {
-                      "inputTokens": {
-                        "type": "number"
-                      },
-                      "outputTokens": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "inputTokens",
-                      "outputTokens"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "latencyMs": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "decisionId",
-                  "model",
-                  "requestedModel",
-                  "usage",
-                  "latencyMs"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "protocolVersion",
-            "requestId",
-            "battery",
-            "batteryVersion",
-            "status",
-            "value",
-            "readings",
-            "outcome",
-            "evidence"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "protocolVersion": {
-              "type": "number",
-              "enum": [
-                1
-              ]
-            },
-            "requestId": {
-              "type": "string"
-            },
-            "battery": {
-              "type": "string",
-              "enum": [
-                "webui.code.language"
-              ]
-            },
-            "batteryVersion": {
-              "type": "number",
-              "enum": [
-                2
-              ]
-            },
-            "status": {
-              "type": "string",
-              "enum": [
-                "held"
-              ]
-            },
-            "reason": {
-              "type": "string",
-              "enum": [
-                "uncertain"
-              ]
-            },
-            "readings": {
-              "type": "object",
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "yes-no"
-                        ]
-                      },
-                      "probability": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "verdict": {
-                        "type": "string",
-                        "enum": [
-                          "yes",
-                          "no",
-                          "uncertain"
-                        ]
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "probability",
-                      "verdict",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "choice"
-                        ]
-                      },
-                      "choice": {
-                        "type": "string"
-                      },
-                      "confidence": {
-                        "type": "number",
-                        "minimum": 0,
-                        "maximum": 1
-                      },
-                      "probabilities": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 1
-                        }
-                      },
-                      "outcome": {
-                        "type": "string",
-                        "enum": [
-                          "act",
-                          "confirm",
-                          "escalate"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "choice",
-                      "confidence",
-                      "probabilities",
-                      "outcome"
-                    ],
-                    "additionalProperties": false
-                  }
-                ]
               }
             },
             "outcome": {
@@ -108480,6 +106071,51 @@ Remove completed project work-plan tasks. Defaults to clearing status done only.
     "workPlanId": {
       "type": "string"
     },
+    "changed": {
+      "type": "boolean"
+    },
+    "revision": {
+      "type": "number"
+    },
+    "updatedAt": {
+      "type": "number"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "number"
+        },
+        "pending": {
+          "type": "number"
+        },
+        "in_progress": {
+          "type": "number"
+        },
+        "blocked": {
+          "type": "number"
+        },
+        "done": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        },
+        "cancelled": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "total",
+        "pending",
+        "in_progress",
+        "blocked",
+        "done",
+        "failed",
+        "cancelled"
+      ],
+      "additionalProperties": false
+    },
     "task": {
       "type": "object",
       "properties": {
@@ -108529,6 +106165,9 @@ Remove completed project work-plan tasks. Defaults to clearing status done only.
           "type": "string"
         },
         "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
           "type": "string"
         },
         "turnId": {
@@ -108665,6 +106304,9 @@ Remove completed project work-plan tasks. Defaults to clearing status done only.
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -108799,6 +106441,9 @@ Remove completed project work-plan tasks. Defaults to clearing status done only.
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -108888,208 +106533,151 @@ Remove completed project work-plan tasks. Defaults to clearing status done only.
         "type": "string"
       }
     },
-    "snapshot": {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "projectId": {
-          "type": "string"
-        },
-        "knowledgeSpaceId": {
-          "type": "string"
-        },
-        "workPlanId": {
-          "type": "string"
-        },
-        "tasks": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "taskId": {
-                "type": "string"
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "knowledgeSpaceId": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "notes": {
-                "type": "string"
-              },
-              "owner": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "priority": {
-                "type": "number"
-              },
-              "order": {
-                "type": "number"
-              },
-              "source": {
-                "type": "string"
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "parentTaskId": {
-                "type": "string"
-              },
-              "contractId": {
-                "type": "string"
-              },
-              "phaseId": {
-                "type": "string"
-              },
-              "agentId": {
-                "type": "string"
-              },
-              "turnId": {
-                "type": "string"
-              },
-              "decisionId": {
-                "type": "string"
-              },
-              "sourceMessageId": {
-                "type": "string"
-              },
-              "linkedArtifactIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedSourceIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedNodeIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "originSurface": {
-                "type": "string"
-              },
-              "createdAt": {
-                "type": "number"
-              },
-              "updatedAt": {
-                "type": "number"
-              },
-              "completedAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "taskId",
-              "projectId",
-              "knowledgeSpaceId",
-              "title",
-              "status",
-              "order",
-              "tags",
-              "linkedArtifactIds",
-              "linkedSourceIds",
-              "linkedNodeIds",
-              "createdAt",
-              "updatedAt"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "counts": {
-          "type": "object",
-          "properties": {
-            "total": {
-              "type": "number"
-            },
-            "pending": {
-              "type": "number"
-            },
-            "in_progress": {
-              "type": "number"
-            },
-            "blocked": {
-              "type": "number"
-            },
-            "done": {
-              "type": "number"
-            },
-            "failed": {
-              "type": "number"
-            },
-            "cancelled": {
-              "type": "number"
+    "reclaimedTaskIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "knowledgeSpaceId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "number"
+          },
+          "order": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
-          "required": [
-            "total",
-            "pending",
-            "in_progress",
-            "blocked",
-            "done",
-            "failed",
-            "cancelled"
-          ],
-          "additionalProperties": false
+          "parentTaskId": {
+            "type": "string"
+          },
+          "contractId": {
+            "type": "string"
+          },
+          "phaseId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "sourceMessageId": {
+            "type": "string"
+          },
+          "linkedArtifactIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedSourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "originSurface": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          }
         },
-        "updatedAt": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "ok",
-        "projectId",
-        "knowledgeSpaceId",
-        "workPlanId",
-        "tasks",
-        "counts",
-        "updatedAt"
-      ],
-      "additionalProperties": true
+        "required": [
+          "taskId",
+          "projectId",
+          "knowledgeSpaceId",
+          "title",
+          "status",
+          "order",
+          "tags",
+          "linkedArtifactIds",
+          "linkedSourceIds",
+          "linkedNodeIds",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": true
+      }
     }
   },
   "required": [
@@ -109097,7 +106685,10 @@ Remove completed project work-plan tasks. Defaults to clearing status done only.
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
-    "snapshot"
+    "changed",
+    "revision",
+    "updatedAt",
+    "counts"
   ],
   "additionalProperties": true
 }
@@ -109170,6 +106761,9 @@ Return the durable project-scoped work-plan snapshot, including tasks and status
     "workPlanId": {
       "type": "string"
     },
+    "revision": {
+      "type": "number"
+    },
     "tasks": {
       "type": "array",
       "items": {
@@ -109221,6 +106815,9 @@ Return the durable project-scoped work-plan snapshot, including tasks and status
             "type": "string"
           },
           "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
             "type": "string"
           },
           "turnId": {
@@ -109352,6 +106949,7 @@ Return the durable project-scoped work-plan snapshot, including tasks and status
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
+    "revision",
     "tasks",
     "counts",
     "updatedAt"
@@ -109434,6 +107032,9 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -109499,6 +107100,51 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
     "workPlanId": {
       "type": "string"
     },
+    "changed": {
+      "type": "boolean"
+    },
+    "revision": {
+      "type": "number"
+    },
+    "updatedAt": {
+      "type": "number"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "number"
+        },
+        "pending": {
+          "type": "number"
+        },
+        "in_progress": {
+          "type": "number"
+        },
+        "blocked": {
+          "type": "number"
+        },
+        "done": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        },
+        "cancelled": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "total",
+        "pending",
+        "in_progress",
+        "blocked",
+        "done",
+        "failed",
+        "cancelled"
+      ],
+      "additionalProperties": false
+    },
     "task": {
       "type": "object",
       "properties": {
@@ -109548,6 +107194,9 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
           "type": "string"
         },
         "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
           "type": "string"
         },
         "turnId": {
@@ -109684,6 +107333,9 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -109818,6 +107470,9 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -109907,208 +107562,151 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
         "type": "string"
       }
     },
-    "snapshot": {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "projectId": {
-          "type": "string"
-        },
-        "knowledgeSpaceId": {
-          "type": "string"
-        },
-        "workPlanId": {
-          "type": "string"
-        },
-        "tasks": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "taskId": {
-                "type": "string"
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "knowledgeSpaceId": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "notes": {
-                "type": "string"
-              },
-              "owner": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "priority": {
-                "type": "number"
-              },
-              "order": {
-                "type": "number"
-              },
-              "source": {
-                "type": "string"
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "parentTaskId": {
-                "type": "string"
-              },
-              "contractId": {
-                "type": "string"
-              },
-              "phaseId": {
-                "type": "string"
-              },
-              "agentId": {
-                "type": "string"
-              },
-              "turnId": {
-                "type": "string"
-              },
-              "decisionId": {
-                "type": "string"
-              },
-              "sourceMessageId": {
-                "type": "string"
-              },
-              "linkedArtifactIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedSourceIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedNodeIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "originSurface": {
-                "type": "string"
-              },
-              "createdAt": {
-                "type": "number"
-              },
-              "updatedAt": {
-                "type": "number"
-              },
-              "completedAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "taskId",
-              "projectId",
-              "knowledgeSpaceId",
-              "title",
-              "status",
-              "order",
-              "tags",
-              "linkedArtifactIds",
-              "linkedSourceIds",
-              "linkedNodeIds",
-              "createdAt",
-              "updatedAt"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "counts": {
-          "type": "object",
-          "properties": {
-            "total": {
-              "type": "number"
-            },
-            "pending": {
-              "type": "number"
-            },
-            "in_progress": {
-              "type": "number"
-            },
-            "blocked": {
-              "type": "number"
-            },
-            "done": {
-              "type": "number"
-            },
-            "failed": {
-              "type": "number"
-            },
-            "cancelled": {
-              "type": "number"
+    "reclaimedTaskIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "knowledgeSpaceId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "number"
+          },
+          "order": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
-          "required": [
-            "total",
-            "pending",
-            "in_progress",
-            "blocked",
-            "done",
-            "failed",
-            "cancelled"
-          ],
-          "additionalProperties": false
+          "parentTaskId": {
+            "type": "string"
+          },
+          "contractId": {
+            "type": "string"
+          },
+          "phaseId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "sourceMessageId": {
+            "type": "string"
+          },
+          "linkedArtifactIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedSourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "originSurface": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          }
         },
-        "updatedAt": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "ok",
-        "projectId",
-        "knowledgeSpaceId",
-        "workPlanId",
-        "tasks",
-        "counts",
-        "updatedAt"
-      ],
-      "additionalProperties": true
+        "required": [
+          "taskId",
+          "projectId",
+          "knowledgeSpaceId",
+          "title",
+          "status",
+          "order",
+          "tags",
+          "linkedArtifactIds",
+          "linkedSourceIds",
+          "linkedNodeIds",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": true
+      }
     }
   },
   "required": [
@@ -110116,7 +107714,10 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
-    "snapshot"
+    "changed",
+    "revision",
+    "updatedAt",
+    "counts"
   ],
   "additionalProperties": true
 }
@@ -110180,6 +107781,51 @@ Delete a durable project-scoped work-plan task.
     "workPlanId": {
       "type": "string"
     },
+    "changed": {
+      "type": "boolean"
+    },
+    "revision": {
+      "type": "number"
+    },
+    "updatedAt": {
+      "type": "number"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "number"
+        },
+        "pending": {
+          "type": "number"
+        },
+        "in_progress": {
+          "type": "number"
+        },
+        "blocked": {
+          "type": "number"
+        },
+        "done": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        },
+        "cancelled": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "total",
+        "pending",
+        "in_progress",
+        "blocked",
+        "done",
+        "failed",
+        "cancelled"
+      ],
+      "additionalProperties": false
+    },
     "task": {
       "type": "object",
       "properties": {
@@ -110229,6 +107875,9 @@ Delete a durable project-scoped work-plan task.
           "type": "string"
         },
         "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
           "type": "string"
         },
         "turnId": {
@@ -110365,6 +108014,9 @@ Delete a durable project-scoped work-plan task.
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -110499,6 +108151,9 @@ Delete a durable project-scoped work-plan task.
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -110588,208 +108243,151 @@ Delete a durable project-scoped work-plan task.
         "type": "string"
       }
     },
-    "snapshot": {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "projectId": {
-          "type": "string"
-        },
-        "knowledgeSpaceId": {
-          "type": "string"
-        },
-        "workPlanId": {
-          "type": "string"
-        },
-        "tasks": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "taskId": {
-                "type": "string"
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "knowledgeSpaceId": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "notes": {
-                "type": "string"
-              },
-              "owner": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "priority": {
-                "type": "number"
-              },
-              "order": {
-                "type": "number"
-              },
-              "source": {
-                "type": "string"
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "parentTaskId": {
-                "type": "string"
-              },
-              "contractId": {
-                "type": "string"
-              },
-              "phaseId": {
-                "type": "string"
-              },
-              "agentId": {
-                "type": "string"
-              },
-              "turnId": {
-                "type": "string"
-              },
-              "decisionId": {
-                "type": "string"
-              },
-              "sourceMessageId": {
-                "type": "string"
-              },
-              "linkedArtifactIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedSourceIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedNodeIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "originSurface": {
-                "type": "string"
-              },
-              "createdAt": {
-                "type": "number"
-              },
-              "updatedAt": {
-                "type": "number"
-              },
-              "completedAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "taskId",
-              "projectId",
-              "knowledgeSpaceId",
-              "title",
-              "status",
-              "order",
-              "tags",
-              "linkedArtifactIds",
-              "linkedSourceIds",
-              "linkedNodeIds",
-              "createdAt",
-              "updatedAt"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "counts": {
-          "type": "object",
-          "properties": {
-            "total": {
-              "type": "number"
-            },
-            "pending": {
-              "type": "number"
-            },
-            "in_progress": {
-              "type": "number"
-            },
-            "blocked": {
-              "type": "number"
-            },
-            "done": {
-              "type": "number"
-            },
-            "failed": {
-              "type": "number"
-            },
-            "cancelled": {
-              "type": "number"
+    "reclaimedTaskIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "knowledgeSpaceId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "number"
+          },
+          "order": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
-          "required": [
-            "total",
-            "pending",
-            "in_progress",
-            "blocked",
-            "done",
-            "failed",
-            "cancelled"
-          ],
-          "additionalProperties": false
+          "parentTaskId": {
+            "type": "string"
+          },
+          "contractId": {
+            "type": "string"
+          },
+          "phaseId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "sourceMessageId": {
+            "type": "string"
+          },
+          "linkedArtifactIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedSourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "originSurface": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          }
         },
-        "updatedAt": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "ok",
-        "projectId",
-        "knowledgeSpaceId",
-        "workPlanId",
-        "tasks",
-        "counts",
-        "updatedAt"
-      ],
-      "additionalProperties": true
+        "required": [
+          "taskId",
+          "projectId",
+          "knowledgeSpaceId",
+          "title",
+          "status",
+          "order",
+          "tags",
+          "linkedArtifactIds",
+          "linkedSourceIds",
+          "linkedNodeIds",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": true
+      }
     }
   },
   "required": [
@@ -110797,7 +108395,10 @@ Delete a durable project-scoped work-plan task.
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
-    "snapshot"
+    "changed",
+    "revision",
+    "updatedAt",
+    "counts"
   ],
   "additionalProperties": true
 }
@@ -110805,7 +108406,7 @@ Delete a durable project-scoped work-plan task.
 
 #### `projectPlanning.workPlan.task.get`
 
-Fetch one durable project-scoped work-plan task by id.
+Fetch one durable project-scoped work-plan task by id, with the plan revision.
 
 - Title: `Get Project Work Plan Task`
 - Source: `builtin`
@@ -110861,6 +108462,9 @@ Fetch one durable project-scoped work-plan task by id.
     "workPlanId": {
       "type": "string"
     },
+    "revision": {
+      "type": "number"
+    },
     "task": {
       "anyOf": [
         {
@@ -110912,6 +108516,9 @@ Fetch one durable project-scoped work-plan task by id.
               "type": "string"
             },
             "agentId": {
+              "type": "string"
+            },
+            "sessionId": {
               "type": "string"
             },
             "turnId": {
@@ -111001,209 +108608,6 @@ Fetch one durable project-scoped work-plan task by id.
           "type": "null"
         }
       ]
-    },
-    "snapshot": {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "projectId": {
-          "type": "string"
-        },
-        "knowledgeSpaceId": {
-          "type": "string"
-        },
-        "workPlanId": {
-          "type": "string"
-        },
-        "tasks": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "taskId": {
-                "type": "string"
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "knowledgeSpaceId": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "notes": {
-                "type": "string"
-              },
-              "owner": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "priority": {
-                "type": "number"
-              },
-              "order": {
-                "type": "number"
-              },
-              "source": {
-                "type": "string"
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "parentTaskId": {
-                "type": "string"
-              },
-              "contractId": {
-                "type": "string"
-              },
-              "phaseId": {
-                "type": "string"
-              },
-              "agentId": {
-                "type": "string"
-              },
-              "turnId": {
-                "type": "string"
-              },
-              "decisionId": {
-                "type": "string"
-              },
-              "sourceMessageId": {
-                "type": "string"
-              },
-              "linkedArtifactIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedSourceIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedNodeIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "originSurface": {
-                "type": "string"
-              },
-              "createdAt": {
-                "type": "number"
-              },
-              "updatedAt": {
-                "type": "number"
-              },
-              "completedAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "taskId",
-              "projectId",
-              "knowledgeSpaceId",
-              "title",
-              "status",
-              "order",
-              "tags",
-              "linkedArtifactIds",
-              "linkedSourceIds",
-              "linkedNodeIds",
-              "createdAt",
-              "updatedAt"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "counts": {
-          "type": "object",
-          "properties": {
-            "total": {
-              "type": "number"
-            },
-            "pending": {
-              "type": "number"
-            },
-            "in_progress": {
-              "type": "number"
-            },
-            "blocked": {
-              "type": "number"
-            },
-            "done": {
-              "type": "number"
-            },
-            "failed": {
-              "type": "number"
-            },
-            "cancelled": {
-              "type": "number"
-            }
-          },
-          "required": [
-            "total",
-            "pending",
-            "in_progress",
-            "blocked",
-            "done",
-            "failed",
-            "cancelled"
-          ],
-          "additionalProperties": false
-        },
-        "updatedAt": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "ok",
-        "projectId",
-        "knowledgeSpaceId",
-        "workPlanId",
-        "tasks",
-        "counts",
-        "updatedAt"
-      ],
-      "additionalProperties": true
     }
   },
   "required": [
@@ -111211,8 +108615,8 @@ Fetch one durable project-scoped work-plan task by id.
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
-    "task",
-    "snapshot"
+    "revision",
+    "task"
   ],
   "additionalProperties": true
 }
@@ -111286,6 +108690,51 @@ Set a task's status and optional reason.
     "workPlanId": {
       "type": "string"
     },
+    "changed": {
+      "type": "boolean"
+    },
+    "revision": {
+      "type": "number"
+    },
+    "updatedAt": {
+      "type": "number"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "number"
+        },
+        "pending": {
+          "type": "number"
+        },
+        "in_progress": {
+          "type": "number"
+        },
+        "blocked": {
+          "type": "number"
+        },
+        "done": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        },
+        "cancelled": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "total",
+        "pending",
+        "in_progress",
+        "blocked",
+        "done",
+        "failed",
+        "cancelled"
+      ],
+      "additionalProperties": false
+    },
     "task": {
       "type": "object",
       "properties": {
@@ -111335,6 +108784,9 @@ Set a task's status and optional reason.
           "type": "string"
         },
         "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
           "type": "string"
         },
         "turnId": {
@@ -111471,6 +108923,9 @@ Set a task's status and optional reason.
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -111605,6 +109060,9 @@ Set a task's status and optional reason.
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -111694,208 +109152,151 @@ Set a task's status and optional reason.
         "type": "string"
       }
     },
-    "snapshot": {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "projectId": {
-          "type": "string"
-        },
-        "knowledgeSpaceId": {
-          "type": "string"
-        },
-        "workPlanId": {
-          "type": "string"
-        },
-        "tasks": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "taskId": {
-                "type": "string"
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "knowledgeSpaceId": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "notes": {
-                "type": "string"
-              },
-              "owner": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "priority": {
-                "type": "number"
-              },
-              "order": {
-                "type": "number"
-              },
-              "source": {
-                "type": "string"
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "parentTaskId": {
-                "type": "string"
-              },
-              "contractId": {
-                "type": "string"
-              },
-              "phaseId": {
-                "type": "string"
-              },
-              "agentId": {
-                "type": "string"
-              },
-              "turnId": {
-                "type": "string"
-              },
-              "decisionId": {
-                "type": "string"
-              },
-              "sourceMessageId": {
-                "type": "string"
-              },
-              "linkedArtifactIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedSourceIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedNodeIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "originSurface": {
-                "type": "string"
-              },
-              "createdAt": {
-                "type": "number"
-              },
-              "updatedAt": {
-                "type": "number"
-              },
-              "completedAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "taskId",
-              "projectId",
-              "knowledgeSpaceId",
-              "title",
-              "status",
-              "order",
-              "tags",
-              "linkedArtifactIds",
-              "linkedSourceIds",
-              "linkedNodeIds",
-              "createdAt",
-              "updatedAt"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "counts": {
-          "type": "object",
-          "properties": {
-            "total": {
-              "type": "number"
-            },
-            "pending": {
-              "type": "number"
-            },
-            "in_progress": {
-              "type": "number"
-            },
-            "blocked": {
-              "type": "number"
-            },
-            "done": {
-              "type": "number"
-            },
-            "failed": {
-              "type": "number"
-            },
-            "cancelled": {
-              "type": "number"
+    "reclaimedTaskIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "knowledgeSpaceId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "number"
+          },
+          "order": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
-          "required": [
-            "total",
-            "pending",
-            "in_progress",
-            "blocked",
-            "done",
-            "failed",
-            "cancelled"
-          ],
-          "additionalProperties": false
+          "parentTaskId": {
+            "type": "string"
+          },
+          "contractId": {
+            "type": "string"
+          },
+          "phaseId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "sourceMessageId": {
+            "type": "string"
+          },
+          "linkedArtifactIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedSourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "originSurface": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          }
         },
-        "updatedAt": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "ok",
-        "projectId",
-        "knowledgeSpaceId",
-        "workPlanId",
-        "tasks",
-        "counts",
-        "updatedAt"
-      ],
-      "additionalProperties": true
+        "required": [
+          "taskId",
+          "projectId",
+          "knowledgeSpaceId",
+          "title",
+          "status",
+          "order",
+          "tags",
+          "linkedArtifactIds",
+          "linkedSourceIds",
+          "linkedNodeIds",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": true
+      }
     }
   },
   "required": [
@@ -111903,7 +109304,10 @@ Set a task's status and optional reason.
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
-    "snapshot"
+    "changed",
+    "revision",
+    "updatedAt",
+    "counts"
   ],
   "additionalProperties": true
 }
@@ -111911,7 +109315,7 @@ Set a task's status and optional reason.
 
 #### `projectPlanning.workPlan.task.update`
 
-Patch a durable project-scoped work-plan task.
+Patch a durable project-scoped work-plan task. Returns the task before and after and the plan revision; read the snapshot for the whole plan.
 
 - Title: `Update Project Work Plan Task`
 - Source: `builtin`
@@ -111995,6 +109399,51 @@ Patch a durable project-scoped work-plan task.
     "workPlanId": {
       "type": "string"
     },
+    "changed": {
+      "type": "boolean"
+    },
+    "revision": {
+      "type": "number"
+    },
+    "updatedAt": {
+      "type": "number"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "number"
+        },
+        "pending": {
+          "type": "number"
+        },
+        "in_progress": {
+          "type": "number"
+        },
+        "blocked": {
+          "type": "number"
+        },
+        "done": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        },
+        "cancelled": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "total",
+        "pending",
+        "in_progress",
+        "blocked",
+        "done",
+        "failed",
+        "cancelled"
+      ],
+      "additionalProperties": false
+    },
     "task": {
       "type": "object",
       "properties": {
@@ -112044,6 +109493,9 @@ Patch a durable project-scoped work-plan task.
           "type": "string"
         },
         "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
           "type": "string"
         },
         "turnId": {
@@ -112180,6 +109632,9 @@ Patch a durable project-scoped work-plan task.
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -112314,6 +109769,9 @@ Patch a durable project-scoped work-plan task.
         "agentId": {
           "type": "string"
         },
+        "sessionId": {
+          "type": "string"
+        },
         "turnId": {
           "type": "string"
         },
@@ -112403,208 +109861,151 @@ Patch a durable project-scoped work-plan task.
         "type": "string"
       }
     },
-    "snapshot": {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "projectId": {
-          "type": "string"
-        },
-        "knowledgeSpaceId": {
-          "type": "string"
-        },
-        "workPlanId": {
-          "type": "string"
-        },
-        "tasks": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "taskId": {
-                "type": "string"
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "knowledgeSpaceId": {
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "notes": {
-                "type": "string"
-              },
-              "owner": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              },
-              "priority": {
-                "type": "number"
-              },
-              "order": {
-                "type": "number"
-              },
-              "source": {
-                "type": "string"
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "parentTaskId": {
-                "type": "string"
-              },
-              "contractId": {
-                "type": "string"
-              },
-              "phaseId": {
-                "type": "string"
-              },
-              "agentId": {
-                "type": "string"
-              },
-              "turnId": {
-                "type": "string"
-              },
-              "decisionId": {
-                "type": "string"
-              },
-              "sourceMessageId": {
-                "type": "string"
-              },
-              "linkedArtifactIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedSourceIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "linkedNodeIds": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "originSurface": {
-                "type": "string"
-              },
-              "createdAt": {
-                "type": "number"
-              },
-              "updatedAt": {
-                "type": "number"
-              },
-              "completedAt": {
-                "type": "number"
-              },
-              "metadata": {
-                "type": "object",
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    {
-                      "type": "array",
-                      "items": {}
-                    }
-                  ]
-                }
-              }
-            },
-            "required": [
-              "taskId",
-              "projectId",
-              "knowledgeSpaceId",
-              "title",
-              "status",
-              "order",
-              "tags",
-              "linkedArtifactIds",
-              "linkedSourceIds",
-              "linkedNodeIds",
-              "createdAt",
-              "updatedAt"
-            ],
-            "additionalProperties": true
-          }
-        },
-        "counts": {
-          "type": "object",
-          "properties": {
-            "total": {
-              "type": "number"
-            },
-            "pending": {
-              "type": "number"
-            },
-            "in_progress": {
-              "type": "number"
-            },
-            "blocked": {
-              "type": "number"
-            },
-            "done": {
-              "type": "number"
-            },
-            "failed": {
-              "type": "number"
-            },
-            "cancelled": {
-              "type": "number"
+    "reclaimedTaskIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "knowledgeSpaceId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "number"
+          },
+          "order": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
-          "required": [
-            "total",
-            "pending",
-            "in_progress",
-            "blocked",
-            "done",
-            "failed",
-            "cancelled"
-          ],
-          "additionalProperties": false
+          "parentTaskId": {
+            "type": "string"
+          },
+          "contractId": {
+            "type": "string"
+          },
+          "phaseId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "sourceMessageId": {
+            "type": "string"
+          },
+          "linkedArtifactIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedSourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linkedNodeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "originSurface": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "completedAt": {
+            "type": "number"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          }
         },
-        "updatedAt": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "ok",
-        "projectId",
-        "knowledgeSpaceId",
-        "workPlanId",
-        "tasks",
-        "counts",
-        "updatedAt"
-      ],
-      "additionalProperties": true
+        "required": [
+          "taskId",
+          "projectId",
+          "knowledgeSpaceId",
+          "title",
+          "status",
+          "order",
+          "tags",
+          "linkedArtifactIds",
+          "linkedSourceIds",
+          "linkedNodeIds",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": true
+      }
     }
   },
   "required": [
@@ -112612,7 +110013,10 @@ Patch a durable project-scoped work-plan task.
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
-    "snapshot"
+    "changed",
+    "revision",
+    "updatedAt",
+    "counts"
   ],
   "additionalProperties": true
 }
@@ -112685,6 +110089,9 @@ List durable project-scoped work-plan tasks with optional status, owner, parent,
     "workPlanId": {
       "type": "string"
     },
+    "revision": {
+      "type": "number"
+    },
     "tasks": {
       "type": "array",
       "items": {
@@ -112736,6 +110143,9 @@ List durable project-scoped work-plan tasks with optional status, owner, parent,
             "type": "string"
           },
           "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
             "type": "string"
           },
           "turnId": {
@@ -112867,6 +110277,7 @@ List durable project-scoped work-plan tasks with optional status, owner, parent,
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
+    "revision",
     "tasks",
     "counts",
     "updatedAt"
@@ -112877,7 +110288,7 @@ List durable project-scoped work-plan tasks with optional status, owner, parent,
 
 #### `projectPlanning.workPlan.tasks.reorder`
 
-Replace task ordering for the current project work plan.
+Replace task ordering for the current project work plan. Returns the tasks whose position changed and the plan revision.
 
 - Title: `Reorder Project Work Plan Tasks`
 - Source: `builtin`
@@ -112936,6 +110347,474 @@ Replace task ordering for the current project work plan.
     "workPlanId": {
       "type": "string"
     },
+    "changed": {
+      "type": "boolean"
+    },
+    "revision": {
+      "type": "number"
+    },
+    "updatedAt": {
+      "type": "number"
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "number"
+        },
+        "pending": {
+          "type": "number"
+        },
+        "in_progress": {
+          "type": "number"
+        },
+        "blocked": {
+          "type": "number"
+        },
+        "done": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        },
+        "cancelled": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "total",
+        "pending",
+        "in_progress",
+        "blocked",
+        "done",
+        "failed",
+        "cancelled"
+      ],
+      "additionalProperties": false
+    },
+    "task": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "knowledgeSpaceId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "order": {
+          "type": "number"
+        },
+        "source": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parentTaskId": {
+          "type": "string"
+        },
+        "contractId": {
+          "type": "string"
+        },
+        "phaseId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "decisionId": {
+          "type": "string"
+        },
+        "sourceMessageId": {
+          "type": "string"
+        },
+        "linkedArtifactIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkedSourceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkedNodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "originSurface": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "taskId",
+        "projectId",
+        "knowledgeSpaceId",
+        "title",
+        "status",
+        "order",
+        "tags",
+        "linkedArtifactIds",
+        "linkedSourceIds",
+        "linkedNodeIds",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    },
+    "previousTask": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "knowledgeSpaceId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "order": {
+          "type": "number"
+        },
+        "source": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parentTaskId": {
+          "type": "string"
+        },
+        "contractId": {
+          "type": "string"
+        },
+        "phaseId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "decisionId": {
+          "type": "string"
+        },
+        "sourceMessageId": {
+          "type": "string"
+        },
+        "linkedArtifactIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkedSourceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkedNodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "originSurface": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "taskId",
+        "projectId",
+        "knowledgeSpaceId",
+        "title",
+        "status",
+        "order",
+        "tags",
+        "linkedArtifactIds",
+        "linkedSourceIds",
+        "linkedNodeIds",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    },
+    "deletedTask": {
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "knowledgeSpaceId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "number"
+        },
+        "order": {
+          "type": "number"
+        },
+        "source": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parentTaskId": {
+          "type": "string"
+        },
+        "contractId": {
+          "type": "string"
+        },
+        "phaseId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "decisionId": {
+          "type": "string"
+        },
+        "sourceMessageId": {
+          "type": "string"
+        },
+        "linkedArtifactIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkedSourceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "linkedNodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "originSurface": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "completedAt": {
+          "type": "number"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "taskId",
+        "projectId",
+        "knowledgeSpaceId",
+        "title",
+        "status",
+        "order",
+        "tags",
+        "linkedArtifactIds",
+        "linkedSourceIds",
+        "linkedNodeIds",
+        "createdAt",
+        "updatedAt"
+      ],
+      "additionalProperties": true
+    },
+    "clearedTaskIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reclaimedTaskIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "tasks": {
       "type": "array",
       "items": {
@@ -112987,6 +110866,9 @@ Replace task ordering for the current project work plan.
             "type": "string"
           },
           "agentId": {
+            "type": "string"
+          },
+          "sessionId": {
             "type": "string"
           },
           "turnId": {
@@ -113072,45 +110954,6 @@ Replace task ordering for the current project work plan.
         ],
         "additionalProperties": true
       }
-    },
-    "counts": {
-      "type": "object",
-      "properties": {
-        "total": {
-          "type": "number"
-        },
-        "pending": {
-          "type": "number"
-        },
-        "in_progress": {
-          "type": "number"
-        },
-        "blocked": {
-          "type": "number"
-        },
-        "done": {
-          "type": "number"
-        },
-        "failed": {
-          "type": "number"
-        },
-        "cancelled": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "total",
-        "pending",
-        "in_progress",
-        "blocked",
-        "done",
-        "failed",
-        "cancelled"
-      ],
-      "additionalProperties": false
-    },
-    "updatedAt": {
-      "type": "number"
     }
   },
   "required": [
@@ -113118,9 +110961,10 @@ Replace task ordering for the current project work plan.
     "projectId",
     "knowledgeSpaceId",
     "workPlanId",
-    "tasks",
-    "counts",
-    "updatedAt"
+    "changed",
+    "revision",
+    "updatedAt",
+    "counts"
   ],
   "additionalProperties": true
 }
@@ -120439,12 +118283,6 @@ Record that the owner has one occurrence in hand, so nothing is pushed at them a
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "occasionId": {
       "type": "string"
     },
@@ -120523,12 +118361,6 @@ Record yes, no, later or acknowledged for one occurrence. A no goes silent for t
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "occasionId": {
       "type": "string"
     },
@@ -120696,12 +118528,6 @@ Write the confirmed occasion as one line in the owner profile, under Important d
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "title": {
       "type": "string"
     },
@@ -120815,12 +118641,6 @@ Apply the owner's answer to "which date is right?": keep names the date to keep,
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "occasionId": {
       "type": "string"
     },
@@ -120988,12 +118808,6 @@ Record one answer and return the next question, if there is one. The interview g
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "interviewId": {
       "type": "string"
     },
@@ -121288,12 +119102,6 @@ Close the interview with what the owner settled on and write it to the gift hist
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "interviewId": {
       "type": "string"
     },
@@ -122088,12 +119896,6 @@ Write the confirmed plan as one line in the owner profile, under Plans, carrying
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "title": {
       "type": "string"
     },
@@ -122468,12 +120270,6 @@ Remove one plan from the owner profile, chosen by planId (its normalised title) 
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "planId": {
       "type": "string"
     },
@@ -122557,12 +120353,6 @@ Change one recorded plan in place, chosen by planId (its normalised title) and p
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "planId": {
       "type": "string"
     },
@@ -122827,12 +120617,6 @@ Remove one occasion and every record the machine kept against it, answers, gift 
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "occasionId": {
       "type": "string"
     },
@@ -123035,14 +120819,7 @@ Run one pass immediately: reap expired and orphaned state, find the occasions en
 ```json
 {
   "type": "object",
-  "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    }
-  },
+  "properties": {},
   "additionalProperties": false
 }
 ```
@@ -123353,12 +121130,6 @@ Change one recorded occasion in place: any of date, kind, person, recurrence, le
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "occasionId": {
       "type": "string"
     },
@@ -123885,7 +121656,7 @@ The honest TLS/capability posture of a web origin, pass your surface's current o
 
 #### `pairing.tokens.create`
 
-Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND.
+Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret.
 
 - Title: `Mint Paired Device Token`
 - Source: `builtin`
@@ -123905,6 +121676,15 @@ Mint a new named per-device operator token and return its plaintext secret EXACT
   "properties": {
     "name": {
       "type": "string"
+    },
+    "attemptId": {
+      "type": "string"
+    },
+    "client": {
+      "type": "string",
+      "enum": [
+        "agent"
+      ]
     }
   },
   "required": [
@@ -124054,6 +121834,12 @@ none
           },
           "mintedBy": {
             "type": "string"
+          },
+          "client": {
+            "type": "string",
+            "enum": [
+              "agent"
+            ]
           }
         },
         "required": [
@@ -124312,7 +122098,7 @@ Return integration panel descriptors.
 
 #### `panels.open`
 
-Request that a panel be opened in the current TUI session.
+Open a listed panel in the terminal session this process runs. Answers opened: true only when the view appeared; an id GET /api/panels does not list is refused with 404, and a listed panel this process has no terminal screen to show is refused with 409.
 
 - Title: `Open Panel`
 - Source: `builtin`
@@ -127401,12 +125187,6 @@ Add one prose bullet to a section, carrying its provenance suffix. Same three-la
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "section": {
       "type": "string"
     },
@@ -127523,12 +125303,6 @@ Delete a mechanical field and every retained history comment for it, or one pros
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "fieldId": {
       "type": "string"
     },
@@ -128350,12 +126124,6 @@ Record or correct one mechanical field, moving any previous value into a retaine
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "fieldId": {
       "type": "string"
     },
@@ -128557,12 +126325,6 @@ Promote a field's most recent superseded value back to the active line, so a wro
 {
   "type": "object",
   "properties": {
-    "admission": {
-      "type": "string",
-      "enum": [
-        "autonomous"
-      ]
-    },
     "fieldId": {
       "type": "string"
     },
@@ -137405,6 +135167,95 @@ Return registered channel and control surfaces. Stay current by subscribing to t
 
 ### runtime
 
+#### `devices.artifacts.delete`
+
+Remove one retained camera or screen capture now, before its retention window ends: the file on the daemon host and its record. The removal is added to the housekeeping disclosure like a sweep removal, with the reason `deleted`. `deleted` is true only when the file was unlinked; a capture whose file was already gone (`file-missing`) or no longer matches what was taken (`content-mismatch`, the file is kept for inspection) loses its record and says so. An id that is not retained is a 404.
+
+- Title: `Delete a Retained Device Capture`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `DELETE /api/devices/artifacts/{artifactId}`
+- Scopes: `write:remote`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "artifactId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifactId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "deleted": {
+      "type": "boolean"
+    },
+    "removal": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "capabilityId": {
+          "type": "string"
+        },
+        "fileName": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "removedAt": {
+          "type": "number"
+        },
+        "byteLength": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "artifactId",
+        "nodeId",
+        "capabilityId",
+        "fileName",
+        "reason",
+        "removedAt",
+        "byteLength"
+      ],
+      "additionalProperties": false
+    },
+    "detail": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "deleted",
+    "removal",
+    "detail"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `devices.artifacts.list`
 
 The camera and screen captures still inside their retention window, newest first, with when each was captured, when it will be deleted, and the reason the request stated. Expired captures are never listed, retention is enforced by the store, not by this verb filtering them out of a longer list.
@@ -140436,7 +138287,7 @@ Return the aggregate workspace file changes a session made, joined over its sess
     "nativeRevision": {
       "type": "string",
       "maxLength": 200,
-      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
     },
     "unifiedDiff": {
       "type": "string"
@@ -140542,8 +138393,9 @@ Mark a shared session as closed.
         "channelPermissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -140931,8 +138783,9 @@ Create a shared session for a surface, route, or web client.
         "channelPermissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -141192,8 +139045,9 @@ Remove a surface's participant and its route binding from a session so that surf
         "channelPermissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -141338,6 +139192,9 @@ Queue a deferred follow-up for a shared session so it runs after the current age
       "type": "string"
     },
     "body": {
+      "type": "string"
+    },
+    "messageId": {
       "type": "string"
     },
     "surfaceKind": {
@@ -141512,8 +139369,9 @@ Queue a deferred follow-up for a shared session so it runs after the current age
             "channelPermissionMode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -142040,8 +139898,9 @@ Return metadata for a shared session.
         "channelPermissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -142388,8 +140247,9 @@ Join a hosted session and receive its transcript so far, so a client that was ne
         "permissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -142607,8 +140467,9 @@ Compose a full conversation loop INSIDE the daemon for a workspace: the same orc
         "permissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -142776,8 +140637,9 @@ Leave a hosted session. When other clients are still attached, nothing else happ
         "permissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -142941,8 +140803,9 @@ End a hosted session regardless of who is attached or what its detach policy say
         "permissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -143105,8 +140968,9 @@ Every session this daemon hosts, most recently updated first. Terminated session
           "permissionMode": {
             "type": "string",
             "enum": [
-              "safe-owner",
-              "safe-jev",
+              "ask-me",
+              "jev-decides",
+              "just-vibes",
               "yolo",
               "plan"
             ]
@@ -143826,8 +141690,9 @@ Return explicit session inputs, including queued follow-ups and delivered steeri
         "channelPermissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -144343,8 +142208,9 @@ Return shared-session integration state.
           "channelPermissionMode": {
             "type": "string",
             "enum": [
-              "safe-owner",
-              "safe-jev",
+              "ask-me",
+              "jev-decides",
+              "just-vibes",
               "yolo",
               "plan"
             ]
@@ -144491,6 +142357,9 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
       "type": "string"
     },
     "body": {
+      "type": "string"
+    },
+    "messageId": {
       "type": "string"
     },
     "surfaceKind": {
@@ -144690,8 +142559,9 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -145229,8 +143099,9 @@ Return a page of retained session messages. Offset counts backward from the newe
         "channelPermissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -145448,7 +143319,7 @@ Return a page of retained session messages. Offset counts backward from the newe
 
 #### `sessions.permissionMode.get`
 
-Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.
+Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Get Session Permission Mode`
 - Source: `builtin`
@@ -145489,8 +143360,9 @@ Return the effective session execution mode: safe-owner, safe-jev, yolo, or the 
     "mode": {
       "type": "string",
       "enum": [
-        "safe-owner",
-        "safe-jev",
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
         "yolo",
         "plan"
       ]
@@ -145506,7 +143378,7 @@ Return the effective session execution mode: safe-owner, safe-jev, yolo, or the 
 
 #### `sessions.permissionMode.set`
 
-Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.
+Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Set Session Permission Mode`
 - Source: `builtin`
@@ -145530,8 +143402,9 @@ Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture
     "mode": {
       "type": "string",
       "enum": [
-        "safe-owner",
-        "safe-jev",
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
         "yolo",
         "plan"
       ]
@@ -145557,8 +143430,9 @@ Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture
     "mode": {
       "type": "string",
       "enum": [
-        "safe-owner",
-        "safe-jev",
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
         "yolo",
         "plan"
       ]
@@ -145566,8 +143440,9 @@ Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture
     "previousMode": {
       "type": "string",
       "enum": [
-        "safe-owner",
-        "safe-jev",
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
         "yolo",
         "plan"
       ]
@@ -145917,8 +143792,9 @@ Idempotently register (or heartbeat) a session keyed on a caller-supplied id, ca
         "channelPermissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -146141,8 +144017,9 @@ Reopen a previously closed shared session.
         "channelPermissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -146370,8 +144247,9 @@ Paginated, filtered query over shared sessions: free-text query (matches id/titl
           "channelPermissionMode": {
             "type": "string",
             "enum": [
-              "safe-owner",
-              "safe-jev",
+              "ask-me",
+              "jev-decides",
+              "just-vibes",
               "yolo",
               "plan"
             ]
@@ -146524,6 +144402,9 @@ Deliver a live steering message to the active agent for a shared session, option
       "type": "string"
     },
     "body": {
+      "type": "string"
+    },
+    "messageId": {
       "type": "string"
     },
     "surfaceKind": {
@@ -146701,8 +144582,9 @@ Deliver a live steering message to the active agent for a shared session, option
             "channelPermissionMode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -154284,121 +152166,11 @@ Stop a watcher instance.
 }
 ```
 
-#### `watchers.triggers.migrate`
-
-Explicitly acknowledge that older GoodVibes instances are closed, then migrate and start this surface’s original trigger supervisor. The acknowledgement is an operator statement, not OS liveness proof.
-
-- Title: `Migrate triggers after closing older instances`
-- Source: `builtin`
-- Access: `admin`
-- Transport: `ws`
-- HTTP: none
-- Scopes: `write:watchers`
-- Emits events: none
-- Dangerous: `yes`
-- Invokable: `yes`
-
-##### Input schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "olderInstancesClosed": {
-      "type": "boolean",
-      "const": true
-    },
-    "confirm": {
-      "type": "boolean",
-      "const": true
-    }
-  },
-  "required": [
-    "olderInstancesClosed",
-    "confirm"
-  ],
-  "additionalProperties": false
-}
-```
-
-##### Output schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "migrated": {
-      "type": "boolean",
-      "const": true
-    },
-    "status": {
-      "type": "object",
-      "properties": {
-        "ownership": {
-          "type": "string",
-          "enum": [
-            "local",
-            "other-process",
-            "migration-required",
-            "unclaimed"
-          ]
-        },
-        "migrationRequired": {
-          "type": "boolean"
-        },
-        "records": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "label": {
-                "type": "string"
-              },
-              "kind": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "label",
-              "kind",
-              "state"
-            ],
-            "additionalProperties": false
-          }
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "ownership",
-        "migrationRequired",
-        "records",
-        "message"
-      ],
-      "additionalProperties": false
-    }
-  },
-  "required": [
-    "migrated",
-    "status"
-  ],
-  "additionalProperties": false
-}
-```
-
 #### `watchers.triggers.status`
 
-Read the original surface trigger supervisor and affected record summaries without claiming execution ownership or migrating saved state.
+Read the surface trigger supervisor and affected record summaries without claiming execution ownership.
 
-- Title: `Inspect trigger execution and migration`
+- Title: `Inspect supervised triggers`
 - Source: `builtin`
 - Access: `admin`
 - Transport: `ws`
@@ -154429,12 +152201,8 @@ Read the original surface trigger supervisor and affected record summaries witho
       "enum": [
         "local",
         "other-process",
-        "migration-required",
         "unclaimed"
       ]
-    },
-    "migrationRequired": {
-      "type": "boolean"
     },
     "records": {
       "type": "array",
@@ -154469,7 +152237,6 @@ Read the original surface trigger supervisor and affected record summaries witho
   },
   "required": [
     "ownership",
-    "migrationRequired",
     "records",
     "message"
   ],
@@ -159170,7 +156937,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                   "revision": {
                                     "type": "string",
                                     "maxLength": 200,
-                                    "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                    "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                   },
                                   "selectedDiff": {
                                     "anyOf": [
@@ -159186,7 +156953,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                           "revision": {
                                             "type": "string",
                                             "maxLength": 200,
-                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                           },
                                           "fileIndex": {
                                             "type": "integer",
@@ -159264,7 +157031,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                           "revision": {
                                             "type": "string",
                                             "maxLength": 200,
-                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                           },
                                           "fileIndex": {
                                             "type": "integer",
@@ -159457,7 +157224,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                               },
                               "sourceId": {
                                 "type": "string",
-                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                               },
                               "sourceRevision": {
                                 "type": "string",
@@ -159494,11 +157261,11 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                               },
                               "sourceId": {
                                 "type": "string",
-                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                               },
                               "sourceRevision": {
                                 "type": "string",
-                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                               },
                               "inputId": {
                                 "type": "string",
@@ -160036,7 +157803,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                     },
                                     "selectedDiff": {
                                       "anyOf": [
@@ -160052,7 +157819,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                             "revision": {
                                               "type": "string",
                                               "maxLength": 200,
-                                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                             },
                                             "fileIndex": {
                                               "type": "integer",
@@ -160130,7 +157897,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                             "revision": {
                                               "type": "string",
                                               "maxLength": 200,
-                                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                             },
                                             "fileIndex": {
                                               "type": "integer",
@@ -160323,7 +158090,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                 },
                                 "sourceId": {
                                   "type": "string",
-                                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                  "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                 },
                                 "sourceRevision": {
                                   "type": "string",
@@ -160360,11 +158127,11 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                 },
                                 "sourceId": {
                                   "type": "string",
-                                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                  "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                 },
                                 "sourceRevision": {
                                   "type": "string",
-                                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                  "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                 },
                                 "inputId": {
                                   "type": "string",
@@ -160731,7 +158498,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                         "revision": {
                                           "type": "string",
                                           "maxLength": 200,
-                                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                         },
                                         "selectedDiff": {
                                           "anyOf": [
@@ -160747,7 +158514,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                                 "revision": {
                                                   "type": "string",
                                                   "maxLength": 200,
-                                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                 },
                                                 "fileIndex": {
                                                   "type": "integer",
@@ -160825,7 +158592,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                                 "revision": {
                                                   "type": "string",
                                                   "maxLength": 200,
-                                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                 },
                                                 "fileIndex": {
                                                   "type": "integer",
@@ -161018,7 +158785,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                     },
                                     "sourceId": {
                                       "type": "string",
-                                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                     },
                                     "sourceRevision": {
                                       "type": "string",
@@ -161055,11 +158822,11 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                     },
                                     "sourceId": {
                                       "type": "string",
-                                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                     },
                                     "sourceRevision": {
                                       "type": "string",
-                                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                     },
                                     "inputId": {
                                       "type": "string",
@@ -161590,7 +159357,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                           "revision": {
                                             "type": "string",
                                             "maxLength": 200,
-                                            "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                            "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                           },
                                           "selectedDiff": {
                                             "anyOf": [
@@ -161606,7 +159373,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                                   "revision": {
                                                     "type": "string",
                                                     "maxLength": 200,
-                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                   },
                                                   "fileIndex": {
                                                     "type": "integer",
@@ -161684,7 +159451,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                                   "revision": {
                                                     "type": "string",
                                                     "maxLength": 200,
-                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                   },
                                                   "fileIndex": {
                                                     "type": "integer",
@@ -161877,7 +159644,7 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                       },
                                       "sourceId": {
                                         "type": "string",
-                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                       },
                                       "sourceRevision": {
                                         "type": "string",
@@ -161914,11 +159681,11 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                       },
                                       "sourceId": {
                                         "type": "string",
-                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                       },
                                       "sourceRevision": {
                                         "type": "string",
-                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                       },
                                       "inputId": {
                                         "type": "string",
@@ -162805,7 +160572,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -162821,7 +160588,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -162859,7 +160626,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -163005,7 +160772,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -163021,7 +160788,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -163059,7 +160826,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -163224,7 +160991,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -163240,7 +161007,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -163278,7 +161045,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -163349,7 +161116,7 @@ Start the single initial semantic admission of captured conversation text. Repla
             "revision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -163365,7 +161132,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -163443,7 +161210,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -163643,7 +161410,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -163659,7 +161426,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -163697,7 +161464,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -163864,7 +161631,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -163880,7 +161647,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -163918,7 +161685,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -164072,7 +161839,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -164088,7 +161855,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -164126,7 +161893,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -164272,7 +162039,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -164288,7 +162055,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -164326,7 +162093,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -164510,7 +162277,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -164526,7 +162293,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -164604,7 +162371,7 @@ Start the single initial semantic admission of captured conversation text. Repla
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -164914,7 +162681,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -164930,7 +162697,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -164968,7 +162735,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165114,7 +162881,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -165130,7 +162897,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165168,7 +162935,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165333,7 +163100,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -165349,7 +163116,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165387,7 +163154,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165458,7 +163225,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "revision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -165474,7 +163241,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -165552,7 +163319,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -165752,7 +163519,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -165768,7 +163535,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165806,7 +163573,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165973,7 +163740,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -165989,7 +163756,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -166027,7 +163794,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -166181,7 +163948,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -166197,7 +163964,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -166235,7 +164002,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -166381,7 +164148,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -166397,7 +164164,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -166435,7 +164202,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -166619,7 +164386,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -166635,7 +164402,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -166713,7 +164480,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -166940,7 +164707,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -166978,7 +164745,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                 },
                 "fileIndex": {
                   "type": "integer",
@@ -167148,7 +164915,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -167164,7 +164931,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -167202,7 +164969,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -167348,7 +165115,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -167364,7 +165131,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -167402,7 +165169,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -167567,7 +165334,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -167583,7 +165350,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -167621,7 +165388,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -167692,7 +165459,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "revision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -167708,7 +165475,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -167786,7 +165553,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -167986,7 +165753,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -168002,7 +165769,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -168040,7 +165807,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -168207,7 +165974,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -168223,7 +165990,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -168261,7 +166028,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -168415,7 +166182,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -168431,7 +166198,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -168469,7 +166236,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -168615,7 +166382,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -168631,7 +166398,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -168669,7 +166436,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -168853,7 +166620,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -168869,7 +166636,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -168947,7 +166714,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -169253,7 +167020,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -169269,7 +167036,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -169307,7 +167074,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -169453,7 +167220,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -169469,7 +167236,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -169507,7 +167274,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -169672,7 +167439,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -169688,7 +167455,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -169726,7 +167493,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -169797,7 +167564,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -169813,7 +167580,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -169891,7 +167658,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -170091,7 +167858,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -170107,7 +167874,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170145,7 +167912,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170312,7 +168079,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -170328,7 +168095,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170366,7 +168133,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170520,7 +168287,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -170536,7 +168303,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170574,7 +168341,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170720,7 +168487,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -170736,7 +168503,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170774,7 +168541,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170958,7 +168725,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -170974,7 +168741,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -171052,7 +168819,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -171379,7 +169146,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -171395,7 +169162,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -171433,7 +169200,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -171579,7 +169346,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -171595,7 +169362,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -171633,7 +169400,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -171798,7 +169565,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -171814,7 +169581,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -171852,7 +169619,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -171923,7 +169690,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "revision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
             },
             "selectedDiff": {
               "anyOf": [
@@ -171939,7 +169706,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -172017,7 +169784,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                     },
                     "fileIndex": {
                       "type": "integer",
@@ -172217,7 +169984,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -172233,7 +170000,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -172271,7 +170038,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -172438,7 +170205,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -172454,7 +170221,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -172492,7 +170259,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -172646,7 +170413,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -172662,7 +170429,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -172700,7 +170467,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -172846,7 +170613,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                 "revision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                 },
                 "selectedDiff": {
                   "anyOf": [
@@ -172862,7 +170629,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -172900,7 +170667,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -173084,7 +170851,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -173100,7 +170867,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -173178,7 +170945,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -173348,7 +171115,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
 
 #### `workLedger.prepareLegacyImport`
 
-Capture bounded complete legacy sources on the selected authoritative host. Preparation does not write or grant execution authority.
+Capture bounded complete legacy sources on the selected authoritative host, plus every work-plan task of the project (the host adds those). Preparation does not write or grant execution authority.
 
 - Title: `Prepare Legacy Work Import`
 - Source: `builtin`
@@ -173373,7 +171140,6 @@ Capture bounded complete legacy sources on the selected authoritative host. Prep
       "maxLength": 200
     },
     "sourceIds": {
-      "minItems": 1,
       "maxItems": 500,
       "type": "array",
       "items": {
@@ -173674,7 +171440,7 @@ Read the selected host project ledger, without mutation authority or allowedActi
                               "revision": {
                                 "type": "string",
                                 "maxLength": 200,
-                                "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                               },
                               "selectedDiff": {
                                 "anyOf": [
@@ -173690,7 +171456,7 @@ Read the selected host project ledger, without mutation authority or allowedActi
                                       "revision": {
                                         "type": "string",
                                         "maxLength": 200,
-                                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                       },
                                       "fileIndex": {
                                         "type": "integer",
@@ -173768,7 +171534,7 @@ Read the selected host project ledger, without mutation authority or allowedActi
                                       "revision": {
                                         "type": "string",
                                         "maxLength": 200,
-                                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                        "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                       },
                                       "fileIndex": {
                                         "type": "integer",
@@ -173961,7 +171727,7 @@ Read the selected host project ledger, without mutation authority or allowedActi
                           },
                           "sourceId": {
                             "type": "string",
-                            "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                            "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                           },
                           "sourceRevision": {
                             "type": "string",
@@ -173998,11 +171764,11 @@ Read the selected host project ledger, without mutation authority or allowedActi
                           },
                           "sourceId": {
                             "type": "string",
-                            "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                            "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                           },
                           "sourceRevision": {
                             "type": "string",
-                            "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                            "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                           },
                           "inputId": {
                             "type": "string",
@@ -174578,7 +172344,7 @@ Look up an immutable native submission receipt by the original request ID on the
                     },
                     "sourceId": {
                       "type": "string",
-                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                     },
                     "sourceRevision": {
                       "type": "string",
@@ -174609,11 +172375,11 @@ Look up an immutable native submission receipt by the original request ID on the
                     },
                     "sourceId": {
                       "type": "string",
-                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                     },
                     "sourceRevision": {
                       "type": "string",
-                      "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                     },
                     "sessionId": {
                       "type": "string",
@@ -174875,7 +172641,7 @@ Persist one bounded explicit-source goal and ordered criteria on the selected au
                 },
                 "sourceId": {
                   "type": "string",
-                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                  "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                 },
                 "sourceRevision": {
                   "type": "string",
@@ -174906,11 +172672,11 @@ Persist one bounded explicit-source goal and ordered criteria on the selected au
                 },
                 "sourceId": {
                   "type": "string",
-                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                  "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                 },
                 "sourceRevision": {
                   "type": "string",
-                  "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                  "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                 },
                 "sessionId": {
                   "type": "string",
@@ -175272,8 +173038,9 @@ Deliver an already admitted native conversation input at most once through a hos
     "permissionMode": {
       "type": "string",
       "enum": [
-        "safe-owner",
-        "safe-jev",
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
         "yolo",
         "plan"
       ]
@@ -175454,8 +173221,9 @@ Deliver an already admitted native conversation input at most once through a hos
     "permissionMode": {
       "type": "string",
       "enum": [
-        "safe-owner",
-        "safe-jev",
+        "ask-me",
+        "jev-decides",
+        "just-vibes",
         "yolo",
         "plan"
       ]
@@ -176153,7 +173921,7 @@ Remove a worktree per the eviction-preserving rules: any uncommitted state is fi
 
 #### `worktrees.setup.run`
 
-Re-run cold-start setup (configured commands + untracked-file carry-over) on a live worktree by path, recording the honest outcome onto the worktree record. Returns the setup result: state skipped (nothing configured), succeeded, or failed with the failing step and error. A failed setup is a visible worktree state, never silent.
+Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over from worktree.setup.carryOverGlobs; each is auto, none or a list, and auto derives from the repository) on a live worktree by path, recording the honest outcome onto the worktree record. Returns the setup result: state skipped (nothing to run or copy), succeeded, or failed with the failing step and error, which names a derived step as derived. A failed setup is a visible worktree state, never silent.
 
 - Title: `Re-run Worktree Setup`
 - Source: `builtin`
@@ -178200,8 +175968,9 @@ Every lifecycle transition of a session whose loop runs INSIDE the daemon: creat
         "permissionMode": {
           "type": "string",
           "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
           ]
@@ -178381,6 +176150,30 @@ A question, claim, purchase window or queued action in the owner inbox was poste
               }
             ]
           }
+        },
+        "delivery": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "delivered",
+                "waiting",
+                "undeliverable"
+              ]
+            },
+            "to": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "to"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

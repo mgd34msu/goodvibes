@@ -477,7 +477,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "awaitingDecision": false,
-      "mode": "safe-owner",
+      "mode": "ask-me",
       "lastDecision": {
         "callId": "sample",
         "toolName": "sample",
@@ -676,7 +676,72 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "closedAt": 0,
         "withdrawnReason": "sample",
         "key": "sample",
-        "metadata": {}
+        "metadata": {},
+        "delivery": {
+          "state": "delivered",
+          "to": "sample",
+          "reason": "sample"
+        }
+      },
+      "delivery": {
+        "state": "delivered",
+        "to": "sample",
+        "reason": "sample"
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      }
+    }
+  },
+  "inbox.delivery": {
+    "methodId": "inbox.delivery",
+    "http": null,
+    "status": 200,
+    "body": {
+      "applied": false,
+      "item": {
+        "id": "sample",
+        "kind": "approval",
+        "status": "open",
+        "sessionId": "sample",
+        "title": "sample",
+        "detail": "sample",
+        "options": [
+          "sample"
+        ],
+        "askedBy": "sample",
+        "createdAt": 0,
+        "expiresAt": 0,
+        "answer": {
+          "option": "sample",
+          "text": "sample"
+        },
+        "answeredBy": {
+          "actor": "sample",
+          "surface": "sample"
+        },
+        "closedAt": 0,
+        "withdrawnReason": "sample",
+        "key": "sample",
+        "metadata": {},
+        "delivery": {
+          "state": "delivered",
+          "to": "sample",
+          "reason": "sample"
+        }
+      },
+      "delivery": {
+        "state": "delivered",
+        "to": "sample",
+        "reason": "sample"
       },
       "refusal": {
         "code": "sample",
@@ -721,7 +786,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "closedAt": 0,
           "withdrawnReason": "sample",
           "key": "sample",
-          "metadata": {}
+          "metadata": {},
+          "delivery": {
+            "state": "delivered",
+            "to": "sample",
+            "reason": "sample"
+          }
         }
       ],
       "revision": 0
@@ -757,7 +827,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "closedAt": 0,
         "withdrawnReason": "sample",
         "key": "sample",
-        "metadata": {}
+        "metadata": {},
+        "delivery": {
+          "state": "delivered",
+          "to": "sample",
+          "reason": "sample"
+        }
       }
     }
   },
@@ -791,7 +866,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "closedAt": 0,
         "withdrawnReason": "sample",
         "key": "sample",
-        "metadata": {}
+        "metadata": {},
+        "delivery": {
+          "state": "delivered",
+          "to": "sample",
+          "reason": "sample"
+        }
+      },
+      "delivery": {
+        "state": "delivered",
+        "to": "sample",
+        "reason": "sample"
       },
       "refusal": {
         "code": "sample",
@@ -4641,7 +4726,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "channelId": "sample",
         "model": "sample",
         "provider": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "updatedAt": 0,
         "metadata": {}
       }
@@ -4662,7 +4747,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "channelId": "sample",
           "model": "sample",
           "provider": "sample",
-          "permissionMode": "safe-owner",
+          "permissionMode": "ask-me",
           "updatedAt": 0,
           "metadata": {}
         }
@@ -4683,7 +4768,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "channelId": "sample",
         "model": "sample",
         "provider": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "updatedAt": 0,
         "metadata": {}
       }
@@ -6091,6 +6176,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ],
           "assistedNarrative": "sample"
         }
+      }
+    }
+  },
+  "contracts.budget": {
+    "methodId": "contracts.budget",
+    "http": null,
+    "status": 200,
+    "body": {
+      "budget": {
+        "maxTokens": 0,
+        "maxCostUsd": 0
       }
     }
   },
@@ -9724,6 +9820,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "nextEscalationId": "sample"
     }
   },
+  "contracts.retryUnit": {
+    "methodId": "contracts.retryUnit",
+    "http": null,
+    "status": 200,
+    "body": {
+      "outcome": "restarted",
+      "reason": "sample"
+    }
+  },
   "contracts.start": {
     "methodId": "contracts.start",
     "http": {
@@ -12784,6 +12889,46 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ]
         }
       }
+    }
+  },
+  "ops.doctor": {
+    "methodId": "ops.doctor",
+    "http": null,
+    "status": 200,
+    "body": {
+      "symptom": "sample",
+      "playbooks": [
+        {
+          "id": "sample",
+          "name": "sample",
+          "checks": [
+            {
+              "id": "sample",
+              "label": "sample",
+              "outcome": "pass",
+              "severity": "info",
+              "summary": "sample"
+            }
+          ],
+          "steps": [
+            {
+              "step": 0,
+              "title": "sample",
+              "action": "sample",
+              "kind": "command",
+              "command": "sample",
+              "expectedOutcome": "sample",
+              "automatable": false
+            }
+          ]
+        }
+      ],
+      "available": [
+        {
+          "id": "sample",
+          "name": "sample"
+        }
+      ]
     }
   },
   "ops.memory.get": {
@@ -17125,6 +17270,18 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
       "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
       "task": {
         "taskId": "sample",
         "projectId": "sample",
@@ -17143,6 +17300,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -17179,6 +17337,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -17215,6 +17374,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -17236,74 +17396,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "clearedTaskIds": [
         "sample"
       ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.snapshot": {
-    "methodId": "projectPlanning.workPlan.snapshot",
-    "http": {
-      "method": "GET",
-      "path": "/api/projects/planning/work-plan"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
+      "reclaimedTaskIds": [
+        "sample"
+      ],
       "tasks": [
         {
           "taskId": "sample",
@@ -17323,6 +17418,61 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "contractId": "sample",
           "phaseId": "sample",
           "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.snapshot": {
+    "methodId": "projectPlanning.workPlan.snapshot",
+    "http": {
+      "method": "GET",
+      "path": "/api/projects/planning/work-plan"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "revision": 0,
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
           "turnId": "sample",
           "decisionId": "sample",
           "sourceMessageId": "sample",
@@ -17366,6 +17516,18 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
       "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
       "task": {
         "taskId": "sample",
         "projectId": "sample",
@@ -17384,6 +17546,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -17420,6 +17583,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -17456,6 +17620,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -17477,715 +17642,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "clearedTaskIds": [
         "sample"
       ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.task.delete": {
-    "methodId": "projectPlanning.workPlan.task.delete",
-    "http": {
-      "method": "DELETE",
-      "path": "/api/projects/planning/work-plan/tasks/{taskId}"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "task": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "previousTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "deletedTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "clearedTaskIds": [
+      "reclaimedTaskIds": [
         "sample"
       ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.task.get": {
-    "methodId": "projectPlanning.workPlan.task.get",
-    "http": {
-      "method": "GET",
-      "path": "/api/projects/planning/work-plan/tasks/{taskId}"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "task": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.task.status": {
-    "methodId": "projectPlanning.workPlan.task.status",
-    "http": {
-      "method": "POST",
-      "path": "/api/projects/planning/work-plan/tasks/{taskId}/status"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "task": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "previousTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "deletedTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "clearedTaskIds": [
-        "sample"
-      ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.task.update": {
-    "methodId": "projectPlanning.workPlan.task.update",
-    "http": {
-      "method": "PATCH",
-      "path": "/api/projects/planning/work-plan/tasks/{taskId}"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "task": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "previousTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "deletedTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "clearedTaskIds": [
-        "sample"
-      ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.tasks.list": {
-    "methodId": "projectPlanning.workPlan.tasks.list",
-    "http": {
-      "method": "GET",
-      "path": "/api/projects/planning/work-plan/tasks"
-    },
-    "status": 200,
-    "body": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
       "tasks": [
         {
           "taskId": "sample",
@@ -18205,6 +17664,659 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "contractId": "sample",
           "phaseId": "sample",
           "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.task.delete": {
+    "methodId": "projectPlanning.workPlan.task.delete",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/projects/planning/work-plan/tasks/{taskId}"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "previousTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "deletedTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "clearedTaskIds": [
+        "sample"
+      ],
+      "reclaimedTaskIds": [
+        "sample"
+      ],
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.task.get": {
+    "methodId": "projectPlanning.workPlan.task.get",
+    "http": {
+      "method": "GET",
+      "path": "/api/projects/planning/work-plan/tasks/{taskId}"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "revision": 0,
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      }
+    }
+  },
+  "projectPlanning.workPlan.task.status": {
+    "methodId": "projectPlanning.workPlan.task.status",
+    "http": {
+      "method": "POST",
+      "path": "/api/projects/planning/work-plan/tasks/{taskId}/status"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "previousTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "deletedTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "clearedTaskIds": [
+        "sample"
+      ],
+      "reclaimedTaskIds": [
+        "sample"
+      ],
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.task.update": {
+    "methodId": "projectPlanning.workPlan.task.update",
+    "http": {
+      "method": "PATCH",
+      "path": "/api/projects/planning/work-plan/tasks/{taskId}"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "previousTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "deletedTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "clearedTaskIds": [
+        "sample"
+      ],
+      "reclaimedTaskIds": [
+        "sample"
+      ],
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.tasks.list": {
+    "methodId": "projectPlanning.workPlan.tasks.list",
+    "http": {
+      "method": "GET",
+      "path": "/api/projects/planning/work-plan/tasks"
+    },
+    "status": 200,
+    "body": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "revision": 0,
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
           "turnId": "sample",
           "decisionId": "sample",
           "sourceMessageId": "sample",
@@ -18248,6 +18360,135 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
       "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "previousTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "deletedTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "clearedTaskIds": [
+        "sample"
+      ],
+      "reclaimedTaskIds": [
+        "sample"
+      ],
       "tasks": [
         {
           "taskId": "sample",
@@ -18267,6 +18508,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "contractId": "sample",
           "phaseId": "sample",
           "agentId": "sample",
+          "sessionId": "sample",
           "turnId": "sample",
           "decisionId": "sample",
           "sourceMessageId": "sample",
@@ -18285,17 +18527,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "completedAt": 0,
           "metadata": {}
         }
-      ],
-      "counts": {
-        "total": 0,
-        "pending": 0,
-        "in_progress": 0,
-        "blocked": 0,
-        "done": 0,
-        "failed": 0,
-        "cancelled": 0
-      },
-      "updatedAt": 0
+      ]
     }
   },
   "mcp.config.get": {
@@ -20238,7 +20470,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "name": "sample",
           "createdAt": 0,
           "lastSeenAt": 0,
-          "mintedBy": "sample"
+          "mintedBy": "sample",
+          "client": "agent"
         }
       ],
       "legacySharedRevoked": false
@@ -22934,6 +23167,27 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
+  "devices.artifacts.delete": {
+    "methodId": "devices.artifacts.delete",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/devices/artifacts/{artifactId}"
+    },
+    "status": 200,
+    "body": {
+      "deleted": false,
+      "removal": {
+        "artifactId": "sample",
+        "nodeId": "sample",
+        "capabilityId": "sample",
+        "fileName": "sample",
+        "reason": "sample",
+        "removedAt": 0,
+        "byteLength": 0
+      },
+      "detail": "sample"
+    }
+  },
   "devices.artifacts.list": {
     "methodId": "devices.artifacts.list",
     "http": {
@@ -23699,7 +23953,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -23768,7 +24022,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -23828,7 +24082,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -23876,7 +24130,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -23984,7 +24238,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -24058,7 +24312,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "contractIds": [
           "sample"
         ],
@@ -24101,7 +24355,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "contractIds": [
           "sample"
         ],
@@ -24136,7 +24390,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "contractIds": [
           "sample"
         ],
@@ -24171,7 +24425,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "contractIds": [
           "sample"
         ],
@@ -24207,7 +24461,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "terminatedReason": "sample",
           "restoredFromDisk": false,
           "originSurface": "sample",
-          "permissionMode": "safe-owner",
+          "permissionMode": "ask-me",
           "contractIds": [
             "sample"
           ],
@@ -24355,7 +24609,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -24477,7 +24731,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "lastActivityAt": 0,
           "messageCount": 0,
           "retainedMessageCount": 0,
-          "channelPermissionMode": "safe-owner",
+          "channelPermissionMode": "ask-me",
           "channelPermissionModeRevision": 0,
           "pendingInputCount": 0,
           "routeIds": [
@@ -24539,7 +24793,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -24595,7 +24849,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "sessionId": "sample",
-      "mode": "safe-owner"
+      "mode": "ask-me"
     }
   },
   "sessions.permissionMode.set": {
@@ -24607,8 +24861,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "sessionId": "sample",
-      "mode": "safe-owner",
-      "previousMode": "safe-owner"
+      "mode": "ask-me",
+      "previousMode": "ask-me"
     }
   },
   "sessions.queuedMessages.delete": {
@@ -24676,7 +24930,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -24728,7 +24982,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -24774,7 +25028,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "lastActivityAt": 0,
           "messageCount": 0,
           "retainedMessageCount": 0,
-          "channelPermissionMode": "safe-owner",
+          "channelPermissionMode": "ask-me",
           "channelPermissionModeRevision": 0,
           "pendingInputCount": 0,
           "routeIds": [
@@ -24825,7 +25079,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -26117,34 +26371,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "metadata": {}
     }
   },
-  "watchers.triggers.migrate": {
-    "methodId": "watchers.triggers.migrate",
-    "http": null,
-    "status": 200,
-    "body": {
-      "migrated": true,
-      "status": {
-        "ownership": "local",
-        "migrationRequired": false,
-        "records": [
-          {
-            "id": "sample",
-            "label": "sample",
-            "kind": "sample",
-            "state": "sample"
-          }
-        ],
-        "message": "sample"
-      }
-    }
-  },
   "watchers.triggers.status": {
     "methodId": "watchers.triggers.status",
     "http": null,
     "status": 200,
     "body": {
       "ownership": "local",
-      "migrationRequired": false,
       "records": [
         {
           "id": "sample",

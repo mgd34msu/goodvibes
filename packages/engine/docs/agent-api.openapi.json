@@ -461,8 +461,9 @@
           "mode": {
            "type": "string",
            "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
            ]
@@ -524,6 +525,7 @@
               "managed_policy_deny",
               "safety_guardrail",
               "mode_allow_all",
+              "mode_queued_for_owner",
               "invocation_already_admitted",
               "mode_denied",
               "plan_mode",
@@ -2005,7 +2007,7 @@
    "post": {
     "operationId": "sessions.followUp",
     "summary": "Queue Shared Session Follow-Up",
-    "description": "Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.",
+    "description": "Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.\n\nReplay key: body field `messageId`. Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -2052,7 +2054,17 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-replay-key": {
+     "in": "body",
+     "name": "messageId",
+     "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+    },
     "x-error-codes": [
+     {
+      "code": "INVALID_MESSAGE_ID",
+      "status": 400,
+      "meaning": "messageId is not 1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\"; nothing was changed."
+     },
      {
       "code": "SESSION_NOT_FOUND",
       "status": 404,
@@ -2085,6 +2097,9 @@
           "type": "string"
          },
          "body": {
+          "type": "string"
+         },
+         "messageId": {
           "type": "string"
          },
          "surfaceKind": {
@@ -2512,7 +2527,7 @@
    "post": {
     "operationId": "sessions.messages.create",
     "summary": "Post Shared Session Message",
-    "description": "Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: \"task\"` to request agent or contract task continuation.",
+    "description": "Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: \"task\"` to request agent or contract task continuation.\n\nReplay key: body field `messageId`. Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -2583,6 +2598,11 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-replay-key": {
+     "in": "body",
+     "name": "messageId",
+     "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+    },
     "x-error-codes": [
      {
       "code": "INVALID_KIND",
@@ -2626,6 +2646,9 @@
           "type": "string"
          },
          "body": {
+          "type": "string"
+         },
+         "messageId": {
           "type": "string"
          },
          "surfaceKind": {
@@ -2735,7 +2758,7 @@
    "get": {
     "operationId": "sessions.permissionMode.get",
     "summary": "Get Session Permission Mode",
-    "description": "Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
+    "description": "Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -2763,8 +2786,9 @@
           "mode": {
            "type": "string",
            "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
            ]
@@ -2802,7 +2826,7 @@
    "post": {
     "operationId": "sessions.permissionMode.set",
     "summary": "Set Session Permission Mode",
-    "description": "Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.",
+    "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.",
     "tags": [
      "sessions"
     ],
@@ -2830,8 +2854,9 @@
           "mode": {
            "type": "string",
            "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
            ]
@@ -2839,8 +2864,9 @@
           "previousMode": {
            "type": "string",
            "enum": [
-            "safe-owner",
-            "safe-jev",
+            "ask-me",
+            "jev-decides",
+            "just-vibes",
             "yolo",
             "plan"
            ]
@@ -2891,8 +2917,9 @@
          "mode": {
           "type": "string",
           "enum": [
-           "safe-owner",
-           "safe-jev",
+           "ask-me",
+           "jev-decides",
+           "just-vibes",
            "yolo",
            "plan"
           ]
@@ -3381,7 +3408,7 @@
    "post": {
     "operationId": "sessions.steer",
     "summary": "Steer Shared Session",
-    "description": "Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.",
+    "description": "Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.\n\nReplay key: body field `messageId`. Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.",
     "tags": [
      "sessions"
     ],
@@ -3428,7 +3455,17 @@
     "x-scopes": [
      "write:sessions"
     ],
+    "x-replay-key": {
+     "in": "body",
+     "name": "messageId",
+     "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+    },
     "x-error-codes": [
+     {
+      "code": "INVALID_MESSAGE_ID",
+      "status": 400,
+      "meaning": "messageId is not 1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\"; nothing was changed."
+     },
      {
       "code": "SESSION_NOT_FOUND",
       "status": 404,
@@ -3461,6 +3498,9 @@
           "type": "string"
          },
          "body": {
+          "type": "string"
+         },
+         "messageId": {
           "type": "string"
          },
          "surfaceKind": {
@@ -4301,11 +4341,14 @@
        "type": "string",
        "enum": [
         "approvals.raise",
+        "contracts.budget",
         "contracts.dispatch",
         "contracts.remove",
+        "contracts.retryUnit",
         "contracts.status",
         "contracts.summaries",
         "inbox.answer",
+        "inbox.delivery",
         "inbox.list",
         "inbox.post",
         "inbox.withdraw",
@@ -4349,11 +4392,14 @@
     },
     "x-invoke-only-methods": [
      "approvals.raise",
+     "contracts.budget",
      "contracts.dispatch",
      "contracts.remove",
+     "contracts.retryUnit",
      "contracts.status",
      "contracts.summaries",
      "inbox.answer",
+     "inbox.delivery",
      "inbox.list",
      "inbox.post",
      "inbox.withdraw",
@@ -4395,7 +4441,7 @@
     }
    },
    "BadRequest": {
-    "description": "The request was malformed or failed validation; nothing was changed. Codes declared: INVALID_ARGUMENT, INVALID_KIND, INVALID_MESSAGE_ID.",
+    "description": "The request was malformed or failed validation; nothing was changed. Codes declared: INVALID_ARGUMENT, INVALID_MESSAGE_ID, INVALID_KIND.",
     "content": {
      "application/json": {
       "schema": {
@@ -4435,7 +4481,7 @@
     }
    },
    "Conflict": {
-    "description": "The target is in a state that cannot take this action; the body names the state and what is allowed. Codes declared: CONTRACT_NATIVE, CONTRACT_NOT_RUNNING, NOT_HOSTING, CONTRACT_NOT_ENDED, CONTRACT_ENDED, ESCALATION_NOT_OPEN, SESSION_NOT_LIVE, IDEMPOTENCY_KEY_REUSED, HOSTED_SESSION_STILL_RUNNING, SESSION_ACTIVE, SESSION_CLOSED, WORKSPACE_BUSY, CANCEL_NOT_ALLOWED, INPUT_NOT_CLAIMABLE, INPUT_NOT_DELIVERABLE.",
+    "description": "The target is in a state that cannot take this action; the body names the state and what is allowed. Codes declared: CONTRACT_ENDED, CONTRACT_NATIVE, CONTRACT_NOT_RUNNING, NOT_HOSTING, CONTRACT_NOT_ENDED, ESCALATION_NOT_OPEN, SESSION_NOT_LIVE, IDEMPOTENCY_KEY_REUSED, HOSTED_SESSION_STILL_RUNNING, SESSION_ACTIVE, SESSION_CLOSED, WORKSPACE_BUSY, CANCEL_NOT_ALLOWED, INPUT_NOT_CLAIMABLE, INPUT_NOT_DELIVERABLE.",
     "content": {
      "application/json": {
       "schema": {
@@ -4564,10 +4610,6 @@
      },
      "requestId": {
       "type": "string"
-     },
-     "errorRef": {
-      "type": "string",
-      "description": "Opaque server-owned failure receipt."
      },
      "providerCode": {
       "type": "string"
@@ -5154,7 +5196,7 @@
            "revision": {
             "type": "string",
             "maxLength": 200,
-            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
            },
            "fileIndex": {
             "type": "integer",
@@ -5228,7 +5270,7 @@
            "revision": {
             "type": "string",
             "maxLength": 200,
-            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
            },
            "fileIndex": {
             "type": "integer",
@@ -9030,8 +9072,9 @@
      "channelPermissionMode": {
       "type": "string",
       "enum": [
-       "safe-owner",
-       "safe-jev",
+       "ask-me",
+       "jev-decides",
+       "just-vibes",
        "yolo",
        "plan"
       ]

@@ -2928,8 +2928,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -2991,6 +2992,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "managed_policy_deny",
                     "safety_guardrail",
                     "mode_allow_all",
+                    "mode_queued_for_owner",
                     "invocation_already_admitted",
                     "mode_denied",
                     "plan_mode",
@@ -4269,7 +4271,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "inbox.answer",
         "title": "Answer Owner Inbox Item",
-        "description": "Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). Who answered is taken from the authenticated caller.",
+        "description": "Answer one open inbox item with one of its `options`, or with `text` when it has none (text may also accompany an option). An approval answered approve or deny is decided through the approval broker exactly as approvals.approve/deny would. The first answer wins: a later one, or an answer to a withdrawn or expired item, returns `applied: false` with a `refusal` naming who answered and from where (still 200, so a raced answer does not fail). For a question an agent or session asked, `delivery` says whether the answer reached it now, waits for its session to be opened again, or cannot reach it and why; the answer is kept either way. Who answered is taken from the authenticated caller.",
         "category": "approvals",
         "source": "builtin",
         "access": "admin",
@@ -4415,6 +4417,30 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       }
                     ]
                   }
+                },
+                "delivery": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "delivered",
+                        "waiting",
+                        "undeliverable"
+                      ]
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "to"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -4425,6 +4451,291 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "detail",
                 "options",
                 "createdAt"
+              ],
+              "additionalProperties": false
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "delivered",
+                    "waiting",
+                    "undeliverable"
+                  ]
+                },
+                "to": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            "refusal": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "next": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "retryAfterMs": {
+                  "type": "number"
+                },
+                "status": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "state",
+                "reason",
+                "next",
+                "retryable"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "applied"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
+        "id": "inbox.delivery",
+        "title": "Report Owner Answer Delivery",
+        "description": "The asking session reports what became of the answer to a question it posted: `delivered` once the answer is in its conversation, `undeliverable` (with `reason`) when its session was deleted. Only the principal that posted the question may report, only on an answered question a session asked, and only once: a second report returns `applied: false` with a `refusal`, so exactly one terminal puts the answer in its conversation.",
+        "category": "approvals",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:approvals"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "itemId": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "delivered",
+                "undeliverable"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "itemId",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "applied": {
+              "type": "boolean"
+            },
+            "item": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "approval",
+                    "question",
+                    "claim",
+                    "purchase",
+                    "queued-action"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "expired"
+                  ]
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "askedBy": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "expiresAt": {
+                  "type": "number"
+                },
+                "answer": {
+                  "type": "object",
+                  "properties": {
+                    "option": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "answeredBy": {
+                  "type": "object",
+                  "properties": {
+                    "actor": {
+                      "type": "string"
+                    },
+                    "surface": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "actor",
+                    "surface"
+                  ],
+                  "additionalProperties": false
+                },
+                "closedAt": {
+                  "type": "number"
+                },
+                "withdrawnReason": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                },
+                "delivery": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "delivered",
+                        "waiting",
+                        "undeliverable"
+                      ]
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "to"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "status",
+                "title",
+                "detail",
+                "options",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "delivered",
+                    "waiting",
+                    "undeliverable"
+                  ]
+                },
+                "to": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "to"
               ],
               "additionalProperties": false
             },
@@ -4477,7 +4788,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "inbox.list",
         "title": "List Owner Inbox",
-        "description": "Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.",
+        "description": "Everything waiting on the owner in one list, newest first: permission asks (kind approval), questions agents left, channel claims, purchase windows and queued actions. `status` is open (default), closed or all; pass `itemId` to read one item wherever it ranks. An answered question carries `delivery`: delivered to the agent or session that asked, waiting for that session to be opened again, or undeliverable with the reason. `revision` moves on every change, so a surface can tell whether its copy is current by comparing one number.",
         "category": "approvals",
         "source": "builtin",
         "access": "authenticated",
@@ -4640,6 +4951,30 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         }
                       ]
                     }
+                  },
+                  "delivery": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "delivered",
+                          "waiting",
+                          "undeliverable"
+                        ]
+                      },
+                      "to": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "to"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -4866,6 +5201,30 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       }
                     ]
                   }
+                },
+                "delivery": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "delivered",
+                        "waiting",
+                        "undeliverable"
+                      ]
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "to"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -5035,6 +5394,30 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       }
                     ]
                   }
+                },
+                "delivery": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "delivered",
+                        "waiting",
+                        "undeliverable"
+                      ]
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "to"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -5045,6 +5428,30 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "detail",
                 "options",
                 "createdAt"
+              ],
+              "additionalProperties": false
+            },
+            "delivery": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "delivered",
+                    "waiting",
+                    "undeliverable"
+                  ]
+                },
+                "to": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "to"
               ],
               "additionalProperties": false
             },
@@ -7390,12 +7797,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "id": {
               "type": "string"
             },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "name": {
               "type": "string"
             },
@@ -8746,12 +9147,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "expectedMutationRevision": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -8807,12 +9202,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "expectedMutationRevision": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -8868,12 +9257,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "expectedMutationRevision": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -10667,12 +11050,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "expectedMutationRevision": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             },
             "name": {
               "type": "string"
@@ -17042,12 +17419,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "name": {
               "type": "string"
             },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "prompt": {
               "type": "string"
             },
@@ -18327,12 +18698,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "expectedMutationRevision": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -18385,12 +18750,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "expectedMutationRevision": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -18443,12 +18802,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "expectedMutationRevision": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -21040,7 +21393,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "batch.runtime.get",
         "title": "Batch Runtime",
-        "description": "The batch queue's current mode (`off`, `explicit` or `eligible-by-default`; the last is accepted and behaves like `explicit`, nothing enqueues by default yet), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.",
+        "description": "The batch queue's current mode (`off`: nothing is queued; `explicit`: the job API is open and a non-streaming OpenAI-compatible chat completion is queued when it sends `x-goodvibes-execution: batch`; `eligible-by-default`: every such completion is queued unless it sends `x-goodvibes-execution: live`), what happens to a job whose provider cannot batch (`fallback`: `live` runs it at once on the live path and answers it finished, `fail` refuses it), which queue backend holds jobs, the Cloudflare settings it would use, its limits, and the providers that can batch. `GET /api/batch` and `GET /api/batch/config` return the same document.",
         "category": "batch",
         "source": "builtin",
         "access": "authenticated",
@@ -27327,12 +27680,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "properties": {
             "draftId": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -27564,7 +27911,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.drafts.save",
         "title": "Save Channel Draft",
-        "description": "Mirror a channel draft to the daemon-side store. Webhook values must be redacted before transmission; raw webhook tokens are rejected. Requires explicit confirmation or fresh recorded native admission for a paired autonomous caller.",
+        "description": "Mirror a channel draft to the daemon-side store. Webhook values must be redacted before transmission; raw webhook tokens are rejected. Requires explicit confirmation; a call made with the Agent's credential (the Agent acting on the owner's behalf) instead takes fresh recorded native admission.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -27629,12 +27976,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "sendError": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -28903,8 +29244,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -29005,8 +29347,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "permissionMode": {
                     "type": "string",
                     "enum": [
-                      "safe-owner",
-                      "safe-jev",
+                      "ask-me",
+                      "jev-decides",
+                      "just-vibes",
                       "yolo",
                       "plan"
                     ]
@@ -29095,8 +29438,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "permissionMode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -29158,8 +29502,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -29338,7 +29683,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.routing.assign",
         "title": "Assign Channel Routing Rule",
-        "description": "Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation or fresh recorded native admission for a paired autonomous caller.",
+        "description": "Create or update a channel-to-profile routing rule in the daemon-persisted routing table. The daemon applies it to inbox items from slack, discord and email (surfaceKind any reaches the same three); any other surface is refused with 400 ROUTING_SURFACE_NOT_ROUTED, because nothing there reads the rule. Requires explicit confirmation; a call made with the Agent's credential (the Agent acting on the owner's behalf) instead takes fresh recorded native admission.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -29356,12 +29701,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "channelId": {
               "type": "string"
             },
@@ -29448,12 +29787,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "properties": {
             "assignmentId": {
               "type": "string"
-            },
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
             }
           },
           "required": [
@@ -31507,7 +31840,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "nativeRevision": {
                   "type": "string",
                   "maxLength": 200,
-                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                 },
                 "unifiedDiff": {
                   "type": "string"
@@ -36946,6 +37279,89 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "contracts.budget",
+        "title": "Set a Running Contract's Budget",
+        "description": "Replace a running contract's token and cost ceiling (`maxCostUsd`, `maxTokens`, or both). Each running group's remaining allowance moves by the same amount, and a unit waiting because the budget was used up starts. Returns the new `budget`. 400 with INVALID_ARGUMENT when neither limit is given or one is negative; 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.",
+        "category": "contracts",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:fleet"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "contractId": {
+              "type": "string"
+            },
+            "maxCostUsd": {
+              "type": "number"
+            },
+            "maxTokens": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "contractId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "budget": {
+              "type": "object",
+              "properties": {
+                "maxTokens": {
+                  "type": "number"
+                },
+                "maxCostUsd": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "budget"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true,
+        "errorCodes": [
+          {
+            "code": "INVALID_ARGUMENT",
+            "status": 400,
+            "meaning": "An input is not one the method accepts; the error names it and nothing was changed."
+          },
+          {
+            "code": "CONTRACT_NOT_FOUND",
+            "status": 404,
+            "meaning": "No runner on this daemon holds that contract id."
+          },
+          {
+            "code": "CONTRACT_ENDED",
+            "status": 409,
+            "meaning": "The contract has ended; its budget can no longer change."
+          },
+          {
+            "code": "CONTRACT_NATIVE",
+            "status": 409,
+            "meaning": "Native work keeps its budget with its own execution."
+          },
+          {
+            "code": "CONTRACT_NOT_RUNNING",
+            "status": 409,
+            "meaning": "This runner holds the contract only for inspection."
+          }
+        ]
+      },
+      {
         "id": "contracts.cancel",
         "title": "Cancel a Contract",
         "description": "Stop a contract and every unit agent it runs; its status line records how many files were already changed and where. `cancelled` is false when the contract had already ended. 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_NATIVE for native work (stop it through its own execution, or answer its open question with `cancel`); 409 with CONTRACT_NOT_RUNNING when this runner holds the contract only for inspection.",
@@ -37013,7 +37429,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "contracts.dispatch",
         "title": "Dispatch Contract Work",
-        "description": "Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's workspace) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside the daemon's workspace; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).",
+        "description": "Start a contract for `ask` (the person's words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon's working directory or a registered workspace, the folders sessions.hosted.workspaces lists) or the daemon's working directory. The contract's questions arrive as that session's replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch's contract to a retry by the same caller while that contract runs. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside those folders; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).",
         "category": "contracts",
         "source": "builtin",
         "access": "authenticated",
@@ -37099,7 +37515,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -37173,7 +37589,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -45147,7 +45563,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -45221,7 +45637,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -53179,7 +53595,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "revision": {
                                 "type": "string",
                                 "maxLength": 200,
-                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                               },
                               "fileIndex": {
                                 "type": "integer",
@@ -53253,7 +53669,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "revision": {
                                 "type": "string",
                                 "maxLength": 200,
-                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                               },
                               "fileIndex": {
                                 "type": "integer",
@@ -61294,6 +61710,82 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         ]
       },
       {
+        "id": "contracts.retryUnit",
+        "title": "Run One Contract Unit Again",
+        "description": "Run one unit of a running contract again: a unit that is working gets a fresh agent with its brief and previous checks, and a passed unit whose commit failed has its changes committed again. `outcome` is `restarted`, `committed`, or `refused` with `reason` naming why and what to do instead (a unit that has not started, is being fixed, or ended with its contract). 404 with CONTRACT_NOT_FOUND for an unknown id; 409 with CONTRACT_ENDED once the contract has ended; 409 with CONTRACT_NATIVE for native work.",
+        "category": "contracts",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:fleet"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "contractId": {
+              "type": "string"
+            },
+            "unitId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "contractId",
+            "unitId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "restarted",
+                "committed",
+                "refused"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true,
+        "errorCodes": [
+          {
+            "code": "CONTRACT_NOT_FOUND",
+            "status": 404,
+            "meaning": "No runner on this daemon holds that contract id."
+          },
+          {
+            "code": "CONTRACT_ENDED",
+            "status": 409,
+            "meaning": "The contract has ended; start a new one for the remaining work."
+          },
+          {
+            "code": "CONTRACT_NATIVE",
+            "status": 409,
+            "meaning": "Native work runs its units through its own execution."
+          },
+          {
+            "code": "CONTRACT_NOT_RUNNING",
+            "status": 409,
+            "meaning": "This runner holds the contract only for inspection."
+          }
+        ]
+      },
+      {
         "id": "contracts.start",
         "title": "Start a Contract",
         "description": "Start a contract for `ask`, the person's words verbatim, which every stated acceptance criterion must trace to. Returns at once with the new contract and its owner agent id; the contract shapes, plans and runs on its own, and its progress arrives on the `contracts` event domain. When `sessionId` names a live session this daemon hosts, the contract starts in that session (origin `hosted`): its turns receive the contract's questions and a following turn answers them. Otherwise it starts on the daemon's own runner (origin `external`) under `sessionId`, or the `operator` session when none is given, in `workspaceRoot` (absolute), or the daemon's working directory. `isolation` overrides `contract.isolation` for this contract. 400 with INVALID_ARGUMENT when `ask` is empty, `workspaceRoot` is relative or outside the daemon's workspace, or differs from the hosted session's; 403 with SESSION_NOT_OWNED when the session belongs to another caller; 409 with SESSION_NOT_LIVE when `sessionId` names a hosted session that is no longer live.",
@@ -61397,7 +61889,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -61471,7 +61963,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -69971,6 +70463,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "local",
                     "shared-token",
                     "device-token",
+                    "agent",
                     "user-session"
                   ]
                 },
@@ -70332,6 +70825,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "local",
                                     "shared-token",
                                     "device-token",
+                                    "agent",
                                     "user-session"
                                   ]
                                 },
@@ -77975,6 +78469,174 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "ops.doctor",
+        "title": "Diagnose a Symptom",
+        "description": "Find the runbook for a symptom in plain words (for example \"stuck turn\", \"mcp keeps disconnecting\", \"approval never answered\", \"compaction failed\") and run its checks against the daemon's live state. Each check is pass, fail or unknown (it could not look), with a one-line summary; each runbook lists the next steps as real commands. Read-only, no model request. An empty `playbooks` means nothing matched; `available` lists what can be diagnosed.",
+        "category": "health",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "read:health"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symptom": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "symptom"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "symptom": {
+              "type": "string"
+            },
+            "playbooks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "checks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "pass",
+                            "fail",
+                            "unknown"
+                          ]
+                        },
+                        "severity": {
+                          "type": "string",
+                          "enum": [
+                            "info",
+                            "warning",
+                            "error",
+                            "critical"
+                          ]
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "outcome",
+                        "severity",
+                        "summary"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "step": {
+                          "type": "number"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "action": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "command",
+                            "config",
+                            "observe",
+                            "wait",
+                            "escalate"
+                          ]
+                        },
+                        "command": {
+                          "type": "string"
+                        },
+                        "expectedOutcome": {
+                          "type": "string"
+                        },
+                        "automatable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "step",
+                        "title",
+                        "action",
+                        "kind",
+                        "automatable"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "checks",
+                  "steps"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "available": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "symptom",
+            "playbooks",
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
         "id": "ops.memory.get",
         "title": "Get Memory Governance State",
         "description": "The MemoryGovernor snapshot: the current memory-pressure tier and budget, resident set size and heap, the tier thresholds and hard limit in force, per-cache footprints the governor can shrink, which deferrable background jobs are paused, and the leak-tripwire state. When memory.budgetMb, memory.tier.* or memory.hardLimitPct were refused, `configFallback` names the settings and why; the shipped values shown are in force until the setting is fixed and the daemon restarts. Read-only observability so operators can see the daemon shedding memory before it approaches OOM.",
@@ -79151,7 +79813,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Download and checksum-verify the pinned wake-word classifier in both runtime formats (onnx and tflite), the speech-embedding front end, the speech gate voice.wake.vadThreshold runs, and the attribution NOTICE of each, into the goodvibes-managed directory, about 6.1 MB. Installing goodvibes already does this, and a daemon retries at boot, so this verb is the RECOVERY path: an install that was offline, an artifact that failed verification, or a re-provision after the pinned model changes. Resumable by re-running: an artifact that already matches its pin is skipped, and one that is present but fails verification is replaced rather than used. A failed or mismatched download keeps nothing at the destination. Single-flight: two surfaces asking at once, or a boot attempt and a user asking, join one download instead of racing for the same files.",
         "category": "health",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -79269,7 +79931,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ],
           "additionalProperties": false
         },
-        "dangerous": true,
         "effect": "write",
         "invokable": true
       },
@@ -80513,7 +81174,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "properties": {
                       "kind": {
                         "type": "string",
-                        "const": "pairing-token"
+                        "enum": [
+                          "pairing-token",
+                          "local"
+                        ]
                       },
                       "principalId": {
                         "type": "string",
@@ -80917,7 +81581,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "const": "pairing-token"
+                          "enum": [
+                            "pairing-token",
+                            "local"
+                          ]
                         },
                         "principalId": {
                           "type": "string",
@@ -81883,7 +82550,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "const": "pairing-token"
+                          "enum": [
+                            "pairing-token",
+                            "local"
+                          ]
                         },
                         "principalId": {
                           "type": "string",
@@ -82459,203 +83129,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "battery": {
                   "type": "string",
                   "enum": [
-                    "webui.errors.daemon-refusal"
-                  ]
-                },
-                "batteryVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "input": {
-                  "type": "object",
-                  "properties": {
-                    "errorRef": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  },
-                  "required": [
-                    "errorRef"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "protocolVersion",
-                "requestId",
-                "battery",
-                "batteryVersion",
-                "input"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "protocolVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "requestId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "battery": {
-                  "type": "string",
-                  "enum": [
-                    "webui.palette.command-rank"
-                  ]
-                },
-                "batteryVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "input": {
-                  "type": "object",
-                  "properties": {
-                    "query": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "inline"
-                              ]
-                            },
-                            "text": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 256
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "text"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "reference"
-                              ]
-                            },
-                            "queryRef": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 256
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "queryRef"
-                          ],
-                          "additionalProperties": false
-                        }
-                      ]
-                    },
-                    "registryVersion": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    },
-                    "candidates": {
-                      "type": "array",
-                      "items": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "builtin"
-                                ]
-                              },
-                              "commandId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 256
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "commandId"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "chat"
-                                ]
-                              },
-                              "sessionId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 256
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "sessionId"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      },
-                      "minItems": 1,
-                      "maxItems": 64
-                    }
-                  },
-                  "required": [
-                    "query",
-                    "registryVersion",
-                    "candidates"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "protocolVersion",
-                "requestId",
-                "battery",
-                "batteryVersion",
-                "input"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "protocolVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "requestId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "battery": {
-                  "type": "string",
-                  "enum": [
                     "webui.models.catalog-provider-match"
                   ]
                 },
@@ -82687,246 +83160,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "required": [
                     "providerId",
                     "keys"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "protocolVersion",
-                "requestId",
-                "battery",
-                "batteryVersion",
-                "input"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "protocolVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "requestId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "battery": {
-                  "type": "string",
-                  "enum": [
-                    "webui.credentials.provider-key"
-                  ]
-                },
-                "batteryVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "input": {
-                  "type": "object",
-                  "properties": {
-                    "providerId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128
-                    },
-                    "keys": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256
-                      },
-                      "minItems": 1,
-                      "maxItems": 64
-                    }
-                  },
-                  "required": [
-                    "providerId",
-                    "keys"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "protocolVersion",
-                "requestId",
-                "battery",
-                "batteryVersion",
-                "input"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "protocolVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "requestId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "battery": {
-                  "type": "string",
-                  "enum": [
-                    "webui.settings.card-material-key"
-                  ]
-                },
-                "batteryVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "input": {
-                  "type": "object",
-                  "properties": {
-                    "keys": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256
-                      },
-                      "minItems": 1,
-                      "maxItems": 64
-                    }
-                  },
-                  "required": [
-                    "keys"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "protocolVersion",
-                "requestId",
-                "battery",
-                "batteryVersion",
-                "input"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "protocolVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "requestId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "battery": {
-                  "type": "string",
-                  "enum": [
-                    "webui.config.credential-key"
-                  ]
-                },
-                "batteryVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "input": {
-                  "type": "object",
-                  "properties": {
-                    "keys": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256
-                      },
-                      "minItems": 1,
-                      "maxItems": 64
-                    }
-                  },
-                  "required": [
-                    "keys"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "protocolVersion",
-                "requestId",
-                "battery",
-                "batteryVersion",
-                "input"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "protocolVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "requestId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "battery": {
-                  "type": "string",
-                  "enum": [
-                    "webui.code.language"
-                  ]
-                },
-                "batteryVersion": {
-                  "type": "number",
-                  "enum": [
-                    2
-                  ]
-                },
-                "input": {
-                  "type": "object",
-                  "properties": {
-                    "sessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    },
-                    "messageId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    },
-                    "start": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "end": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 1000000
-                    },
-                    "contentRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  },
-                  "required": [
-                    "sessionId",
-                    "messageId",
-                    "start",
-                    "end",
-                    "contentRevision"
                   ],
                   "additionalProperties": false
                 }
@@ -83010,90 +83243,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "readings": {
                       "type": "object",
                       "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "yes-no"
+                            ]
                           },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
+                          "probability": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "yes",
+                              "no",
+                              "uncertain"
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "act",
+                              "confirm",
+                              "escalate"
+                            ]
                           }
-                        ]
+                        },
+                        "required": [
+                          "kind",
+                          "probability",
+                          "verdict",
+                          "outcome"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "outcome": {
@@ -83201,953 +83387,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "readings": {
                       "type": "object",
                       "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
                         "type": "object",
                         "properties": {
-                          "decisionId": {
-                            "type": "string"
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "yes-no"
+                            ]
                           },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "reason",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.errors.daemon-refusal"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "settled"
-                      ]
-                    },
-                    "value": {
-                      "type": "object",
-                      "properties": {
-                        "session_not_found": {
-                          "type": "boolean"
-                        },
-                        "session_closed": {
-                          "type": "boolean"
-                        },
-                        "session_active": {
-                          "type": "boolean"
-                        },
-                        "session_not_local": {
-                          "type": "boolean"
-                        },
-                        "method_unknown": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "session_not_found",
-                        "session_closed",
-                        "session_active",
-                        "session_not_local",
-                        "method_unknown"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "act",
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "structuralBasis": {
-                      "type": "object",
-                      "properties": {
-                        "method_unknown": {
-                          "type": "string",
-                          "enum": [
-                            "http-status-not-404"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "method_unknown"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "value",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.errors.daemon-refusal"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "held"
-                      ]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "uncertain"
-                      ]
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "structuralBasis": {
-                      "type": "object",
-                      "properties": {
-                        "method_unknown": {
-                          "type": "string",
-                          "enum": [
-                            "http-status-not-404"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "method_unknown"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "reason",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.palette.command-rank"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "settled"
-                      ]
-                    },
-                    "value": {
-                      "type": "object",
-                      "properties": {
-                        "registryVersion": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 256
-                        },
-                        "accepted": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "candidateIndex": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 63
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              }
-                            },
-                            "required": [
-                              "candidateIndex",
-                              "probability"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "rejected": {
-                          "type": "array",
-                          "items": {
+                          "probability": {
                             "type": "number",
                             "minimum": 0,
-                            "maximum": 63
-                          }
-                        }
-                      },
-                      "required": [
-                        "registryVersion",
-                        "accepted",
-                        "rejected"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
+                            "maximum": 1
                           },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "act",
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "yes",
+                              "no",
+                              "uncertain"
+                            ]
                           },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "act",
+                              "confirm",
+                              "escalate"
+                            ]
                           }
                         },
                         "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
+                          "kind",
+                          "probability",
+                          "verdict",
+                          "outcome"
                         ],
                         "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "value",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.palette.command-rank"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "held"
-                      ]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "uncertain"
-                      ]
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
                       }
                     },
                     "outcome": {
@@ -84252,102 +83528,58 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "value": {
                       "type": "object",
                       "properties": {
-                        "alreadyReply": {
-                          "type": "boolean"
+                        "matches": {
+                          "type": "array",
+                          "items": {
+                            "type": "boolean"
+                          }
                         }
                       },
                       "required": [
-                        "alreadyReply"
+                        "matches"
                       ],
                       "additionalProperties": false
                     },
                     "readings": {
                       "type": "object",
                       "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "yes-no"
+                            ]
                           },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
+                          "probability": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "yes",
+                              "no",
+                              "uncertain"
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "act",
+                              "confirm",
+                              "escalate"
+                            ]
                           }
-                        ]
+                        },
+                        "required": [
+                          "kind",
+                          "probability",
+                          "verdict",
+                          "outcome"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "outcome": {
@@ -84455,1666 +83687,43 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "readings": {
                       "type": "object",
                       "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
                         "type": "object",
                         "properties": {
-                          "decisionId": {
-                            "type": "string"
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "yes-no"
+                            ]
                           },
-                          "model": {
-                            "type": "string"
+                          "probability": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
                           },
-                          "requestedModel": {
-                            "type": "string"
+                          "verdict": {
+                            "type": "string",
+                            "enum": [
+                              "yes",
+                              "no",
+                              "uncertain"
+                            ]
                           },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "act",
+                              "confirm",
+                              "escalate"
+                            ]
                           }
                         },
                         "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
+                          "kind",
+                          "probability",
+                          "verdict",
+                          "outcome"
                         ],
                         "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "reason",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.credentials.provider-key"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "settled"
-                      ]
-                    },
-                    "value": {
-                      "type": "object",
-                      "properties": {
-                        "matches": {
-                          "type": "array",
-                          "items": {
-                            "type": "boolean"
-                          }
-                        }
-                      },
-                      "required": [
-                        "matches"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "act",
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "value",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.credentials.provider-key"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "held"
-                      ]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "uncertain"
-                      ]
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "reason",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.settings.card-material-key"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "settled"
-                      ]
-                    },
-                    "value": {
-                      "type": "object",
-                      "properties": {
-                        "matches": {
-                          "type": "array",
-                          "items": {
-                            "type": "boolean"
-                          }
-                        }
-                      },
-                      "required": [
-                        "matches"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "act",
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "value",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.settings.card-material-key"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "held"
-                      ]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "uncertain"
-                      ]
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "reason",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.config.credential-key"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "settled"
-                      ]
-                    },
-                    "value": {
-                      "type": "object",
-                      "properties": {
-                        "matches": {
-                          "type": "array",
-                          "items": {
-                            "type": "boolean"
-                          }
-                        }
-                      },
-                      "required": [
-                        "matches"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "act",
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "value",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.config.credential-key"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "held"
-                      ]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "uncertain"
-                      ]
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "reason",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.code.language"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        2
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "settled"
-                      ]
-                    },
-                    "value": {
-                      "type": "object",
-                      "properties": {
-                        "matches": {
-                          "type": "array",
-                          "items": {
-                            "type": "boolean"
-                          }
-                        }
-                      },
-                      "required": [
-                        "matches"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "act",
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "value",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.code.language"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        2
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "held"
-                      ]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "uncertain"
-                      ]
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "yes-no"
-                                ]
-                              },
-                              "probability": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "verdict": {
-                                "type": "string",
-                                "enum": [
-                                  "yes",
-                                  "no",
-                                  "uncertain"
-                                ]
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "probability",
-                              "verdict",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "choice"
-                                ]
-                              },
-                              "choice": {
-                                "type": "string"
-                              },
-                              "confidence": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 1
-                              },
-                              "probabilities": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 1
-                                }
-                              },
-                              "outcome": {
-                                "type": "string",
-                                "enum": [
-                                  "act",
-                                  "confirm",
-                                  "escalate"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "choice",
-                              "confidence",
-                              "probabilities",
-                              "outcome"
-                            ],
-                            "additionalProperties": false
-                          }
-                        ]
                       }
                     },
                     "outcome": {
@@ -107658,6 +105267,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "workPlanId": {
               "type": "string"
             },
+            "changed": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "updatedAt": {
+              "type": "number"
+            },
+            "counts": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "number"
+                },
+                "pending": {
+                  "type": "number"
+                },
+                "in_progress": {
+                  "type": "number"
+                },
+                "blocked": {
+                  "type": "number"
+                },
+                "done": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "cancelled": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "total",
+                "pending",
+                "in_progress",
+                "blocked",
+                "done",
+                "failed",
+                "cancelled"
+              ],
+              "additionalProperties": false
+            },
             "task": {
               "type": "object",
               "properties": {
@@ -107707,6 +105361,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
                   "type": "string"
                 },
                 "turnId": {
@@ -107843,6 +105500,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -107977,6 +105637,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -108066,208 +105729,151 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "type": "string"
               }
             },
-            "snapshot": {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "boolean"
-                },
-                "projectId": {
-                  "type": "string"
-                },
-                "knowledgeSpaceId": {
-                  "type": "string"
-                },
-                "workPlanId": {
-                  "type": "string"
-                },
-                "tasks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "taskId": {
-                        "type": "string"
-                      },
-                      "projectId": {
-                        "type": "string"
-                      },
-                      "knowledgeSpaceId": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "notes": {
-                        "type": "string"
-                      },
-                      "owner": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "priority": {
-                        "type": "number"
-                      },
-                      "order": {
-                        "type": "number"
-                      },
-                      "source": {
-                        "type": "string"
-                      },
-                      "tags": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "parentTaskId": {
-                        "type": "string"
-                      },
-                      "contractId": {
-                        "type": "string"
-                      },
-                      "phaseId": {
-                        "type": "string"
-                      },
-                      "agentId": {
-                        "type": "string"
-                      },
-                      "turnId": {
-                        "type": "string"
-                      },
-                      "decisionId": {
-                        "type": "string"
-                      },
-                      "sourceMessageId": {
-                        "type": "string"
-                      },
-                      "linkedArtifactIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedSourceIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedNodeIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "originSurface": {
-                        "type": "string"
-                      },
-                      "createdAt": {
-                        "type": "number"
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      },
-                      "completedAt": {
-                        "type": "number"
-                      },
-                      "metadata": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "array",
-                              "items": {}
-                            }
-                          ]
-                        }
-                      }
-                    },
-                    "required": [
-                      "taskId",
-                      "projectId",
-                      "knowledgeSpaceId",
-                      "title",
-                      "status",
-                      "order",
-                      "tags",
-                      "linkedArtifactIds",
-                      "linkedSourceIds",
-                      "linkedNodeIds",
-                      "createdAt",
-                      "updatedAt"
-                    ],
-                    "additionalProperties": true
-                  }
-                },
-                "counts": {
-                  "type": "object",
-                  "properties": {
-                    "total": {
-                      "type": "number"
-                    },
-                    "pending": {
-                      "type": "number"
-                    },
-                    "in_progress": {
-                      "type": "number"
-                    },
-                    "blocked": {
-                      "type": "number"
-                    },
-                    "done": {
-                      "type": "number"
-                    },
-                    "failed": {
-                      "type": "number"
-                    },
-                    "cancelled": {
-                      "type": "number"
+            "reclaimedTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "knowledgeSpaceId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "number"
+                  },
+                  "order": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
                     }
                   },
-                  "required": [
-                    "total",
-                    "pending",
-                    "in_progress",
-                    "blocked",
-                    "done",
-                    "failed",
-                    "cancelled"
-                  ],
-                  "additionalProperties": false
+                  "parentTaskId": {
+                    "type": "string"
+                  },
+                  "contractId": {
+                    "type": "string"
+                  },
+                  "phaseId": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "decisionId": {
+                    "type": "string"
+                  },
+                  "sourceMessageId": {
+                    "type": "string"
+                  },
+                  "linkedArtifactIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedNodeIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "originSurface": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "completedAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
                 },
-                "updatedAt": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "ok",
-                "projectId",
-                "knowledgeSpaceId",
-                "workPlanId",
-                "tasks",
-                "counts",
-                "updatedAt"
-              ],
-              "additionalProperties": true
+                "required": [
+                  "taskId",
+                  "projectId",
+                  "knowledgeSpaceId",
+                  "title",
+                  "status",
+                  "order",
+                  "tags",
+                  "linkedArtifactIds",
+                  "linkedSourceIds",
+                  "linkedNodeIds",
+                  "createdAt",
+                  "updatedAt"
+                ],
+                "additionalProperties": true
+              }
             }
           },
           "required": [
@@ -108275,7 +105881,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
-            "snapshot"
+            "changed",
+            "revision",
+            "updatedAt",
+            "counts"
           ],
           "additionalProperties": true
         },
@@ -108345,6 +105954,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "workPlanId": {
               "type": "string"
             },
+            "revision": {
+              "type": "number"
+            },
             "tasks": {
               "type": "array",
               "items": {
@@ -108396,6 +106008,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string"
                   },
                   "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
                     "type": "string"
                   },
                   "turnId": {
@@ -108527,6 +106142,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
+            "revision",
             "tasks",
             "counts",
             "updatedAt"
@@ -108611,6 +106227,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -108671,6 +106290,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "workPlanId": {
               "type": "string"
             },
+            "changed": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "updatedAt": {
+              "type": "number"
+            },
+            "counts": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "number"
+                },
+                "pending": {
+                  "type": "number"
+                },
+                "in_progress": {
+                  "type": "number"
+                },
+                "blocked": {
+                  "type": "number"
+                },
+                "done": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "cancelled": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "total",
+                "pending",
+                "in_progress",
+                "blocked",
+                "done",
+                "failed",
+                "cancelled"
+              ],
+              "additionalProperties": false
+            },
             "task": {
               "type": "object",
               "properties": {
@@ -108720,6 +106384,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
                   "type": "string"
                 },
                 "turnId": {
@@ -108856,6 +106523,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -108990,6 +106660,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -109079,208 +106752,151 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "type": "string"
               }
             },
-            "snapshot": {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "boolean"
-                },
-                "projectId": {
-                  "type": "string"
-                },
-                "knowledgeSpaceId": {
-                  "type": "string"
-                },
-                "workPlanId": {
-                  "type": "string"
-                },
-                "tasks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "taskId": {
-                        "type": "string"
-                      },
-                      "projectId": {
-                        "type": "string"
-                      },
-                      "knowledgeSpaceId": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "notes": {
-                        "type": "string"
-                      },
-                      "owner": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "priority": {
-                        "type": "number"
-                      },
-                      "order": {
-                        "type": "number"
-                      },
-                      "source": {
-                        "type": "string"
-                      },
-                      "tags": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "parentTaskId": {
-                        "type": "string"
-                      },
-                      "contractId": {
-                        "type": "string"
-                      },
-                      "phaseId": {
-                        "type": "string"
-                      },
-                      "agentId": {
-                        "type": "string"
-                      },
-                      "turnId": {
-                        "type": "string"
-                      },
-                      "decisionId": {
-                        "type": "string"
-                      },
-                      "sourceMessageId": {
-                        "type": "string"
-                      },
-                      "linkedArtifactIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedSourceIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedNodeIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "originSurface": {
-                        "type": "string"
-                      },
-                      "createdAt": {
-                        "type": "number"
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      },
-                      "completedAt": {
-                        "type": "number"
-                      },
-                      "metadata": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "array",
-                              "items": {}
-                            }
-                          ]
-                        }
-                      }
-                    },
-                    "required": [
-                      "taskId",
-                      "projectId",
-                      "knowledgeSpaceId",
-                      "title",
-                      "status",
-                      "order",
-                      "tags",
-                      "linkedArtifactIds",
-                      "linkedSourceIds",
-                      "linkedNodeIds",
-                      "createdAt",
-                      "updatedAt"
-                    ],
-                    "additionalProperties": true
-                  }
-                },
-                "counts": {
-                  "type": "object",
-                  "properties": {
-                    "total": {
-                      "type": "number"
-                    },
-                    "pending": {
-                      "type": "number"
-                    },
-                    "in_progress": {
-                      "type": "number"
-                    },
-                    "blocked": {
-                      "type": "number"
-                    },
-                    "done": {
-                      "type": "number"
-                    },
-                    "failed": {
-                      "type": "number"
-                    },
-                    "cancelled": {
-                      "type": "number"
+            "reclaimedTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "knowledgeSpaceId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "number"
+                  },
+                  "order": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
                     }
                   },
-                  "required": [
-                    "total",
-                    "pending",
-                    "in_progress",
-                    "blocked",
-                    "done",
-                    "failed",
-                    "cancelled"
-                  ],
-                  "additionalProperties": false
+                  "parentTaskId": {
+                    "type": "string"
+                  },
+                  "contractId": {
+                    "type": "string"
+                  },
+                  "phaseId": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "decisionId": {
+                    "type": "string"
+                  },
+                  "sourceMessageId": {
+                    "type": "string"
+                  },
+                  "linkedArtifactIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedNodeIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "originSurface": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "completedAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
                 },
-                "updatedAt": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "ok",
-                "projectId",
-                "knowledgeSpaceId",
-                "workPlanId",
-                "tasks",
-                "counts",
-                "updatedAt"
-              ],
-              "additionalProperties": true
+                "required": [
+                  "taskId",
+                  "projectId",
+                  "knowledgeSpaceId",
+                  "title",
+                  "status",
+                  "order",
+                  "tags",
+                  "linkedArtifactIds",
+                  "linkedSourceIds",
+                  "linkedNodeIds",
+                  "createdAt",
+                  "updatedAt"
+                ],
+                "additionalProperties": true
+              }
             }
           },
           "required": [
@@ -109288,7 +106904,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
-            "snapshot"
+            "changed",
+            "revision",
+            "updatedAt",
+            "counts"
           ],
           "additionalProperties": true
         },
@@ -109349,6 +106968,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "workPlanId": {
               "type": "string"
             },
+            "changed": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "updatedAt": {
+              "type": "number"
+            },
+            "counts": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "number"
+                },
+                "pending": {
+                  "type": "number"
+                },
+                "in_progress": {
+                  "type": "number"
+                },
+                "blocked": {
+                  "type": "number"
+                },
+                "done": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "cancelled": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "total",
+                "pending",
+                "in_progress",
+                "blocked",
+                "done",
+                "failed",
+                "cancelled"
+              ],
+              "additionalProperties": false
+            },
             "task": {
               "type": "object",
               "properties": {
@@ -109398,6 +107062,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
                   "type": "string"
                 },
                 "turnId": {
@@ -109534,6 +107201,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -109668,6 +107338,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -109757,208 +107430,151 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "type": "string"
               }
             },
-            "snapshot": {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "boolean"
-                },
-                "projectId": {
-                  "type": "string"
-                },
-                "knowledgeSpaceId": {
-                  "type": "string"
-                },
-                "workPlanId": {
-                  "type": "string"
-                },
-                "tasks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "taskId": {
-                        "type": "string"
-                      },
-                      "projectId": {
-                        "type": "string"
-                      },
-                      "knowledgeSpaceId": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "notes": {
-                        "type": "string"
-                      },
-                      "owner": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "priority": {
-                        "type": "number"
-                      },
-                      "order": {
-                        "type": "number"
-                      },
-                      "source": {
-                        "type": "string"
-                      },
-                      "tags": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "parentTaskId": {
-                        "type": "string"
-                      },
-                      "contractId": {
-                        "type": "string"
-                      },
-                      "phaseId": {
-                        "type": "string"
-                      },
-                      "agentId": {
-                        "type": "string"
-                      },
-                      "turnId": {
-                        "type": "string"
-                      },
-                      "decisionId": {
-                        "type": "string"
-                      },
-                      "sourceMessageId": {
-                        "type": "string"
-                      },
-                      "linkedArtifactIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedSourceIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedNodeIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "originSurface": {
-                        "type": "string"
-                      },
-                      "createdAt": {
-                        "type": "number"
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      },
-                      "completedAt": {
-                        "type": "number"
-                      },
-                      "metadata": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "array",
-                              "items": {}
-                            }
-                          ]
-                        }
-                      }
-                    },
-                    "required": [
-                      "taskId",
-                      "projectId",
-                      "knowledgeSpaceId",
-                      "title",
-                      "status",
-                      "order",
-                      "tags",
-                      "linkedArtifactIds",
-                      "linkedSourceIds",
-                      "linkedNodeIds",
-                      "createdAt",
-                      "updatedAt"
-                    ],
-                    "additionalProperties": true
-                  }
-                },
-                "counts": {
-                  "type": "object",
-                  "properties": {
-                    "total": {
-                      "type": "number"
-                    },
-                    "pending": {
-                      "type": "number"
-                    },
-                    "in_progress": {
-                      "type": "number"
-                    },
-                    "blocked": {
-                      "type": "number"
-                    },
-                    "done": {
-                      "type": "number"
-                    },
-                    "failed": {
-                      "type": "number"
-                    },
-                    "cancelled": {
-                      "type": "number"
+            "reclaimedTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "knowledgeSpaceId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "number"
+                  },
+                  "order": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
                     }
                   },
-                  "required": [
-                    "total",
-                    "pending",
-                    "in_progress",
-                    "blocked",
-                    "done",
-                    "failed",
-                    "cancelled"
-                  ],
-                  "additionalProperties": false
+                  "parentTaskId": {
+                    "type": "string"
+                  },
+                  "contractId": {
+                    "type": "string"
+                  },
+                  "phaseId": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "decisionId": {
+                    "type": "string"
+                  },
+                  "sourceMessageId": {
+                    "type": "string"
+                  },
+                  "linkedArtifactIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedNodeIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "originSurface": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "completedAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
                 },
-                "updatedAt": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "ok",
-                "projectId",
-                "knowledgeSpaceId",
-                "workPlanId",
-                "tasks",
-                "counts",
-                "updatedAt"
-              ],
-              "additionalProperties": true
+                "required": [
+                  "taskId",
+                  "projectId",
+                  "knowledgeSpaceId",
+                  "title",
+                  "status",
+                  "order",
+                  "tags",
+                  "linkedArtifactIds",
+                  "linkedSourceIds",
+                  "linkedNodeIds",
+                  "createdAt",
+                  "updatedAt"
+                ],
+                "additionalProperties": true
+              }
             }
           },
           "required": [
@@ -109966,7 +107582,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
-            "snapshot"
+            "changed",
+            "revision",
+            "updatedAt",
+            "counts"
           ],
           "additionalProperties": true
         },
@@ -109976,7 +107595,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "projectPlanning.workPlan.task.get",
         "title": "Get Project Work Plan Task",
-        "description": "Fetch one durable project-scoped work-plan task by id.",
+        "description": "Fetch one durable project-scoped work-plan task by id, with the plan revision.",
         "category": "knowledge",
         "source": "builtin",
         "access": "authenticated",
@@ -110026,6 +107645,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "workPlanId": {
               "type": "string"
+            },
+            "revision": {
+              "type": "number"
             },
             "task": {
               "anyOf": [
@@ -110078,6 +107700,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string"
                     },
                     "agentId": {
+                      "type": "string"
+                    },
+                    "sessionId": {
                       "type": "string"
                     },
                     "turnId": {
@@ -110167,209 +107792,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "null"
                 }
               ]
-            },
-            "snapshot": {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "boolean"
-                },
-                "projectId": {
-                  "type": "string"
-                },
-                "knowledgeSpaceId": {
-                  "type": "string"
-                },
-                "workPlanId": {
-                  "type": "string"
-                },
-                "tasks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "taskId": {
-                        "type": "string"
-                      },
-                      "projectId": {
-                        "type": "string"
-                      },
-                      "knowledgeSpaceId": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "notes": {
-                        "type": "string"
-                      },
-                      "owner": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "priority": {
-                        "type": "number"
-                      },
-                      "order": {
-                        "type": "number"
-                      },
-                      "source": {
-                        "type": "string"
-                      },
-                      "tags": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "parentTaskId": {
-                        "type": "string"
-                      },
-                      "contractId": {
-                        "type": "string"
-                      },
-                      "phaseId": {
-                        "type": "string"
-                      },
-                      "agentId": {
-                        "type": "string"
-                      },
-                      "turnId": {
-                        "type": "string"
-                      },
-                      "decisionId": {
-                        "type": "string"
-                      },
-                      "sourceMessageId": {
-                        "type": "string"
-                      },
-                      "linkedArtifactIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedSourceIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedNodeIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "originSurface": {
-                        "type": "string"
-                      },
-                      "createdAt": {
-                        "type": "number"
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      },
-                      "completedAt": {
-                        "type": "number"
-                      },
-                      "metadata": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "array",
-                              "items": {}
-                            }
-                          ]
-                        }
-                      }
-                    },
-                    "required": [
-                      "taskId",
-                      "projectId",
-                      "knowledgeSpaceId",
-                      "title",
-                      "status",
-                      "order",
-                      "tags",
-                      "linkedArtifactIds",
-                      "linkedSourceIds",
-                      "linkedNodeIds",
-                      "createdAt",
-                      "updatedAt"
-                    ],
-                    "additionalProperties": true
-                  }
-                },
-                "counts": {
-                  "type": "object",
-                  "properties": {
-                    "total": {
-                      "type": "number"
-                    },
-                    "pending": {
-                      "type": "number"
-                    },
-                    "in_progress": {
-                      "type": "number"
-                    },
-                    "blocked": {
-                      "type": "number"
-                    },
-                    "done": {
-                      "type": "number"
-                    },
-                    "failed": {
-                      "type": "number"
-                    },
-                    "cancelled": {
-                      "type": "number"
-                    }
-                  },
-                  "required": [
-                    "total",
-                    "pending",
-                    "in_progress",
-                    "blocked",
-                    "done",
-                    "failed",
-                    "cancelled"
-                  ],
-                  "additionalProperties": false
-                },
-                "updatedAt": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "ok",
-                "projectId",
-                "knowledgeSpaceId",
-                "workPlanId",
-                "tasks",
-                "counts",
-                "updatedAt"
-              ],
-              "additionalProperties": true
             }
           },
           "required": [
@@ -110377,8 +107799,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
-            "task",
-            "snapshot"
+            "revision",
+            "task"
           ],
           "additionalProperties": true
         },
@@ -110449,6 +107871,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "workPlanId": {
               "type": "string"
             },
+            "changed": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "updatedAt": {
+              "type": "number"
+            },
+            "counts": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "number"
+                },
+                "pending": {
+                  "type": "number"
+                },
+                "in_progress": {
+                  "type": "number"
+                },
+                "blocked": {
+                  "type": "number"
+                },
+                "done": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "cancelled": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "total",
+                "pending",
+                "in_progress",
+                "blocked",
+                "done",
+                "failed",
+                "cancelled"
+              ],
+              "additionalProperties": false
+            },
             "task": {
               "type": "object",
               "properties": {
@@ -110498,6 +107965,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
                   "type": "string"
                 },
                 "turnId": {
@@ -110634,6 +108104,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -110768,6 +108241,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -110857,208 +108333,151 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "type": "string"
               }
             },
-            "snapshot": {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "boolean"
-                },
-                "projectId": {
-                  "type": "string"
-                },
-                "knowledgeSpaceId": {
-                  "type": "string"
-                },
-                "workPlanId": {
-                  "type": "string"
-                },
-                "tasks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "taskId": {
-                        "type": "string"
-                      },
-                      "projectId": {
-                        "type": "string"
-                      },
-                      "knowledgeSpaceId": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "notes": {
-                        "type": "string"
-                      },
-                      "owner": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "priority": {
-                        "type": "number"
-                      },
-                      "order": {
-                        "type": "number"
-                      },
-                      "source": {
-                        "type": "string"
-                      },
-                      "tags": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "parentTaskId": {
-                        "type": "string"
-                      },
-                      "contractId": {
-                        "type": "string"
-                      },
-                      "phaseId": {
-                        "type": "string"
-                      },
-                      "agentId": {
-                        "type": "string"
-                      },
-                      "turnId": {
-                        "type": "string"
-                      },
-                      "decisionId": {
-                        "type": "string"
-                      },
-                      "sourceMessageId": {
-                        "type": "string"
-                      },
-                      "linkedArtifactIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedSourceIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedNodeIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "originSurface": {
-                        "type": "string"
-                      },
-                      "createdAt": {
-                        "type": "number"
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      },
-                      "completedAt": {
-                        "type": "number"
-                      },
-                      "metadata": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "array",
-                              "items": {}
-                            }
-                          ]
-                        }
-                      }
-                    },
-                    "required": [
-                      "taskId",
-                      "projectId",
-                      "knowledgeSpaceId",
-                      "title",
-                      "status",
-                      "order",
-                      "tags",
-                      "linkedArtifactIds",
-                      "linkedSourceIds",
-                      "linkedNodeIds",
-                      "createdAt",
-                      "updatedAt"
-                    ],
-                    "additionalProperties": true
-                  }
-                },
-                "counts": {
-                  "type": "object",
-                  "properties": {
-                    "total": {
-                      "type": "number"
-                    },
-                    "pending": {
-                      "type": "number"
-                    },
-                    "in_progress": {
-                      "type": "number"
-                    },
-                    "blocked": {
-                      "type": "number"
-                    },
-                    "done": {
-                      "type": "number"
-                    },
-                    "failed": {
-                      "type": "number"
-                    },
-                    "cancelled": {
-                      "type": "number"
+            "reclaimedTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "knowledgeSpaceId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "number"
+                  },
+                  "order": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
                     }
                   },
-                  "required": [
-                    "total",
-                    "pending",
-                    "in_progress",
-                    "blocked",
-                    "done",
-                    "failed",
-                    "cancelled"
-                  ],
-                  "additionalProperties": false
+                  "parentTaskId": {
+                    "type": "string"
+                  },
+                  "contractId": {
+                    "type": "string"
+                  },
+                  "phaseId": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "decisionId": {
+                    "type": "string"
+                  },
+                  "sourceMessageId": {
+                    "type": "string"
+                  },
+                  "linkedArtifactIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedNodeIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "originSurface": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "completedAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
                 },
-                "updatedAt": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "ok",
-                "projectId",
-                "knowledgeSpaceId",
-                "workPlanId",
-                "tasks",
-                "counts",
-                "updatedAt"
-              ],
-              "additionalProperties": true
+                "required": [
+                  "taskId",
+                  "projectId",
+                  "knowledgeSpaceId",
+                  "title",
+                  "status",
+                  "order",
+                  "tags",
+                  "linkedArtifactIds",
+                  "linkedSourceIds",
+                  "linkedNodeIds",
+                  "createdAt",
+                  "updatedAt"
+                ],
+                "additionalProperties": true
+              }
             }
           },
           "required": [
@@ -111066,7 +108485,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
-            "snapshot"
+            "changed",
+            "revision",
+            "updatedAt",
+            "counts"
           ],
           "additionalProperties": true
         },
@@ -111076,7 +108498,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "projectPlanning.workPlan.task.update",
         "title": "Update Project Work Plan Task",
-        "description": "Patch a durable project-scoped work-plan task.",
+        "description": "Patch a durable project-scoped work-plan task. Returns the task before and after and the plan revision; read the snapshot for the whole plan.",
         "category": "knowledge",
         "source": "builtin",
         "access": "admin",
@@ -111155,6 +108577,51 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "workPlanId": {
               "type": "string"
             },
+            "changed": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "updatedAt": {
+              "type": "number"
+            },
+            "counts": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "number"
+                },
+                "pending": {
+                  "type": "number"
+                },
+                "in_progress": {
+                  "type": "number"
+                },
+                "blocked": {
+                  "type": "number"
+                },
+                "done": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "cancelled": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "total",
+                "pending",
+                "in_progress",
+                "blocked",
+                "done",
+                "failed",
+                "cancelled"
+              ],
+              "additionalProperties": false
+            },
             "task": {
               "type": "object",
               "properties": {
@@ -111204,6 +108671,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string"
                 },
                 "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
                   "type": "string"
                 },
                 "turnId": {
@@ -111340,6 +108810,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -111474,6 +108947,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "agentId": {
                   "type": "string"
                 },
+                "sessionId": {
+                  "type": "string"
+                },
                 "turnId": {
                   "type": "string"
                 },
@@ -111563,208 +109039,151 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "type": "string"
               }
             },
-            "snapshot": {
-              "type": "object",
-              "properties": {
-                "ok": {
-                  "type": "boolean"
-                },
-                "projectId": {
-                  "type": "string"
-                },
-                "knowledgeSpaceId": {
-                  "type": "string"
-                },
-                "workPlanId": {
-                  "type": "string"
-                },
-                "tasks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "taskId": {
-                        "type": "string"
-                      },
-                      "projectId": {
-                        "type": "string"
-                      },
-                      "knowledgeSpaceId": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "notes": {
-                        "type": "string"
-                      },
-                      "owner": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "priority": {
-                        "type": "number"
-                      },
-                      "order": {
-                        "type": "number"
-                      },
-                      "source": {
-                        "type": "string"
-                      },
-                      "tags": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "parentTaskId": {
-                        "type": "string"
-                      },
-                      "contractId": {
-                        "type": "string"
-                      },
-                      "phaseId": {
-                        "type": "string"
-                      },
-                      "agentId": {
-                        "type": "string"
-                      },
-                      "turnId": {
-                        "type": "string"
-                      },
-                      "decisionId": {
-                        "type": "string"
-                      },
-                      "sourceMessageId": {
-                        "type": "string"
-                      },
-                      "linkedArtifactIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedSourceIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedNodeIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "originSurface": {
-                        "type": "string"
-                      },
-                      "createdAt": {
-                        "type": "number"
-                      },
-                      "updatedAt": {
-                        "type": "number"
-                      },
-                      "completedAt": {
-                        "type": "number"
-                      },
-                      "metadata": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            },
-                            {
-                              "type": "object",
-                              "additionalProperties": {}
-                            },
-                            {
-                              "type": "array",
-                              "items": {}
-                            }
-                          ]
-                        }
-                      }
-                    },
-                    "required": [
-                      "taskId",
-                      "projectId",
-                      "knowledgeSpaceId",
-                      "title",
-                      "status",
-                      "order",
-                      "tags",
-                      "linkedArtifactIds",
-                      "linkedSourceIds",
-                      "linkedNodeIds",
-                      "createdAt",
-                      "updatedAt"
-                    ],
-                    "additionalProperties": true
-                  }
-                },
-                "counts": {
-                  "type": "object",
-                  "properties": {
-                    "total": {
-                      "type": "number"
-                    },
-                    "pending": {
-                      "type": "number"
-                    },
-                    "in_progress": {
-                      "type": "number"
-                    },
-                    "blocked": {
-                      "type": "number"
-                    },
-                    "done": {
-                      "type": "number"
-                    },
-                    "failed": {
-                      "type": "number"
-                    },
-                    "cancelled": {
-                      "type": "number"
+            "reclaimedTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": "string"
+                  },
+                  "knowledgeSpaceId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "priority": {
+                    "type": "number"
+                  },
+                  "order": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
                     }
                   },
-                  "required": [
-                    "total",
-                    "pending",
-                    "in_progress",
-                    "blocked",
-                    "done",
-                    "failed",
-                    "cancelled"
-                  ],
-                  "additionalProperties": false
+                  "parentTaskId": {
+                    "type": "string"
+                  },
+                  "contractId": {
+                    "type": "string"
+                  },
+                  "phaseId": {
+                    "type": "string"
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "decisionId": {
+                    "type": "string"
+                  },
+                  "sourceMessageId": {
+                    "type": "string"
+                  },
+                  "linkedArtifactIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "linkedNodeIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "originSurface": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "completedAt": {
+                    "type": "number"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  }
                 },
-                "updatedAt": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "ok",
-                "projectId",
-                "knowledgeSpaceId",
-                "workPlanId",
-                "tasks",
-                "counts",
-                "updatedAt"
-              ],
-              "additionalProperties": true
+                "required": [
+                  "taskId",
+                  "projectId",
+                  "knowledgeSpaceId",
+                  "title",
+                  "status",
+                  "order",
+                  "tags",
+                  "linkedArtifactIds",
+                  "linkedSourceIds",
+                  "linkedNodeIds",
+                  "createdAt",
+                  "updatedAt"
+                ],
+                "additionalProperties": true
+              }
             }
           },
           "required": [
@@ -111772,7 +109191,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
-            "snapshot"
+            "changed",
+            "revision",
+            "updatedAt",
+            "counts"
           ],
           "additionalProperties": true
         },
@@ -111842,6 +109264,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "workPlanId": {
               "type": "string"
             },
+            "revision": {
+              "type": "number"
+            },
             "tasks": {
               "type": "array",
               "items": {
@@ -111893,6 +109318,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string"
                   },
                   "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
                     "type": "string"
                   },
                   "turnId": {
@@ -112024,6 +109452,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
+            "revision",
             "tasks",
             "counts",
             "updatedAt"
@@ -112036,7 +109465,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "projectPlanning.workPlan.tasks.reorder",
         "title": "Reorder Project Work Plan Tasks",
-        "description": "Replace task ordering for the current project work plan.",
+        "description": "Replace task ordering for the current project work plan. Returns the tasks whose position changed and the plan revision.",
         "category": "knowledge",
         "source": "builtin",
         "access": "admin",
@@ -112090,6 +109519,474 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "workPlanId": {
               "type": "string"
             },
+            "changed": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "updatedAt": {
+              "type": "number"
+            },
+            "counts": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "number"
+                },
+                "pending": {
+                  "type": "number"
+                },
+                "in_progress": {
+                  "type": "number"
+                },
+                "blocked": {
+                  "type": "number"
+                },
+                "done": {
+                  "type": "number"
+                },
+                "failed": {
+                  "type": "number"
+                },
+                "cancelled": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "total",
+                "pending",
+                "in_progress",
+                "blocked",
+                "done",
+                "failed",
+                "cancelled"
+              ],
+              "additionalProperties": false
+            },
+            "task": {
+              "type": "object",
+              "properties": {
+                "taskId": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": "string"
+                },
+                "knowledgeSpaceId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "notes": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "number"
+                },
+                "order": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "parentTaskId": {
+                  "type": "string"
+                },
+                "contractId": {
+                  "type": "string"
+                },
+                "phaseId": {
+                  "type": "string"
+                },
+                "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "turnId": {
+                  "type": "string"
+                },
+                "decisionId": {
+                  "type": "string"
+                },
+                "sourceMessageId": {
+                  "type": "string"
+                },
+                "linkedArtifactIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "linkedSourceIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "linkedNodeIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "originSurface": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "completedAt": {
+                  "type": "number"
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "taskId",
+                "projectId",
+                "knowledgeSpaceId",
+                "title",
+                "status",
+                "order",
+                "tags",
+                "linkedArtifactIds",
+                "linkedSourceIds",
+                "linkedNodeIds",
+                "createdAt",
+                "updatedAt"
+              ],
+              "additionalProperties": true
+            },
+            "previousTask": {
+              "type": "object",
+              "properties": {
+                "taskId": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": "string"
+                },
+                "knowledgeSpaceId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "notes": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "number"
+                },
+                "order": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "parentTaskId": {
+                  "type": "string"
+                },
+                "contractId": {
+                  "type": "string"
+                },
+                "phaseId": {
+                  "type": "string"
+                },
+                "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "turnId": {
+                  "type": "string"
+                },
+                "decisionId": {
+                  "type": "string"
+                },
+                "sourceMessageId": {
+                  "type": "string"
+                },
+                "linkedArtifactIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "linkedSourceIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "linkedNodeIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "originSurface": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "completedAt": {
+                  "type": "number"
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "taskId",
+                "projectId",
+                "knowledgeSpaceId",
+                "title",
+                "status",
+                "order",
+                "tags",
+                "linkedArtifactIds",
+                "linkedSourceIds",
+                "linkedNodeIds",
+                "createdAt",
+                "updatedAt"
+              ],
+              "additionalProperties": true
+            },
+            "deletedTask": {
+              "type": "object",
+              "properties": {
+                "taskId": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": "string"
+                },
+                "knowledgeSpaceId": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "notes": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "number"
+                },
+                "order": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "parentTaskId": {
+                  "type": "string"
+                },
+                "contractId": {
+                  "type": "string"
+                },
+                "phaseId": {
+                  "type": "string"
+                },
+                "agentId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "turnId": {
+                  "type": "string"
+                },
+                "decisionId": {
+                  "type": "string"
+                },
+                "sourceMessageId": {
+                  "type": "string"
+                },
+                "linkedArtifactIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "linkedSourceIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "linkedNodeIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "originSurface": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "completedAt": {
+                  "type": "number"
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "taskId",
+                "projectId",
+                "knowledgeSpaceId",
+                "title",
+                "status",
+                "order",
+                "tags",
+                "linkedArtifactIds",
+                "linkedSourceIds",
+                "linkedNodeIds",
+                "createdAt",
+                "updatedAt"
+              ],
+              "additionalProperties": true
+            },
+            "clearedTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "reclaimedTaskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "tasks": {
               "type": "array",
               "items": {
@@ -112141,6 +110038,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "type": "string"
                   },
                   "agentId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
                     "type": "string"
                   },
                   "turnId": {
@@ -112226,45 +110126,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 ],
                 "additionalProperties": true
               }
-            },
-            "counts": {
-              "type": "object",
-              "properties": {
-                "total": {
-                  "type": "number"
-                },
-                "pending": {
-                  "type": "number"
-                },
-                "in_progress": {
-                  "type": "number"
-                },
-                "blocked": {
-                  "type": "number"
-                },
-                "done": {
-                  "type": "number"
-                },
-                "failed": {
-                  "type": "number"
-                },
-                "cancelled": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "total",
-                "pending",
-                "in_progress",
-                "blocked",
-                "done",
-                "failed",
-                "cancelled"
-              ],
-              "additionalProperties": false
-            },
-            "updatedAt": {
-              "type": "number"
             }
           },
           "required": [
@@ -112272,9 +110133,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "projectId",
             "knowledgeSpaceId",
             "workPlanId",
-            "tasks",
-            "counts",
-            "updatedAt"
+            "changed",
+            "revision",
+            "updatedAt",
+            "counts"
           ],
           "additionalProperties": true
         },
@@ -119493,12 +117355,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "occasionId": {
               "type": "string"
             },
@@ -119574,12 +117430,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "occasionId": {
               "type": "string"
             },
@@ -119744,12 +117594,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "title": {
               "type": "string"
             },
@@ -119860,12 +117704,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "occasionId": {
               "type": "string"
             },
@@ -120027,12 +117865,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "interviewId": {
               "type": "string"
             },
@@ -120321,12 +118153,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "interviewId": {
               "type": "string"
             },
@@ -121112,12 +118938,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "title": {
               "type": "string"
             },
@@ -121483,12 +119303,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "planId": {
               "type": "string"
             },
@@ -121570,12 +119384,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "planId": {
               "type": "string"
             },
@@ -121834,12 +119642,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "occasionId": {
               "type": "string"
             },
@@ -122037,14 +119839,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "inputSchema": {
           "type": "object",
-          "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            }
-          },
+          "properties": {},
           "additionalProperties": false
         },
         "outputSchema": {
@@ -122352,12 +120147,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "occasionId": {
               "type": "string"
             },
@@ -122855,7 +120644,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.create",
         "title": "Mint Paired Device Token",
-        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND.",
+        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -122870,6 +120659,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "properties": {
             "name": {
               "type": "string"
+            },
+            "attemptId": {
+              "type": "string"
+            },
+            "client": {
+              "type": "string",
+              "enum": [
+                "agent"
+              ]
             }
           },
           "required": [
@@ -122999,6 +120797,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "mintedBy": {
                     "type": "string"
+                  },
+                  "client": {
+                    "type": "string",
+                    "enum": [
+                      "agent"
+                    ]
                   }
                 },
                 "required": [
@@ -123231,7 +121035,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "panels.open",
         "title": "Open Panel",
-        "description": "Request that a panel be opened in the current TUI session.",
+        "description": "Open a listed panel in the terminal session this process runs. Answers opened: true only when the view appeared; an id GET /api/panels does not list is refused with 404, and a listed panel this process has no terminal screen to show is refused with 409.",
         "category": "panels",
         "source": "builtin",
         "access": "admin",
@@ -126248,12 +124052,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "section": {
               "type": "string"
             },
@@ -126367,12 +124165,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "fieldId": {
               "type": "string"
             },
@@ -127180,12 +124972,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "fieldId": {
               "type": "string"
             },
@@ -127381,12 +125167,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "inputSchema": {
           "type": "object",
           "properties": {
-            "admission": {
-              "type": "string",
-              "enum": [
-                "autonomous"
-              ]
-            },
             "fieldId": {
               "type": "string"
             },
@@ -135995,6 +133775,92 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "devices.artifacts.delete",
+        "title": "Delete a Retained Device Capture",
+        "description": "Remove one retained camera or screen capture now, before its retention window ends: the file on the daemon host and its record. The removal is added to the housekeeping disclosure like a sweep removal, with the reason `deleted`. `deleted` is true only when the file was unlinked; a capture whose file was already gone (`file-missing`) or no longer matches what was taken (`content-mismatch`, the file is kept for inspection) loses its record and says so. An id that is not retained is a 404.",
+        "category": "runtime",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:remote"
+        ],
+        "http": {
+          "method": "DELETE",
+          "path": "/api/devices/artifacts/{artifactId}"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "artifactId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "deleted": {
+              "type": "boolean"
+            },
+            "removal": {
+              "type": "object",
+              "properties": {
+                "artifactId": {
+                  "type": "string"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "capabilityId": {
+                  "type": "string"
+                },
+                "fileName": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "removedAt": {
+                  "type": "number"
+                },
+                "byteLength": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "artifactId",
+                "nodeId",
+                "capabilityId",
+                "fileName",
+                "reason",
+                "removedAt",
+                "byteLength"
+              ],
+              "additionalProperties": false
+            },
+            "detail": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "deleted",
+            "removal",
+            "detail"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
         "id": "devices.artifacts.list",
         "title": "List Retained Device Captures",
         "description": "The camera and screen captures still inside their retention window, newest first, with when each was captured, when it will be deleted, and the reason the request stated. Expired captures are never listed, retention is enforced by the store, not by this verb filtering them out of a longer list.",
@@ -138966,7 +136832,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "nativeRevision": {
               "type": "string",
               "maxLength": 200,
-              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
             },
             "unifiedDiff": {
               "type": "string"
@@ -139072,8 +136938,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -139470,8 +137337,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -139743,8 +137611,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -139901,6 +137770,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             },
             "body": {
+              "type": "string"
+            },
+            "messageId": {
               "type": "string"
             },
             "surfaceKind": {
@@ -140070,8 +137942,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "channelPermissionMode": {
                       "type": "string",
                       "enum": [
-                        "safe-owner",
-                        "safe-jev",
+                        "ask-me",
+                        "jev-decides",
+                        "just-vibes",
                         "yolo",
                         "plan"
                       ]
@@ -140515,7 +138388,17 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "messageId",
+          "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+        },
         "errorCodes": [
+          {
+            "code": "INVALID_MESSAGE_ID",
+            "status": 400,
+            "meaning": "messageId is not 1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\"; nothing was changed."
+          },
           {
             "code": "SESSION_NOT_FOUND",
             "status": 404,
@@ -140617,8 +138500,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -140967,8 +138851,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -141182,8 +139067,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -141346,8 +139232,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -141507,8 +139394,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -141663,8 +139551,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "permissionMode": {
                     "type": "string",
                     "enum": [
-                      "safe-owner",
-                      "safe-jev",
+                      "ask-me",
+                      "jev-decides",
+                      "just-vibes",
                       "yolo",
                       "plan"
                     ]
@@ -142392,8 +140281,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -142913,8 +140803,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "channelPermissionMode": {
                     "type": "string",
                     "enum": [
-                      "safe-owner",
-                      "safe-jev",
+                      "ask-me",
+                      "jev-decides",
+                      "just-vibes",
                       "yolo",
                       "plan"
                     ]
@@ -143066,6 +140957,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             },
             "body": {
+              "type": "string"
+            },
+            "messageId": {
               "type": "string"
             },
             "surfaceKind": {
@@ -143260,8 +141154,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "channelPermissionMode": {
                           "type": "string",
                           "enum": [
-                            "safe-owner",
-                            "safe-jev",
+                            "ask-me",
+                            "jev-decides",
+                            "just-vibes",
                             "yolo",
                             "plan"
                           ]
@@ -143707,6 +141602,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "messageId",
+          "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+        },
         "errorCodes": [
           {
             "code": "INVALID_KIND",
@@ -143828,8 +141728,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -144056,7 +141957,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.permissionMode.get",
         "title": "Get Session Permission Mode",
-        "description": "Return the effective session execution mode: safe-owner, safe-jev, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
+        "description": "Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture. Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, and a channel session with its own mode; other session ids answer 404 SESSION_NOT_LOCAL.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -144092,8 +141993,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -144111,7 +142013,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.permissionMode.set",
         "title": "Set Session Permission Mode",
-        "description": "Set safe-owner, safe-jev, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.",
+        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL.",
         "category": "sessions",
         "source": "builtin",
         "access": "admin",
@@ -144138,8 +142040,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -144160,8 +142063,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -144169,8 +142073,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "previousMode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -144517,8 +142422,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -144746,8 +142652,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "channelPermissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -144974,8 +142881,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "channelPermissionMode": {
                     "type": "string",
                     "enum": [
-                      "safe-owner",
-                      "safe-jev",
+                      "ask-me",
+                      "jev-decides",
+                      "just-vibes",
                       "yolo",
                       "plan"
                     ]
@@ -145133,6 +143041,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             },
             "body": {
+              "type": "string"
+            },
+            "messageId": {
               "type": "string"
             },
             "surfaceKind": {
@@ -145305,8 +143216,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "channelPermissionMode": {
                       "type": "string",
                       "enum": [
-                        "safe-owner",
-                        "safe-jev",
+                        "ask-me",
+                        "jev-decides",
+                        "just-vibes",
                         "yolo",
                         "plan"
                       ]
@@ -145750,7 +143662,17 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "effect": "outward",
         "invokable": true,
+        "replay": {
+          "in": "body",
+          "name": "messageId",
+          "behavior": "Sending the same messageId again (1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response."
+        },
         "errorCodes": [
+          {
+            "code": "INVALID_MESSAGE_ID",
+            "status": 400,
+            "meaning": "messageId is not 1 to 128 letters, digits, \".\", \"_\", \":\" or \"-\"; nothing was changed."
+          },
           {
             "code": "SESSION_NOT_FOUND",
             "status": 404,
@@ -152845,112 +150767,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
-        "id": "watchers.triggers.migrate",
-        "title": "Migrate triggers after closing older instances",
-        "description": "Explicitly acknowledge that older GoodVibes instances are closed, then migrate and start this surface’s original trigger supervisor. The acknowledgement is an operator statement, not OS liveness proof.",
-        "category": "watchers",
-        "source": "builtin",
-        "access": "admin",
-        "transport": [
-          "ws"
-        ],
-        "scopes": [
-          "write:watchers"
-        ],
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "olderInstancesClosed": {
-              "type": "boolean",
-              "const": true
-            },
-            "confirm": {
-              "type": "boolean",
-              "const": true
-            }
-          },
-          "required": [
-            "olderInstancesClosed",
-            "confirm"
-          ],
-          "additionalProperties": false
-        },
-        "outputSchema": {
-          "type": "object",
-          "properties": {
-            "migrated": {
-              "type": "boolean",
-              "const": true
-            },
-            "status": {
-              "type": "object",
-              "properties": {
-                "ownership": {
-                  "type": "string",
-                  "enum": [
-                    "local",
-                    "other-process",
-                    "migration-required",
-                    "unclaimed"
-                  ]
-                },
-                "migrationRequired": {
-                  "type": "boolean"
-                },
-                "records": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "label": {
-                        "type": "string"
-                      },
-                      "kind": {
-                        "type": "string"
-                      },
-                      "state": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "label",
-                      "kind",
-                      "state"
-                    ],
-                    "additionalProperties": false
-                  }
-                },
-                "message": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "ownership",
-                "migrationRequired",
-                "records",
-                "message"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "required": [
-            "migrated",
-            "status"
-          ],
-          "additionalProperties": false
-        },
-        "dangerous": true,
-        "effect": "write",
-        "invokable": true
-      },
-      {
         "id": "watchers.triggers.status",
-        "title": "Inspect trigger execution and migration",
-        "description": "Read the original surface trigger supervisor and affected record summaries without claiming execution ownership or migrating saved state.",
+        "title": "Inspect supervised triggers",
+        "description": "Read the surface trigger supervisor and affected record summaries without claiming execution ownership.",
         "category": "watchers",
         "source": "builtin",
         "access": "admin",
@@ -152973,12 +150792,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "enum": [
                 "local",
                 "other-process",
-                "migration-required",
                 "unclaimed"
               ]
-            },
-            "migrationRequired": {
-              "type": "boolean"
             },
             "records": {
               "type": "array",
@@ -153013,7 +150828,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           },
           "required": [
             "ownership",
-            "migrationRequired",
             "records",
             "message"
           ],
@@ -157693,7 +155507,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                           "revision": {
                                             "type": "string",
                                             "maxLength": 200,
-                                            "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                            "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                           },
                                           "selectedDiff": {
                                             "anyOf": [
@@ -157709,7 +155523,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                   "revision": {
                                                     "type": "string",
                                                     "maxLength": 200,
-                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                   },
                                                   "fileIndex": {
                                                     "type": "integer",
@@ -157787,7 +155601,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                   "revision": {
                                                     "type": "string",
                                                     "maxLength": 200,
-                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                   },
                                                   "fileIndex": {
                                                     "type": "integer",
@@ -157980,7 +155794,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       },
                                       "sourceId": {
                                         "type": "string",
-                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                       },
                                       "sourceRevision": {
                                         "type": "string",
@@ -158017,11 +155831,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       },
                                       "sourceId": {
                                         "type": "string",
-                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                       },
                                       "sourceRevision": {
                                         "type": "string",
-                                        "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                       },
                                       "inputId": {
                                         "type": "string",
@@ -158559,7 +156373,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             "revision": {
                                               "type": "string",
                                               "maxLength": 200,
-                                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                             },
                                             "selectedDiff": {
                                               "anyOf": [
@@ -158575,7 +156389,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                     "revision": {
                                                       "type": "string",
                                                       "maxLength": 200,
-                                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                     },
                                                     "fileIndex": {
                                                       "type": "integer",
@@ -158653,7 +156467,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                     "revision": {
                                                       "type": "string",
                                                       "maxLength": 200,
-                                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                     },
                                                     "fileIndex": {
                                                       "type": "integer",
@@ -158846,7 +156660,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         },
                                         "sourceId": {
                                           "type": "string",
-                                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                          "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                         },
                                         "sourceRevision": {
                                           "type": "string",
@@ -158883,11 +156697,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         },
                                         "sourceId": {
                                           "type": "string",
-                                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                          "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                         },
                                         "sourceRevision": {
                                           "type": "string",
-                                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                          "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                         },
                                         "inputId": {
                                           "type": "string",
@@ -159252,7 +157066,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                 "revision": {
                                                   "type": "string",
                                                   "maxLength": 200,
-                                                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                                 },
                                                 "selectedDiff": {
                                                   "anyOf": [
@@ -159268,7 +157082,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                         "revision": {
                                                           "type": "string",
                                                           "maxLength": 200,
-                                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                         },
                                                         "fileIndex": {
                                                           "type": "integer",
@@ -159346,7 +157160,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                         "revision": {
                                                           "type": "string",
                                                           "maxLength": 200,
-                                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                         },
                                                         "fileIndex": {
                                                           "type": "integer",
@@ -159539,7 +157353,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             },
                                             "sourceId": {
                                               "type": "string",
-                                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                              "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                             },
                                             "sourceRevision": {
                                               "type": "string",
@@ -159576,11 +157390,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             },
                                             "sourceId": {
                                               "type": "string",
-                                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                              "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                             },
                                             "sourceRevision": {
                                               "type": "string",
-                                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                              "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                             },
                                             "inputId": {
                                               "type": "string",
@@ -160111,7 +157925,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                   "revision": {
                                                     "type": "string",
                                                     "maxLength": 200,
-                                                    "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                                    "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                                   },
                                                   "selectedDiff": {
                                                     "anyOf": [
@@ -160127,7 +157941,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                           "revision": {
                                                             "type": "string",
                                                             "maxLength": 200,
-                                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                           },
                                                           "fileIndex": {
                                                             "type": "integer",
@@ -160205,7 +158019,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                                           "revision": {
                                                             "type": "string",
                                                             "maxLength": 200,
-                                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                            "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                                           },
                                                           "fileIndex": {
                                                             "type": "integer",
@@ -160398,7 +158212,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               },
                                               "sourceId": {
                                                 "type": "string",
-                                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                                "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                               },
                                               "sourceRevision": {
                                                 "type": "string",
@@ -160435,11 +158249,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               },
                                               "sourceId": {
                                                 "type": "string",
-                                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                                "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                               },
                                               "sourceRevision": {
                                                 "type": "string",
-                                                "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                                "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                               },
                                               "inputId": {
                                                 "type": "string",
@@ -161329,7 +159143,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -161345,7 +159159,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -161383,7 +159197,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -161529,7 +159343,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -161545,7 +159359,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -161583,7 +159397,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -161748,7 +159562,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -161764,7 +159578,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -161802,7 +159616,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -161873,7 +159687,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -161889,7 +159703,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -161967,7 +159781,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -162167,7 +159981,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -162183,7 +159997,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -162221,7 +160035,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -162388,7 +160202,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -162404,7 +160218,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -162442,7 +160256,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -162596,7 +160410,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -162612,7 +160426,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -162650,7 +160464,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -162796,7 +160610,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -162812,7 +160626,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -162850,7 +160664,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -163034,7 +160848,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -163050,7 +160864,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -163128,7 +160942,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -163436,7 +161250,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -163452,7 +161266,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -163490,7 +161304,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -163636,7 +161450,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -163652,7 +161466,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -163690,7 +161504,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -163855,7 +161669,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -163871,7 +161685,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -163909,7 +161723,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -163980,7 +161794,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -163996,7 +161810,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -164074,7 +161888,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -164274,7 +162088,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -164290,7 +162104,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -164328,7 +162142,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -164495,7 +162309,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -164511,7 +162325,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -164549,7 +162363,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -164703,7 +162517,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -164719,7 +162533,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -164757,7 +162571,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -164903,7 +162717,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -164919,7 +162733,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -164957,7 +162771,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -165141,7 +162955,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -165157,7 +162971,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -165235,7 +163049,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -165465,7 +163279,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165503,7 +163317,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                         },
                         "fileIndex": {
                           "type": "integer",
@@ -165668,7 +163482,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -165684,7 +163498,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -165722,7 +163536,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -165868,7 +163682,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -165884,7 +163698,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -165922,7 +163736,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -166087,7 +163901,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -166103,7 +163917,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -166141,7 +163955,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -166212,7 +164026,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -166228,7 +164042,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -166306,7 +164120,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -166506,7 +164320,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -166522,7 +164336,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -166560,7 +164374,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -166727,7 +164541,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -166743,7 +164557,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -166781,7 +164595,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -166935,7 +164749,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -166951,7 +164765,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -166989,7 +164803,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -167135,7 +164949,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -167151,7 +164965,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -167189,7 +165003,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -167373,7 +165187,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -167389,7 +165203,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -167467,7 +165281,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -167771,7 +165585,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -167787,7 +165601,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -167825,7 +165639,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -167971,7 +165785,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -167987,7 +165801,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -168025,7 +165839,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -168190,7 +166004,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -168206,7 +166020,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -168244,7 +166058,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -168315,7 +166129,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -168331,7 +166145,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -168409,7 +166223,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -168609,7 +166423,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -168625,7 +166439,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -168663,7 +166477,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -168830,7 +166644,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -168846,7 +166660,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -168884,7 +166698,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -169038,7 +166852,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -169054,7 +166868,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -169092,7 +166906,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -169238,7 +167052,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -169254,7 +167068,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -169292,7 +167106,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -169476,7 +167290,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                  "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                 },
                                 "selectedDiff": {
                                   "anyOf": [
@@ -169492,7 +167306,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "revision": {
                                           "type": "string",
                                           "maxLength": 200,
-                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                         },
                                         "fileIndex": {
                                           "type": "integer",
@@ -169570,7 +167384,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "revision": {
                                           "type": "string",
                                           "maxLength": 200,
-                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                          "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                         },
                                         "fileIndex": {
                                           "type": "integer",
@@ -169895,7 +167709,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -169911,7 +167725,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -169949,7 +167763,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -170095,7 +167909,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -170111,7 +167925,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -170149,7 +167963,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -170314,7 +168128,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -170330,7 +168144,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -170368,7 +168182,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -170439,7 +168253,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "revision": {
                       "type": "string",
                       "maxLength": 200,
-                      "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                      "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                     },
                     "selectedDiff": {
                       "anyOf": [
@@ -170455,7 +168269,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170533,7 +168347,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                              "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                             },
                             "fileIndex": {
                               "type": "integer",
@@ -170733,7 +168547,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -170749,7 +168563,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -170787,7 +168601,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -170954,7 +168768,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -170970,7 +168784,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -171008,7 +168822,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -171162,7 +168976,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -171178,7 +168992,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -171216,7 +169030,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -171362,7 +169176,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "revision": {
                           "type": "string",
                           "maxLength": 200,
-                          "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                         },
                         "selectedDiff": {
                           "anyOf": [
@@ -171378,7 +169192,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -171416,7 +169230,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "revision": {
                                   "type": "string",
                                   "maxLength": 200,
-                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                 },
                                 "fileIndex": {
                                   "type": "integer",
@@ -171600,7 +169414,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "revision": {
                               "type": "string",
                               "maxLength": 200,
-                              "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                              "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                             },
                             "selectedDiff": {
                               "anyOf": [
@@ -171616,7 +169430,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -171694,7 +169508,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                     "revision": {
                                       "type": "string",
                                       "maxLength": 200,
-                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                      "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                     },
                                     "fileIndex": {
                                       "type": "integer",
@@ -171866,7 +169680,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "workLedger.prepareLegacyImport",
         "title": "Prepare Legacy Work Import",
-        "description": "Capture bounded complete legacy sources on the selected authoritative host. Preparation does not write or grant execution authority.",
+        "description": "Capture bounded complete legacy sources on the selected authoritative host, plus every work-plan task of the project (the host adds those). Preparation does not write or grant execution authority.",
         "category": "work-ledger",
         "source": "builtin",
         "access": "admin",
@@ -171892,7 +169706,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "maxLength": 200
             },
             "sourceIds": {
-              "minItems": 1,
               "maxItems": 500,
               "type": "array",
               "items": {
@@ -172182,7 +169995,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "revision": {
                                         "type": "string",
                                         "maxLength": 200,
-                                        "pattern": "^(?:[a-f0-9]{64}|[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12})$"
+                                        "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
                                       },
                                       "selectedDiff": {
                                         "anyOf": [
@@ -172198,7 +170011,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               "revision": {
                                                 "type": "string",
                                                 "maxLength": 200,
-                                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                               },
                                               "fileIndex": {
                                                 "type": "integer",
@@ -172276,7 +170089,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               "revision": {
                                                 "type": "string",
                                                 "maxLength": 200,
-                                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}:[0-9a-z]+)$"
+                                                "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
                                               },
                                               "fileIndex": {
                                                 "type": "integer",
@@ -172469,7 +170282,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   },
                                   "sourceId": {
                                     "type": "string",
-                                    "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                    "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                   },
                                   "sourceRevision": {
                                     "type": "string",
@@ -172506,11 +170319,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   },
                                   "sourceId": {
                                     "type": "string",
-                                    "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                    "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                   },
                                   "sourceRevision": {
                                     "type": "string",
-                                    "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                                    "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                                   },
                                   "inputId": {
                                     "type": "string",
@@ -173084,7 +170897,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "sourceId": {
                               "type": "string",
-                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                              "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                             },
                             "sourceRevision": {
                               "type": "string",
@@ -173115,11 +170928,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "sourceId": {
                               "type": "string",
-                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                              "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                             },
                             "sourceRevision": {
                               "type": "string",
-                              "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                              "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                             },
                             "sessionId": {
                               "type": "string",
@@ -173379,7 +171192,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "sourceId": {
                           "type": "string",
-                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                          "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                         },
                         "sourceRevision": {
                           "type": "string",
@@ -173410,11 +171223,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "sourceId": {
                           "type": "string",
-                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                          "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                         },
                         "sourceRevision": {
                           "type": "string",
-                          "pattern": "^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$"
+                          "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
                         },
                         "sessionId": {
                           "type": "string",
@@ -173781,8 +171594,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "permissionMode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -173962,8 +171776,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "permissionMode": {
               "type": "string",
               "enum": [
-                "safe-owner",
-                "safe-jev",
+                "ask-me",
+                "jev-decides",
+                "just-vibes",
                 "yolo",
                 "plan"
               ]
@@ -174634,7 +172449,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "worktrees.setup.run",
         "title": "Re-run Worktree Setup",
-        "description": "Re-run cold-start setup (configured commands + untracked-file carry-over) on a live worktree by path, recording the honest outcome onto the worktree record. Returns the setup result: state skipped (nothing configured), succeeded, or failed with the failing step and error. A failed setup is a visible worktree state, never silent.",
+        "description": "Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over from worktree.setup.carryOverGlobs; each is auto, none or a list, and auto derives from the repository) on a live worktree by path, recording the honest outcome onto the worktree record. Returns the setup result: state skipped (nothing to run or copy), succeeded, or failed with the failing step and error, which names a derived step as derived. A failed setup is a visible worktree state, never silent.",
         "category": "worktrees",
         "source": "builtin",
         "access": "authenticated",
@@ -176787,8 +174602,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "permissionMode": {
                   "type": "string",
                   "enum": [
-                    "safe-owner",
-                    "safe-jev",
+                    "ask-me",
+                    "jev-decides",
+                    "just-vibes",
                     "yolo",
                     "plan"
                   ]
@@ -176972,6 +174788,30 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       }
                     ]
                   }
+                },
+                "delivery": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "delivered",
+                        "waiting",
+                        "undeliverable"
+                      ]
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "to"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -177360,10 +175200,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 595,
-      "typedInputs": 590,
+      "methods": 599,
+      "typedInputs": 594,
       "genericInputs": 5,
-      "typedOutputs": 593,
+      "typedOutputs": 597,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -177372,8 +175212,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 595,
-      "validated": 588,
+      "methods": 599,
+      "validated": 592,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

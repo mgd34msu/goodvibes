@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.3.0
- * Methods: 595 total, 502 REST-routed, 93 ws-only invoke.
+ * Methods: 599 total, 503 REST-routed, 96 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -1632,6 +1632,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "GET",
     "path": "/api/surfaces"
   },
+  "devices.artifacts.delete": {
+    "method": "DELETE",
+    "path": "/api/devices/artifacts/{artifactId}"
+  },
   "devices.artifacts.list": {
     "method": "GET",
     "path": "/api/devices/artifacts"
@@ -2056,6 +2060,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "acp.sessions.create",
   "approvals.raise",
   "inbox.answer",
+  "inbox.delivery",
   "inbox.list",
   "inbox.post",
   "inbox.withdraw",
@@ -2069,8 +2074,10 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "checkpoints.revertHunkPreview",
   "credentials.delete",
   "credentials.set",
+  "contracts.budget",
   "contracts.dispatch",
   "contracts.remove",
+  "contracts.retryUnit",
   "contracts.status",
   "contracts.summaries",
   "relay.pairing.mint",
@@ -2102,6 +2109,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "fleet.observed.steer",
   "fleet.snapshot",
   "fleet.unarchive",
+  "ops.doctor",
   "memory.consolidation.decide",
   "pairing.handoff.complete",
   "pairing.handoff.create",
@@ -2141,7 +2149,6 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "sessions.hosted.list",
   "sessions.hosted.workspaces",
   "sessions.search",
-  "watchers.triggers.migrate",
   "watchers.triggers.status",
   "worktrees.discard",
   "worktrees.setup.run"
@@ -2159,6 +2166,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "approvals.list": "rest",
   "approvals.raise": "ws-invoke",
   "inbox.answer": "ws-invoke",
+  "inbox.delivery": "ws-invoke",
   "inbox.list": "ws-invoke",
   "inbox.post": "ws-invoke",
   "inbox.withdraw": "ws-invoke",
@@ -2320,12 +2328,14 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "credentials.get": "rest",
   "credentials.set": "ws-invoke",
   "continuity.snapshot": "rest",
+  "contracts.budget": "ws-invoke",
   "contracts.cancel": "rest",
   "contracts.dispatch": "ws-invoke",
   "contracts.get": "rest",
   "contracts.list": "rest",
   "contracts.remove": "ws-invoke",
   "contracts.reply": "rest",
+  "contracts.retryUnit": "ws-invoke",
   "contracts.start": "rest",
   "contracts.status": "ws-invoke",
   "contracts.summaries": "ws-invoke",
@@ -2378,6 +2388,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "fleet.snapshot": "ws-invoke",
   "fleet.unarchive": "ws-invoke",
   "health.snapshot": "rest",
+  "ops.doctor": "ws-invoke",
   "ops.memory.get": "rest",
   "power.keepAwake.set": "rest",
   "power.status.get": "rest",
@@ -2629,6 +2640,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "routes.bindings.update": "rest",
   "routes.snapshot": "rest",
   "surfaces.list": "rest",
+  "devices.artifacts.delete": "rest",
   "devices.artifacts.list": "rest",
   "devices.artifacts.read": "rest",
   "devices.capability.request": "rest",
@@ -2711,7 +2723,6 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "watchers.run": "rest",
   "watchers.start": "rest",
   "watchers.stop": "rest",
-  "watchers.triggers.migrate": "ws-invoke",
   "watchers.triggers.status": "ws-invoke",
   "watchers.update": "rest",
   "web_search.providers.list": "rest",
@@ -3219,7 +3230,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     },
     "output": {
       "awaitingDecision": false,
-      "mode": "safe-owner",
+      "mode": "ask-me",
       "lastDecision": {
         "callId": "sample",
         "toolName": "sample",
@@ -3459,7 +3470,74 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "closedAt": 0,
         "withdrawnReason": "sample",
         "key": "sample",
-        "metadata": {}
+        "metadata": {},
+        "delivery": {
+          "state": "delivered",
+          "to": "sample",
+          "reason": "sample"
+        }
+      },
+      "delivery": {
+        "state": "delivered",
+        "to": "sample",
+        "reason": "sample"
+      },
+      "refusal": {
+        "code": "sample",
+        "state": "sample",
+        "reason": "sample",
+        "next": [
+          "sample"
+        ],
+        "retryable": false,
+        "retryAfterMs": 0,
+        "status": 0
+      }
+    }
+  },
+  "inbox.delivery": {
+    "input": {
+      "itemId": "sample",
+      "state": "delivered",
+      "reason": "sample"
+    },
+    "output": {
+      "applied": false,
+      "item": {
+        "id": "sample",
+        "kind": "approval",
+        "status": "open",
+        "sessionId": "sample",
+        "title": "sample",
+        "detail": "sample",
+        "options": [
+          "sample"
+        ],
+        "askedBy": "sample",
+        "createdAt": 0,
+        "expiresAt": 0,
+        "answer": {
+          "option": "sample",
+          "text": "sample"
+        },
+        "answeredBy": {
+          "actor": "sample",
+          "surface": "sample"
+        },
+        "closedAt": 0,
+        "withdrawnReason": "sample",
+        "key": "sample",
+        "metadata": {},
+        "delivery": {
+          "state": "delivered",
+          "to": "sample",
+          "reason": "sample"
+        }
+      },
+      "delivery": {
+        "state": "delivered",
+        "to": "sample",
+        "reason": "sample"
       },
       "refusal": {
         "code": "sample",
@@ -3510,7 +3588,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "closedAt": 0,
           "withdrawnReason": "sample",
           "key": "sample",
-          "metadata": {}
+          "metadata": {},
+          "delivery": {
+            "state": "delivered",
+            "to": "sample",
+            "reason": "sample"
+          }
         }
       ],
       "revision": 0
@@ -3556,7 +3639,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "closedAt": 0,
         "withdrawnReason": "sample",
         "key": "sample",
-        "metadata": {}
+        "metadata": {},
+        "delivery": {
+          "state": "delivered",
+          "to": "sample",
+          "reason": "sample"
+        }
       }
     }
   },
@@ -3591,7 +3679,17 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "closedAt": 0,
         "withdrawnReason": "sample",
         "key": "sample",
-        "metadata": {}
+        "metadata": {},
+        "delivery": {
+          "state": "delivered",
+          "to": "sample",
+          "reason": "sample"
+        }
+      },
+      "delivery": {
+        "state": "delivered",
+        "to": "sample",
+        "reason": "sample"
       },
       "refusal": {
         "code": "sample",
@@ -4125,8 +4223,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "automation.jobs.delete": {
     "input": {
       "jobId": "sample",
-      "expectedMutationRevision": "sample",
-      "admission": "autonomous"
+      "expectedMutationRevision": "sample"
     },
     "output": {
       "removed": false,
@@ -4136,8 +4233,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "automation.jobs.disable": {
     "input": {
       "jobId": "sample",
-      "expectedMutationRevision": "sample",
-      "admission": "autonomous"
+      "expectedMutationRevision": "sample"
     },
     "output": {
       "id": "sample",
@@ -4147,8 +4243,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "automation.jobs.enable": {
     "input": {
       "jobId": "sample",
-      "expectedMutationRevision": "sample",
-      "admission": "autonomous"
+      "expectedMutationRevision": "sample"
     },
     "output": {
       "id": "sample",
@@ -4309,7 +4404,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "jobId": "sample",
       "expectedMutationRevision": "sample",
-      "admission": "autonomous",
       "name": "sample",
       "description": "sample",
       "prompt": "sample",
@@ -5342,8 +5436,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "automation.schedules.delete": {
     "input": {
       "scheduleId": "sample",
-      "expectedMutationRevision": "sample",
-      "admission": "autonomous"
+      "expectedMutationRevision": "sample"
     },
     "output": {
       "removed": false,
@@ -5353,8 +5446,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "automation.schedules.disable": {
     "input": {
       "scheduleId": "sample",
-      "expectedMutationRevision": "sample",
-      "admission": "autonomous"
+      "expectedMutationRevision": "sample"
     },
     "output": {
       "id": "sample",
@@ -5364,8 +5456,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "automation.schedules.enable": {
     "input": {
       "scheduleId": "sample",
-      "expectedMutationRevision": "sample",
-      "admission": "autonomous"
+      "expectedMutationRevision": "sample"
     },
     "output": {
       "id": "sample",
@@ -7060,8 +7151,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.drafts.delete": {
     "input": {
-      "draftId": "sample",
-      "admission": "autonomous"
+      "draftId": "sample"
     },
     "output": {
       "deleted": false,
@@ -7141,8 +7231,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sample"
       ],
       "sentResponseId": "sample",
-      "sendError": "sample",
-      "admission": "autonomous"
+      "sendError": "sample"
     },
     "output": {
       "draft": {
@@ -7452,7 +7541,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "channelId": "sample",
         "model": "sample",
         "provider": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "updatedAt": 0,
         "metadata": {}
       }
@@ -7468,7 +7557,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "channelId": "sample",
           "model": "sample",
           "provider": "sample",
-          "permissionMode": "safe-owner",
+          "permissionMode": "ask-me",
           "updatedAt": 0,
           "metadata": {}
         }
@@ -7481,7 +7570,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "channelId": "sample",
       "model": "sample",
       "provider": "sample",
-      "permissionMode": "safe-owner",
+      "permissionMode": "ask-me",
       "metadata": {}
     },
     "output": {
@@ -7491,7 +7580,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "channelId": "sample",
         "model": "sample",
         "provider": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "updatedAt": 0,
         "metadata": {}
       }
@@ -7516,7 +7605,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.routing.assign": {
     "input": {
-      "admission": "autonomous",
       "channelId": "sample",
       "surfaceKind": "sample",
       "routeId": "sample",
@@ -7536,8 +7624,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "channels.routing.delete": {
     "input": {
-      "assignmentId": "sample",
-      "admission": "autonomous"
+      "assignmentId": "sample"
     },
     "output": {
       "deleted": false,
@@ -8913,6 +9000,19 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           ],
           "assistedNarrative": "sample"
         }
+      }
+    }
+  },
+  "contracts.budget": {
+    "input": {
+      "contractId": "sample",
+      "maxCostUsd": 0,
+      "maxTokens": 0
+    },
+    "output": {
+      "budget": {
+        "maxTokens": 0,
+        "maxCostUsd": 0
       }
     }
   },
@@ -12541,6 +12641,16 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "nextEscalationId": "sample"
     }
   },
+  "contracts.retryUnit": {
+    "input": {
+      "contractId": "sample",
+      "unitId": "sample"
+    },
+    "output": {
+      "outcome": "restarted",
+      "reason": "sample"
+    }
+  },
   "contracts.start": {
     "input": {
       "ask": "sample",
@@ -15543,6 +15653,46 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           ]
         }
       }
+    }
+  },
+  "ops.doctor": {
+    "input": {
+      "symptom": "sample"
+    },
+    "output": {
+      "symptom": "sample",
+      "playbooks": [
+        {
+          "id": "sample",
+          "name": "sample",
+          "checks": [
+            {
+              "id": "sample",
+              "label": "sample",
+              "outcome": "pass",
+              "severity": "info",
+              "summary": "sample"
+            }
+          ],
+          "steps": [
+            {
+              "step": 0,
+              "title": "sample",
+              "action": "sample",
+              "kind": "command",
+              "command": "sample",
+              "expectedOutcome": "sample",
+              "automatable": false
+            }
+          ]
+        }
+      ],
+      "available": [
+        {
+          "id": "sample",
+          "name": "sample"
+        }
+      ]
     }
   },
   "ops.memory.get": {
@@ -20041,6 +20191,18 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
       "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
       "task": {
         "taskId": "sample",
         "projectId": "sample",
@@ -20059,6 +20221,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -20095,6 +20258,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -20131,6 +20295,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -20152,78 +20317,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "clearedTaskIds": [
         "sample"
       ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.snapshot": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "status": "sample",
-      "parentTaskId": "sample",
-      "contractId": "sample",
-      "owner": "sample",
-      "limit": 0
-    },
-    "output": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
+      "reclaimedTaskIds": [
+        "sample"
+      ],
       "tasks": [
         {
           "taskId": "sample",
@@ -20243,6 +20339,65 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "contractId": "sample",
           "phaseId": "sample",
           "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.snapshot": {
+    "input": {
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "status": "sample",
+      "parentTaskId": "sample",
+      "contractId": "sample",
+      "owner": "sample",
+      "limit": 0
+    },
+    "output": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "revision": 0,
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
           "turnId": "sample",
           "decisionId": "sample",
           "sourceMessageId": "sample",
@@ -20295,6 +20450,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -20316,6 +20472,18 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
       "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
       "task": {
         "taskId": "sample",
         "projectId": "sample",
@@ -20334,6 +20502,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -20370,6 +20539,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -20406,6 +20576,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "contractId": "sample",
         "phaseId": "sample",
         "agentId": "sample",
+        "sessionId": "sample",
         "turnId": "sample",
         "decisionId": "sample",
         "sourceMessageId": "sample",
@@ -20427,723 +20598,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "clearedTaskIds": [
         "sample"
       ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.task.delete": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "taskId": "sample"
-    },
-    "output": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "task": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "previousTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "deletedTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "clearedTaskIds": [
+      "reclaimedTaskIds": [
         "sample"
       ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.task.get": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "taskId": "sample"
-    },
-    "output": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "task": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.task.status": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "taskId": "sample",
-      "status": "sample",
-      "reason": "sample",
-      "source": "sample"
-    },
-    "output": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "task": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "previousTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "deletedTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "clearedTaskIds": [
-        "sample"
-      ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.task.update": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "taskId": "sample",
-      "patch": {}
-    },
-    "output": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "task": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "previousTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "deletedTask": {
-        "taskId": "sample",
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "title": "sample",
-        "notes": "sample",
-        "owner": "sample",
-        "status": "sample",
-        "priority": 0,
-        "order": 0,
-        "source": "sample",
-        "tags": [
-          "sample"
-        ],
-        "parentTaskId": "sample",
-        "contractId": "sample",
-        "phaseId": "sample",
-        "agentId": "sample",
-        "turnId": "sample",
-        "decisionId": "sample",
-        "sourceMessageId": "sample",
-        "linkedArtifactIds": [
-          "sample"
-        ],
-        "linkedSourceIds": [
-          "sample"
-        ],
-        "linkedNodeIds": [
-          "sample"
-        ],
-        "originSurface": "sample",
-        "createdAt": 0,
-        "updatedAt": 0,
-        "completedAt": 0,
-        "metadata": {}
-      },
-      "clearedTaskIds": [
-        "sample"
-      ],
-      "snapshot": {
-        "ok": false,
-        "projectId": "sample",
-        "knowledgeSpaceId": "sample",
-        "workPlanId": "sample",
-        "tasks": [
-          {
-            "taskId": "sample",
-            "projectId": "sample",
-            "knowledgeSpaceId": "sample",
-            "title": "sample",
-            "notes": "sample",
-            "owner": "sample",
-            "status": "sample",
-            "priority": 0,
-            "order": 0,
-            "source": "sample",
-            "tags": [
-              "sample"
-            ],
-            "parentTaskId": "sample",
-            "contractId": "sample",
-            "phaseId": "sample",
-            "agentId": "sample",
-            "turnId": "sample",
-            "decisionId": "sample",
-            "sourceMessageId": "sample",
-            "linkedArtifactIds": [
-              "sample"
-            ],
-            "linkedSourceIds": [
-              "sample"
-            ],
-            "linkedNodeIds": [
-              "sample"
-            ],
-            "originSurface": "sample",
-            "createdAt": 0,
-            "updatedAt": 0,
-            "completedAt": 0,
-            "metadata": {}
-          }
-        ],
-        "counts": {
-          "total": 0,
-          "pending": 0,
-          "in_progress": 0,
-          "blocked": 0,
-          "done": 0,
-          "failed": 0,
-          "cancelled": 0
-        },
-        "updatedAt": 0
-      }
-    }
-  },
-  "projectPlanning.workPlan.tasks.list": {
-    "input": {
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
-      "status": "sample",
-      "parentTaskId": "sample",
-      "contractId": "sample",
-      "owner": "sample",
-      "limit": 0
-    },
-    "output": {
-      "ok": false,
-      "projectId": "sample",
-      "knowledgeSpaceId": "sample",
-      "workPlanId": "sample",
       "tasks": [
         {
           "taskId": "sample",
@@ -21163,6 +20620,667 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "contractId": "sample",
           "phaseId": "sample",
           "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.task.delete": {
+    "input": {
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "taskId": "sample"
+    },
+    "output": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "previousTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "deletedTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "clearedTaskIds": [
+        "sample"
+      ],
+      "reclaimedTaskIds": [
+        "sample"
+      ],
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.task.get": {
+    "input": {
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "taskId": "sample"
+    },
+    "output": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "revision": 0,
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      }
+    }
+  },
+  "projectPlanning.workPlan.task.status": {
+    "input": {
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "taskId": "sample",
+      "status": "sample",
+      "reason": "sample",
+      "source": "sample"
+    },
+    "output": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "previousTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "deletedTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "clearedTaskIds": [
+        "sample"
+      ],
+      "reclaimedTaskIds": [
+        "sample"
+      ],
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.task.update": {
+    "input": {
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "taskId": "sample",
+      "patch": {}
+    },
+    "output": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "previousTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "deletedTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "clearedTaskIds": [
+        "sample"
+      ],
+      "reclaimedTaskIds": [
+        "sample"
+      ],
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
+          "turnId": "sample",
+          "decisionId": "sample",
+          "sourceMessageId": "sample",
+          "linkedArtifactIds": [
+            "sample"
+          ],
+          "linkedSourceIds": [
+            "sample"
+          ],
+          "linkedNodeIds": [
+            "sample"
+          ],
+          "originSurface": "sample",
+          "createdAt": 0,
+          "updatedAt": 0,
+          "completedAt": 0,
+          "metadata": {}
+        }
+      ]
+    }
+  },
+  "projectPlanning.workPlan.tasks.list": {
+    "input": {
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "status": "sample",
+      "parentTaskId": "sample",
+      "contractId": "sample",
+      "owner": "sample",
+      "limit": 0
+    },
+    "output": {
+      "ok": false,
+      "projectId": "sample",
+      "knowledgeSpaceId": "sample",
+      "workPlanId": "sample",
+      "revision": 0,
+      "tasks": [
+        {
+          "taskId": "sample",
+          "projectId": "sample",
+          "knowledgeSpaceId": "sample",
+          "title": "sample",
+          "notes": "sample",
+          "owner": "sample",
+          "status": "sample",
+          "priority": 0,
+          "order": 0,
+          "source": "sample",
+          "tags": [
+            "sample"
+          ],
+          "parentTaskId": "sample",
+          "contractId": "sample",
+          "phaseId": "sample",
+          "agentId": "sample",
+          "sessionId": "sample",
           "turnId": "sample",
           "decisionId": "sample",
           "sourceMessageId": "sample",
@@ -21208,6 +21326,135 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "projectId": "sample",
       "knowledgeSpaceId": "sample",
       "workPlanId": "sample",
+      "changed": false,
+      "revision": 0,
+      "updatedAt": 0,
+      "counts": {
+        "total": 0,
+        "pending": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "done": 0,
+        "failed": 0,
+        "cancelled": 0
+      },
+      "task": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "previousTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "deletedTask": {
+        "taskId": "sample",
+        "projectId": "sample",
+        "knowledgeSpaceId": "sample",
+        "title": "sample",
+        "notes": "sample",
+        "owner": "sample",
+        "status": "sample",
+        "priority": 0,
+        "order": 0,
+        "source": "sample",
+        "tags": [
+          "sample"
+        ],
+        "parentTaskId": "sample",
+        "contractId": "sample",
+        "phaseId": "sample",
+        "agentId": "sample",
+        "sessionId": "sample",
+        "turnId": "sample",
+        "decisionId": "sample",
+        "sourceMessageId": "sample",
+        "linkedArtifactIds": [
+          "sample"
+        ],
+        "linkedSourceIds": [
+          "sample"
+        ],
+        "linkedNodeIds": [
+          "sample"
+        ],
+        "originSurface": "sample",
+        "createdAt": 0,
+        "updatedAt": 0,
+        "completedAt": 0,
+        "metadata": {}
+      },
+      "clearedTaskIds": [
+        "sample"
+      ],
+      "reclaimedTaskIds": [
+        "sample"
+      ],
       "tasks": [
         {
           "taskId": "sample",
@@ -21227,6 +21474,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "contractId": "sample",
           "phaseId": "sample",
           "agentId": "sample",
+          "sessionId": "sample",
           "turnId": "sample",
           "decisionId": "sample",
           "sourceMessageId": "sample",
@@ -21245,17 +21493,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "completedAt": 0,
           "metadata": {}
         }
-      ],
-      "counts": {
-        "total": 0,
-        "pending": 0,
-        "in_progress": 0,
-        "blocked": 0,
-        "done": 0,
-        "failed": 0,
-        "cancelled": 0
-      },
-      "updatedAt": 0
+      ]
     }
   },
   "mcp.config.get": {
@@ -22635,7 +22873,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.acknowledge": {
     "input": {
-      "admission": "autonomous",
       "occasionId": "sample",
       "source": "conversation",
       "occurrence": "sample"
@@ -22649,7 +22886,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.answer": {
     "input": {
-      "admission": "autonomous",
       "occasionId": "sample",
       "answer": "yes",
       "occurrence": "sample"
@@ -22680,7 +22916,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.confirm": {
     "input": {
-      "admission": "autonomous",
       "title": "sample",
       "date": "sample",
       "kind": "gift-giving",
@@ -22702,7 +22937,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.conflict.resolve": {
     "input": {
-      "admission": "autonomous",
       "occasionId": "sample",
       "keep": "sample",
       "authority": "sample"
@@ -22739,7 +22973,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.interview.answer": {
     "input": {
-      "admission": "autonomous",
       "interviewId": "sample",
       "stepId": "sample",
       "text": "sample"
@@ -22796,7 +23029,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.interview.record": {
     "input": {
-      "admission": "autonomous",
       "interviewId": "sample",
       "landedOn": "sample"
     },
@@ -22959,7 +23191,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.plans.confirm": {
     "input": {
-      "admission": "autonomous",
       "title": "sample",
       "from": "sample",
       "to": "sample",
@@ -23045,7 +23276,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.plans.remove": {
     "input": {
-      "admission": "autonomous",
       "planId": "sample",
       "planFrom": "sample",
       "confirmed": false,
@@ -23061,7 +23291,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.plans.update": {
     "input": {
-      "admission": "autonomous",
       "planId": "sample",
       "planFrom": "sample",
       "title": "sample",
@@ -23117,7 +23346,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.remove": {
     "input": {
-      "admission": "autonomous",
       "occasionId": "sample",
       "confirmed": false,
       "authority": "sample"
@@ -23154,9 +23382,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     }
   },
   "occasions.sweep": {
-    "input": {
-      "admission": "autonomous"
-    },
+    "input": {},
     "output": {
       "provenance": "classic",
       "semanticAssessment": "not-evaluated",
@@ -23211,7 +23437,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "occasions.update": {
     "input": {
-      "admission": "autonomous",
       "occasionId": "sample",
       "title": "sample",
       "date": "sample",
@@ -23334,7 +23559,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "pairing.tokens.create": {
     "input": {
-      "name": "sample"
+      "name": "sample",
+      "attemptId": "sample",
+      "client": "agent"
     },
     "output": {
       "token": {
@@ -23366,7 +23593,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "name": "sample",
           "createdAt": 0,
           "lastSeenAt": 0,
-          "mintedBy": "sample"
+          "mintedBy": "sample",
+          "client": "agent"
         }
       ],
       "legacySharedRevoked": false
@@ -23968,7 +24196,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "profile.append": {
     "input": {
-      "admission": "autonomous",
       "section": "sample",
       "text": "sample",
       "surface": "sample",
@@ -23992,7 +24219,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "profile.forget": {
     "input": {
-      "admission": "autonomous",
       "fieldId": "sample",
       "section": "sample",
       "text": "sample",
@@ -24187,7 +24413,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "profile.set": {
     "input": {
-      "admission": "autonomous",
       "fieldId": "sample",
       "value": "sample",
       "surface": "sample",
@@ -24232,7 +24457,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "profile.undo": {
     "input": {
-      "admission": "autonomous",
       "fieldId": "sample",
       "authority": "sample"
     },
@@ -26052,6 +26276,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
+  "devices.artifacts.delete": {
+    "input": {
+      "artifactId": "sample"
+    },
+    "output": {
+      "deleted": false,
+      "removal": {
+        "artifactId": "sample",
+        "nodeId": "sample",
+        "capabilityId": "sample",
+        "fileName": "sample",
+        "reason": "sample",
+        "removedAt": 0,
+        "byteLength": 0
+      },
+      "detail": "sample"
+    }
+  },
   "devices.artifacts.list": {
     "input": {
       "nodeId": "sample",
@@ -26759,7 +27001,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -26824,7 +27066,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -26879,7 +27121,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -26910,6 +27152,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "sessionId": "sample",
       "body": "sample",
+      "messageId": "sample",
       "surfaceKind": "sample",
       "surfaceId": "sample",
       "routing": {
@@ -26950,7 +27193,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -27055,7 +27298,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -27131,7 +27374,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "contractIds": [
           "sample"
         ],
@@ -27180,7 +27423,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "contractIds": [
           "sample"
         ],
@@ -27216,7 +27459,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "contractIds": [
           "sample"
         ],
@@ -27251,7 +27494,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "terminatedReason": "sample",
         "restoredFromDisk": false,
         "originSurface": "sample",
-        "permissionMode": "safe-owner",
+        "permissionMode": "ask-me",
         "contractIds": [
           "sample"
         ],
@@ -27287,7 +27530,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "terminatedReason": "sample",
           "restoredFromDisk": false,
           "originSurface": "sample",
-          "permissionMode": "safe-owner",
+          "permissionMode": "ask-me",
           "contractIds": [
             "sample"
           ],
@@ -27434,7 +27677,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -27546,7 +27789,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "lastActivityAt": 0,
           "messageCount": 0,
           "retainedMessageCount": 0,
-          "channelPermissionMode": "safe-owner",
+          "channelPermissionMode": "ask-me",
           "channelPermissionModeRevision": 0,
           "pendingInputCount": 0,
           "routeIds": [
@@ -27578,6 +27821,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "sessionId": "sample",
       "body": "sample",
+      "messageId": "sample",
       "surfaceKind": "sample",
       "surfaceId": "sample",
       "kind": "sample",
@@ -27632,7 +27876,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -27685,18 +27929,18 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     },
     "output": {
       "sessionId": "sample",
-      "mode": "safe-owner"
+      "mode": "ask-me"
     }
   },
   "sessions.permissionMode.set": {
     "input": {
       "sessionId": "sample",
-      "mode": "safe-owner"
+      "mode": "ask-me"
     },
     "output": {
       "sessionId": "sample",
-      "mode": "safe-owner",
-      "previousMode": "safe-owner"
+      "mode": "ask-me",
+      "previousMode": "ask-me"
     }
   },
   "sessions.queuedMessages.delete": {
@@ -27768,7 +28012,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -27817,7 +28061,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -27870,7 +28114,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "lastActivityAt": 0,
           "messageCount": 0,
           "retainedMessageCount": 0,
-          "channelPermissionMode": "safe-owner",
+          "channelPermissionMode": "ask-me",
           "channelPermissionModeRevision": 0,
           "pendingInputCount": 0,
           "routeIds": [
@@ -27904,6 +28148,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "sessionId": "sample",
       "body": "sample",
+      "messageId": "sample",
       "surfaceKind": "sample",
       "surfaceId": "sample",
       "routing": {
@@ -27945,7 +28190,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "lastActivityAt": 0,
         "messageCount": 0,
         "retainedMessageCount": 0,
-        "channelPermissionMode": "safe-owner",
+        "channelPermissionMode": "ask-me",
         "channelPermissionModeRevision": 0,
         "pendingInputCount": 0,
         "routeIds": [
@@ -29310,33 +29555,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "metadata": {}
     }
   },
-  "watchers.triggers.migrate": {
-    "input": {
-      "olderInstancesClosed": true,
-      "confirm": true
-    },
-    "output": {
-      "migrated": true,
-      "status": {
-        "ownership": "local",
-        "migrationRequired": false,
-        "records": [
-          {
-            "id": "sample",
-            "label": "sample",
-            "kind": "sample",
-            "state": "sample"
-          }
-        ],
-        "message": "sample"
-      }
-    }
-  },
   "watchers.triggers.status": {
     "input": {},
     "output": {
       "ownership": "local",
-      "migrationRequired": false,
       "records": [
         {
           "id": "sample",
@@ -30422,7 +30644,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "projectId": "sample",
       "inputId": "sample",
       "sourceRevision": "sample",
-      "permissionMode": "safe-owner"
+      "permissionMode": "ask-me"
     },
     "output": {
       "projectId": "sample",
@@ -30444,7 +30666,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "projectId": "sample",
       "inputId": "sample",
       "sourceRevision": "sample",
-      "permissionMode": "safe-owner"
+      "permissionMode": "ask-me"
     },
     "output": {
       "projectId": "sample",

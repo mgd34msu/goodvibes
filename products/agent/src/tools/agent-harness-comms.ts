@@ -577,7 +577,7 @@ export async function channelDraftSendHandoff(
         error: errorMessage,
         policy: recorded
           ? 'The message was delivered and the draft is marked sent; a step after delivery reported an error. Do not send it again.'
-          : 'The message was delivered, but recording it on the draft failed, so the draft still reads queued. Do not send it again; the delivery receipt is the responseId.',
+          : 'The message was delivered, but recording it on the draft failed, so the draft still reads queued. A queued draft is never sent again; the delivery receipt is the responseId.',
       };
     }
     let markedFailed = false;

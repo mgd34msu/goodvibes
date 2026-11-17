@@ -69,13 +69,13 @@ export type ChannelDraftStatus = 'draft' | 'queued' | 'sent' | 'failed';
 
 /**
  * A draft is queued once per delivery attempt: queueDraftToSend hands out the
- * delivery input only on a move into 'queued', so an already queued draft
- * cannot be sent twice. 'sent' is final. A failed delivery may be queued again
+ * delivery input only on a move into 'queued', written before anything is
+ * sent, so an already queued draft cannot be sent twice. 'queued' with no
+ * recorded outcome means the delivery may have happened: it is never queued
+ * again, however old. 'sent' is final. A failed delivery may be queued again
  * as a retry. (saveDraft edits a draft's content and may set any status; this
  * table governs the send-path writers.)
  */
-/** How long a draft may sit queued with no recorded outcome before it counts as abandoned and may be queued again. */
-export const ABANDONED_QUEUE_MS = 10 * 60_000;
 
 export const channelDraftLifecycle = defineLifecycle<ChannelDraftStatus>('channel draft', {
   // A delivery outcome is a fact about something that already happened, so it
@@ -830,14 +830,14 @@ export async function queueDraftToSend(
   const draft = getDraft(shellPaths, draftId) ?? await adoptDaemonDraft(shellPaths, draftId, options);
   if (!draft) throw new Error(`Draft not found: ${draftId}`);
   if (draft.status === 'sent') throw new Error(`Draft ${draftId} is already sent.`);
-  // A draft still queued long after it was handed to delivery was abandoned by
-  // a process that exited before recording an outcome. Without this it could
-  // never be sent: let it be queued again once it is clearly not in flight.
-  const abandoned = draft.status === 'queued' && Date.now() - Date.parse(draft.updatedAt) >= ABANDONED_QUEUE_MS;
   const move = channelDraftLifecycle.check(draft.status, 'queued');
-  if (!move.ok && !abandoned) {
+  if (!move.ok) {
+    // Queued is written before delivery starts, so a queued draft is in flight
+    // or was handed to delivery with no outcome recorded (the sender exited, or
+    // the receipt could not be written). Either way it may have been delivered.
     throw new Error(draft.status === 'queued'
-      ? `Draft ${draftId} is already queued and being delivered; it can be queued again if no outcome is recorded within ${ABANDONED_QUEUE_MS / 60_000} minutes.`
+      ? `Draft ${draftId} was handed to delivery at ${draft.updatedAt} and no outcome is recorded, so it may already have been delivered; it is not sent again. `
+        + 'If the recipient did not get it, save its text as a new draft (agent_harness mode:"channel_draft_save" without draftId) and send that.'
       : `Draft ${draftId}: ${move.reason}.`);
   }
 

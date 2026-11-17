@@ -260,8 +260,9 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
       const connection = entry.connection;
       if (entry.users > 0 || connected === undefined || connection === null || daemon.mcp.get(mcpServer.name) !== entry) continue;
       entry.connection = null;
+      const registry = connected;
       const removal: Promise<unknown> = connection
-        .then((ok) => (ok ? connected.unregisterMcpServer(mcpServer) : false))
+        .then((ok) => (ok ? registry.unregisterMcpServer(mcpServer) : false))
         .catch((error: unknown) => {
           logger.warn('createEmbeddedSession: failed to disconnect a declared MCP server no session uses', {
             server: mcpServer.name,

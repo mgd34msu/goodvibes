@@ -591,6 +591,21 @@ export function jsonErrorResponse(error: unknown, options: JsonErrorResponseOpti
 }
 
 /**
+ * The one answer for a request without a valid credential, on every route
+ * and listener: code `AUTH_REQUIRED`, category `authentication`, and what to
+ * do, so a client or an agent matches one refusal.
+ */
+export function authenticationRequiredResponse(): Response {
+  return jsonErrorResponse({
+    error: 'Authentication required',
+    code: 'AUTH_REQUIRED',
+    category: 'authentication',
+    source: 'runtime',
+    guidance: 'Authenticate with the operator shared token or an authenticated user session before calling daemon APIs.',
+  }, { status: 401 });
+}
+
+/**
  * {@link jsonErrorResponse} for a caught error: when structure leaves the
  * category open, Jev reads the wording first (see {@link readErrorResponseBody}).
  */

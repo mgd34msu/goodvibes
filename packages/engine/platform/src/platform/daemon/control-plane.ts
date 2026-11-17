@@ -36,7 +36,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
-import { buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
+import { authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
 import { missingScopes } from './http/route-helpers.js';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import {
@@ -405,7 +405,7 @@ export class DaemonControlPlaneHelper {
     const principal = this.authenticateRequest(req)?.principal;
     if (!principal) {
       this.recordRefusedCredential(req);
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      return authenticationRequiredResponse();
     }
     if (!principal.admin) {
       return jsonErrorResponse({ error: 'Admin role required', code: 'ADMIN_REQUIRED',
@@ -967,7 +967,7 @@ export class DaemonControlPlaneHelper {
       // A credential that no longer authenticates gets the call refused.
       if (!this.socketPrincipalCurrent(ws)) {
         this.sendFrame(ws, JSON.stringify({ type: 'response', id, ok: false, status: 401,
-          body: refusalBody('Operator authentication is no longer valid', 'UNAUTHORIZED', 401) }));
+          body: refusalBody('Operator authentication is no longer valid', 'AUTH_REQUIRED', 401) }));
         return;
       }
       const methodId = typeof frame.methodId === 'string' ? frame.methodId : undefined;
@@ -1198,7 +1198,7 @@ export class DaemonControlPlaneHelper {
       const principal = authenticated;
       if (!principal || (context?.principalId !== undefined && context.principalId !== principal.principalId)
         || (context?.principalKind !== undefined && context.principalKind !== principal.principalKind)) {
-        return { status: 401, ok: false, body: refusalBody('Operator authentication is no longer valid', 'UNAUTHORIZED', 401) };
+        return { status: 401, ok: false, body: refusalBody('Operator authentication is no longer valid', 'AUTH_REQUIRED', 401) };
       }
       const cachedScopes = new Set(context?.scopes ?? principal.scopes);
       const scopes = cachedScopes.has('*') ? principal.scopes

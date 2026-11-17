@@ -1,7 +1,7 @@
 import type { DaemonControlRouteHandlers, GatewayRestVerbInvocation } from './context.js';
 import { isRuntimeEventDomain, type RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
-import { jsonErrorResponse } from './error-response.js';
+import { authenticationRequiredResponse, jsonErrorResponse } from './error-response.js';
 import { readSynthesizedDispatchDepth } from './gateway-rest-routes.js';
 import { GATEWAY_METHOD_INVOKE_PATH } from './operator.js';
 import type { AuthenticatedPrincipal, CredentialKind } from './http-policy.js';
@@ -223,7 +223,7 @@ export function createDaemonControlRouteHandlers(
       : jsonErrorResponse({ error: 'Login is not configured for this daemon host.' }, { status: 404 }),
     getStatus: (req) => {
       const principal = context.resolveAuthenticatedPrincipal(req);
-      if (!principal) return jsonErrorResponse({ error: 'Unauthorized' }, { status: 401 });
+      if (!principal) return authenticationRequiredResponse();
       // Receipt consumption is explicit: only a reader that passes
       // ?receipts=consume receives undelivered receipts (and marks them
       // delivered, exactly once). Every other /status read is
@@ -347,7 +347,7 @@ export function createDaemonControlRouteHandlers(
       }
       const principal = context.resolveAuthenticatedPrincipal(req);
       if (access === 'authenticated' && !principal) {
-        return jsonErrorResponse({ error: 'Unauthorized' }, { status: 401 });
+        return authenticationRequiredResponse();
       }
       const parsedBody = await context.parseOptionalJsonBody(req);
       if (parsedBody instanceof Response) return parsedBody;
@@ -390,7 +390,7 @@ export function createDaemonControlRouteHandlers(
       }
       const principal = context.resolveAuthenticatedPrincipal(req);
       if (access === 'authenticated' && !principal) {
-        return jsonErrorResponse({ error: 'Unauthorized' }, { status: 401 });
+        return authenticationRequiredResponse();
       }
       const parsedBody = await context.parseOptionalJsonBody(req);
       if (parsedBody instanceof Response) return parsedBody;
@@ -443,7 +443,7 @@ export function createDaemonControlRouteHandlers(
       const domains = (rawDomains ? rawDomains.split(',').map((v) => v.trim()).filter(Boolean) : [])
         .filter(isRuntimeEventDomain) as RuntimeEventDomain[];
       const principal = context.resolveAuthenticatedPrincipal(req);
-      if (!principal) return jsonErrorResponse({ error: 'Unauthorized' }, { status: 401 });
+      if (!principal) return authenticationRequiredResponse();
       return context.controlPlaneGateway.createEventStream(req, {
         clientKind: 'web',
         transport: 'sse',

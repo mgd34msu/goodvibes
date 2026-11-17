@@ -11,7 +11,7 @@
 import { dispatchDaemonApiRoutes } from '../../control-plane/routes/index.js';
 import { AppError } from '../../types/errors.js';
 import type { RequestContext } from '../http-policy.js';
-import { jsonErrorResponse } from './error-response.js';
+import { authenticationRequiredResponse, jsonErrorResponse } from './error-response.js';
 
 /** A route family with its own dispatcher. Null: the request is not one of its routes. */
 export type DaemonRouteDispatcher = (req: Request) => Promise<Response | null> | Response | null;
@@ -101,12 +101,5 @@ export class DaemonRequestRouter {
 
 /** The refusal for a request that carries no valid credential. */
 export function authenticationRequired(): Response {
-  return jsonErrorResponse(
-    new AppError('Authentication required', 'AUTH_REQUIRED', false, {
-      category: 'authentication',
-      source: 'runtime',
-      guidance: 'Authenticate with the operator shared token or an authenticated user session before calling daemon APIs.',
-    }),
-    { status: 401 },
-  );
+  return authenticationRequiredResponse();
 }

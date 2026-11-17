@@ -1,7 +1,7 @@
 import type { DaemonKnowledgeRouteHandlers } from './context.js';
 import { resolvePrivateHostFetchOptions } from './http-policy.js';
 import { GoodVibesError, DaemonErrorCategory, readRefusal } from '@goodvibes-jev/engine/errors';
-import { jsonErrorResponse, missingScopeRefusal, readServiceErrorResponse } from './error-response.js';
+import { authenticationRequiredResponse, jsonErrorResponse, missingScopeRefusal, readServiceErrorResponse } from './error-response.js';
 import { decodeCursor, encodeCursor, listingEnvelope } from './pagination.js';
 import { createArtifactFromUploadRequest, isArtifactUploadRequest } from './artifact-upload.js';
 import {
@@ -246,7 +246,7 @@ async function readScopedKnowledgeResponse(
   request: Request,
   read: (options: KnowledgeScopeReadOptions) => Promise<Response>,
 ): Promise<Response> {
-  if (!context.resolveAuthenticatedPrincipal(request)) return jsonErrorResponse({ error: 'Unauthorized' }, { status: 401 });
+  if (!context.resolveAuthenticatedPrincipal(request)) return authenticationRequiredResponse();
   const signal = context.requestSignal?.(request) ?? request.signal;
   const options: KnowledgeScopeReadOptions = { signal, assertCurrent: () => signal.throwIfAborted() };
   try {
@@ -643,7 +643,7 @@ async function handleKnowledgeGraphql(context: DaemonKnowledgeRouteContext, req:
   if (parsed instanceof Response) return parsed;
   const principal = context.resolveAuthenticatedPrincipal(req);
   if (!principal) {
-    return jsonErrorResponse({ error: 'Unauthorized' }, { status: 401 });
+    return authenticationRequiredResponse();
   }
 
   let access;

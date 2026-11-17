@@ -21,6 +21,14 @@ export interface AgentNoteRecord {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly reviewedAt?: string;
+  /** The records made from this note, by either promotion path; the one record of "already promoted". */
+  readonly promoted?: readonly AgentNotePromotion[];
+}
+
+export interface AgentNotePromotion {
+  readonly domain: 'memory' | 'persona' | 'skill' | 'routine';
+  readonly id: string;
+  readonly at: string;
 }
 
 export interface AgentNoteCreateInput {
@@ -106,6 +114,12 @@ function parseNote(value: unknown): AgentNoteRecord | null {
   const sourceUrl = readString(value.sourceUrl).trim();
   const staleReason = readString(value.staleReason).trim();
   const reviewedAt = readString(value.reviewedAt).trim();
+  const promoted = Array.isArray(value.promoted) ? value.promoted.flatMap((entry): AgentNotePromotion[] => {
+    if (!isRecord(entry)) return [];
+    const domain = entry.domain, id = readString(entry.id).trim();
+    if ((domain !== 'memory' && domain !== 'persona' && domain !== 'skill' && domain !== 'routine') || !id) return [];
+    return [{ domain, id, at: readString(entry.at, nowIso()) }];
+  }) : [];
   return {
     id,
     title,
@@ -119,6 +133,7 @@ function parseNote(value: unknown): AgentNoteRecord | null {
     createdAt: readString(value.createdAt, nowIso()),
     updatedAt: readString(value.updatedAt, nowIso()),
     reviewedAt: reviewedAt || undefined,
+    ...(promoted.length > 0 ? { promoted } : {}),
   };
 }
 
@@ -269,6 +284,25 @@ export class AgentNoteRegistry {
         ...existing,
         ...staleReviewPatch(reason),
         updatedAt: nowIso(),
+      };
+      this.writeStore({
+        ...store,
+        notes: store.notes.map((note) => note.id === existing.id ? updated : note),
+      });
+      return updated;
+    });
+  }
+
+  /** Records on the note that a record was made from it. The note's content and review state are unchanged. */
+  public recordPromotion(idOrTitle: string, promotion: Omit<AgentNotePromotion, 'at'>): AgentNoteRecord {
+    return runStoreFileUpdateSync(this.storePath, () => {
+      const store = this.readStore(true);
+      const existing = this.findInStore(store, idOrTitle);
+      if (!existing) throw new Error(`Unknown note ${idOrTitle}`);
+      const updated: AgentNoteRecord = {
+        ...existing,
+        promoted: [...(existing.promoted ?? []).filter((entry) => entry.domain !== promotion.domain || entry.id !== promotion.id),
+          { domain: promotion.domain, id: promotion.id, at: nowIso() }],
       };
       this.writeStore({
         ...store,

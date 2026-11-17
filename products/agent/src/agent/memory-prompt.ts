@@ -29,7 +29,7 @@ function formatMemoryLine(record: MemoryRecord): string {
   const provenance = record.provenance.length > 0
     ? ` source=${record.provenance.slice(0, 2).map((entry) => `${entry.kind}:${entry.ref}`).join(',')}`
     : '';
-  return `- [${record.scope}/${record.cls} ${record.confidence}%${tags}${provenance}] ${record.summary}`;
+  return `- [${record.scope}/${record.cls} ${record.confidence}% ${record.reviewState}${tags}${provenance}] ${record.summary}`;
 }
 
 /**
@@ -179,8 +179,8 @@ export function renderReviewedMemoryPrompt(ranking: MemoryTurnRankingResult, lim
 
   if (records.length === 0) return null;
   return [
-    '## Reviewed GoodVibes Agent Memory',
-    `Use these local, reviewed, non-secret memory records with confidence >= ${MIN_PROMPT_MEMORY_CONFIDENCE}% to avoid asking repeat questions and to preserve durable user preferences, constraints, and operating facts.`,
+    '## GoodVibes Agent Memory',
+    `Use these local, non-secret memory records (each at confidence >= ${MIN_PROMPT_MEMORY_CONFIDENCE}%, none marked stale or contradicted; each line shows whether the owner reviewed it) to avoid asking repeat questions and to preserve durable user preferences, constraints, and operating facts.`,
     ...records.map(formatMemoryLine),
   ].join('\n');
 }

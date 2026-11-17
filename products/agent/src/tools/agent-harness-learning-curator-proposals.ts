@@ -117,6 +117,8 @@ async function noteBehaviorProposalCandidate(record: LearningRecord, source: Lea
   const note = record.record as AgentNoteRecord;
   if (typeof note.title !== 'string' || typeof note.body !== 'string' || !Array.isArray(note.tags))
     throw new ToolInputProjectionError('held');
+  // The note records what was made from it, by this pass or the workspace promotion action.
+  if (note.promoted?.some(entry => entry.domain === target)) return null;
   const proposalFields: NonNullable<LearningCandidateDraft['proposalFields']> = target === 'memory' ? {
     cls: await readLearningMemoryClass({ origin: 'note', ...record }, source.options),
     scope: 'project', summary: note.title, detail: note.body, tags: note.tags.join(','),
@@ -571,5 +573,7 @@ async function collectLearningDrafts(source: LearningCuratorSource,
   for (const candidate of vibeHealthCandidates(source)) drafts.push({ candidate, record: { health: source.source.vibe, files: source.source.vibeEvidence } });
   if (drafts.length === 0) drafts.push({ candidate: captureCandidate(), record: { source: source.source, noUrgentCandidates: true } });
   const promotedReferences = new Set(Object.values(source.libraries).flatMap(records => records.flatMap(record => recordedPromotionReferences(record.record))));
-  return drafts.filter(({ candidate }) => !candidate.proposalTarget || !promotedReferences.has(learningPromotionReference(candidate.id)));
+  // Notes promoted before the note kept its own record carry the workspace action's marker on the made record.
+  return drafts.filter(({ candidate }) => !candidate.proposalTarget || (!promotedReferences.has(learningPromotionReference(candidate.id))
+    && !(candidate.domain === 'note' && candidate.recordId && promotedReferences.has(`agent-harness-note-promotion:${candidate.recordId}`))));
 }

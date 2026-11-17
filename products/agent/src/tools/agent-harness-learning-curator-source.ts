@@ -1,5 +1,8 @@
 import fs from 'node:fs';
-import { prepareLearningNativeTransition, type LearningTransitionIntent, type LearningSourceTransition } from './agent-harness-learning-curator-transitions.ts';
+import type { MemoryAddOptions } from '@goodvibes-jev/engine/platform/platform/state';
+import type { AgentPersonaCreateInput, AgentPersonaUpdateInput } from '../agent/persona-registry.ts';
+import type { AgentSkillCreateInput, AgentSkillUpdateInput } from '../agent/skill-registry.ts';
+import type { AgentRoutineCreateInput, AgentRoutineUpdateInput } from '../agent/routine-registry.ts';
 import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
@@ -42,6 +45,25 @@ function learningWorkItem(task: ProjectWorkPlanTask): LearningWorkItem {
     updatedAt: task.updatedAt,
     ...(task.completedAt !== undefined ? { completedAt: task.completedAt } : {}),
   };
+}
+
+/** A write the curator is about to make through a registry, which alone owns the record's format. */
+export type LearningTransitionIntent =
+  | { readonly kind: 'create'; readonly domain: 'persona'; readonly input: AgentPersonaCreateInput }
+  | { readonly kind: 'create'; readonly domain: 'skill'; readonly input: AgentSkillCreateInput }
+  | { readonly kind: 'create'; readonly domain: 'routine'; readonly input: AgentRoutineCreateInput }
+  | { readonly kind: 'create'; readonly domain: 'memory'; readonly input: MemoryAddOptions }
+  | { readonly kind: 'update'; readonly domain: 'persona'; readonly id: string; readonly input: AgentPersonaUpdateInput }
+  | { readonly kind: 'update'; readonly domain: 'skill'; readonly id: string; readonly input: AgentSkillUpdateInput }
+  | { readonly kind: 'update'; readonly domain: 'routine'; readonly id: string; readonly input: AgentRoutineUpdateInput }
+  | { readonly kind: 'stale'; readonly domain: 'persona' | 'skill' | 'routine'; readonly id: string; readonly reason: string }
+  | { readonly kind: 'delete'; readonly domain: 'persona' | 'skill' | 'routine'; readonly id: string };
+
+export interface LearningSourceTransition {
+  readonly effects: { readonly assertCurrent: () => void; readonly onEffect: (published?: boolean) => void };
+  /** After the registry's own write: the source is read once and becomes the new baseline. */
+  readonly commit: (record: unknown) => void;
+  readonly abort: () => void;
 }
 
 export interface LearningRecord {
@@ -228,17 +250,14 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
     }
     assertCurrent();
   };
-  const prepareTransition = (originalIntent: LearningTransitionIntent): LearningSourceTransition => {
+  const prepareTransition = (_intent: LearningTransitionIntent): LearningSourceTransition => {
     assertCurrent();
     if (active) throw new ToolInputProjectionError('held');
-    const intent = captureCatalogData(originalIntent);
-    const assertIntent = captureModelReadingSnapshotGuard(intent);
-    const accept = prepareLearningNativeTransition(expected, intent);
     const lease = {};
     active = lease;
     let phase: 'unpublished' | 'published' | 'finished' = 'unpublished';
     const assertLease = () => {
-      assertCaller(); assertReadingBackends(); assertIntent(originalIntent);
+      assertCaller(); assertReadingBackends();
       if (active !== lease || phase === 'finished') throw new ToolInputProjectionError('held');
     };
     const effects = Object.freeze({
@@ -251,30 +270,15 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
       },
     });
     return Object.freeze({ effects,
-      commit: (record: unknown) => {
+      // The registry is the one owner of its record and file format: the curator
+      // does not predict its bytes, it adopts what the registry wrote.
+      commit: (_record: unknown) => {
         assertLease();
         if (phase !== 'published') throw new ToolInputProjectionError('held');
-        const delta = accept(record);
-        const current = read();
-        let planned: typeof expected;
-        if (delta.domain === 'memory') {
-          planned = captureCatalogData({ ...expected, memoryRecords: delta.memoryRecords });
-        } else {
-          const file = current.registryFiles.find(file => file.domain === delta.domain);
-          const previous = expected.registryFiles.find(file => file.domain === delta.domain);
-          if (!file || !previous || file.path !== previous.path || !file.exists || file.bytes !== delta.bytes) throw new ToolInputProjectionError('held');
-          // Only the exact predicted target bytes authorize its native derived views.
-          const registryFiles = expected.registryFiles.map(file => file.domain === delta.domain ? { ...file, exists: true, bytes: delta.bytes } : file);
-          planned = delta.domain === 'persona' ? captureCatalogData({ ...expected, registryFiles, personaSnapshot: current.personaSnapshot })
-            : delta.domain === 'skill' ? captureCatalogData({ ...expected, registryFiles, skillSnapshot: current.skillSnapshot })
-              : captureCatalogData({ ...expected, registryFiles, routineSnapshot: current.routineSnapshot });
-        }
-        captureModelReadingSnapshotGuard(planned)(current);
-        assertLease();
-        captureModelReadingSnapshotGuard(planned)(read()); assertNative();
-        const nextGuard = captureModelReadingSnapshotGuard(planned);
-        expected = planned; assertSnapshot = nextGuard; phase = 'finished'; active = undefined;
-        assertCurrent();
+        expected = read();
+        assertSnapshot = captureModelReadingSnapshotGuard(expected);
+        phase = 'finished'; active = undefined;
+        assertCaller();
       },
       abort: () => {
         if (phase === 'finished') return;

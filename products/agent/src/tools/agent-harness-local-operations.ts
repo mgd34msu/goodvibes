@@ -1,7 +1,7 @@
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { requireConfirmedAction } from './agent-harness-tool-utils.ts';
-import { AgentNoteRegistry } from '../agent/note-registry.ts';
+import { AgentNoteRegistry, type AgentNotePromotion } from '../agent/note-registry.ts';
 import { AgentPersonaRegistry } from '../agent/persona-registry.ts';
 import { AgentRoutineRegistry } from '../agent/routine-registry.ts';
 import { AgentSkillRegistry } from '../agent/skill-registry.ts';
@@ -86,6 +86,15 @@ const NOTE_PROMOTION_PREFIX = 'agent-harness-note-promotion';
 
 function isNotePromotion(operation: AgentWorkspaceLocalOperation): boolean {
   return operation.startsWith('note-promote-');
+}
+
+/** The registry domain a note promotion writes, or null for the knowledge-URL ingest. */
+function notePromotionDomain(operation: AgentWorkspaceLocalOperation): AgentNotePromotion['domain'] | null {
+  if (operation === 'note-promote-memory') return 'memory';
+  if (operation === 'note-promote-persona') return 'persona';
+  if (operation === 'note-promote-skill') return 'skill';
+  if (operation === 'note-promote-routine') return 'routine';
+  return null;
 }
 
 let nestedCallSequence = 0;
@@ -190,9 +199,17 @@ function editorForOperation(context: AgentHarnessLocalOperationDeps['commandCont
   return null;
 }
 
-/** The record an earlier promotion of this note already created in the target domain, if any. */
+/**
+ * The record an earlier promotion of this note already created in the target
+ * domain, if any. The note's own `promoted` list is the record both promotion
+ * paths (this workspace action and learning auto-promotion) write and read;
+ * the provenance markers below answer only for notes promoted before it existed.
+ */
 function existingNotePromotion(context: AgentHarnessLocalOperationDeps['commandContext'], operation: AgentWorkspaceLocalOperation, noteId: string, editor: AgentWorkspaceLocalEditor, fields: Readonly<Record<string, string>>): { readonly domain: string; readonly id: string } | null {
   const shellPaths = context.workspace.shellPaths;
+  const domain = notePromotionDomain(operation);
+  const recorded = domain && shellPaths ? AgentNoteRegistry.fromShellPaths(shellPaths).get(noteId)?.promoted?.find((entry) => entry.domain === domain) : undefined;
+  if (recorded) return { domain: recorded.domain, id: recorded.id };
   const marker = `${NOTE_PROMOTION_PREFIX}:${noteId}`;
   if (operation === 'note-promote-persona' && shellPaths) {
     const found = AgentPersonaRegistry.fromShellPaths(shellPaths).list().find((record) => record.provenance === marker);
@@ -285,11 +302,21 @@ function localRegistryArgsForTarget(target: RegistryTarget, args: AgentHarnessLo
   } };
 }
 
-async function executeTool(toolRegistry: ToolRegistry, name: string, toolArgs: Record<string, unknown>, options: Parameters<Tool['execute']>[1]): Promise<HarnessResult> {
+/** The nested tool's result as data: parsed JSON, or its text with the id of a record it created. */
+function nestedResult(text: string): { readonly result: unknown; readonly createdId: string | null } {
+  try { return { result: JSON.parse(text), createdId: null }; } catch { /* plain text result */ }
+  const created = /^Created\b/.test(text) ? /^\s*id (\S+)\s*$/m.exec(text)?.[1] ?? null : null;
+  return { result: text, createdId: created };
+}
+
+async function executeTool(toolRegistry: ToolRegistry, name: string, toolArgs: Record<string, unknown>, options: Parameters<Tool['execute']>[1],
+  onCreated?: (id: string) => void): Promise<HarnessResult> {
   if (!toolRegistry.has(name)) return output({ status: 'model_tool_required', modelExecution: { tool: name, args: toolArgs } });
   const result = await toolRegistry.executeNested(`agent-harness-${name}-${Date.now()}-${++nestedCallSequence}`, name, toolArgs, options) as { readonly success: boolean; readonly output?: string; readonly error?: string };
   if (!result.success) return error(result.error ?? `${name} failed.`);
-  return output({ status: 'executed_model_tool', tool: name, output: result.output ?? '' });
+  const nested = nestedResult(result.output ?? '');
+  if (nested.createdId) onCreated?.(nested.createdId);
+  return output({ status: 'executed_model_tool', tool: name, result: nested.result, ...(nested.createdId ? { createdId: nested.createdId } : {}) });
 }
 
 export function describeLocalWorkspaceModelExecution(action: AgentWorkspaceAction): Record<string, unknown> | null {
@@ -379,7 +406,9 @@ export async function runLocalWorkspaceAction(
     }
     const built = localRegistryArgsFromEditor(editor, fields, isNotePromotion(operation) ? undefined : recordId, isNotePromotion(operation) ? recordId : undefined);
     if (!built.success) return built;
-    return executeTool(deps.toolRegistry, 'agent_local_registry', built.args, options);
+    const domain = notePromotionDomain(operation), shellPaths = deps.commandContext.workspace.shellPaths;
+    return executeTool(deps.toolRegistry, 'agent_local_registry', built.args, options, domain && shellPaths
+      ? id => { AgentNoteRegistry.fromShellPaths(shellPaths).recordPromotion(recordId, { domain, id }); } : undefined);
   }
   if (!target) return output({ status: 'local_registry_action', action: action.id, modelExecution: describeLocalWorkspaceModelExecution(action) });
   const built = localRegistryArgsForTarget(target, args, recordId);

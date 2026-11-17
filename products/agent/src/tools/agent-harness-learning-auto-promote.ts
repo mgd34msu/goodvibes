@@ -1,4 +1,5 @@
-import { learningPromotionReference } from './agent-harness-learning-curator-common.ts';
+import { learningPromotionReference, MIN_PROMPT_MEMORY_CONFIDENCE } from './agent-harness-learning-curator-common.ts';
+import { AgentNoteRegistry } from '../agent/note-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { previewHarnessText } from './agent-harness-text.ts';
@@ -76,6 +77,12 @@ function splitList(value: string | undefined): string[] {
   return value ? value.split(/[,;]+/).map(entry => entry.trim()).filter(Boolean) : [];
 }
 
+/** A promotion made from a note is recorded on the note, the one record both promotion paths read. */
+function markNotePromotion(paths: ShellPathService | undefined, candidate: LearningCandidate, domain: 'memory' | 'persona' | 'routine', id: string): void {
+  if (!paths || candidate.domain !== 'note' || !candidate.recordId) return;
+  AgentNoteRegistry.fromShellPaths(paths).recordPromotion(candidate.recordId, { domain, id });
+}
+
 function memoryClass(value: string): Parameters<MemoryApi['add']>[0]['cls'] {
   switch (value) {
     case 'decision': case 'constraint': case 'incident': case 'pattern': case 'fact':
@@ -130,7 +137,7 @@ function writeLocalRecord(
 async function promoteMemory(
   api: MemoryApi, candidate: LearningCandidate, collection: LearningCandidateCollection,
   options: CatalogRankingOptions, context: LearningCuratorNativeContext, assertOwnership: () => void,
-  onDurable?: () => void,
+  onDurable?: () => void, paths?: ShellPathService,
 ): Promise<string> {
   const fields = candidate.proposalFields ?? {};
   const summary = (fields.summary ?? fields.detail ?? candidate.label).trim();
@@ -139,10 +146,14 @@ async function promoteMemory(
   if (!summary || !detail || confidence === undefined || !Number.isFinite(confidence)
     || confidence < 0 || confidence > 100 || String(confidence) !== fields.confidence)
     throw new ToolInputProjectionError('held');
+  // Like a promoted routine (disabled) or persona (not active), a promoted memory is
+  // stored but does not guide the assistant until the owner reviews it: it is
+  // written below the recall floor, and the review sets the confidence it earns.
+  const storedConfidence = Math.min(confidence, MIN_PROMPT_MEMORY_CONFIDENCE - 1);
   const input = {
     scope: memoryScope((fields.scope ?? 'project').trim()),
     cls: memoryClass((fields.cls ?? 'fact').trim()), summary,
-    detail, tags: splitList(fields.tags), review: { confidence },
+    detail, tags: splitList(fields.tags), review: { confidence: storedConfidence },
     provenance: [{ kind: 'event', ref: learningPromotionReference(candidate.id) }],
   } satisfies Parameters<MemoryApi['add']>[0];
   let transition: ReturnType<LearningCandidateCollection['prepareTransition']> | undefined;
@@ -151,7 +162,7 @@ async function promoteMemory(
     // The record is planned before the write so the transition is staged with it;
     // the store inserts exactly this record and completes the transition at the insert.
     const planned = planMemoryRecord(input);
-    const owned = collection.prepareTransition({ kind: 'create', domain: 'memory', input, preparedRecord: planned });
+    const owned = collection.prepareTransition({ kind: 'create', domain: 'memory', input });
     transition = owned;
     const record = await api.add(input, {
       signal: options.signal,
@@ -166,10 +177,11 @@ async function promoteMemory(
       onInserted: inserted => {
         onDurable?.();
         owned.effects.onEffect(true);
+        markNotePromotion(paths, candidate, 'memory', inserted.id);
         owned.commit(inserted);
       },
     });
-    return `memory:${record.id}  ${summary.slice(0, 60)}`;
+    return `memory:${record.id}  ${summary.slice(0, 60)} (not recalled until reviewed: agent_local_registry domain:"memory" action:"review" id:"${record.id}" confidence:${Math.max(confidence, MIN_PROMPT_MEMORY_CONFIDENCE)})`;
   } catch (error) {
     try { transition?.abort(); } catch (failure) { throw new PromotionRestrictionFailure(failure); }
     throw new PromotionRestrictionFailure(error);
@@ -186,9 +198,12 @@ function promotePersona(paths: ShellPathService, candidate: LearningCandidate, c
     body, triggers: splitList(fields.triggers),
     tags: splitList(fields.tags), source: 'agent', provenance: learningPromotionReference(candidate.id),
   } satisfies Parameters<AgentPersonaRegistry['create']>[0];
-  const record = writeLocalRecord(collection, { kind: 'create', domain: 'persona', input },
-    effects => AgentPersonaRegistry.fromShellPaths(paths, effects).create(input), context, options, assertOwnership, onDurable);
-  return `persona:${record.id}  ${name.slice(0, 60)}`;
+  const record = writeLocalRecord(collection, { kind: 'create', domain: 'persona', input }, effects => {
+    const created = AgentPersonaRegistry.fromShellPaths(paths, effects).create(input);
+    markNotePromotion(paths, candidate, 'persona', created.id);
+    return created;
+  }, context, options, assertOwnership, onDurable);
+  return `persona:${record.id}  ${name.slice(0, 60)} (not active until the owner selects it: /personas use ${record.id})`;
 }
 
 function promoteRoutine(paths: ShellPathService, candidate: LearningCandidate, collection: LearningCandidateCollection, context: LearningCuratorNativeContext, options: CatalogRankingOptions, assertOwnership: () => void, onDurable?: () => void): string {
@@ -203,9 +218,12 @@ function promoteRoutine(paths: ShellPathService, candidate: LearningCandidate, c
     triggers: splitList(fields.triggers), tags: splitList(fields.tags), enabled: false,
     source: 'agent', provenance: learningPromotionReference(candidate.id),
   } satisfies Parameters<AgentRoutineRegistry['create']>[0];
-  const record = writeLocalRecord(collection, { kind: 'create', domain: 'routine', input },
-    effects => AgentRoutineRegistry.fromShellPaths(paths, effects).create(input), context, options, assertOwnership, onDurable);
-  return `routine:${record.id}  ${name.slice(0, 60)}`;
+  const record = writeLocalRecord(collection, { kind: 'create', domain: 'routine', input }, effects => {
+    const created = AgentRoutineRegistry.fromShellPaths(paths, effects).create(input);
+    markNotePromotion(paths, candidate, 'routine', created.id);
+    return created;
+  }, context, options, assertOwnership, onDurable);
+  return `routine:${record.id}  ${name.slice(0, 60)} (disabled until the owner enables it: /routines enable ${record.id})`;
 }
 
 /** Writes already made by a consolidation, kept outside the call so a later failure cannot hide them. */
@@ -331,7 +349,7 @@ async function runAutoPromoterOnce(
     const ledger = () => durable ? [...log, `wrote ${candidate.proposalTarget} for ${candidate.id}; the checks after the write stopped the pass`] : log;
     try {
       let line: string;
-      if (candidate.proposalTarget === 'memory') line = await promoteMemory(memoryApi, candidate, collection, options, context, assertOwnership, onDurable);
+      if (candidate.proposalTarget === 'memory') line = await promoteMemory(memoryApi, candidate, collection, options, context, assertOwnership, onDurable, paths);
       else if (candidate.proposalTarget === 'persona') line = promotePersona(paths, candidate, collection, context, options, assertOwnership, onDurable);
       else if (candidate.proposalTarget === 'routine') line = promoteRoutine(paths, candidate, collection, context, options, assertOwnership, onDurable);
       else { skipped++; log.push(`Skipped ${candidate.id}: the ${candidate.proposalTarget ?? 'unknown'} proposal target is not written by this pass.`); continue; }

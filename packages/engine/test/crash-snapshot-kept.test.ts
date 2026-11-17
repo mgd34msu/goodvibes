@@ -1,5 +1,7 @@
 // Proves: A crash snapshot the person chose to keep is replaced or deleted by the session carrying on, and the conversation it held is gone.
 // Red when: The live snapshot write or the turn-end save and delete replaces or removes the kept snapshot.
+// Proves: A crash in a later turn is taken for already saved and the turn in flight is lost, or a snapshot the turn-end save superseded is restored over the newer save.
+// Red when: The comparison of a snapshot with its session's saved file goes the wrong way: a snapshot newer than the last save is hidden, or one a later save replaced is offered.
 /**
  * A crash snapshot the person chose to keep is still offered at the next launch,
  * with the conversation it held, even when the kept session is the one they go
@@ -14,6 +16,7 @@ import { createSessionSurface, type SessionSurface } from '../platform/src/platf
 import { persistConversation } from '../platform/src/platform/runtime/session-persistence.ts';
 import {
   checkRecoveryFile,
+  checkRecoveryForSession,
   deleteRecoveryFile,
   holdOfferedRecoverySnapshot,
   loadRecoveryConversation,
@@ -63,4 +66,21 @@ test('the kept session goes on: its live snapshot and its turn-end save leave th
   deleteRecoveryFile({ surface }, SESSION);
 
   expect(nextLaunchOffer(surface)).toEqual(crashed);
+});
+
+test('a crash in a later turn is offered over the earlier save; once the turn-end save lands it is not', () => {
+  const surface = surfaceIn();
+  const turnOne = [{ role: 'user', content: 'refactor the parser' }, { role: 'assistant', content: 'first pass done' }];
+  const turnTwo = [...turnOne, { role: 'user', content: 'now the tests' }, { role: 'assistant', content: 'half way through the tests' }];
+  persistConversation(SESSION, { messages: turnOne }, 'model-a', 'provider-a', 'parser work', { surface });
+  // Turn two is in flight when the process dies: its snapshot is newer than the saved session.
+  expect(writeRecoveryFile({ messages: turnTwo }, SESSION, 'parser work', { surface })).toBe(true);
+  expect(checkRecoveryFile({ surface })?.sessionId).toBe(SESSION);
+  expect(checkRecoveryForSession(surface, SESSION)?.sessionId).toBe(SESSION);
+  expect(loadRecoveryConversation({ surface }, SESSION)?.messages).toEqual(turnTwo);
+
+  // The turn-end save landed after the snapshot (the crash came before the snapshot was removed).
+  persistConversation(SESSION, { messages: turnTwo }, 'model-a', 'provider-a', 'parser work', { surface });
+  expect(checkRecoveryFile({ surface })).toBeNull();
+  expect(checkRecoveryForSession(surface, SESSION)).toBeNull();
 });

@@ -1,9 +1,9 @@
 import { assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
-import { runCandidate, listSelectableModels, parseArtifactCandidate } from './agent-model-compare-run.ts';
-import { type AgentModelCompareToolDeps, type CompareCandidateResult, type ResolvedCompareModel } from './agent-model-compare-types.ts';
-import { assertComparisonCandidateSource, createComparisonCandidateProjector } from './agent-model-compare-candidate-input.ts';
+import { runCandidate, listSelectableModels, parseArtifactCandidate } from './model-compare-run.js';
+import { type AgentModelCompareToolDeps, type CompareCandidateResult, type ResolvedCompareModel } from './model-compare-types.js';
+import { assertComparisonCandidateSource, createComparisonCandidateProjector } from './model-compare-candidate-input.js';
 
 const NAME = 'agent_model_compare_candidate';
 let sequence = 0;

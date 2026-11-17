@@ -1,8 +1,8 @@
 import { assertCurrentToolEffect, assertCurrentToolExecution } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { ToolExecuteOptions } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { AgentModelCompareArtifactStore, AgentModelCompareToolDeps } from './agent-model-compare-types.ts';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
+import type { AgentModelCompareArtifactStore, AgentModelCompareToolDeps } from './model-compare-types.js';
+import { agentResearchSourceOwner } from './protected-research-report.js';
 
 /** Every asynchronous comparison dependency stays inside its original owner frame. */
 export function createComparisonOperation(source: AgentModelCompareToolDeps, args: Record<string, unknown>, options?: ToolExecuteOptions) {

@@ -3,7 +3,7 @@ import {
   createErrorNavigationCommands,
 } from '@goodvibes-jev/engine/terminal-shell/context-inspection-command';
 import { createInteractionModeCommand } from '@goodvibes-jev/engine/terminal-shell/interaction-mode-command';
-import { agentResearchSourceOwner } from '../../agent/protected-research-report.ts';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';

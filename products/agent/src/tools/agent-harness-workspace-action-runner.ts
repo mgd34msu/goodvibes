@@ -10,7 +10,7 @@ import { effectOutput, error, output, readString, requireConfirmedAction } from 
 import { formatHarnessError } from '../agent/harness-control.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 import { executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertModelReadingInputCurrent, captureModelReadingInput, withModelReadingSource } from './agent-harness-model-reading-source.ts';
 import { capturedHarnessSettingsImportPreview, harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { getOnboardingCheckMarkerPath, getOnboardingCompletionMarkerPath, writeOnboardingCheckMarker, writeOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';

@@ -2,7 +2,7 @@ import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { planAgentTaskRoute, type AgentTaskRouteSources } from './agent-route-planner.ts';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
 import { createHarnessCatalogInputProjector, protectHarnessCatalogTool, harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 

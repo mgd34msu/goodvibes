@@ -12,7 +12,7 @@ import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent
 import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './agent-learning-consolidation-core.ts';
 import type { LearningCandidate } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createHarnessCatalogInputProjector, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
 import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

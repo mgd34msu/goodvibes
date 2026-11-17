@@ -1,4 +1,4 @@
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { withModelReadingSource, captureModelReadingInput, assertModelReadingInputCurrent } from './agent-harness-model-reading-source.ts';
 /** Preferred settings and compatibility harness share one exact effect-owner plan. */
 import { settingsOutcomeError } from './agent-settings-outcome.ts';

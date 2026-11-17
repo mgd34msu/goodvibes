@@ -1,12 +1,12 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
-import { prepareProtectedResearchReport, agentResearchReportSourceOwner, createAgentResearchReportProjector, inheritPreparedResearchReport, type PreparedResearchReport } from '../agent/protected-research-report.ts';
+import { prepareProtectedResearchReport, agentResearchReportSourceOwner, createAgentResearchReportProjector, inheritPreparedResearchReport, type PreparedResearchReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, assertCurrentToolExecution, assertCurrentToolEffect, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import { createAgentArtifactsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
-import { createAgentResearchReportTool } from './agent-research-report-tool.ts';
+import { createAgentResearchReportTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createAgentResearchRunsTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { runAdmittedResearchRunner, runPublicSearch } from './agent-research-runner.ts';
 import { createAgentResearchSourcesTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

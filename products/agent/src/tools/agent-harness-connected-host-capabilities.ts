@@ -17,7 +17,7 @@ import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-t
 import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
 import { operatorBriefingRoutes } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { OPERATOR_ACTION_IDS } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { SOURCE_KINDS } from './agent-knowledge-ingest-tool.ts';
+import { AGENT_KNOWLEDGE_INGEST_SOURCE_KINDS as SOURCE_KINDS } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 

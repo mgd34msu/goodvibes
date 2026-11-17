@@ -1,6 +1,6 @@
 import { agentDaemonConfigClientRevision } from '../config/daemon-config-routing.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry, type ToolExecutionEffect } from '@goodvibes-jev/engine/platform/platform/tools';
 import { captureModelReadingInput, assertModelReadingInputCurrent, modelReadingServicePath } from './agent-harness-model-reading-source.ts';

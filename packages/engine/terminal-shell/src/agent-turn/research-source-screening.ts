@@ -1,16 +1,71 @@
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { createClassicProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import { isSecretRefInput, normalizeSecretRef, type ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
+import { ConfigManager, isSecretRefInput, normalizeSecretRef, type HostBooleanSetting, type SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createProtectedSourceOwner, type ProtectedSourceOwner, type ProtectedSource, type ProtectedResearchReference,
   type SourceScreeningReceipt, type ResearchReferenceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { SecretsManager } from '../config/secrets.ts';
-import { AGENT_HOSTED_RESEARCH_SCREENING_KEY } from '../config/host-settings.ts';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 
-type ConfigOwner = Pick<ConfigManager, 'getHostBooleanSetting' | 'getIngestionQuarantine' | 'getConfigurationIncarnation'
+/** The Agent's consent to screen raw report text with the hosted screening providers. */
+export const AGENT_HOSTED_RESEARCH_SCREENING_KEY = 'tools.hostedResearchScreening';
+
+/** The consent as a host setting; registered on every manager that reads the Agent's settings. */
+export const AGENT_HOSTED_RESEARCH_SCREENING_SETTING: HostBooleanSetting = Object.freeze({
+  key: AGENT_HOSTED_RESEARCH_SCREENING_KEY,
+  type: 'boolean',
+  default: false,
+  description: 'Explicitly allow raw research report text and source URLs to be screened by Abacus route-llm and TypeSafe Jev. Providers manage retention; zero retention is unverified. Requires native ABACUSAI_API_KEY and TYPESAFE_API_KEY credentials. Covers research report preview, save, and the research editor only.',
+});
+
+/** The settings a screening owner reads: the consent, the quarantine and the change signals. */
+export type AgentResearchScreeningConfig = Pick<ConfigManager, 'getHostBooleanSetting' | 'getIngestionQuarantine' | 'getConfigurationIncarnation'
   | 'onDidChangeIncarnation' | 'onDidInvalidate'>;
-type CredentialOwner = Pick<SecretsManager, 'resolveLocalCredentialSnapshot' | 'getCredentialMutationState' | 'onDidInvalidateCredentials'>;
+type ConfigOwner = AgentResearchScreeningConfig;
+/** The credentials a screening owner reads: the screening provider keys and their change signals. */
+export type AgentResearchScreeningCredentials = Pick<SecretsManager, 'resolveLocalCredentialSnapshot' | 'getCredentialMutationState' | 'onDidInvalidateCredentials'>;
+type CredentialOwner = AgentResearchScreeningCredentials;
+
+/**
+ * The Agent's own settings, read by a process that is not the Agent (the
+ * daemon, for a turn it hosts for the Agent): one read-only manager over the
+ * Agent's user settings files with the consent registered, loaded again when
+ * the Agent's settings file changes. Nothing is written. Each incarnation read
+ * costs one `stat` of that file; a load happens only after it changed, and the
+ * load moves the incarnation, so an acquisition made under the old file is
+ * retired exactly as a settings change retires it in the Agent's own process.
+ */
+export function createAgentSettingsReader(homeDirectory: string): AgentResearchScreeningConfig {
+  const manager = new ConfigManager({
+    homeDir: homeDirectory,
+    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+    readOnly: true,
+    hostSettings: [AGENT_HOSTED_RESEARCH_SCREENING_SETTING],
+  });
+  const settingsPath = manager.getConfigPath();
+  const stamp = (): string => {
+    try {
+      const stat = statSync(settingsPath, { bigint: true, throwIfNoEntry: false });
+      return stat ? `${stat.ino}:${stat.size}:${stat.mtimeNs}` : 'absent';
+    } catch {
+      return 'unreadable';
+    }
+  };
+  let loaded = stamp();
+  const fresh = (): ConfigManager => {
+    const now = stamp();
+    if (now !== loaded) { loaded = now; manager.load(); }
+    return manager;
+  };
+  return {
+    getHostBooleanSetting: (key) => fresh().getHostBooleanSetting(key),
+    getIngestionQuarantine: () => fresh().getIngestionQuarantine(),
+    getConfigurationIncarnation: () => fresh().getConfigurationIncarnation(),
+    onDidChangeIncarnation: (listener) => manager.onDidChangeIncarnation(listener),
+    onDidInvalidate: (listener) => manager.onDidInvalidate(listener),
+  };
+}
 interface Acquisition { readonly owner: ProtectedSourceOwner; assertCurrent(): void; close(): Promise<void>; }
 
 /** The general sentence, for a refusal raised before any cause is known. */

@@ -9,7 +9,7 @@ import { assertPreparedConfigWriteRoute, resolvePreparedConfigWriteRoute, type C
   assertCompletedRemoteSettingsImportPrecondition, type RemoteSettingsImportPrecondition } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveWakeEnablementCompanion } from '@goodvibes-jev/engine/platform/platform/voice';
 import { AGENT_WAKE_SURFACE } from '../audio/wake-surface.ts';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { bindSettingSchemaDescriptors, coerceHarnessSettingValue } from '../agent/harness-control.ts';
 import { getAgentSettingsSchema } from '../config/settings-catalog.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting, configKeyScope } from '../config/daemon-config-routing.ts';

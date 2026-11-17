@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { SOURCE_SCREENING_LIMITS, type ProtectedSource, type ProtectedSourceOwner, type SourceScreeningHold, type SourceScreeningReceipt } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError, type ToolInputProjectionRequest, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureModelReadingInput } from './agent-harness-model-reading-source.ts';
-import { createComparisonOperation } from './agent-model-compare-operation.ts';
-import type { AgentModelCompareToolDeps } from './agent-model-compare-types.ts';
+import { captureModelReadingInput } from './model-reading.js';
+import { createComparisonOperation } from './model-compare-operation.js';
+import type { AgentModelCompareToolDeps } from './model-compare-types.js';
 
 /** The most text one comparison can send to each candidate: the prompt, any inlined document, the system prompt and the request. */
 export const COMPARISON_TEXT_LIMIT = 1_000_000;

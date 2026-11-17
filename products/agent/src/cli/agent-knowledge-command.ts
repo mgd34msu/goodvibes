@@ -29,19 +29,18 @@ import {
   reindexFailures,
   formatSearch,
   formatStatus,
-} from './agent-knowledge-format.ts';
-import { AGENT_KNOWLEDGE_METHODS, DELEGATION_METHOD } from './agent-knowledge-methods.ts';
-import { inspectCliExternalRuntime } from './external-runtime.ts';
-import {
+  isAgentKnowledgeRecord as isRecord,
+  AGENT_KNOWLEDGE_METHODS,
+  DELEGATION_METHOD,
   createAgentPlatform,
   findDisallowedKnowledgeScopeFlag,
   formatScopeFlagRejection,
   getAgentKnowledgeJson,
-  isRecord,
   postAgentKnowledgeJson,
-  readPackageMetadata,
   runKnowledgeCall,
-} from './agent-knowledge-runtime.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { inspectCliExternalRuntime } from './external-runtime.ts';
+import { VERSION } from '../version.ts';
 import { formatJsonOrText, yesNo } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 
 interface DelegationResult {
@@ -549,7 +548,7 @@ export async function handleAgentKnowledgeShortcutCommand(
  * two never disagree about one host.
  */
 export async function handleCompatCommand(runtime: CliCommandRuntime): Promise<CliCommandOutput> {
-  const metadata = readPackageMetadata();
+  const metadata = { version: VERSION };
   const inspected = await inspectCliExternalRuntime({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
   const knowledgeRouteReady = inspected.agentKnowledge.ready;
   const hostCompatible = inspected.reachable && inspected.compatible;

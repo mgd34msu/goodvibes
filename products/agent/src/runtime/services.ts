@@ -5,7 +5,7 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { shell as runtimeShell } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
-import { createAgentResearchSourceOwner } from './research-source-screening.ts';
+import { createAgentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createClassicProtectedSourceOwner, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import { createWorkspaceRegistrationLiveChecker } from '../config/workspace-registration.ts';
 import { FocusTracker } from '@/runtime/index.ts';

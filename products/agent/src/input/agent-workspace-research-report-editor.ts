@@ -1,6 +1,6 @@
-import { prepareProtectedResearchReport, type ResearchReportOperation } from '../agent/protected-research-report.ts';
+import { prepareProtectedResearchReport, type ResearchReportOperation } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
-import { prepareAgentResearchReportInput } from '../agent/research-report-input.ts';
+import { prepareAgentResearchReportInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentWorkspaceActionResult, AgentWorkspaceLocalEditor } from './agent-workspace-types.ts';
 import { isAffirmative } from './agent-workspace-command-editor-engine.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';

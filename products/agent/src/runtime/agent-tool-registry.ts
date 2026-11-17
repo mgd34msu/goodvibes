@@ -8,12 +8,12 @@ import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBa
 import { registerAgentAccountsTool } from '../tools/agent-accounts-tool.ts';
 import { AgentAccountRegistry, ACCOUNT_REGISTRY_PATH_SEGMENTS } from '@goodvibes-jev/engine/platform/platform/google';
 import { containsSecretLikeText } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { registerAgentKnowledgeIngestTool } from '../tools/agent-knowledge-ingest-tool.ts';
-import { registerAgentKnowledgeTool } from '../tools/agent-knowledge-tool.ts';
+import { registerAgentKnowledgeIngestTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { registerAgentKnowledgeTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
-import { registerAgentModelCompareTool } from '../tools/agent-model-compare-tool.ts';
+import { registerAgentModelCompareTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentReminderScheduleTool } from '../tools/agent-reminder-schedule-tool.ts';
-import { registerAgentResearchReportTool } from '../tools/agent-research-report-tool.ts';
+import { registerAgentResearchReportTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   connectedHostGoogleCalendar,
   getOutwardApprovalStore,

@@ -11,7 +11,7 @@ import { describeWorkspaceEditor } from './agent-harness-workspace-actions.ts';
 import { runTranslatedWorkspaceCommand } from './agent-harness-command-runner.ts';
 import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import { harnessCatalogExecutionGuard, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
-import { agentResearchSourceOwner } from '../agent/protected-research-report.ts';
+import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { personaStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { skillStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { routineStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

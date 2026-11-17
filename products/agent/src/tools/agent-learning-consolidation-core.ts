@@ -18,7 +18,7 @@ import {
 import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { readString } from './tool-args.ts';
+import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export type AgentLearningConsolidationMode = 'preview' | 'stale' | 'delete' | 'rollback' | 'recreate' | 'receipts';
 export type AgentLearningConsolidationDomain = 'memory' | 'persona' | 'skill' | 'routine';

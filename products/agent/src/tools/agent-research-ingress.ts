@@ -1,6 +1,6 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolInputProjector, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentResearchReportSourceOwner, captureResearchInput, hasPreparedResearchReport, inheritPreparedResearchReport, prepareProtectedResearchReport } from '../agent/protected-research-report.ts';
+import { agentResearchReportSourceOwner, captureResearchInput, hasPreparedResearchReport, inheritPreparedResearchReport, prepareProtectedResearchReport } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { resolveWorkspaceActionIdentity } from './agent-harness-workspace-actions.ts';
 import { forwardHarnessCatalogCall, harnessCatalogExecutionGuard } from './agent-harness-catalog-ingress.ts';
 

@@ -95,6 +95,78 @@ export * from './notify-tool.js';
 export * from './media-generate-tool.js';
 export * from './review-packet-share-tool.js';
 export * from './work-plan-tool.js';
+// Agent Knowledge, research reports and model comparison. Not re-exported: the
+// knowledge formatter's readString(record, key), the runtime's JsonRecord and
+// the comparison helpers, whose names other modules here export too.
+export { readFlag } from './tool-args.js';
+export * from './markdown-fence.js';
+export * from './model-reading.js';
+export * from './research-report-input.js';
+export * from './protected-research-report.js';
+export {
+  AGENT_HOSTED_RESEARCH_SCREENING_KEY,
+  AGENT_HOSTED_RESEARCH_SCREENING_SETTING,
+  createAgentResearchSourceOwner,
+  createAgentSettingsReader,
+  type AgentResearchScreeningConfig,
+  type AgentResearchScreeningCredentials,
+} from './research-source-screening.js';
+export * from './research-report-tool.js';
+export * from './model-compare-tool.js';
+export * from './knowledge-methods.js';
+export * from './knowledge-scope-alias.js';
+export {
+  formatAgentKnowledgeFailureKind,
+  formatAsk,
+  formatBatchIngest,
+  formatConnector,
+  formatConnectorDoctor,
+  formatConnectors,
+  formatEntityList,
+  formatFailure,
+  formatIngest,
+  formatItem,
+  formatMap,
+  formatReindex,
+  formatSearch,
+  formatStatus,
+  reindexFailures,
+  isRecord as isAgentKnowledgeRecord,
+  type AgentKnowledgeFailureLike,
+} from './knowledge-format.js';
+export {
+  AGENT_KNOWLEDGE_BATCH_DEADLINE_MS,
+  AGENT_KNOWLEDGE_READ_DEADLINE_MS,
+  AGENT_KNOWLEDGE_WRITE_DEADLINE_MS,
+  classifyKnowledgeError,
+  createAgentPlatform,
+  fetchConnectedHostStatus,
+  findAgentKnowledgeScopeContamination,
+  findDisallowedKnowledgeScopeFlag,
+  formatScopeFlagRejection,
+  getAgentKnowledgeJson,
+  normalizeAgentKnowledgeData,
+  postAgentKnowledgeJson,
+  postAgentKnowledgeUpload,
+  resolveConnectedHostConnection,
+  runKnowledgeCall,
+  type AgentKnowledgeConnection,
+  type AgentKnowledgeConnectionRuntime,
+  type AgentKnowledgeFailure,
+  type AgentKnowledgeRequestOptions,
+  type AgentKnowledgeResult,
+  type AgentKnowledgeSuccess,
+  type AgentKnowledgeUploadFile,
+} from './knowledge-runtime.js';
+export * from './knowledge-tool.js';
+export {
+  SOURCE_KINDS as AGENT_KNOWLEDGE_INGEST_SOURCE_KINDS,
+  createAgentKnowledgeIngestInputProjector,
+  createAgentKnowledgeIngestTool,
+  registerAgentKnowledgeIngestTool,
+  type AgentKnowledgeIngestSourceKind,
+  type AgentKnowledgeIngestToolArgs,
+} from './knowledge-ingest-tool.js';
 export * from './connected-host-dial.js';
 export * from './connected-host-pairing-store.js';
 export * from './connected-host-auth.js';

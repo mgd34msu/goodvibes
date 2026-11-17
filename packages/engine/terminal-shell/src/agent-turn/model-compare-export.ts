@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { AgentModelCompareArtifactStore, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './agent-model-compare-types.ts';
-import { DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_HANDOFF_ARTIFACT_BYTES } from './agent-model-compare-types.ts';
-import { formatComparisonDimensionLines, formatUsage, toSavedComparisonArtifact } from './agent-model-compare-run.ts';
-import { isTextLike, readString, previewText } from './agent-model-compare-utils.ts';
-import { fencedBlock } from './markdown-fence.ts';
+import type { AgentModelCompareArtifactStore, LoadedComparisonJudgment, SavedComparisonArtifact, StoredComparison } from './model-compare-types.js';
+import { DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_HANDOFF_ARTIFACT_BYTES } from './model-compare-types.js';
+import { formatComparisonDimensionLines, formatUsage, toSavedComparisonArtifact } from './model-compare-run.js';
+import { isTextLike, readString, previewText } from './model-compare-utils.js';
+import { fencedBlock } from './markdown-fence.js';
 
 export function markdownBlock(value: string): string {
   return fencedBlock(value || '(empty)');
@@ -81,7 +81,7 @@ export function judgmentExportMarkdown(judgment: LoadedComparisonJudgment): stri
 }
 
 export async function saveComparisonExportArtifact(input: {
-  readonly artifactStore?: AgentModelCompareArtifactStore;
+  readonly artifactStore?: AgentModelCompareArtifactStore | undefined;
   readonly sourceArtifactId: string;
   readonly sourceKind: 'comparison' | 'judgment';
   readonly comparisonId: string;
@@ -208,8 +208,8 @@ export function formatRelatedArtifactEvidence(input: {
 }
 
 export function formatComparisonEvidencePane(input: {
-  readonly comparison?: StoredComparison;
-  readonly judgment?: LoadedComparisonJudgment;
+  readonly comparison?: StoredComparison | undefined;
+  readonly judgment?: LoadedComparisonJudgment | undefined;
   readonly reveal: boolean;
   readonly previewBytes: number;
 }): readonly string[] {
@@ -252,8 +252,8 @@ export function formatSideBySideReview(input: {
   readonly sourceKind: 'comparison' | 'judgment';
   readonly sourceArtifactId: string;
   readonly comparisonId: string;
-  readonly comparison?: StoredComparison;
-  readonly judgment?: LoadedComparisonJudgment;
+  readonly comparison?: StoredComparison | undefined;
+  readonly judgment?: LoadedComparisonJudgment | undefined;
   readonly reveal: boolean;
   readonly relatedArtifacts: readonly { readonly artifact: SavedComparisonArtifact; readonly text?: string; readonly truncatedBytes: number }[];
   readonly previewBytes: number;
@@ -284,7 +284,7 @@ export function formatSideBySideReview(input: {
 }
 
 export async function saveComparisonHandoffArtifact(input: {
-  readonly artifactStore?: AgentModelCompareArtifactStore;
+  readonly artifactStore?: AgentModelCompareArtifactStore | undefined;
   readonly sourceArtifactId: string;
   readonly sourceKind: 'comparison' | 'judgment';
   readonly comparisonId: string;

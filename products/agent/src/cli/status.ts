@@ -11,7 +11,7 @@ import type { CliConnectedHostMetricsSnapshot } from './connected-host-metrics.t
 import type { CredentialAvailability } from '../config/credential-status.ts';
 import { getProviderIdFromModel } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentRecordSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { formatAgentKnowledgeFailureKind } from './agent-knowledge-format.ts';
+import { formatAgentKnowledgeFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readApprovalPostureFromConfig, type ApprovalPosture } from '../permissions/approval-posture.ts';
 import { appendTemporalLabel } from './temporal-label.ts';
 

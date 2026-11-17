@@ -1,4 +1,4 @@
-import { agentResearchReportSourceOwner } from '../agent/protected-research-report.ts';
+import { agentResearchReportSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { submitProtectedAgentResearchReport } from './agent-workspace-research-report-editor.ts';
 import { settleEditorMessageTone } from './agent-workspace-editor-message.ts';
 import type { MemoryApi } from '@goodvibes-jev/engine/platform/platform/knowledge';

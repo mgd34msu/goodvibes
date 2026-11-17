@@ -4,7 +4,8 @@
  * same on every port: a per-address limit before any password work, the
  * memory-hard password check off the event loop behind a bounded queue
  * (`UserAuthManager.authenticateSignIn`), and a lock that counts per username
- * and client address.
+ * and client address. An IPv6 address counts by its /64, the block one host
+ * holds, so rotating through a host's own addresses does not reset either.
  */
 
 import type { AddressRateLimiter } from '@goodvibes-jev/engine/daemon-api';
@@ -31,6 +32,26 @@ export interface OperatorLoginDeps {
   readonly trustProxy: boolean;
 }
 
+/**
+ * The address a sign-in counts against: an IPv4 address as it is (an
+ * IPv4-mapped IPv6 address as its IPv4 form), an IPv6 address by its /64.
+ */
+function signInAddressKey(address: string): string {
+  const bare = address.replace(/^\[|\]$/g, '').split('%')[0]!.toLowerCase();
+  if (!bare.includes(':')) return bare;
+  const mapped = /^(?:0{0,4}:){0,5}:?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(bare);
+  if (mapped) return mapped[1]!;
+  const halves = bare.split('::');
+  if (halves.length > 2) return bare;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const tailGroups = tail.length + (tail.at(-1)?.includes('.') ? 1 : 0);
+  const groups = halves.length === 2 ? [...head, ...Array<string>(Math.max(0, 8 - head.length - tailGroups)).fill('0'), ...tail] : head;
+  const prefix = groups.slice(0, 4);
+  if (prefix.length < 4 || prefix.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return bare;
+  return `${prefix.map((group) => parseInt(group, 16).toString(16)).join(':')}::/64`;
+}
+
 export async function handleOperatorLogin(req: Request, clientAddress: string, deps: OperatorLoginDeps): Promise<Response> {
   const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID();
   const failed = (reason: 'invalid_credentials' | 'rate_limited'): void => {
@@ -55,7 +76,8 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
     }, { status: 415 });
   }
 
-  if (!deps.limiter.allow(clientAddress)) {
+  const addressKey = signInAddressKey(clientAddress);
+  if (!deps.limiter.allow(addressKey)) {
     failed('rate_limited');
     return retryAfter(jsonErrorResponse({
       error: 'Too many requests', code: 'RATE_LIMITED', state: 'this address used its sign-in attempts for the minute',
@@ -67,7 +89,7 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
   if (body instanceof Response) return body;
   const username = typeof body.username === 'string' ? body.username : '';
   const password = typeof body.password === 'string' ? body.password : '';
-  const authResult = await deps.userAuth.authenticateSignIn(username, password, clientAddress);
+  const authResult = await deps.userAuth.authenticateSignIn(username, password, addressKey);
 
   if (!authResult.ok) {
     if (authResult.busy) {
@@ -81,7 +103,7 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
     if (lockedUntilMs) {
       const retryAfterSeconds = Math.max(1, Math.ceil((lockedUntilMs - Date.now()) / 1_000));
       return retryAfter(jsonErrorResponse({
-        error: 'Too many requests', code: 'SIGN_IN_LOCKED', state: 'repeated failed sign-ins from this address locked this account here',
+        error: 'Too many requests', code: 'SIGN_IN_LOCKED', state: 'repeated failed sign-ins locked this account for a short time',
         next: [`Wait ${retryAfterSeconds} seconds, then sign in again`],
       }, { status: 429 }), retryAfterSeconds);
     }

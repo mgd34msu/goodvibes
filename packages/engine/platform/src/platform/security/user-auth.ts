@@ -107,6 +107,22 @@ interface AccountLockState {
   lastFailureAt: number;
 }
 
+/**
+ * Failed network sign-ins for one username from every address. The per-address
+ * lock never stops a guesser who changes address; this slows every sign-in for
+ * the username once it has failed many times in an hour, without locking the
+ * owner out the way a per-username lock would.
+ */
+interface UsernameFailureWindow {
+  failures: number;
+  windowStart: number;
+  slowedUntil: number;
+}
+
+const USERNAME_FAILURE_WINDOW_MS = 60 * 60_000;
+const USERNAME_FAILURE_THRESHOLD = 50;
+const USERNAME_SLOWDOWN_MS = 30_000;
+
 /** The lock a failure count reaches: 6-9 failures 30 s, 10-19 five minutes, 20 or more 30 minutes. */
 function lockDurationMs(failures: number): number {
   if (failures >= 20) return 30 * 60_000;
@@ -434,6 +450,8 @@ export class UserAuthManager {
   private staleBootstrapNoted = false;
   /** Failure counters for lockout, keyed by username (in-process checks) or username and client address (sign-ins). */
   private accountLocks = new Map<string, AccountLockState>();
+  /** Network sign-in failures per username across all addresses (see UsernameFailureWindow). */
+  private usernameFailures = new Map<string, UsernameFailureWindow>();
   private sessionTtlMs: number;
   private readonly maxSessions: number;
   private readonly maxAccountLocks: number;
@@ -564,8 +582,10 @@ export class UserAuthManager {
    * A sign-in from the network: the password check runs on the thread pool,
    * one at a time, and a lock counts per username and client address, so a
    * stranger repeating the owner's username locks out only their own address.
-   * A burst beyond {@link MAX_WAITING_SIGN_INS} is answered `busy` without a
-   * password check.
+   * Past 50 failures for a username in an hour from any addresses, every
+   * sign-in for it waits 30 seconds after the last failure, so changing
+   * address does not buy unlimited guesses. A burst beyond
+   * {@link MAX_WAITING_SIGN_INS} is answered `busy` without a password check.
    */
   authenticateSignIn(username: string, password: string, clientAddress: string): Promise<AuthenticateResult> {
     if (this.#signInsWaiting >= MAX_WAITING_SIGN_INS) return Promise.resolve({ ok: false, busy: true });
@@ -592,7 +612,7 @@ export class UserAuthManager {
 
   private beginAttempt(username: string, clientAddress: string | undefined):
     | { readonly result: AuthenticateResult }
-    | { readonly username: string; readonly lockKey: string; readonly now: number; readonly user: AuthUser | undefined; readonly hashToCheck: string } {
+    | { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly now: number; readonly user: AuthUser | undefined; readonly hashToCheck: string } {
     const now = this.nowFn();
     this.refreshFromDisk();
     const lockKey = this.lockKey(username, clientAddress);
@@ -604,26 +624,32 @@ export class UserAuthManager {
     if (lockState && lockState.lockedUntil > now) {
       return { result: { ok: false, lockedUntilMs: lockState.lockedUntil } };
     }
+    const network = clientAddress !== undefined;
+    const slowed = network ? this.usernameFailures.get(username) : undefined;
+    if (slowed && slowed.slowedUntil > now) {
+      return { result: { ok: false, lockedUntilMs: slowed.slowedUntil } };
+    }
 
     const user = this.users.get(username);
     // Unknown accounts still perform the configured scrypt work instead of
     // bypassing password derivation.
     const target = this.scryptParams;
     const hashToCheck = user?.passwordHash ?? `Z29vZHZpYmVzLWR1bW15:${target.N}:${target.r}:${target.p}:${Buffer.alloc(SCRYPT_KEY_LENGTH).toString('base64')}`;
-    return { username, lockKey, now, user, hashToCheck };
+    return { username, lockKey, network, now, user, hashToCheck };
   }
 
   /** A failed check records the failure and answers; a passed one says whether the stored hash needs a stronger cost. */
   private settleAttempt(
-    attempt: { readonly lockKey: string; readonly now: number; readonly user: AuthUser | undefined },
+    attempt: { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly now: number; readonly user: AuthUser | undefined },
     verified: PasswordVerification,
   ): AuthenticateResult | { readonly user: AuthUser; readonly upgrade: ScryptParams | null } {
     const { lockKey, now, user } = attempt;
     if (!verified || !user) {
       this._recordLoginFailure(lockKey, now);
       const newLock = this.accountLocks.get(lockKey);
-      const lockedUntilMs = newLock && newLock.lockedUntil > now ? newLock.lockedUntil : undefined;
-      return lockedUntilMs !== undefined ? { ok: false, lockedUntilMs } : { ok: false };
+      const slowedUntil = attempt.network ? this.recordUsernameFailure(attempt.username, now) : 0;
+      const lockedUntilMs = Math.max(newLock && newLock.lockedUntil > now ? newLock.lockedUntil : 0, slowedUntil > now ? slowedUntil : 0);
+      return lockedUntilMs > 0 ? { ok: false, lockedUntilMs } : { ok: false };
     }
     const target = this.scryptParams;
     if (!(verified.params.N < target.N || verified.params.r < target.r || verified.params.p < target.p)) return { user, upgrade: null };
@@ -708,6 +734,24 @@ export class UserAuthManager {
     const lockMs = lockDurationMs(state.failures);
     state.lockedUntil = lockMs > 0 ? now + lockMs : 0;
     this.accountLocks.set(lockKey, state);
+  }
+
+  /** Count one failed network sign-in for the username; answers until when its sign-ins wait (0 when they do not). */
+  private recordUsernameFailure(username: string, now: number): number {
+    let window = this.usernameFailures.get(username);
+    if (!window || now - window.windowStart >= USERNAME_FAILURE_WINDOW_MS) {
+      if (!window && this.usernameFailures.size >= this.maxAccountLocks) {
+        // The oldest window goes first; usernames nobody signs in with fill the map, not the owner's.
+        const oldest = this.usernameFailures.keys().next();
+        if (!oldest.done) this.usernameFailures.delete(oldest.value);
+      }
+      this.usernameFailures.delete(username);
+      window = { failures: 0, windowStart: now, slowedUntil: 0 };
+      this.usernameFailures.set(username, window);
+    }
+    window.failures++;
+    if (window.failures >= USERNAME_FAILURE_THRESHOLD) window.slowedUntil = now + USERNAME_SLOWDOWN_MS;
+    return window.slowedUntil;
   }
 
   /**

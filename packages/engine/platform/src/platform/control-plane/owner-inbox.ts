@@ -694,10 +694,14 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     return { applied: true, item };
   }
 
-  /** {@link OwnerAnswerReader}: one asker's open questions and the answers it has not taken. */
+  /**
+   * {@link OwnerAnswerReader}: one asker's open questions and the answers it
+   * has not taken. A question that expired unanswered is left out: the asker
+   * is told of it once while it is open, not again at every reopening.
+   */
   pendingFor(scope: QuestionAskerScope): readonly OwnerItem[] {
     const now = this.#now();
-    return this.#questions.undelivered(scope).map((entry) => this.#project(entry, now));
+    return this.#questions.undelivered(scope).map((entry) => this.#project(entry, now)).filter((item) => item.status !== 'expired');
   }
 
   /** {@link OwnerAnswerReader}: the caller took the answer into its conversation; true only for the first taker. */

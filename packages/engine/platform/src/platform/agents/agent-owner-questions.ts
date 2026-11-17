@@ -21,6 +21,8 @@ import {
   type OwnerAskerPresenceProbe,
   type OwnerItem,
 } from '../control-plane/owner-inbox.js';
+import { isSystemClosedSession } from '../control-plane/session-broker-sessions.js';
+import type { SharedSessionRecord } from '../control-plane/session-types.js';
 import type { QuestionInbox } from '../tools/query/index.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import { callingAgentId } from './calling-agent.js';
@@ -121,12 +123,14 @@ export function callingAgentAsker(agents: { getStatus(id: string): AgentRecord |
 /**
  * Where a daemon agent that asked is: running (`attached`); able to run again
  * (`closed`: a failed run can be woken, a contract unit reopened, a channel's
- * shared session gets its next turn); or gone (finished or cancelled for good,
- * or no longer known, as after a daemon restart).
+ * shared session gets its next turn, also after the idle reaper closed it,
+ * since the next message reopens it); or gone (finished or cancelled for good,
+ * its shared session closed by the owner or removed, or no longer known, as
+ * after a daemon restart).
  */
 export function daemonAgentPresence(
   agents: { getStatus(id: string): AgentRecord | null },
-  sharedSessions?: { getSession(id: string): { readonly status: string; readonly title: string } | null },
+  sharedSessions?: { getSession(id: string): SharedSessionRecord | null },
 ): OwnerAskerPresenceProbe {
   return (asker): OwnerAskerPresence | undefined => {
     if (asker.host !== 'daemon' || asker.agent === undefined) return undefined;
@@ -134,7 +138,7 @@ export function daemonAgentPresence(
     if (record && (record.status === 'running' || record.status === 'pending')) return { state: 'attached' };
     if (asker.session !== undefined) {
       const shared = sharedSessions?.getSession(asker.session) ?? null;
-      if (shared && shared.status !== 'closed') {
+      if (shared && (shared.status !== 'closed' || isSystemClosedSession(shared))) {
         const title = shared.title.trim();
         return { state: 'closed', ...(title ? { title } : {}), reopens: `the next message arrives in session ${asker.session}` };
       }

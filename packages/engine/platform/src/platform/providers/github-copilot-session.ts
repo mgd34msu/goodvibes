@@ -13,8 +13,13 @@ import { VERSION } from '../version.js';
  */
 export const COPILOT_TOKEN_ENV_VARS = ['COPILOT_GITHUB_TOKEN'] as const;
 const TOKEN_URL = 'https://api.github.com/copilot_internal/v2/token';
+const ACCOUNT_URL = 'https://api.github.com/copilot_internal/user';
 const DEFAULT_API_BASE_URL = 'https://api.individual.githubcopilot.com';
 const SESSION_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
+/** How long the account's Copilot API host is used before it is read again, for a token used directly. */
+const DIRECT_SESSION_WINDOW_MS = 30 * 60 * 1000;
+/** Exchange answers that mean "not an exchangeable token" rather than "bad token". */
+const DIRECT_TOKEN_STATUSES: ReadonlySet<number> = new Set([403, 404]);
 export const COPILOT_IO_TIMEOUT_MS = 15_000;
 
 /** The client names itself: GoodVibes, at its own version. */
@@ -36,6 +41,8 @@ interface OwnedCredential {
   readonly abort: AbortController;
   session?: CopilotSession;
   pending?: Promise<CopilotSession>;
+  /** The exchange refused this token; it is used directly as the Copilot API bearer. */
+  direct?: boolean;
 }
 interface SessionOptions {
   readonly tokenCachePath: string;
@@ -174,6 +181,8 @@ export class CopilotSessions {
     const credential = this.#credential;
     if (!credential || credential.owner !== owner) throw changed();
     const source = credential.source;
+    // A token the exchange already refused is used as it is; it is not offered to the exchange again.
+    if (credential.direct) return this.directSession(owner, source, signal, null);
     let response: Response;
     try {
       response = await (this.#options.fetchFn ?? fetch)(TOKEN_URL, {
@@ -186,12 +195,60 @@ export class CopilotSessions {
     }
     try {
       this.assertCurrent(owner); signal.throwIfAborted();
+      if (DIRECT_TOKEN_STATUSES.has(response.status)) {
+        await response.body?.cancel().catch(() => {});
+        const session = await this.directSession(owner, source, signal, response.status);
+        credential.direct = true;
+        return session;
+      }
       if (!response.ok) throw new Error(`Copilot token exchange failed: HTTP ${response.status}`);
       let raw: unknown;
       try { raw = await response.json(); }
       catch { this.assertCurrent(owner); signal.throwIfAborted(); throw new Error('Invalid Copilot session response'); }
       this.assertCurrent(owner); signal.throwIfAborted();
       return parseSession(raw);
+    } finally {
+      if (!response.bodyUsed) await response.body?.cancel().catch(() => {});
+    }
+  }
+
+  /**
+   * A GitHub sign-in token such as the GitHub CLI's `gho_` token is refused by
+   * the exchange (HTTP 403, whatever the client identity) but is accepted by
+   * the Copilot API itself as the bearer (checked live on 2026-11-17). The
+   * account's Copilot API host is read from GitHub, and the token is sent only
+   * to a `githubcopilot.com` host.
+   * One account read per session window; the exchange is not asked again.
+   */
+  private async directSession(owner: CopilotCredentialOwner, source: string, signal: AbortSignal, exchangeStatus: number | null): Promise<CopilotSession> {
+    const refused = exchangeStatus === null ? '' : `Copilot token exchange failed: HTTP ${exchangeStatus}, and `;
+    let response: Response;
+    try {
+      response = await (this.#options.fetchFn ?? fetch)(ACCOUNT_URL, {
+        method: 'GET', signal, redirect: 'error',
+        headers: { Accept: 'application/json', Authorization: `Bearer ${source}`, ...copilotIdeHeaders(true) },
+      });
+    } catch {
+      this.assertCurrent(owner); signal.throwIfAborted();
+      throw new Error(`${refused}the GitHub Copilot account could not be read. Check the configured account and connection.`);
+    }
+    try {
+      this.assertCurrent(owner); signal.throwIfAborted();
+      if (!response.ok) throw new Error(`${refused}the GitHub Copilot account read returned HTTP ${response.status}. The token has no Copilot access.`);
+      let raw: unknown;
+      try { raw = await response.json(); }
+      catch { this.assertCurrent(owner); signal.throwIfAborted(); throw new Error(`${refused}the GitHub Copilot account answer was not JSON.`); }
+      this.assertCurrent(owner); signal.throwIfAborted();
+      const endpoints = raw && typeof raw === 'object' ? (raw as Record<string, unknown>)['endpoints'] : undefined;
+      const api = endpoints && typeof endpoints === 'object' ? (endpoints as Record<string, unknown>)['api'] : undefined;
+      let baseUrl = DEFAULT_API_BASE_URL;
+      if (typeof api === 'string') {
+        try {
+          const parsed = new URL(api);
+          if (parsed.protocol === 'https:' && (parsed.hostname === 'githubcopilot.com' || parsed.hostname.endsWith('.githubcopilot.com'))) baseUrl = `https://${parsed.hostname}`;
+        } catch { /* An absent or foreign endpoint uses the standard Copilot API. */ }
+      }
+      return Object.freeze({ token: source, baseUrl, expiresAt: Date.now() + DIRECT_SESSION_WINDOW_MS });
     } finally {
       if (!response.bodyUsed) await response.body?.cancel().catch(() => {});
     }

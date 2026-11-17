@@ -135,12 +135,12 @@ interface CopilotModelsResponse {
  * credential source, no new env vars. The request sends the Bearer session
  * token and the client's own identity (`copilotIdeHeaders`: `Editor-Version`
  * and `User-Agent` both `GoodVibes/<version>`, plus `X-Github-Api-Version`),
- * and no `Copilot-Integration-Id`. The endpoint and response shape follow
- * independently implemented Copilot API proxies (ericc-ch/copilot-api's
- * `getModels()` hits the same `${baseUrl}/models`), which send VS Code's
- * identity and an integration id instead; that GitHub accepts the GoodVibes
- * identity has not been checked against the live service. A refusal is
- * reported with its status and the bundled list is used. Response shape is
+ * and no `Copilot-Integration-Id`. Checked against the live service on
+ * 2026-11-17 (Copilot Free account, a GitHub sign-in token used directly):
+ * /models and /chat/completions both answer 200 to this identity. Without an
+ * integration id the listing leaves out entries VS Code hides from its picker
+ * (`model_picker_enabled: false`) and keeps the chat models a user picks. A
+ * refusal is reported with its status and the bundled list is used. Response shape is
  * OpenAI-like (`{ data: [{ id, capabilities: { type } }] }`); only
  * `type: 'chat'` entries are kept so embedding-only models don't leak into
  * the chat model picker. Each kept entry's `supported_endpoints` and `vendor`
@@ -291,12 +291,14 @@ export class GitHubCopilotProvider implements LLMProvider {
     try {
       const session = await this.sessions.resolve(owner, signal);
       current();
-      const baseURL = `${session.baseUrl.replace(/\/+$/, '')}/v1`;
+      // Copilot serves Anthropic Messages at /v1/messages and the OpenAI-compatible
+      // chat at /chat/completions; /v1/chat/completions answers 404 (checked live 2026-11-17).
+      const apiBase = session.baseUrl.replace(/\/+$/, '');
       const defaultHeaders = buildCopilotDynamicHeaders(params.messages);
       if (anthropicTransport) {
         const provider = new AnthropicCompatProvider({
           name: this.name,
-          baseURL,
+          baseURL: `${apiBase}/v1`,
           apiKey: session.token,
           defaultModel: model,
           models: this.models,
@@ -311,7 +313,7 @@ export class GitHubCopilotProvider implements LLMProvider {
 
       const provider = new OpenAICompatProvider({
         name: this.name,
-        baseURL,
+        baseURL: apiBase,
         apiKey: session.token,
         defaultModel: model,
         models: this.models,

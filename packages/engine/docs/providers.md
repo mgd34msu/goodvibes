@@ -82,6 +82,9 @@ until its renewal margin. Switching accounts retires the previous session and
 its discovered model metadata; pending requests keep their original account
 and cannot switch credentials halfway through a call. A newly selected account
 refreshes its own live model list before reusing the model-list cache.
+A GitHub sign-in token the exchange refuses (such as the GitHub CLI's `gho_`
+token) is used directly: GoodVibes reads the account's Copilot API host from
+GitHub and sends the token only to that `githubcopilot.com` host.
 
 Sessions are held in the provider's memory. Restarting exchanges a fresh session
 with GitHub. On first use, earlier token-cache files are replaced with a marker

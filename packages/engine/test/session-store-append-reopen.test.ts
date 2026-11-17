@@ -1,5 +1,7 @@
 // Proves: A session's messages are found after a restart, and a terminal's named session keeps saving.
 // Red when: A message appended to an open or closed session is missing in a second broker, or a resumed session saved under its file name is refused or lands in a second file.
+// Proves: Compacting a long session's log drops a message, or keeps an old version of an input so a finished message is queued again and runs twice.
+// Red when: The log's compaction keeps a superseded input version or drops the current one, or reading the log stops preferring each input's newest version.
 /**
  * Session stores lose nothing across a restart. The daemon's session broker:
  * a message appended is found by the next broker over the same files, for an
@@ -8,13 +10,16 @@
  * display name keeps saving when it is addressed by its file name.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SharedSessionBroker } from '../platform/src/platform/control-plane/session-broker.ts';
 import { RouteBindingManager } from '../platform/src/platform/channels/route-manager.ts';
 import { AutomationRouteStore } from '../platform/src/platform/automation/store/routes.ts';
 import { SessionManager, type SessionMeta } from '../platform/src/platform/sessions/manager.ts';
+import { SessionBrokerFileStorage, type SessionBrokerStateView } from '../platform/src/platform/control-plane/session-broker-store.ts';
+import type { SharedSessionInputRecord, SharedSessionInputState } from '../platform/src/platform/control-plane/session-intents.ts';
+import type { SharedSessionMessage } from '../platform/src/platform/control-plane/session-types.ts';
 
 const roots: string[] = [];
 const brokers: SharedSessionBroker[] = [];
@@ -86,4 +91,39 @@ test('a session saved under a display name keeps saving when it is opened by its
   // Another name that maps to the same file is still refused, and nothing is lost.
   expect(() => reopened.save('my chat!', [], meta('Other'))).toThrow();
   expect(reopened.load(fileName).messages).toHaveLength(2);
+});
+
+test('a compacted session log keeps every message and only each input\'s newest version', async () => {
+  const root = tempRoot(), id = 'long-session', storePath = join(root, 'sessions.json');
+  const messages: SharedSessionMessage[] = [1, 2, 3, 4, 5].map((n) => ({ id: `m${n}`, sessionId: id, role: 'user', body: `message ${n}`, createdAt: n, metadata: {} }));
+  const inputsAt = (state: SharedSessionInputState, at: number): SharedSessionInputRecord[] => Array.from({ length: 300 }, (_, n) => ({
+    id: `in-${n}`, sessionId: id, intent: 'submit', state, correlationId: `c-${n}`, body: `input ${n}`, createdAt: 1, updatedAt: at, metadata: {},
+  }));
+  const storage = new SessionBrokerFileStorage(storePath);
+  const write = async (inputs: SharedSessionInputRecord[]) => {
+    const state: SessionBrokerStateView = {
+      sessions: new Map(), messages: new Map([[id, messages]]), inputs: new Map([[id, inputs]]),
+      peekMessages: () => messages, peekInputs: () => inputs,
+    };
+    await storage.write(state, new Set([id]), true);
+  };
+  const reopened = () => {
+    const reader = new SessionBrokerFileStorage(storePath);
+    const history = reader.loadSession(id);
+    reader.close();
+    return { bodies: history.messages.map((message) => message.body), states: new Set(history.inputs.map((input) => input.state)), count: history.inputs.length };
+  };
+  const logLines = () => readFileSync(join(root, 'sessions', `${id}.jsonl`), 'utf8').split('\n').filter(Boolean).length;
+
+  await write(inputsAt('queued', 10));
+  await write(inputsAt('delivered', 20));
+  // Two versions of every input on disk: the newer one is what a restart reads.
+  expect(reopened()).toEqual({ bodies: messages.map((message) => message.body), states: new Set(['delivered']), count: 300 });
+
+  const appended = logLines() + 300;
+  await write(inputsAt('completed', 30));
+  // The superseded versions now outnumber the live rows: the log was rewritten.
+  expect(logLines()).toBeLessThan(appended);
+  expect(reopened()).toEqual({ bodies: messages.map((message) => message.body), states: new Set(['completed']), count: 300 });
+  storage.close();
 });

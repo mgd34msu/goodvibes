@@ -20,6 +20,8 @@
 //     /undo rewind and /redo rewind can reverse and re-apply it.
 // The undo/redo stacks stay TUI-side: the service reports how to reverse a
 // rewind (its receipt's undo block), and this module performs the reversal.
+// The stacks are written beside the undo snapshots after every change, so
+// /undo rewind still finds a rewind after the TUI restarts.
 //
 // The confirm step is a question on a Changes preview (ctx.previewChanges):
 // the handler resolves the anchor, shows exactly what changes, and waits for
@@ -37,6 +39,7 @@ import {
   type RewindWorkspacePort,
 } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
+import { logger, readDocument, writeDocument } from '@goodvibes-jev/engine/platform/platform/utils';
 import { join } from 'node:path';
 import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
@@ -82,12 +85,63 @@ interface RewindSessionState {
   readonly convPort: ConversationRewindPort;
   readonly undo: RewindReceipt[];
   readonly redo: RewindReceipt[];
+  /** Where the two stacks are kept on disk; null when the session has no sessions directory. */
+  readonly stackFile: string | null;
+}
+
+/** As many receipts as the conversation port keeps undo snapshots for. */
+const MAX_KEPT_RECEIPTS = 32;
+
+interface StoredRewindStacks {
+  readonly sessionId: string;
+  readonly undo: readonly RewindReceipt[];
+  readonly redo: readonly RewindReceipt[];
+}
+
+function isReceiptFor(sessionId: string, value: unknown): value is RewindReceipt {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  const undo = v.undo as Record<string, unknown> | null | undefined;
+  return v.sessionId === sessionId && typeof v.scope === 'string' && typeof v.appliedAt === 'number'
+    && typeof undo === 'object' && undo !== null && 'files' in undo && 'conversation' in undo;
+}
+
+/** The stacks a previous run of this session left, or empty ones. */
+function loadStacks(stackFile: string, sessionId: string): { undo: RewindReceipt[]; redo: RewindReceipt[] } {
+  const stored = readDocument<StoredRewindStacks>(stackFile, {
+    label: 'rewind/undo-stack',
+    recovery: 'Rewinds applied before this run are no longer listed under /undo rewind; the conversation and files are unchanged.',
+    validate: (parsed) => {
+      const v = parsed as Partial<StoredRewindStacks> | null;
+      if (!v || v.sessionId !== sessionId || !Array.isArray(v.undo) || !Array.isArray(v.redo)) throw new Error('not this session\'s rewind undo stack');
+      return v as StoredRewindStacks;
+    },
+  });
+  return {
+    undo: (stored?.undo ?? []).filter((r) => isReceiptFor(sessionId, r)),
+    redo: (stored?.redo ?? []).filter((r) => isReceiptFor(sessionId, r)),
+  };
+}
+
+/** One write of both stacks after they changed; a failed write costs only the after-restart listing. */
+function saveStacks(state: RewindSessionState, sessionId: string): void {
+  if (!state.stackFile) return;
+  try {
+    writeDocument(state.stackFile, {
+      sessionId,
+      undo: state.undo.slice(-MAX_KEPT_RECEIPTS),
+      redo: state.redo.slice(-MAX_KEPT_RECEIPTS),
+    } satisfies StoredRewindStacks, { indent: null });
+  } catch (error) {
+    logger.warn('Rewind undo list could not be saved; it lasts until this session closes', { sessionId, error: summarizeError(error) });
+  }
 }
 
 /**
- * Rewind state lives as long as its session is the open one: a resume, load or
- * new session replaces it, and the replaced session's receipts go with it (an
- * undo receipt points into a conversation that is no longer live).
+ * Rewind state in memory lives as long as its session is the open one: a
+ * resume, load or new session replaces it. The receipts stay on disk, so the
+ * session's /undo rewind list comes back when it is resumed or the TUI restarts;
+ * an undo still refuses when the conversation changed since the rewind.
  */
 const sessions = new Map<string, RewindSessionState>();
 
@@ -101,13 +155,16 @@ function stateFor(ctx: CommandContext): RewindSessionState {
     const conv = ctx.session.conversationManager;
     const surface = ctx.workspace.surface;
     // On disk beside the session's history, so the pre-rewind copy outlives this process.
-    const convPort = createConversationRewindPort(() => conv, surface ? { undoDir: join(surface.sessionsDir, 'rewind-undo') } : {});
+    const undoDir = surface ? join(surface.sessionsDir, 'rewind-undo') : undefined;
+    const convPort = createConversationRewindPort(() => conv, undoDir ? { undoDir } : {});
     const service = new UnifiedRewindService({
       workspace: mgr ? makeWorkspacePort(mgr) : null,
       conversation: convPort,
       anchorSurface: ctx.workspace.surface ?? null,
     });
-    state = { service, convPort, undo: [], redo: [] };
+    const stackFile = undoDir ? join(undoDir, `stack-${sessionId.replace(/[^A-Za-z0-9_-]/g, '_')}.json`) : null;
+    const stacks = stackFile ? loadStacks(stackFile, sessionId) : { undo: [], redo: [] };
+    state = { service, convPort, undo: stacks.undo, redo: stacks.redo, stackFile };
     sessions.set(sessionId, state);
   }
   return state;
@@ -174,6 +231,12 @@ const NO_PREVIEW_MESSAGE = (what: string): string =>
   `${what} was not started: restoring files needs the Changes view to show what would be overwritten, and it is not available in this session. Nothing changed.`;
 
 export async function undoLastRewind(ctx: CommandContext): Promise<RewindReversalResult> {
+  const result = await undoLastRewindNow(ctx);
+  saveStacks(stateFor(ctx), ctx.session.runtime.sessionId);
+  return result;
+}
+
+async function undoLastRewindNow(ctx: CommandContext): Promise<RewindReversalResult> {
   if (ctx.isGenerating?.()) return { handled: true, message: BUSY_MESSAGE('undoing the rewind') };
   const state = stateFor(ctx);
   const receipt = state.undo.pop();
@@ -254,6 +317,12 @@ export async function undoLastRewind(ctx: CommandContext): Promise<RewindReversa
 }
 
 export async function redoLastRewind(ctx: CommandContext): Promise<RewindReversalResult> {
+  const result = await redoLastRewindNow(ctx);
+  saveStacks(stateFor(ctx), ctx.session.runtime.sessionId);
+  return result;
+}
+
+async function redoLastRewindNow(ctx: CommandContext): Promise<RewindReversalResult> {
   if (ctx.isGenerating?.()) return { handled: true, message: BUSY_MESSAGE('re-applying the rewind') };
   const state = stateFor(ctx);
   const receipt = state.redo.pop();
@@ -623,6 +692,7 @@ export function registerRewindRuntimeCommands(registry: CommandRegistry): void {
         if (undoAvailable(receipt)) {
           state.undo.push(receipt);
           state.redo.length = 0; // a fresh apply invalidates the redo stack
+          saveStacks(state, anchor.sessionId);
         }
         // addTypedSystemMessage persists the receipt into real session
         // history (indexed by getTranscriptEventIndex + save/load), and the

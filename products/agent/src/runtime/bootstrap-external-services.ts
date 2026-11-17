@@ -230,7 +230,8 @@ export function wireAgentExternalServices(options: {
           detail: `Connected host is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it with: ${DAEMON_START_COMMAND}`,
         };
       case 'not-installed':
-        return { answered: false, level: null, detail: `No daemon service is installed on this machine; install it with: ${DAEMON_INSTALL_COMMAND}` };
+        // Said at start-up: without it every host-backed feature fails one at a time with no reason given.
+        return { answered: false, level: 'high', detail: `No GoodVibes host is running and no daemon service is installed on this machine, so host-backed features are off. Install and start it with: ${DAEMON_INSTALL_COMMAND}` };
       case 'none':
         return {
           answered: outcome.reason === 'daemon-active',

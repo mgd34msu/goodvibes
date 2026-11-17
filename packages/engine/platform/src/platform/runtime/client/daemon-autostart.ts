@@ -312,6 +312,9 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
   };
 }
 
+/** What a surface says when no daemon answers and no daemon service is installed to start. */
+export const DAEMON_NOT_INSTALLED_NOTICE = 'No GoodVibes daemon is running and none is installed on this machine, so shared sessions, the web UI, phone access, push and the relay are off. Install and start it with: goodvibes-daemon install-service';
+
 /**
  * Render one autostart outcome as the line the user reads.
  *
@@ -332,6 +335,9 @@ export function describeDaemonAutostart(
     case 'start-failed':
       return { level: 'high', text: `[Startup] The daemon is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it manually with: goodvibes service start` };
     case 'not-installed':
+      // Nothing answers and nothing is installed to start: without this line
+      // every daemon-backed feature would fail one at a time with no reason given.
+      return { level: 'high', text: `[Startup] ${DAEMON_NOT_INSTALLED_NOTICE}` };
     case 'none':
       return null;
   }

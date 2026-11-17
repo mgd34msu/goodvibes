@@ -6,7 +6,7 @@ import { modalHeightFor, modalTextWidth } from '../renderer/surface-kit-extra.ts
 import { renderDiffView } from '../renderer/diff-view.ts';
 import type { Line } from '@goodvibes-jev/engine/platform/platform/types';
 import { approvalDiffText } from './approval-diff.ts';
-import { buildPermissionApprovalBrief, execFileOperationLines, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { buildPermissionApprovalBrief, execFileOperationLines, execRunPlace, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 
 import type {
   PermissionPromptRequest,
@@ -76,7 +76,11 @@ export class PermissionPromptUI extends PermissionPromptFacts {
     add(brief.subjectLabel, brief.subjectValues.join('\n'), tokens.text);
     const fileOps = execFileOperationLines(request.args);
     if (fileOps.length > 0) add('File ops', fileOps.join('\n'), tokens.warning);
-    add('Directory', request.workingDirectory ?? '(unknown)');
+    // An exec call can name its own directory (top level or per command) and
+    // environment; the owner approves where it runs, not the session's directory.
+    const place = request.tool === 'exec' ? execRunPlace(request.args) : undefined;
+    add('Directory', place?.workingDirectory ?? request.workingDirectory ?? '(unknown)', place?.workingDirectory ? tokens.text : tokens.textMuted);
+    if (place && place.commandLines.length > 0) add('Per command', place.commandLines.join('\n'), tokens.text);
     if (analysis.surface || analysis.blastRadius)
       add('Surface', `${analysis.surface ?? 'generic'}${analysis.blastRadius ? `  radius=${analysis.blastRadius}` : ''}`);
     if (analysis.host) add('Host', analysis.host);

@@ -32,7 +32,7 @@
  */
 
 import type { PermissionCategory, PermissionPromptRequest, PermissionRequestAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
-import { buildPermissionApprovalBrief, buildRememberOptions, execFileOperationLines, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { buildPermissionApprovalBrief, buildRememberOptions, execFileOperationLines, execRunPlace, fallbackAnalysis } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { decodeBase64 } from '@goodvibes-jev/engine/platform/platform/control-plane/approval-hunk-apply';
 import { activeTokens } from '../renderer/theme.ts';
 import {
@@ -299,17 +299,24 @@ function subjectRows(request: PermissionPromptRequest, width: number): CardRow[]
     if (typeof attribution.prompt === 'string' && attribution.prompt.length > 0) rows.push(...labelled('Asks', attribution.prompt, width, t.warning));
     return rows;
   }
-  const fileOpRows = execFileOperationLines(request.args).flatMap((line, i) => labelled(i === 0 ? 'File ops' : '', line, width, t.warning));
+  // An exec call can name its own directory (top level or per command) and
+  // environment: the owner approves where each command runs, beside its text.
+  const place = request.tool === 'exec' ? execRunPlace(request.args) : undefined;
+  const execRows = [
+    ...(place?.workingDirectory ? labelled('Directory', place.workingDirectory, width, t.text) : []),
+    ...(place?.commandLines ?? []).flatMap((line, i) => labelled(i === 0 ? 'Per command' : '', line, width, t.text)),
+    ...execFileOperationLines(request.args).flatMap((line, i) => labelled(i === 0 ? 'File ops' : '', line, width, t.warning)),
+  ];
   const brief = buildPermissionApprovalBrief(request);
   if (brief.subjectKind === 'command') {
     // Every command, in full, wrapped, never truncated.
     return [...brief.subjectValues.flatMap((command) => command.split('\n').flatMap((para, p) => wrapCode(para, Math.max(4, width - 2)).map((line, i) => ({
       spans: [{ text: p === 0 && i === 0 ? '$ ' : '  ', fg: t.textFaint }, { text: line, fg: t.text }],
-    })))), ...fileOpRows];
+    })))), ...execRows];
   }
   // Every path, one row each (the card scrolls): an approval covers each of them.
   const values = brief.subjectKind === 'path' ? brief.subjectValues.map((p) => relativize(p, request.workingDirectory)) : brief.subjectValues;
-  return [...values.flatMap((value, i) => labelled(i === 0 ? brief.subjectLabel : '', value, width, t.text)), ...fileOpRows];
+  return [...values.flatMap((value, i) => labelled(i === 0 ? brief.subjectLabel : '', value, width, t.text)), ...execRows];
 }
 
 /**
@@ -340,7 +347,8 @@ function detailRows(request: PermissionPromptRequest, state: PermissionCardState
   const { rest: reasons } = extractModelJudgmentAnnotation(analysis.reasons);
   const rows: CardRow[] = [];
   rows.push(...labelled('Tool', request.tool, width, t.text));
-  rows.push(...labelled('Directory', request.workingDirectory ?? '(unknown)', width, t.textMuted));
+  const ownDirectory = request.tool === 'exec' ? execRunPlace(request.args).workingDirectory : undefined;
+  rows.push(...labelled('Directory', ownDirectory ?? request.workingDirectory ?? '(unknown)', width, t.textMuted));
   rows.push(...labelled('Risk', `${analysis.riskLevel} (${analysis.classification})`, width, riskColor(analysis.riskLevel)));
   if (analysis.surface || analysis.blastRadius) rows.push(...labelled('Surface', `${analysis.surface ?? 'generic'}${analysis.blastRadius ? ` · radius ${analysis.blastRadius}` : ''}`, width, t.textMuted));
   if (analysis.host) rows.push(...labelled('Host', analysis.host, width, t.textMuted));

@@ -451,9 +451,28 @@ export class ChannelPolicyManager {
       });
     };
     this.ownerInboxUnsubscribe = inbox.subscribe(settle);
-    // An answer given before this attach (a restart in between) still counts; settling is idempotent.
+    // An answer given before this attach (a restart in between) still counts, once. An answer closed
+    // no later than the surface policy's last change is already in it, or was overridden by the owner
+    // since (a sender accepted and later removed stays removed), so it is not applied again. The
+    // policy times are read before any answer is applied, since applying one moves its surface's time.
     // It is read when the policies are, not at attach, so attaching at start-up opens no log.
-    const replay = (): void => { for (const item of inbox.listNow({ kinds: ['claim'], status: 'closed' })) settle(item); };
+    const replay = (): void => {
+      const answered: { readonly item: OwnerItem; readonly surface: string; readonly closedAt: number }[] = [];
+      for (const item of inbox.listNow({ kinds: ['claim'], status: 'closed' })) {
+        const surface = item.metadata?.['surface'];
+        if (item.status === 'answered' && item.closedAt !== undefined && typeof surface === 'string') {
+          answered.push({ item, surface, closedAt: item.closedAt });
+        }
+      }
+      const changedAt = new Map<string, number>();
+      for (const { surface } of answered) {
+        if (!changedAt.has(surface)) changedAt.set(surface, this.getPolicy(surface as ChannelSurface).updatedAt);
+      }
+      // Oldest first, so the first accepted sender is the one recorded as owner.
+      for (const { item, surface, closedAt } of answered.reverse()) {
+        if (closedAt > (changedAt.get(surface) ?? 0)) settle(item);
+      }
+    };
     if (this.loaded) replay();
     else this.pendingClaimReplay = replay;
     return () => {

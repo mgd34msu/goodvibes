@@ -366,7 +366,9 @@ async function handleAction(devices: DevicesClient, sessionId: string | undefine
       success: true,
       grants: grants.slice(0, limit).map((grant) => ({
         ...grant,
-        ...(grant.capability ? { capability: getDeviceCapability(grant.capability)?.title ?? grant.capability } : {}),
+        ...(grant.capabilityId && !grant.capabilityTitle
+          ? { capabilityTitle: getDeviceCapability(grant.capabilityId)?.title ?? grant.capabilityId }
+          : {}),
         ...(grant.expiresAt ? { expiresAt: new Date(grant.expiresAt).toISOString() } : {}),
       })),
     };

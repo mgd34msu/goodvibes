@@ -9,7 +9,7 @@ function toolEvidence(name: string, args: Record<string, string>, output: string
 }
 
 export const executionAssurance = defineBattery({
-  name: 'engine.core.execution-assurance', version: 4, accuracyFloor: .95,
+  name: 'engine.core.execution-assurance', version: 5, accuracyFloor: .95,
   description: 'Checks observed fixes, verification relevance and preserved success criteria against the authorized task.',
   context: RESPONSE_REVIEW_CONTEXT,
   items: {

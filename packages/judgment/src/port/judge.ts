@@ -220,6 +220,7 @@ export async function judge<const Items extends BatteryItems, R>(o: JudgeOptions
   try {
     result = await untilAborted(port.ask({
       state: o.state, questions, signal, deadlineMs, conclude,
+      ...(battery.context ? { sharedContext: battery.context } : {}),
       ...(battery.model === undefined ? {} : { model: battery.model }),
       context: contextFor(battery, 'battery', { site: o.site }),
     }), signal);

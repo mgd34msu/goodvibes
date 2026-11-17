@@ -28,6 +28,8 @@ export interface CallRecord {
    * proof. The state itself is not stored; audit-only and failed calls omit it. */
   readonly stateHash?: StateHash;
   readonly questions: JsonValue;
+  /** The evaluator rules every question of the call shared, stated once for the call (a battery's context). */
+  readonly sharedContext?: string;
   readonly latencyMs: number;
   readonly requestId: string | undefined;
   readonly lineage?: JudgmentLineage;

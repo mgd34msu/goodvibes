@@ -9,7 +9,7 @@
  * routes them. A decision none of them claims gets a neutral answer (first
  * choice, "no", lowest score) and is counted under `unrouted`.
  */
-import { withDecisionLog, type JudgmentPort, type JudgmentRequest, type Question, type Questions, type SqliteDecisionLog } from '@goodvibes-jev/judgment';
+import { placeSharedContext, withDecisionLog, type JudgmentPort, type JudgmentRequest, type Question, type Questions, type SqliteDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer, scoreAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { toolReadingsPort } from '../../test/_helpers/tool-readings.ts';
@@ -90,7 +90,12 @@ export function readingsPort(options: { readonly gate?: GateReadingTable; readon
   };
 }
 
-/** Wrap a port so every request is counted with the JSON size of what it would send. */
+/**
+ * Wrap a port so every request is counted with the JSON size of what it would
+ * send: its state and questions as a wire adapter sends them, with the
+ * request's shared context placed once (every adapter's wire takes the
+ * `state-head` form).
+ */
 export function countingPort(inner: JudgmentPort): JudgmentPort {
   return {
     get model() { return inner.model; },
@@ -98,7 +103,8 @@ export function countingPort(inner: JudgmentPort): JudgmentPort {
       request.signal?.throwIfAborted();
       request.beforeAttempt?.();
       decisionCounts.requests++;
-      decisionCounts.bytes += sizeOf({ model: request.model, questions: request.questions, state: request.state, context: request.context });
+      const wire = placeSharedContext('state-head', request.state, request.questions, request.sharedContext);
+      decisionCounts.bytes += sizeOf({ model: request.model, questions: wire.questions, state: wire.state, context: request.context });
       const site = request.context?.battery ?? request.context?.site ?? '(unnamed)';
       decisionCounts.bySite[site] = (decisionCounts.bySite[site] ?? 0) + 1;
       return inner.ask(request);

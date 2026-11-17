@@ -59,10 +59,14 @@ export function contextFor(header: PatternHeader, pattern: PatternName, options:
   };
 }
 
-/** Asks on behalf of a named decision, attributing the call in the decision log. */
+/**
+ * Asks on behalf of a named decision, attributing the call in the decision
+ * log. A decision with a `context` (a battery's shared evaluator rules) sends
+ * it once, as the request's shared context.
+ */
 export function askAs<const Q extends Questions>(
   port: JudgmentPort,
-  header: PatternHeader,
+  header: PatternHeader & { readonly context?: string | undefined },
   pattern: PatternName,
   state: EntryType,
   questions: Q,
@@ -71,6 +75,7 @@ export function askAs<const Q extends Questions>(
   return port.ask({
     state,
     questions,
+    ...(header.context ? { sharedContext: header.context } : {}),
     ...(header.model === undefined ? {} : { model: header.model }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.beforeAttempt === undefined ? {} : { beforeAttempt: options.beforeAttempt }),

@@ -57,6 +57,14 @@ export interface JudgmentRequest<Q extends Questions> {
   /** Nonempty questions keyed by the names that identify their answers. */
   readonly questions: Q;
   /**
+   * Evaluator rules every question of this request shares (a battery's
+   * `context`), stated once for the whole request instead of in each
+   * question's instructions. The port sends it once per request in the form
+   * its backend's wire takes (`placeSharedContext`). It is host text, never
+   * evidence.
+   */
+  readonly sharedContext?: string;
+  /**
    * Request a private-state commitment on a successfully recorded answer.
    * Use only when an independent saved-proof consumer must later match this
    * input after its original state is released. Ordinary audit and failed

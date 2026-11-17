@@ -1,11 +1,14 @@
 import type { Question } from '../index.ts';
+import { readSharedContext } from '../port/shared-context.ts';
 import { choiceAnswer, noulAnswer, scoreAnswer } from './fake-port.ts';
 
 /**
  * One scripted answer for one question of a decision request, or undefined to
- * give it the neutral answer. `state` is the request's state as sent.
+ * give it the neutral answer. `state` and `question` are as the caller asked
+ * them; `sharedContext` is the request's shared evaluator rules, which the
+ * wire carried once at the head of the state.
  */
-export type DecisionScript = (name: string, question: Question, state: unknown) => unknown;
+export type DecisionScript = (name: string, question: Question, state: unknown, sharedContext?: string) => unknown;
 
 /** The answer a question gets when no script claims it: "none" when offered, else the first option; the lowest score; "no". */
 export function neutralDecisionAnswer(question: Question): unknown {
@@ -29,11 +32,13 @@ export const conversationDecisionScript: DecisionScript = (name, question) => {
   return undefined;
 };
 
-/** One decision request as it reached the server. */
+/** One decision request as it reached the server, read back into what the caller asked. */
 export interface ScriptedDecisionRequest {
   readonly model: unknown;
   readonly questions: Readonly<Record<string, Question>>;
   readonly state: unknown;
+  /** The request's shared evaluator rules, sent once for the request. */
+  readonly sharedContext?: string;
 }
 
 export interface ScriptedDecisionServer {
@@ -63,7 +68,7 @@ function readRequest(body: unknown): ScriptedDecisionRequest | undefined {
   if (!questions || typeof questions !== 'object' || Array.isArray(questions)) return undefined;
   const entries = Object.entries(questions);
   if (entries.length === 0 || !entries.every(([, question]) => isQuestion(question))) return undefined;
-  return { model, questions: questions as Record<string, Question>, state };
+  return { model, ...readSharedContext(state, questions as Record<string, Question>) };
 }
 
 /**
@@ -88,7 +93,7 @@ export function startScriptedDecisionServer(options: { readonly script?: Decisio
     if (!decision) { unreadable.push(body); return Response.json({ error: { message: 'Not a decision request' } }, { status: 400 }); }
     requests.push(decision);
     const answers = Object.fromEntries(Object.entries(decision.questions)
-      .map(([name, question]) => [name, script(name, question, decision.state) ?? neutralDecisionAnswer(question)]));
+      .map(([name, question]) => [name, script(name, question, decision.state, decision.sharedContext) ?? neutralDecisionAnswer(question)]));
     return Response.json({ model, answers, usage: { input_tokens: 10, output_tokens: 3 } });
   } });
   return {

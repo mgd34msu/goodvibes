@@ -15,6 +15,7 @@ import { hashState, isoTime, type DecisionLog, type DecisionNote, type NewDecisi
 interface RecordedInput {
   readonly state: JudgmentRequest<Questions>['state'];
   readonly questions: Questions;
+  readonly sharedContext: string | undefined;
   readonly context: NonNullable<JudgmentRequest<Questions>['context']>;
   readonly stateHash: string;
   readonly decisionId: string;
@@ -54,8 +55,10 @@ export function recordedJudgmentInputHash(value: unknown, request: unknown): str
   const recorded = applyRecordedInput(getRecordedInput, recordedInputResults, [value]) as RecordedInput | undefined; if (!recorded || typeof recorded.decisionId !== 'string' || !recorded.decisionId) return undefined;
   try {
     const id = Object.getOwnPropertyDescriptor(value, 'decisionId'), state = Object.getOwnPropertyDescriptor(request, 'state'), questions = Object.getOwnPropertyDescriptor(request, 'questions'), context = Object.getOwnPropertyDescriptor(request, 'context');
+    const shared = Object.getOwnPropertyDescriptor(request, 'sharedContext');
     if (!id || !('value' in id) || id.value !== recorded.decisionId || !state || !questions || !('value' in state) || !('value' in questions)
       || (context !== undefined && !('value' in context))
+      || (shared !== undefined && !('value' in shared)) || (shared?.value || undefined) !== recorded.sharedContext
       || !sameRecordedData(recorded.state, state.value) || !sameRecordedData(recorded.questions, questions.value)
       || !sameRecordedData(recorded.context, context?.value ?? {})) return undefined;
     return recorded.stateHash;
@@ -317,6 +320,8 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, options: 
         context,
         // Plain JSON already: the capture above is a JSON round trip.
         questions: questions as unknown as JsonValue,
+        // Stated once for the request; its questions do not repeat it.
+        ...(input.sharedContext === undefined ? {} : { sharedContext: input.sharedContext }),
       };
       let originalResult: JudgmentResult<Q> | undefined;
       let result: JudgmentResult<Q>;
@@ -402,7 +407,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, options: 
         return id;
       });
       const returned = recordImmutableJudgmentResult(retainNativeModelObservation(originalResult, { ...resultToReturn, decisionId }));
-      if (entry.stateHash !== undefined) applyRecordedInput(setRecordedInput, recordedInputResults, [returned, { state: input.state, questions: input.questions, context: call.context, stateHash: entry.stateHash, decisionId }]);
+      if (entry.stateHash !== undefined) applyRecordedInput(setRecordedInput, recordedInputResults, [returned, { state: input.state, questions: input.questions, sharedContext: input.sharedContext, context: call.context, stateHash: entry.stateHash, decisionId }]);
       return returned;
     },
   };

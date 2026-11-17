@@ -3,6 +3,7 @@ import type { JudgmentConfig, JudgmentEndpoint } from './config.ts';
 import { requestWithoutDeadline, systemOneWithoutDeadline, type PreparedBody } from './client.ts';
 import { JudgmentError } from './errors.ts';
 import { matchesJudgmentModel } from './endpoint-validation.ts';
+import type { SharedContextForm } from './shared-context.ts';
 
 import type { JudgmentAdapterKind } from './model-profiles.ts';
 export { DECISION_MODEL_PROFILES, type JudgmentAdapterKind, type DecisionModelProfile } from './model-profiles.ts';
@@ -12,6 +13,24 @@ export function judgmentAdapter(endpoint: JudgmentEndpoint): JudgmentAdapterKind
   const url = new URL(endpoint.baseURL);
   return url.hostname === 'api.cloudflare.com' && /\/ai\/run\/@cf\/cloudflare\/clef(?:-flash)?\/?$/.test(url.pathname)
     ? 'cloudflare-workers-ai' : 'system-one';
+}
+
+/**
+ * How each adapter's wire carries a request's shared context. None of them has
+ * a field for it, so each sends it once at the head of the state: the System
+ * One body (TypeSafe's hosted Jev and every loopback model on the same wire:
+ * Kev, DiffusionGemma Jev) is `SystemOneRequest` in @typesafe-ai/sdk, whose
+ * only fields are state, questions and model; the Cloudflare run endpoint
+ * (clef, clef-flash) and Laya take that same body.
+ */
+const SHARED_CONTEXT_FORMS: Readonly<Record<JudgmentAdapterKind, SharedContextForm>> = {
+  'system-one': 'state-head',
+  'cloudflare-workers-ai': 'state-head',
+  laya: 'state-head',
+};
+
+export function sharedContextForm(endpoint: JudgmentEndpoint): SharedContextForm {
+  return SHARED_CONTEXT_FORMS[judgmentAdapter(endpoint)];
 }
 
 /** Capabilities are deployment facts. They never authorize dropping evidence.

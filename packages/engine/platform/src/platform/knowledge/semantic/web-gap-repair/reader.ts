@@ -38,7 +38,7 @@ export function createWebGapReadings(options: { readonly signal: AbortSignal; re
     return { model, ...(owned.recorder ? { recorder: owned.recorder } : {}), async ask(request) {
       requireSemanticKnowledge();
       assertCurrent();
-      bytes += new TextEncoder().encode(JSON.stringify({ state: request.state, questions: request.questions })).byteLength + 1024;
+      bytes += new TextEncoder().encode(JSON.stringify({ state: request.state, questions: request.questions, sharedContext: request.sharedContext })).byteLength + 1024;
       if (++requests > LIMITS.requests || bytes > LIMITS.bytes) throw new Held('budget');
       const result = await owned.ask({ ...request, model, signal: options.signal });
       assertCurrent();

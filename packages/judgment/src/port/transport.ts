@@ -2,11 +2,12 @@ import { assertSynchronousJudgmentGuard } from './attempt-guard.ts';
 import { APIError, APITimeoutError, type Questions } from '@typesafe-ai/sdk';
 import { checkAnswers, markCheckedAnswers, projectAnswers } from './answers.ts';
 import { PreparedBody, toJudgmentError } from './client.ts';
-import { acceptsBackendModel, askBackend, judgmentAdapter, validateBackendInput } from './backends.ts';
-import { validateJudgmentConfig, type JudgmentConfig } from './config.ts';
+import { acceptsBackendModel, askBackend, judgmentAdapter, sharedContextForm, validateBackendInput } from './backends.ts';
+import { validateJudgmentConfig, type JudgmentConfig, type JudgmentEndpoint } from './config.ts';
 import { DEADLINE_COOLDOWN_MS, DEADLINE_MISSES_BEFORE_COOLDOWN } from './deadline.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentFailureReason } from './errors.ts';
-import { checkInputBytes, requiresLongContextFor, serializeInput, validateQuestions, wireBody, wireBodyBytes } from './limits.ts';
+import { checkInputBytes, requiresLongContextFor, serializeInput, validateQuestions, wireBody, wireBodyBytes, type SerializedInput } from './limits.ts';
+import { placeSharedContext, type SharedContextForm } from './shared-context.ts';
 import { withRequestId } from './request-id.ts';
 import { connectionRefused, delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
 import { recordNativeModelObservation } from './model-observation.ts';
@@ -121,14 +122,27 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           deadlineTimer = setTimeout(() => controller.abort(missedDeadline), deadlineMs);
         }
         checkCancellation();
-        let input: Pick<JudgmentRequest<Q>, 'state' | 'questions'>;
+        let input: Pick<JudgmentRequest<Q>, 'state' | 'questions' | 'sharedContext'>;
         try { input = captureJudgmentInput(request); }
         catch { throw new JudgmentError('invalid-request', 'judgment input must be JSON-serializable', { reason: 'not-serializable' }); }
-        const { state, questions } = input;
+        const { state, questions, sharedContext } = input;
         validateQuestions(questions);
-        // The state is serialized once here; size checks and every wire body reuse it.
-        const serialized = serializeInput(state, questions);
-        checkInputBytes(serialized);
+        // The shared context goes once per request, in the form each target's
+        // wire takes. Each form is placed and serialized once; size checks and
+        // every wire body of that form reuse it.
+        const serializedForms = new Map<SharedContextForm, SerializedInput>();
+        const serializedFor = (endpoint: JudgmentEndpoint): SerializedInput => {
+          const form = sharedContextForm(endpoint);
+          let serialized = serializedForms.get(form);
+          if (serialized === undefined) {
+            const wire = placeSharedContext(form, state, questions, sharedContext);
+            serialized = serializeInput(wire.state, wire.questions);
+            checkInputBytes(serialized);
+            serializedForms.set(form, serialized);
+          }
+          return serialized;
+        };
+        serializedFor(targets[0]!.endpoint);
         let lastFailure: JudgmentError | undefined;
         // What the last failed attempt ran into, for the terminal message.
         let lastReason: JudgmentFailureReason | undefined;
@@ -144,6 +158,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           const { target, endpointIndex } = entry;
           if (cooldowns[endpointIndex]! > Date.now()) { skippedForCooldown = true; continue; }
           const targetModel = endpointIndex === 0 ? requestedModel : target.model;
+          const serialized = serializedFor(target.endpoint);
           let headers = judgmentAdapter(target.endpoint) === 'system-one' && requiresLongContextFor(serialized)
             ? { 'TypeSafe-Danger-Zone-Long-Context': 'true' } : undefined;
           let contextUpgrade = false;

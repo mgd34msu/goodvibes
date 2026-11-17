@@ -2,6 +2,7 @@ import type { AnyReading, Battery, BatteryItems, ReadingFor } from '../batteries
 import { readItem } from '../batteries/battery.ts';
 import { recordAction, recordReadings, type CallOptions } from '../batteries/asking.ts';
 import type { EntryType, JudgmentPort, JudgmentResult, Question, Questions } from '../port/types.ts';
+import { prefixInstructions } from '../port/shared-context.ts';
 
 type WireAnswers = JudgmentResult<Questions>['answers'];
 type PartReadings = Readonly<Record<string, Readonly<Record<string, AnyReading>>>>;
@@ -51,11 +52,22 @@ function selectedItems(parts: Parts, only: Readonly<Record<string, readonly stri
   }));
 }
 
-function mergedQuestions(parts: Readonly<Record<string, BatteryItems>>): Questions {
+/**
+ * The one context every part shares, sent once as the request's shared
+ * context; undefined when no part has one, or when the parts' contexts differ
+ * (then each part's own context goes ahead of its own questions).
+ */
+function commonContext(parts: Parts): string | undefined {
+  const contexts = new Set(Object.values(parts).map(battery => battery.context || undefined));
+  return contexts.size === 1 ? [...contexts][0] : undefined;
+}
+
+function mergedQuestions(parts: Parts, selected: Readonly<Record<string, BatteryItems>>, shared: string | undefined): Questions {
   const questions: Record<string, Question> = {};
-  for (const [part, items] of Object.entries(parts)) {
+  for (const [part, items] of Object.entries(selected)) {
     if (part.includes(SEPARATOR)) throw new RangeError(`fan-out part "${part}" may not contain "${SEPARATOR}"`);
-    for (const [item, spec] of Object.entries(items)) questions[questionKey(part, item)] = spec.question;
+    const own = shared === undefined ? parts[part]!.context || undefined : undefined;
+    for (const [item, spec] of Object.entries(items)) questions[questionKey(part, item)] = own === undefined ? spec.question : prefixInstructions(spec.question, own);
   }
   return questions;
 }
@@ -88,13 +100,15 @@ export async function fanOut<const P extends Parts, const Only extends Selection
   const defaultModel = port.model;
   const model = sharedModel(defaultModel, parts);
   const selected = selectedItems(parts, options.only);
+  const shared = commonContext(parts);
   const batteries = Object.entries(parts).map(([part, battery]) => ({
     part, name: battery.name, version: battery.version, model: battery.model ?? defaultModel,
     questions: Object.keys(selected[part]!),
   }));
   const result = await port.ask({
     state,
-    questions: mergedQuestions(selected),
+    questions: mergedQuestions(parts, selected, shared),
+    ...(shared === undefined ? {} : { sharedContext: shared }),
     ...(model === defaultModel ? {} : { model }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.beforeAttempt === undefined ? {} : { beforeAttempt: options.beforeAttempt }),

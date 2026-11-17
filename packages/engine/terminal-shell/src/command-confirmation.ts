@@ -162,6 +162,8 @@ export function withOwnerConfirmation<Context extends ConfirmationHost, Command 
 /** What the shared confirmations below read from the surface's command context. */
 export interface SharedConfirmationContext {
   readonly platform: { readonly configManager: { getCategory(category: 'notifications'): { readonly webhookUrls?: unknown } } };
+  /** The line came from the model's command runner, not the owner's keyboard. */
+  readonly invokedByModel?: boolean | undefined;
 }
 
 type SharedConfirm = (args: readonly string[], context: SharedConfirmationContext) => CommandConfirmation | undefined;
@@ -185,11 +187,38 @@ export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, Share
       confirmLabel: 'Clear',
     };
   },
-  mcp(args) {
+  mcp(args, context) {
     // The words after the subcommand, without `--scope <scope>`.
     const words = args.slice(1).filter((word, index, all) => !word.startsWith('--') && all[index - 1] !== '--scope');
     const server = words[0];
     if (!server) return undefined;
+    const tool = words[1];
+    // A kept per-tool allow, or dropping a kept rule (which may lift a denial), loosens what a server
+    // may do: the owner's own act. A model-run line is refused here, before any question is put.
+    if ((args[0] === 'allow' || args[0] === 'clear') && tool) {
+      if (context.invokedByModel === true) {
+        throw commandRefusal(`/mcp ${args[0]} ${server} ${tool} is the owner's own act: it loosens what an MCP server may do. Nothing was changed.`,
+          `Ask the owner to type /mcp ${args[0]} ${server} ${tool}, or to set it in Settings.`, 'OWNER_ONLY_COMMAND');
+      }
+      return args[0] === 'allow'
+        ? {
+            title: `Allow ${tool} on ${server} past its scope?`,
+            detail: `Calls to ${tool} pass ${server}'s path and host scope, kept in your global MCP config until /mcp clear ${server} ${tool}. A blocked server, a quarantined schema or a denial of ${tool} still refuses it.`,
+            confirmLabel: 'Allow',
+          }
+        : {
+            title: `Drop the rule kept for ${tool} on ${server}?`,
+            detail: `The allow or denial kept for ${tool} in ${server}'s MCP config is removed; its trust mode and scope decide each call again. A denial set for this session stays.`,
+            confirmLabel: 'Clear',
+          };
+    }
+    if (args[0] === 'deny' && tool && words[2] === 'config') {
+      return {
+        title: `Lift this session's denial of ${tool} on ${server}?`,
+        detail: `Calls to ${tool} are no longer refused for this session; a denial kept in ${server}'s MCP config still applies.`,
+        confirmLabel: 'Lift',
+      };
+    }
     // Loosening security is the owner's call: a looser trust mode, or lifting a quarantine.
     if (args[0] === 'trust' && (words[1] === 'ask-on-risk' || words[1] === 'config')) {
       return {

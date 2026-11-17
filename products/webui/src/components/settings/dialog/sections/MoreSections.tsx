@@ -24,6 +24,7 @@ import { StatusDot } from '../../../ui/StatusDot';
 import { Toggle } from '../../../ui/Toggle';
 import { MemoryDiagnostics } from '../../MemoryDiagnostics';
 import { PermissionRules } from '../../PermissionRules';
+import { McpToolRules } from '../../McpToolRules';
 import { NotificationSettings } from '../../NotificationSettings';
 import { PairingTokensSettings } from '../../PairingTokensSettings';
 import { PowerSettings } from '../../PowerSettings';
@@ -185,6 +186,7 @@ export function PermissionsSection() {
   return (
     <>
       <PermissionRules />
+      <McpToolRules />
       <SectionConfig id="permissions" emptyText="No permission settings reported." />
     </>
   );

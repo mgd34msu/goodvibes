@@ -28,9 +28,10 @@ export interface McpWorkspaceStatePorts<Context, Form extends McpWorkspaceFormBa
   };
   readonly requestRender: (context: Context) => void;
 }
-function isTextField(field: string): field is 'name' | 'command' | 'args' | 'env' | 'allowedPaths' | 'allowedHosts' {
+function isTextField(field: string): field is 'name' | 'command' | 'args' | 'env' | 'allowedPaths' | 'allowedHosts' | 'deniedTools' {
   return (
     field === 'name' || field === 'command' || field === 'args' || field === 'env' || field === 'allowedPaths' || field === 'allowedHosts'
+    || field === 'deniedTools'
   );
 }
 export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBase, ExtraMode extends string = never> {

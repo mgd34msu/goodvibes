@@ -36,7 +36,21 @@ export interface McpServerConfig {
    * before it is cancelled and the server told. Absent: 120 s. 0: no deadline.
    */
   toolTimeoutMs?: number | undefined;
+  /**
+   * Tools of this server refused on every call, whatever its trust mode and
+   * scope allow. Any MCP file may carry it: a denial only tightens.
+   */
+  deniedTools?: string[] | undefined;
+  /**
+   * Tools of this server allowed even outside its path and host scope (a
+   * blocked server, a quarantined schema and a denial of the same tool still
+   * refuse). Kept only in the owner's own files: one in a project file is ignored.
+   */
+  allowedTools?: string[] | undefined;
 }
+
+/** A rule kept for one tool with its server's entry: allow, deny, or clear whichever is kept. */
+export type McpToolRule = 'allow' | 'deny' | 'clear';
 
 export interface McpConfig {
   servers: McpServerConfig[];
@@ -79,6 +93,20 @@ function optionalStringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
     ? [...value]
     : undefined;
+}
+
+/** Tool names as written: trimmed, empty and repeated names dropped; absent when none is left. */
+function toolNameList(value: unknown): string[] | undefined {
+  const names = optionalStringArray(value);
+  if (!names) return undefined;
+  const kept = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+  return kept.length > 0 ? kept : undefined;
+}
+
+function sameToolNames(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  const left = new Set(a ?? []);
+  const right = new Set(b ?? []);
+  return left.size === right.size && [...left].every((name) => right.has(name));
 }
 
 function optionalStringRecord(value: unknown): Record<string, string> | undefined {
@@ -139,6 +167,8 @@ function normalizeServerConfig(name: string, raw: Record<string, unknown>): McpS
     allowedPaths: optionalStringArray(raw.allowedPaths),
     allowedHosts: optionalStringArray(raw.allowedHosts),
     toolTimeoutMs: optionalToolTimeout(name, raw.toolTimeoutMs),
+    deniedTools: toolNameList(raw.deniedTools),
+    allowedTools: toolNameList(raw.allowedTools),
   };
 }
 
@@ -217,8 +247,10 @@ function describeEntry(entry: unknown): string {
 /** One goodvibes-format entry, or null when it lacks a name, or a command or url, or has a field of the wrong type. */
 function readServerEntry(entry: unknown): McpServerConfig | null {
   if (!isServerEntry(entry)) return null;
-  const { role, trustMode, headers, ...rest } = entry;
+  const { role, trustMode, headers, deniedTools, allowedTools, ...rest } = entry;
   const knownHeaders = optionalStringRecord(headers);
+  const knownDenied = toolNameList(deniedTools);
+  const knownAllowed = toolNameList(allowedTools);
   const knownRole = knownValue<NonNullable<McpServerConfig['role']>>(entry.name, 'role', role, MCP_SERVER_ROLES);
   const knownTrust = knownValue<NonNullable<McpServerConfig['trustMode']>>(entry.name, 'trustMode', trustMode, MCP_TRUST_MODES);
   return {
@@ -226,11 +258,13 @@ function readServerEntry(entry: unknown): McpServerConfig | null {
     ...(knownHeaders !== undefined ? { headers: knownHeaders } : {}),
     ...(knownRole !== undefined ? { role: knownRole } : {}),
     ...(knownTrust !== undefined ? { trustMode: knownTrust } : {}),
+    ...(knownDenied !== undefined ? { deniedTools: knownDenied } : {}),
+    ...(knownAllowed !== undefined ? { allowedTools: knownAllowed } : {}),
   };
 }
 
 /** Fields this module models; anything else in a file is the user's and is carried through a rewrite. */
-const MODELLED_SERVER_FIELDS = new Set(['name', 'command', 'url', 'args', 'env', 'headers', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'toolTimeoutMs']);
+const MODELLED_SERVER_FIELDS = new Set(['name', 'command', 'url', 'args', 'env', 'headers', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'toolTimeoutMs', 'deniedTools', 'allowedTools']);
 
 function readUnmodelledFields(path: string): Map<string, Record<string, unknown>> {
   const found = new Map<string, Record<string, unknown>>();
@@ -340,6 +374,12 @@ function assertServerConfig(server: McpServerConfig): void {
   if (server.toolTimeoutMs !== undefined && !isToolTimeout(server.toolTimeoutMs)) {
     throw new Error('MCP server toolTimeoutMs must be a whole number of milliseconds, 0 for no deadline.');
   }
+  for (const field of ['deniedTools', 'allowedTools'] as const) {
+    const names: unknown = server[field];
+    if (names !== undefined && (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || !name.trim()))) {
+      throw new Error(`MCP server ${field} must be a list of tool names.`);
+    }
+  }
   const hasCommand = Boolean(server.command?.trim());
   const hasUrl = Boolean(server.url?.trim());
   if (!hasCommand && !hasUrl) throw new Error('MCP server needs a command (stdio) or a url (HTTP).');
@@ -372,6 +412,8 @@ function writeMcpConfigFile(path: string, config: McpConfig, removedName?: strin
         ...(server.allowedPaths !== undefined ? { allowedPaths: [...server.allowedPaths] } : {}),
         ...(server.allowedHosts !== undefined ? { allowedHosts: [...server.allowedHosts] } : {}),
         ...(server.toolTimeoutMs !== undefined ? { toolTimeoutMs: server.toolTimeoutMs } : {}),
+        ...(server.deniedTools?.length ? { deniedTools: [...server.deniedTools] } : {}),
+        ...(server.allowedTools?.length ? { allowedTools: [...server.allowedTools] } : {}),
       };
     }), ...unparsed],
   };
@@ -413,6 +455,11 @@ export function loadMcpEffectiveConfig(roots: McpConfigRoots, options: McpEffect
           logger.warn('[MCP] Ignored trustMode allow-all from a project file; the default trust mode applies', { path: location.path, server: server.name });
           server = { ...server, trustMode: undefined };
         }
+        if (projectScope && server.allowedTools !== undefined) {
+          // The same for a per-tool allow: it widens what the server may do, so only the owner's own files keep one.
+          logger.warn('[MCP] Ignored allowedTools from a project file; a per-tool allow is kept only in your own MCP config', { path: location.path, server: server.name, tools: server.allowedTools });
+          server = { ...server, allowedTools: undefined };
+        }
         serversByName.set(server.name, { server, source: location });
       }
     } catch (err) {
@@ -432,11 +479,19 @@ export function loadWritableMcpConfig(roots: McpConfigRoots, scope: McpConfigSco
   return readMcpConfigAtPath(location.path);
 }
 
+/** Why a project file never keeps a per-tool allow, and where the owner keeps one instead. */
+function projectAllowRefusal(serverName: string): string {
+  return `A per-tool allow for ${serverName} is not kept in the project's MCP file: a repository can bring that file, so an allow there is ignored. `
+    + `Add ${serverName} to your global MCP config (scope global) and allow the tool there.`;
+}
+
 /**
  * Write a server entry, creating or replacing it by name.
  *
  * `args`, `env` and `headers` are the fields an omitted value PRESERVES rather
- * than clears.
+ * than clears. So are `deniedTools` and `allowedTools`: a writer that does not
+ * show them (a form or client that predates them) must not drop a denial the
+ * owner kept.
  *
  * Every other field is a full replacement, which is right: the caller can see
  * what it is replacing. These three it cannot: the read side redacts args and
@@ -454,6 +509,7 @@ export function upsertMcpServerConfig(
   server: McpServerConfig,
 ): { readonly path: string; readonly config: McpConfig } {
   assertServerConfig(server);
+  if (scope === 'project' && (server.allowedTools?.length ?? 0) > 0) throw new Error(projectAllowRefusal(server.name));
   const location = writableMcpConfigLocation(roots, scope);
   const current = readMcpConfigAtPath(location.path);
   const existing = current.servers.find((entry) => entry.name === server.name);
@@ -461,16 +517,55 @@ export function upsertMcpServerConfig(
   const preservedArgs = server.args === undefined ? existing?.args : undefined;
   const preservedEnv = server.env === undefined ? existing?.env : undefined;
   const preservedHeaders = server.headers === undefined ? existing?.headers : undefined;
+  const preservedDenied = server.deniedTools === undefined ? existing?.deniedTools : undefined;
+  const preservedAllowed = server.allowedTools === undefined ? existing?.allowedTools : undefined;
   nextServers.push({
     ...server,
     ...(preservedArgs === undefined ? {} : { args: [...preservedArgs] }),
     ...(preservedEnv === undefined ? {} : { env: { ...preservedEnv } }),
     ...(preservedHeaders === undefined ? {} : { headers: { ...preservedHeaders } }),
+    ...(preservedDenied === undefined ? {} : { deniedTools: [...preservedDenied] }),
+    ...(preservedAllowed === undefined ? {} : { allowedTools: [...preservedAllowed] }),
   });
   nextServers.sort((a, b) => a.name.localeCompare(b.name));
   const config = { servers: nextServers };
   writeMcpConfigFile(location.path, config);
   return { path: location.path, config };
+}
+
+/**
+ * Keep one tool's rule with its server's entry in a writable file: `deny`
+ * refuses every call to it, `allow` lets it past the server's path and host
+ * scope, `clear` drops whichever the entry keeps. A tool has at most one kept
+ * rule, so allowing a denied tool replaces the denial. An allow is refused for
+ * the project file (see {@link projectAllowRefusal}). `changed` is false when
+ * the entry already kept that rule; the file is then left as it is.
+ */
+export function setMcpServerToolRule(
+  roots: McpConfigRoots,
+  scope: McpConfigScope,
+  serverName: string,
+  toolName: string,
+  rule: McpToolRule,
+): { readonly path: string; readonly changed: boolean; readonly config: McpConfig } {
+  const tool = toolName.trim();
+  if (!tool) throw new Error('MCP tool name is required.');
+  if (rule === 'allow' && scope === 'project') throw new Error(projectAllowRefusal(serverName));
+  const location = writableMcpConfigLocation(roots, scope);
+  const current = readMcpConfigAtPath(location.path);
+  const existing = current.servers.find((entry) => entry.name === serverName);
+  if (!existing) throw new Error(`No MCP server named '${serverName}' in ${location.path}, so no rule for its tool '${tool}' was kept.`);
+  const denied = (existing.deniedTools ?? []).filter((name) => name !== tool);
+  const allowed = (existing.allowedTools ?? []).filter((name) => name !== tool);
+  if (rule === 'deny') denied.push(tool);
+  if (rule === 'allow') allowed.push(tool);
+  const next: McpServerConfig = { ...existing, deniedTools: denied.length > 0 ? denied : undefined, allowedTools: allowed.length > 0 ? allowed : undefined };
+  if (sameToolNames(existing.deniedTools, next.deniedTools) && sameToolNames(existing.allowedTools, next.allowedTools)) {
+    return { path: location.path, changed: false, config: current };
+  }
+  const config = { servers: current.servers.map((entry) => (entry === existing ? next : entry)) };
+  writeMcpConfigFile(location.path, config);
+  return { path: location.path, changed: true, config };
 }
 
 /**
@@ -518,5 +613,9 @@ function isServerEntry(s: unknown): s is McpServerConfig {
   if (srv['allowedPaths'] !== undefined && (!Array.isArray(srv['allowedPaths']) || !srv['allowedPaths'].every((a: unknown) => typeof a === 'string'))) return false;
   if (srv['allowedHosts'] !== undefined && (!Array.isArray(srv['allowedHosts']) || !srv['allowedHosts'].every((a: unknown) => typeof a === 'string'))) return false;
   if (srv['toolTimeoutMs'] !== undefined && !isToolTimeout(srv['toolTimeoutMs'])) return false;
+  for (const field of ['deniedTools', 'allowedTools']) {
+    const names = srv[field];
+    if (names !== undefined && (!Array.isArray(names) || !names.every((a: unknown) => typeof a === 'string'))) return false;
+  }
   return true;
 }

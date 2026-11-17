@@ -1,9 +1,9 @@
 import type { McpToolSchema } from './client.js';
 import type { McpClientPhase, McpExcludedTool, McpToolCallOptions } from './client-types.js';
 import type { McpServerHealth, RegisteredTool } from './registry.js';
-import type { McpConfigRoots, McpConfigScope, McpEffectiveConfig, McpServerConfig } from './config.js';
+import type { McpConfigRoots, McpConfigScope, McpEffectiveConfig, McpServerConfig, McpToolRule } from './config.js';
 import type { McpReloadResult } from './registry.js';
-import type { McpDecisionRecord, McpReconnectStatus, McpServerRole, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
+import type { McpDecisionRecord, McpReconnectStatus, McpServerRole, McpToolRuleRecord, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
 
 export interface McpServerRecord {
   readonly name: string;
@@ -44,11 +44,19 @@ export interface McpServerSecurityRecord {
   /** A trust mode or role set for this session; it outlives reconnects and reloads until cleared or the process exits. */
   readonly sessionTrustMode?: McpTrustMode | undefined;
   readonly sessionRole?: McpServerRole | undefined;
-  /** Tools the owner denied for this session; absent when none. */
-  readonly deniedTools?: readonly string[] | undefined;
+  /** Per-tool allows and denials, each with where it came from (this session or the server's MCP config); absent when none. A deny wins. */
+  readonly toolRules?: readonly McpToolRuleRecord[] | undefined;
   /** The values the server's config gives, which apply again once a session value is cleared. */
   readonly configuredTrustMode?: McpTrustMode | undefined;
   readonly configuredRole?: McpServerRole | undefined;
+}
+
+/** Where a kept per-tool rule was written, whether the file changed, and the reload that applied it. */
+export interface McpStoredToolRuleResult {
+  readonly scope: McpConfigScope;
+  readonly path: string;
+  readonly changed: boolean;
+  readonly reload: McpReloadResult;
 }
 
 export interface McpSandboxBindingRecord {
@@ -95,6 +103,11 @@ export interface McpApi {
   denyServerTool?(serverName: string, toolName: string): void;
   /** End this session's deny of one tool; false when it had none. */
   clearServerToolDenial?(serverName: string, toolName: string): boolean;
+  /**
+   * Keep one tool's allow or deny with the server's entry in its MCP config
+   * file, or clear it, and apply it. An allow is the owner's act only.
+   */
+  storeServerToolRule?(serverName: string, toolName: string, rule: McpToolRule, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }
@@ -130,6 +143,11 @@ export interface McpApiRegistry {
   denyServerTool?(serverName: string, toolName: string): void;
   /** End this session's deny of one tool; false when it had none. */
   clearServerToolDenial?(serverName: string, toolName: string): boolean;
+  /**
+   * Keep one tool's allow or deny with the server's entry in its MCP config
+   * file, or clear it, and apply it. An allow is the owner's act only.
+   */
+  storeServerToolRule?(serverName: string, toolName: string, rule: McpToolRule, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }
@@ -186,6 +204,9 @@ export function createMcpApi(registry: McpApiRegistry): McpApi {
       : {}),
     ...(registry.clearServerToolDenial
       ? { clearServerToolDenial: (serverName: string, toolName: string) => registry.clearServerToolDenial!(serverName, toolName) }
+      : {}),
+    ...(registry.storeServerToolRule
+      ? { storeServerToolRule: (serverName: string, toolName: string, rule: McpToolRule, roots?: McpConfigRoots) => registry.storeServerToolRule!(serverName, toolName, rule, roots) }
       : {}),
     quarantineSchema(serverName, reason, detail) {
       registry.quarantineSchema(serverName, reason, detail);

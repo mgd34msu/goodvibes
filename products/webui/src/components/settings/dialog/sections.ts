@@ -183,10 +183,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
     id: 'permissions',
     label: 'Permissions',
     page: 'permissions',
-    description: 'Approval rules, the sandbox and tool policy.',
+    description: 'Approval rules, MCP tool rules, the sandbox and tool policy.',
     namespaces: ['permissions', 'sandbox', 'policy', 'security', 'danger', 'tools', 'conversationGate', 'fetch'],
-    keywords: ['approval', 'approve', 'allow', 'deny', 'sandbox', 'policy', 'safety'],
-    items: [],
+    keywords: ['approval', 'approve', 'allow', 'deny', 'sandbox', 'policy', 'safety', 'mcp', 'server'],
+    items: ['Approval rules', 'MCP tool rules'],
   },
   {
     id: 'network',

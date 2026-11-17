@@ -48,6 +48,7 @@ export type {
   McpAttackPathFinding,
   McpAttackPathReview,
   McpToolPermission,
+  McpToolRuleRecord,
   McpServerPermissions,
   McpServerEntry,
   McpReconnectConfig,

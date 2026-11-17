@@ -885,6 +885,8 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     trustMode: { kind: 'enum', values: ['allow-all', 'ask-on-risk', 'blocked', 'constrained'] },
     allowedPaths: { kind: 'string[]' },
     allowedHosts: { kind: 'string[]' },
+    deniedTools: { kind: 'string[]', optional: true },
+    allowedTools: { kind: 'string[]', optional: true },
   },
   MCP_RECONNECTING: {
     serverId: { kind: 'string' },

@@ -112908,6 +112908,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string"
                     }
                   },
+                  "deniedTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "allowedTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "source": {
                     "type": "object",
                     "properties": {
@@ -112944,6 +112956,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "trustMode",
                   "allowedPaths",
                   "allowedHosts",
+                  "deniedTools",
+                  "allowedTools",
                   "source"
                 ],
                 "additionalProperties": false
@@ -113150,6 +113164,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         }
                       },
+                      "deniedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "source": {
                         "type": "object",
                         "properties": {
@@ -113186,6 +113212,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "trustMode",
                       "allowedPaths",
                       "allowedHosts",
+                      "deniedTools",
+                      "allowedTools",
                       "source"
                     ],
                     "additionalProperties": false
@@ -113568,6 +113596,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         }
                       },
+                      "deniedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "source": {
                         "type": "object",
                         "properties": {
@@ -113604,6 +113644,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "trustMode",
                       "allowedPaths",
                       "allowedHosts",
+                      "deniedTools",
+                      "allowedTools",
                       "source"
                     ],
                     "additionalProperties": false
@@ -113773,6 +113815,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string"
                     }
                   },
+                  "deniedTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "allowedTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "source": {
                     "type": "object",
                     "properties": {
@@ -113811,6 +113865,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "trustMode",
                   "allowedPaths",
                   "allowedHosts",
+                  "deniedTools",
+                  "allowedTools",
                   "source"
                 ],
                 "additionalProperties": false
@@ -113824,6 +113880,929 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "mcp.servers.tools.allow",
+        "title": "Allow MCP Tool",
+        "description": "Keep an allow of one tool with its MCP server's entry in the owner's global MCP config and apply it at once: calls to the tool pass the server's path and host scope. A blocked server, a quarantined schema and a denial of the same tool still refuse. Loosens what the server may do, so it is the owner's own act: refused for the Agent's model and for a server kept in a project file.",
+        "category": "mcp",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:mcp"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/allow"
+        },
+        "events": [
+          "runtime.mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "serverName": {
+              "type": "string"
+            },
+            "toolName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "serverName",
+            "toolName"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "serverName": {
+              "type": "string"
+            },
+            "toolName": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "deny",
+                "clear"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "reload": {
+              "type": "object",
+              "properties": {
+                "added": {
+                  "type": "number"
+                },
+                "changed": {
+                  "type": "number"
+                },
+                "removed": {
+                  "type": "number"
+                },
+                "unchanged": {
+                  "type": "number"
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "added",
+                          "changed",
+                          "removed",
+                          "unchanged"
+                        ]
+                      },
+                      "connected": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "action",
+                      "connected"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "added",
+                "changed",
+                "removed",
+                "unchanged",
+                "servers"
+              ],
+              "additionalProperties": false
+            },
+            "config": {
+              "type": "object",
+              "properties": {
+                "locations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "scope": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "writable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "scope",
+                      "kind",
+                      "path",
+                      "writable"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "command": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "url": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "envKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "headerKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "role": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "trustMode": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "allowedPaths": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedHosts": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "deniedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "source": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "writable": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "kind",
+                          "path",
+                          "writable"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "command",
+                      "url",
+                      "args",
+                      "envKeys",
+                      "headerKeys",
+                      "role",
+                      "trustMode",
+                      "allowedPaths",
+                      "allowedHosts",
+                      "deniedTools",
+                      "allowedTools",
+                      "source"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "locations",
+                "servers"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "serverName",
+            "toolName",
+            "rule",
+            "scope",
+            "path",
+            "changed",
+            "reload",
+            "config"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "ownerOnly": true,
+        "invokable": true
+      },
+      {
+        "id": "mcp.servers.tools.clear",
+        "title": "Clear MCP Tool Rule",
+        "description": "Drop the allow or denial kept for one tool with its MCP server's entry and apply it at once, so the server's trust mode and scope decide the tool again. Lifting a denial loosens what the server may do, so it is the owner's own act: refused for the Agent's model.",
+        "category": "mcp",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:mcp"
+        ],
+        "http": {
+          "method": "DELETE",
+          "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}"
+        },
+        "events": [
+          "runtime.mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "serverName": {
+              "type": "string"
+            },
+            "toolName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "serverName",
+            "toolName"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "serverName": {
+              "type": "string"
+            },
+            "toolName": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "deny",
+                "clear"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "reload": {
+              "type": "object",
+              "properties": {
+                "added": {
+                  "type": "number"
+                },
+                "changed": {
+                  "type": "number"
+                },
+                "removed": {
+                  "type": "number"
+                },
+                "unchanged": {
+                  "type": "number"
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "added",
+                          "changed",
+                          "removed",
+                          "unchanged"
+                        ]
+                      },
+                      "connected": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "action",
+                      "connected"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "added",
+                "changed",
+                "removed",
+                "unchanged",
+                "servers"
+              ],
+              "additionalProperties": false
+            },
+            "config": {
+              "type": "object",
+              "properties": {
+                "locations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "scope": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "writable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "scope",
+                      "kind",
+                      "path",
+                      "writable"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "command": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "url": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "envKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "headerKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "role": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "trustMode": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "allowedPaths": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedHosts": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "deniedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "source": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "writable": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "kind",
+                          "path",
+                          "writable"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "command",
+                      "url",
+                      "args",
+                      "envKeys",
+                      "headerKeys",
+                      "role",
+                      "trustMode",
+                      "allowedPaths",
+                      "allowedHosts",
+                      "deniedTools",
+                      "allowedTools",
+                      "source"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "locations",
+                "servers"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "serverName",
+            "toolName",
+            "rule",
+            "scope",
+            "path",
+            "changed",
+            "reload",
+            "config"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "ownerOnly": true,
+        "invokable": true
+      },
+      {
+        "id": "mcp.servers.tools.deny",
+        "title": "Deny MCP Tool",
+        "description": "Keep a denial of one tool with its MCP server's entry in the config file that holds it (global or this project's .goodvibes/mcp.json) and apply it at once: every call to the tool is refused, whatever the server's trust mode and scope allow, and a call not yet sent ends. A denial replaces a kept allow of the same tool. Refused for a server whose entry is in a file another program owns.",
+        "category": "mcp",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:mcp"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/deny"
+        },
+        "events": [
+          "runtime.mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "serverName": {
+              "type": "string"
+            },
+            "toolName": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "serverName",
+            "toolName"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "serverName": {
+              "type": "string"
+            },
+            "toolName": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "string",
+              "enum": [
+                "allow",
+                "deny",
+                "clear"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ]
+            },
+            "path": {
+              "type": "string"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "reload": {
+              "type": "object",
+              "properties": {
+                "added": {
+                  "type": "number"
+                },
+                "changed": {
+                  "type": "number"
+                },
+                "removed": {
+                  "type": "number"
+                },
+                "unchanged": {
+                  "type": "number"
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "added",
+                          "changed",
+                          "removed",
+                          "unchanged"
+                        ]
+                      },
+                      "connected": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "action",
+                      "connected"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "added",
+                "changed",
+                "removed",
+                "unchanged",
+                "servers"
+              ],
+              "additionalProperties": false
+            },
+            "config": {
+              "type": "object",
+              "properties": {
+                "locations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "scope": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "writable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "scope",
+                      "kind",
+                      "path",
+                      "writable"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "servers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "command": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "url": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "envKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "headerKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "role": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "trustMode": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "allowedPaths": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedHosts": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "deniedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "source": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "writable": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "kind",
+                          "path",
+                          "writable"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "command",
+                      "url",
+                      "args",
+                      "envKeys",
+                      "headerKeys",
+                      "role",
+                      "trustMode",
+                      "allowedPaths",
+                      "allowedHosts",
+                      "deniedTools",
+                      "allowedTools",
+                      "source"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "locations",
+                "servers"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "serverName",
+            "toolName",
+            "rule",
+            "scope",
+            "path",
+            "changed",
+            "reload",
+            "config"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
         "invokable": true
       },
       {
@@ -113919,6 +114898,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   }
                 },
                 "allowedHosts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "deniedTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "allowedTools": {
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -114140,6 +115131,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "type": "string"
                         }
                       },
+                      "deniedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "source": {
                         "type": "object",
                         "properties": {
@@ -114176,6 +115179,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "trustMode",
                       "allowedPaths",
                       "allowedHosts",
+                      "deniedTools",
+                      "allowedTools",
                       "source"
                     ],
                     "additionalProperties": false
@@ -180465,10 +181470,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 633,
-      "typedInputs": 628,
+      "methods": 636,
+      "typedInputs": 631,
       "genericInputs": 5,
-      "typedOutputs": 631,
+      "typedOutputs": 634,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -180477,8 +181482,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 633,
-      "validated": 626,
+      "methods": 636,
+      "validated": 629,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

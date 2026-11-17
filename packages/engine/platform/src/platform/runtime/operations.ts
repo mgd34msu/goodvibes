@@ -35,6 +35,7 @@ export type {
   McpServerRole,
   McpServerState,
   McpToolPermission,
+  McpToolRuleRecord,
   McpTrustLevel,
   McpTrustMode,
   McpTrustProfile,

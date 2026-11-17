@@ -22,6 +22,7 @@ import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/plat
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
+import { keepMcpToolRuleFromSettings, parseMcpToolRuleEdit } from '@goodvibes-jev/engine/terminal-shell/settings-mcp-entries';
 import { buildFlagEntries } from './settings-modal-flag-entries.ts';
 import { buildPaymentsCardsRow, PAYMENTS_CARDS_ROW_KEY } from './payments-config.ts';
 import type { FeatureFlagManager } from '@/runtime/index.ts';
@@ -578,9 +579,25 @@ export class SettingsModal extends TerminalSettingsModalState<
         return this._applyTrustMode(entry, 'allow-all');
       }
 
+      // `deny <tool>`, `allow <tool>` or `clear <tool>`: a per-tool rule kept in the server's MCP config. This screen is the owner's own.
+      const toolEdit = parseMcpToolRuleEdit(this.editBuffer);
+      if (toolEdit) {
+        const registry = this.mcpRegistry;
+        this.editingMode = false;
+        this.editBuffer = '';
+        this.mcpAllowAllConfirmationTarget = null;
+        this.lastSettingEffectMessage = `Keeping ${toolEdit.rule} ${toolEdit.tool} for ${entry.name}...`;
+        keepMcpToolRuleFromSettings(registry, entry.name, toolEdit, (message, entries) => {
+          this.lastSettingEffectMessage = message;
+          if (this.mcpRegistry === registry) this.mcpEntries = entries;
+          this.requestHostSettingRender?.();
+        });
+        return true;
+      }
+
       const nextMode = this.editBuffer.trim() as McpEntry['trustMode'];
       if (!MCP_TRUST_MODES.includes(nextMode)) {
-        return this._rejectEdit(`Not changed: "${this.editBuffer.trim()}" is not a trust mode. Use ${MCP_TRUST_MODES.join(', ')}.`);
+        return this._rejectEdit(`Not changed: "${this.editBuffer.trim()}" is not a trust mode (${MCP_TRUST_MODES.join(', ')}) or a tool rule (deny <tool>, allow <tool>, clear <tool>).`);
       }
       return this._requestTrustMode(entry, nextMode);
     }

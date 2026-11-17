@@ -69,11 +69,11 @@ export function emitMcpDisconnected(
   bus.emit('mcp', createEventEnvelope('MCP_DISCONNECTED', { type: 'MCP_DISCONNECTED', ...data }, ctx));
 }
 
-/** Emit MCP_POLICY_UPDATED when server trust posture changes. */
+/** Emit MCP_POLICY_UPDATED when server trust posture or a per-tool rule changes. */
 export function emitMcpPolicyUpdated(
   bus: RuntimeEventBus,
   ctx: EmitterContext,
-  data: { serverId: string; role: McpServerRole; trustMode: McpTrustMode; allowedPaths: string[]; allowedHosts: string[] }
+  data: { serverId: string; role: McpServerRole; trustMode: McpTrustMode; allowedPaths: string[]; allowedHosts: string[]; deniedTools?: string[]; allowedTools?: string[] }
 ): void {
   bus.emit('mcp', createEventEnvelope('MCP_POLICY_UPDATED', { type: 'MCP_POLICY_UPDATED', ...data }, ctx));
 }

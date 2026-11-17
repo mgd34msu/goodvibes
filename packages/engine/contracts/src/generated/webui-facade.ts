@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.3.0
- * Methods: 633 total, 526 REST-routed, 107 ws-only invoke.
+ * Methods: 636 total, 529 REST-routed, 107 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -1243,6 +1243,18 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "mcp.servers.reveal": {
     "method": "GET",
     "path": "/api/mcp/servers/reveal"
+  },
+  "mcp.servers.tools.allow": {
+    "method": "POST",
+    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/allow"
+  },
+  "mcp.servers.tools.clear": {
+    "method": "DELETE",
+    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}"
+  },
+  "mcp.servers.tools.deny": {
+    "method": "POST",
+    "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/deny"
   },
   "mcp.servers.upsert": {
     "method": "POST",
@@ -2619,6 +2631,9 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "mcp.servers.list": "rest",
   "mcp.servers.remove": "rest",
   "mcp.servers.reveal": "rest",
+  "mcp.servers.tools.allow": "rest",
+  "mcp.servers.tools.clear": "rest",
+  "mcp.servers.tools.deny": "rest",
   "mcp.servers.upsert": "rest",
   "mcp.tools.list": "rest",
   "media.analyze": "rest",
@@ -22185,6 +22200,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "allowedHosts": [
             "sample"
           ],
+          "deniedTools": [
+            "sample"
+          ],
+          "allowedTools": [
+            "sample"
+          ],
           "source": {
             "scope": "sample",
             "kind": "sample",
@@ -22240,6 +22261,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "sample"
             ],
             "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
               "sample"
             ],
             "source": {
@@ -22335,6 +22362,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "allowedHosts": [
               "sample"
             ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
             "source": {
               "scope": "sample",
               "kind": "sample",
@@ -22381,6 +22414,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "allowedHosts": [
             "sample"
           ],
+          "deniedTools": [
+            "sample"
+          ],
+          "allowedTools": [
+            "sample"
+          ],
           "source": {
             "scope": "sample",
             "kind": "sample",
@@ -22389,6 +22428,225 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           }
         }
       ]
+    }
+  },
+  "mcp.servers.tools.allow": {
+    "input": {
+      "serverName": "sample",
+      "toolName": "sample"
+    },
+    "output": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "allow",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.tools.clear": {
+    "input": {
+      "serverName": "sample",
+      "toolName": "sample"
+    },
+    "output": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "allow",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.tools.deny": {
+    "input": {
+      "serverName": "sample",
+      "toolName": "sample"
+    },
+    "output": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "allow",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
     }
   },
   "mcp.servers.upsert": {
@@ -22444,6 +22702,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "sample"
             ],
             "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
               "sample"
             ],
             "source": {

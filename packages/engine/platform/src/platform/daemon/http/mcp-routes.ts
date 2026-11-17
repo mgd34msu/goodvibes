@@ -4,11 +4,13 @@ import type {
   McpConfigScope,
   McpEffectiveConfig,
   McpServerConfig,
+  McpToolRule,
 } from '../../mcp/config.js';
 import type { JsonRecord } from '../helpers.js';
 import { jsonErrorResponse } from './error-response.js';
 import { isRecord } from '../../utils/record-coerce.js';
 import { decodePathSegment } from './route-helpers.js';
+import { summarizeError } from '../../utils/error-display.js';
 
 interface McpRouteContext {
   readonly mcpRegistry: Pick<
@@ -17,6 +19,7 @@ interface McpRouteContext {
     | 'reload'
     | 'upsertServerConfig'
     | 'removeServerConfig'
+    | 'storeServerToolRule'
     | 'listServers'
     | 'listServerSecurity'
     | 'listServerSandboxBindings'
@@ -86,6 +89,11 @@ function parseServerConfig(value: unknown): McpServerConfig | Response {
   if (headers !== undefined && !url) {
     return jsonErrorResponse({ error: 'MCP server headers are sent only to a url (HTTP) server; this server has a command.', code: 'INVALID_ARGUMENT', field: 'headers' }, { status: 400 });
   }
+  // Absent: the kept per-tool rules stay as they are. A list replaces them; an empty one clears them.
+  const deniedTools = readShaped(value.deniedTools, 'deniedTools', 'an array of tool names', stringArray);
+  if (deniedTools instanceof Response) return deniedTools;
+  const allowedTools = readShaped(value.allowedTools, 'allowedTools', 'an array of tool names', stringArray);
+  if (allowedTools instanceof Response) return allowedTools;
   return {
     name: value.name.trim(),
     command,
@@ -97,6 +105,8 @@ function parseServerConfig(value: unknown): McpServerConfig | Response {
     trustMode: typeof value.trustMode === 'string' ? value.trustMode as McpServerConfig['trustMode'] : undefined,
     allowedPaths: stringArray(value.allowedPaths),
     allowedHosts: stringArray(value.allowedHosts),
+    deniedTools,
+    allowedTools,
   };
 }
 
@@ -152,6 +162,8 @@ function redactServer(server: McpServerConfig): Record<string, unknown> {
     trustMode: server.trustMode ?? null,
     allowedPaths: server.allowedPaths ?? [],
     allowedHosts: server.allowedHosts ?? [],
+    deniedTools: server.deniedTools ?? [],
+    allowedTools: server.allowedTools ?? [],
   };
 }
 
@@ -215,6 +227,9 @@ export const MCP_ROUTES: readonly { readonly method: string; readonly path: stri
   { method: 'POST', path: '/api/mcp/reload' },
   { method: 'POST', path: '/api/mcp/config/servers' },
   { method: 'DELETE', path: '/api/mcp/config/servers/{serverName}' },
+  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/deny' },
+  { method: 'POST', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}/allow' },
+  { method: 'DELETE', path: '/api/mcp/config/servers/{serverName}/tools/{toolName}' },
 ];
 
 export async function dispatchMcpRoutes(req: Request, context: McpRouteContext): Promise<Response | null> {
@@ -265,6 +280,36 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
       scope,
       path: result.path,
       removed: false,
+      reload: result.reload,
+      config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
+    });
+  }
+
+  // One tool's kept rule. Who may call each verb is the catalog's to say: allow and clear are the owner's own acts.
+  const toolRuleMatch = pathname.match(/^\/api\/mcp\/config\/servers\/([^/]+)\/tools\/([^/]+)(?:\/(allow|deny))?$/);
+  if (toolRuleMatch && ((req.method === 'POST' && toolRuleMatch[3] !== undefined) || (req.method === 'DELETE' && toolRuleMatch[3] === undefined))) {
+    const admin = context.requireAdmin(req);
+    if (admin) return admin;
+    const serverName = decodePathSegment(toolRuleMatch[1]!);
+    const toolName = decodePathSegment(toolRuleMatch[2]!);
+    if (serverName === null || toolName === null || !toolName.trim()) {
+      return jsonErrorResponse({ error: 'Malformed server or tool name in path', code: 'INVALID_ARGUMENT' }, { status: 400 });
+    }
+    const rule: McpToolRule = toolRuleMatch[3] === 'allow' ? 'allow' : toolRuleMatch[3] === 'deny' ? 'deny' : 'clear';
+    let result: Awaited<ReturnType<McpRouteContext['mcpRegistry']['storeServerToolRule']>>;
+    try {
+      result = await context.mcpRegistry.storeServerToolRule(serverName, toolName.trim(), rule, context.roots);
+    } catch (error) {
+      // An unknown server, a file another program owns, or an allow aimed at the project file: nothing was written.
+      return jsonErrorResponse({ error: summarizeError(error), code: 'INVALID_ARGUMENT' }, { status: 400 });
+    }
+    return Response.json({
+      serverName,
+      toolName: toolName.trim(),
+      rule,
+      scope: result.scope,
+      path: result.path,
+      changed: result.changed,
       reload: result.reload,
       config: serializeEffectiveConfig(context.mcpRegistry.getEffectiveConfig(context.roots)),
     });

@@ -75,6 +75,17 @@ export interface McpEntry {
   trustMode: 'constrained' | 'ask-on-risk' | 'allow-all' | 'blocked';
   allowedPaths: string[];
   allowedHosts: string[];
+  /** Per-tool allows and denials, each with where it came from; absent when none. */
+  toolRules?: readonly McpEntryToolRule[];
+}
+/** One per-tool rule as Settings -> MCP shows it. */
+export interface McpEntryToolRule {
+  readonly toolName: string;
+  readonly rule: 'allow' | 'deny';
+  /** `session`: /mcp deny, until restart; `stored`: kept with the server's entry in its MCP config. */
+  readonly source: 'session' | 'stored';
+  /** False for an allow a deny of the same tool overrides. */
+  readonly inEffect: boolean;
 }
 export interface SettingsModalChange<Key extends string = ConfigKey> {
   readonly key: Key;

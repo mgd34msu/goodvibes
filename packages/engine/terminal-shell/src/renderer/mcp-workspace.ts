@@ -177,6 +177,9 @@ export function createMcpWorkspaceRenderer(policy: {
         ),
         body(`Allowed paths ${server.allowedPaths.length > 0 ? server.allowedPaths.join(', ') : '(none)'}`),
         body(`Allowed hosts ${server.allowedHosts.length > 0 ? server.allowedHosts.join(', ') : '(none)'}`),
+        body(`Tool rules ${server.toolRules?.length
+          ? server.toolRules.map((rule) => `${rule.rule} ${rule.toolName} (${rule.source === 'session' ? 'this session' : 'config'}${rule.inEffect ? '' : ', overridden by a deny'})`).join(', ')
+          : '(none)'}`),
       );
       if (server.quarantineReason) {
         lines.push({

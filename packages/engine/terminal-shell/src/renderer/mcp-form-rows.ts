@@ -71,6 +71,7 @@ export interface McpTrustRowEntry {
   readonly trustMode: string;
   readonly connected: boolean;
   readonly role: string;
+  readonly toolRules?: readonly { readonly rule: 'allow' | 'deny' }[] | undefined;
 }
 export function mcpTrustRows(
   items: readonly McpTrustRowEntry[],
@@ -88,9 +89,12 @@ export function mcpTrustRows(
           ? entry.allowedHosts.join(', ')
           : 'no scope';
     const trust = i === selected && editing ? `${buffer}▏` : entry.trustMode;
+    const denied = entry.toolRules?.filter((rule) => rule.rule === 'deny').length ?? 0;
+    const allowed = entry.toolRules?.filter((rule) => rule.rule === 'allow').length ?? 0;
+    const rules = denied + allowed > 0 ? ` · tools${denied > 0 ? ` ${denied} denied` : ''}${allowed > 0 ? ` ${allowed} allowed` : ''}` : '';
     return {
       label: entry.name,
-      desc: `${entry.role} · ${scope}`,
+      desc: `${entry.role} · ${scope}${rules}`,
       right: trust,
       mark: entry.connected ? '●' : '○',
       markFg: entry.connected ? t.success : t.textFaint,

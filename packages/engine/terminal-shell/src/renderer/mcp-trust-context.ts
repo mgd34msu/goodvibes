@@ -8,6 +8,7 @@ type McpTrustEntry = {
   readonly connected: boolean;
   readonly role: string;
   readonly trustMode: string;
+  readonly toolRules?: readonly { readonly toolName: string; readonly rule: 'allow' | 'deny'; readonly source: 'session' | 'stored'; readonly inEffect: boolean }[] | undefined;
 };
 
 const text = (line: string): HelpLine => ({ kind: 'text', text: line });
@@ -25,6 +26,7 @@ export function buildMcpHelp(modal: McpTrustModal, entry: McpTrustEntry | null):
     modal.mcpAllowAllConfirmationTarget === entry.name
       ? { kind: 'warning', text: `Confirmation required: type ALLOW ALL ${entry.name} to grant unrestricted trust.` }
       : text('Enter edits the trust mode. Valid values are constrained, ask-on-risk, allow-all, and blocked.');
+  const rules = entry.toolRules ?? [];
   return [
     text(entry.name),
     { kind: 'fact', text: `Connection: ${entry.connected ? 'connected' : 'disconnected'}` },
@@ -33,6 +35,12 @@ export function buildMcpHelp(modal: McpTrustModal, entry: McpTrustEntry | null):
     confirmation,
     text(''),
     text(scope),
+    text(''),
+    { kind: 'heading', text: 'Tool rules:' },
+    ...(rules.length > 0
+      ? rules.map((rule): HelpLine => ({ kind: 'text', text: `${rule.rule} ${rule.toolName}: ${rule.source === 'session' ? 'this session (/mcp deny)' : 'kept in the MCP config'}${rule.inEffect ? '' : '; overridden by a deny'}` }))
+      : [text('None. Every tool is decided by the trust mode and scope.')]),
+    text('Enter, then type deny <tool>, allow <tool> or clear <tool> to keep a rule in the server\'s MCP config. A deny refuses every call to the tool; an allow lets it past the path and host scope (kept only in your global config); clear drops the kept rule.'),
     text(''),
     { kind: 'heading', text: 'Trust meanings:' },
     text('constrained: keep MCP activity inside declared paths/hosts and prompt on risk.'),

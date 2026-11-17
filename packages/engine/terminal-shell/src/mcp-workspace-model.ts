@@ -16,6 +16,8 @@ export interface McpWorkspaceServerRow {
   readonly allowedHosts: readonly string[];
   readonly quarantineReason?: string | undefined;
   readonly quarantineDetail?: string | undefined;
+  /** Per-tool allows and denials and where each came from (this session or the config); absent when none. */
+  readonly toolRules?: McpServerSecurityRecord['toolRules'];
   /** Short connection state for a server that is not connected: `starting`, `reconnecting 2/5`, `offline`. */
   readonly connectionState?: string | undefined;
   /** Why it is not connected and what happens next (the last error, the next attempt, or why reconnecting stopped). */
@@ -43,6 +45,8 @@ export interface McpWorkspaceFormBase {
   env: string;
   allowedPaths: string;
   allowedHosts: string;
+  /** Comma-separated tools refused on every call, kept with the entry. Kept allows are not edited here: they ask once, in Settings or with /mcp allow. */
+  deniedTools: string;
   /**
    * The saved config this form was opened from. The text fields cannot encode every
    * saved value (a comma inside an env value or path, allow-all trust), so a field
@@ -140,6 +144,7 @@ export function serverConfigToForm(server?: McpServerConfig | undefined): McpWor
     env: envText(server?.env),
     allowedPaths: server?.allowedPaths?.join(', ') ?? '',
     allowedHosts: server?.allowedHosts?.join(', ') ?? '',
+    deniedTools: server?.deniedTools?.join(', ') ?? '',
   };
 }
 export function formToServerConfig(form: McpWorkspaceFormBase): McpServerConfig & {
@@ -158,6 +163,7 @@ export function formToServerConfig(form: McpWorkspaceFormBase): McpServerConfig 
   const env = origin?.env && unedited(form.env, envText(origin.env)) ? { ...origin.env } : parseEnv(form.env);
   const allowedPaths = origin?.allowedPaths && unedited(form.allowedPaths, origin.allowedPaths.join(', ')) ? [...origin.allowedPaths] : splitList(form.allowedPaths);
   const allowedHosts = origin?.allowedHosts && unedited(form.allowedHosts, origin.allowedHosts.join(', ')) ? [...origin.allowedHosts] : splitList(form.allowedHosts);
+  const deniedTools = origin?.deniedTools && unedited(form.deniedTools, origin.deniedTools.join(', ')) ? [...origin.deniedTools] : splitList(form.deniedTools);
   // Saving another field never changes the trust mode: an untouched trust field keeps what was saved
   // (allow-all, which the form cannot show, or nothing, which runs as the default).
   const trustMode = form.trustTouched ? form.trustMode : origin ? origin.trustMode : form.trustMode === MCP_DEFAULT_TRUST_MODE ? undefined : form.trustMode;
@@ -170,6 +176,8 @@ export function formToServerConfig(form: McpWorkspaceFormBase): McpServerConfig 
     ...(env ? { env } : {}),
     ...(allowedPaths.length > 0 ? { allowedPaths } : {}),
     ...(allowedHosts.length > 0 ? { allowedHosts } : {}),
+    // An emptied field clears the kept denials; a field never filled leaves the entry's as they are. Kept allows are never sent from here.
+    ...(deniedTools.length > 0 || origin?.deniedTools?.length ? { deniedTools } : {}),
   };
 }
 export function nextEnumValue<T extends readonly string[]>(values: T, current: T[number], direction: 1 | -1): T[number] {
@@ -208,11 +216,22 @@ export function mergeServers(
         args: config?.args,
         allowedPaths: runtime?.allowedPaths ?? config?.allowedPaths ?? [],
         allowedHosts: runtime?.allowedHosts ?? config?.allowedHosts ?? [],
+        toolRules: runtime?.toolRules ?? keptToolRules(config),
         quarantineReason: runtime?.quarantineReason,
         quarantineDetail: runtime?.quarantineDetail,
         ...describeConnection(runtime),
       };
     });
+}
+
+/** The rules a configured server keeps, for a server the runtime has no record of. */
+function keptToolRules(config: McpServerConfig | undefined): McpServerSecurityRecord['toolRules'] {
+  if (!config?.deniedTools?.length && !config?.allowedTools?.length) return undefined;
+  const denied = new Set(config.deniedTools ?? []);
+  return [
+    ...(config.deniedTools ?? []).map((toolName) => ({ toolName, rule: 'deny' as const, source: 'stored' as const, inEffect: true })),
+    ...(config.allowedTools ?? []).map((toolName) => ({ toolName, rule: 'allow' as const, source: 'stored' as const, inEffect: !denied.has(toolName) })),
+  ];
 }
 
 /** The connection state the workspace shows for a server that is not connected, from the runtime's own record. */
@@ -302,6 +321,13 @@ export function buildMcpWorkspaceFormFields(form: McpWorkspaceFormBase): readonl
       label: 'Allowed hosts',
       value: form.allowedHosts,
       help: 'Comma-separated hostnames for network-oriented servers.',
+      editable: true,
+    },
+    {
+      id: 'deniedTools',
+      label: 'Denied tools',
+      value: form.deniedTools,
+      help: 'Comma-separated tool names refused on every call, kept in this config past a restart. /mcp deny <server> <tool> denies one for this session only; a tool allow is set in Settings MCP or with /mcp allow.',
       editable: true,
     },
   ];

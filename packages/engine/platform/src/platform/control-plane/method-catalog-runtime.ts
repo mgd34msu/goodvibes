@@ -81,6 +81,7 @@ import {
   MCP_SERVER_CONFIG_SCHEMA,
   MCP_SERVERS_RESPONSE_SCHEMA,
   MCP_TOOLS_RESPONSE_SCHEMA,
+  MCP_TOOL_RULE_METHOD_DESCRIPTORS,
 } from './method-catalog-runtime-mcp.js';
 import type { ContractErrorCode } from '../types/foundation-contract.js';
 
@@ -214,6 +215,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     }, ['serverName']),
     outputSchema: MCP_CONFIG_MUTATION_RESPONSE_SCHEMA,
   }),
+  ...MCP_TOOL_RULE_METHOD_DESCRIPTORS,
   methodDescriptor({
     id: 'remote.snapshot',
     title: 'Remote Runtime Snapshot',

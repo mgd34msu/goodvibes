@@ -26,6 +26,12 @@ export const queryKeys = {
   // generalizing tier. Invalidate alongside approvals: a decision can mint a
   // rule, a deletion makes matching asks prompt again.
   permissionRules: ['permissions', 'rules'] as const,
+  // MCP servers, their config and tools (Settings > Permissions > MCP tool rules).
+  // A kept per-tool rule changes all three, so a write invalidates the `mcp` prefix.
+  mcp: ['mcp'] as const,
+  mcpConfig: ['mcp', 'config'] as const,
+  mcpServers: ['mcp', 'servers'] as const,
+  mcpTools: ['mcp', 'tools'] as const,
   sessions: ['sessions'] as const,
   sessionList: (revision: number) => ['sessions', 'list', revision] as const,
   // fleet.*/checkpoints.* (platform 0.39.0-dev). Neither verb family emits a wire

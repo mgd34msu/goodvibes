@@ -13,6 +13,7 @@ import type {
   McpDecisionRecord,
   McpPermission,
   McpServerPermissions,
+  McpToolPermission,
 } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -295,6 +296,18 @@ export class McpPermissionManager {
     }
   }
 
+  /**
+   * Replace every per-tool override of a server at once, so the set its
+   * configuration and this session give is exactly the set in force.
+   *
+   * @throws {Error} If the server is not registered
+   */
+  replaceToolOverrides(serverName: string, overrides: readonly McpToolPermission[]): void {
+    const record = this._getRequired(serverName);
+    record.toolOverrides = new Map(overrides.map((override) => [override.toolName, { ...override }]));
+    record.lastModifiedAt = Date.now();
+  }
+
   // ── Permission check ──────────────────────────────────────────────────────
 
   async evaluateToolCall(
@@ -340,7 +353,7 @@ export class McpPermissionManager {
       const allow = override.verdict === 'allow';
       return {
         allowed: allow,
-        reason: allow ? `tool '${toolName}' explicitly allowed` : `tool '${toolName}' explicitly denied`,
+        reason: `tool '${toolName}' explicitly ${allow ? 'allowed' : 'denied'}${override.note ? ` (${override.note})` : ''}`,
         verdict: allow ? 'allow' : 'deny',
         profileMode: record.profile.mode,
       };

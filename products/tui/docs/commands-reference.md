@@ -332,7 +332,7 @@ GoodVibes ships **166** built-in slash commands across **76** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/mcp` | None | `[servers\|review\|tools [<server>]\|config\|add\|remove\|reload\|auth-review\|repair [server]\|trust\|role\|deny <server> <tool> [config]]` | Manage MCP servers and their tools |
+| `/mcp` | None | `[servers\|review\|tools [<server>]\|config\|add\|remove\|reload\|auth-review\|repair [server]\|trust\|role\|deny <server> <tool> [--keep\|config]\|allow <server> <tool>\|clear <server> <tool>]` | Manage MCP servers and their tools; /mcp deny lasts this session, deny --keep, allow and clear are kept in the MCP config |
 
 ## Memory
 

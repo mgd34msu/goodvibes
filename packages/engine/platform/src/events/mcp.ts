@@ -38,8 +38,8 @@ export type McpEvent =
    * recommended.
    */
   | { type: 'MCP_SCHEMA_QUARANTINE_APPROVED'; serverId: string; operatorId: string }
-  /** MCP trust/role policy has changed. */
-  | { type: 'MCP_POLICY_UPDATED'; serverId: string; role: McpServerRole; trustMode: McpTrustMode; allowedPaths: string[]; allowedHosts: string[] };
+  /** MCP trust/role policy or a per-tool rule has changed. `deniedTools` and `allowedTools` are the per-tool rules in force (a deny wins). */
+  | { type: 'MCP_POLICY_UPDATED'; serverId: string; role: McpServerRole; trustMode: McpTrustMode; allowedPaths: string[]; allowedHosts: string[]; deniedTools?: string[] | undefined; allowedTools?: string[] | undefined };
 
 /** All MCP event type literals as a union. */
 export type McpEventType = McpEvent['type'];

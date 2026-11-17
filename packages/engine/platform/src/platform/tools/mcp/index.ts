@@ -20,6 +20,11 @@ function summarizeServer(server: McpServerSecurity) {
     trustMode: server.trustMode,
     schemaFreshness: server.schemaFreshness,
     quarantined: server.schemaFreshness === 'quarantined',
+    // The owner's per-tool rules, so a call to a denied tool is not attempted.
+    ...(server.toolRules?.some((rule) => rule.rule === 'deny')
+      ? { deniedTools: [...new Set(server.toolRules.filter((rule) => rule.rule === 'deny').map((rule) => rule.toolName))] } : {}),
+    ...(server.toolRules?.some((rule) => rule.rule === 'allow' && rule.inEffect)
+      ? { allowedPastScope: server.toolRules.filter((rule) => rule.rule === 'allow' && rule.inEffect).map((rule) => rule.toolName) } : {}),
   };
 }
 

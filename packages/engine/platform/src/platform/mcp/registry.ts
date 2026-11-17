@@ -29,6 +29,7 @@ import {
   MCP_DEFAULT_TRUST_MODE,
   loadMcpEffectiveConfig,
   removeMcpServerConfig,
+  setMcpServerToolRule,
   upsertMcpServerConfig,
   withMcpConfigLock,
 } from './config.js';
@@ -50,6 +51,7 @@ import type {
   McpConfigScope,
   McpEffectiveConfig,
   McpServerConfig,
+  McpToolRule,
 } from './config.js';
 import type { HookDispatcher } from '../hooks/dispatcher.js';
 import type { RepositoryFileGate } from '../runtime/workspace-trust.js';
@@ -58,7 +60,7 @@ import { McpPermissionManager } from '../runtime/mcp/permissions.js';
 import { McpSchemaFreshnessTracker } from '../runtime/mcp/schema-freshness.js';
 import { McpLifecycleManager } from '../runtime/mcp/manager.js';
 import { McpHttpAuthError } from './http-connection.js';
-import type { McpDecisionRecord, McpReconnectStatus, McpServerRole, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
+import type { McpDecisionRecord, McpReconnectStatus, McpServerRole, McpToolPermission, McpToolRuleRecord, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
 import type { McpEvent } from '../../events/mcp.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import {
@@ -117,9 +119,33 @@ interface PendingMcpConnection {
   readonly cleanupErrors: unknown[];
 }
 
+/**
+ * The same server to run: every field but the per-tool rules, which the
+ * registry applies in place, so changing one neither restarts the server nor
+ * ends a call already sent.
+ */
 function sameServerConfig(a: McpServerConfig | undefined, b: McpServerConfig | undefined): boolean {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return JSON.stringify(withoutToolRules(a)) === JSON.stringify(withoutToolRules(b));
 }
+
+function withoutToolRules(config: McpServerConfig | undefined): McpServerConfig | null {
+  if (!config) return null;
+  const copy = { ...config };
+  delete copy.deniedTools;
+  delete copy.allowedTools;
+  return copy;
+}
+
+function sameToolRules(a: McpServerConfig, b: McpServerConfig): boolean {
+  return JSON.stringify([a.deniedTools ?? [], a.allowedTools ?? []]) === JSON.stringify([b.deniedTools ?? [], b.allowedTools ?? []]);
+}
+
+/** The reason a refused call names for each kind of per-tool rule. */
+const TOOL_RULE_NOTES = {
+  storedAllow: 'allowed in your MCP config, past the server\'s path and host scope',
+  storedDeny: 'denied in the server\'s MCP config; lift it in /mcp or Settings',
+  sessionDeny: 'denied by the owner for this session; /mcp deny <server> <tool> config lifts it',
+} as const;
 
 /** Servers connected at once while applying a configuration. */
 const MCP_CONNECT_CONCURRENCY = 4;
@@ -165,6 +191,8 @@ export class McpRegistry {
   private permissions = new McpPermissionManager();
   /** Trust and role the owner set this session. They outlive a reconnect or reload and end with the process or the server's removal. */
   private readonly sessionPolicy = new Map<string, { trustMode?: McpTrustMode; role?: McpServerRole }>();
+  /** Tools the owner denied this session, by server. Like the session trust mode, they outlive a reconnect or reload. */
+  private readonly sessionToolDenials = new Map<string, Set<string>>();
   /** The policy a server runs under: what the owner set this session, else its config, else the defaults. */
   private policyProfile(name: string, config: McpServerConfig | undefined): { role: McpServerRole; mode: McpTrustMode; allowedPaths: string[]; allowedHosts: string[] } {
     const session = this.sessionPolicy.get(name);
@@ -264,6 +292,7 @@ export class McpRegistry {
     serverConfig = structuredClone(serverConfig);
     const previous = this.serverConfigs.get(serverConfig.name);
     this.serverConfigs.set(serverConfig.name, serverConfig); this.#revision++;
+    this.syncToolRules(serverConfig.name);
     if (previous && !sameServerConfig(previous, serverConfig)) await this.disconnectServer(serverConfig.name, 'config-changed');
     await this._connectServer(serverConfig);
   }
@@ -352,6 +381,8 @@ export class McpRegistry {
     // Publish the complete new intent before any drain. An older reload may
     // never delete or reconnect a destination installed while it was awaiting.
     this.serverConfigs = new Map(next); this.#revision++;
+    // A per-tool rule that changed applies now, before any drain: a call not yet sent to a newly denied tool ends here.
+    for (const name of next.keys()) this.syncToolRules(name);
     const disconnecting: Promise<boolean>[] = [];
     for (const [name, previous] of previousConfigs) {
       if (!sameServerConfig(previous, next.get(name))) disconnecting.push(this.disconnectServer(name, next.has(name) ? 'config-changed' : 'config-removed'));
@@ -380,8 +411,10 @@ export class McpRegistry {
       if (this.serverConfigs.get(name) !== serverConfig) throw new Error('MCP configuration intent changed');
       const previous = previousConfigs.get(name);
       if (previous && sameServerConfig(previous, serverConfig)) {
-        unchanged += 1;
-        plan.push({ name, serverConfig, action: 'unchanged', connect: !this.clients.get(name)?.isConnected });
+        // Only its per-tool rules changed (applied above, without a restart), or nothing did.
+        const rulesChanged = !sameToolRules(previous, serverConfig);
+        if (rulesChanged) changed += 1; else unchanged += 1;
+        plan.push({ name, serverConfig, action: rulesChanged ? 'changed' : 'unchanged', connect: !this.clients.get(name)?.isConnected });
         continue;
       }
       if (previous) changed += 1; else added += 1;
@@ -823,6 +856,7 @@ export class McpRegistry {
     this.permissions.removeServer(name);
     this.#lifecycle.forget(name);
     this.sessionPolicy.delete(name);
+    this.sessionToolDenials.delete(name);
     this.freshness.removeServer(name);
     this.connectFailures.delete(name);
     this.policyLifetimes.delete(name);
@@ -963,7 +997,7 @@ export class McpRegistry {
     quarantineApprovedBy?: string | undefined;
     sessionTrustMode?: McpTrustMode | undefined;
     sessionRole?: McpServerRole | undefined;
-    deniedTools?: string[] | undefined;
+    toolRules?: McpToolRuleRecord[] | undefined;
     configuredTrustMode: McpTrustMode;
     configuredRole: McpServerRole;
     phase: McpClientPhase;
@@ -975,11 +1009,11 @@ export class McpRegistry {
       const freshnessRecord = this.freshness.getRecord(server.name);
       const config = this.serverConfigs.get(server.name);
       const session = this.sessionPolicy.get(server.name);
-      const deniedTools = [...(permissions?.toolOverrides.values() ?? [])].filter((entry) => entry.verdict === 'deny').map((entry) => entry.toolName);
+      const toolRules = this.toolRuleRecords(server.name);
       return {
         ...(session?.trustMode !== undefined ? { sessionTrustMode: session.trustMode } : {}),
         ...(session?.role !== undefined ? { sessionRole: session.role } : {}),
-        ...(deniedTools.length > 0 ? { deniedTools } : {}),
+        ...(toolRules.length > 0 ? { toolRules } : {}),
         configuredTrustMode: config?.trustMode ?? MCP_DEFAULT_TRUST_MODE,
         configuredRole: config?.role ?? 'general',
         name: server.name,
@@ -1038,6 +1072,7 @@ export class McpRegistry {
         + `Known servers: ${this.serverNames.join(', ') || '(none)'}. Run /mcp servers to list them.`);
     }
     this.permissions.registerServer(serverName, this.policyProfile(serverName, config));
+    this.permissions.replaceToolOverrides(serverName, this.toolOverridesFor(serverName));
   }
 
   setServerTrustMode(serverName: string, mode: McpTrustMode): void {
@@ -1057,25 +1092,110 @@ export class McpRegistry {
   }
 
   /**
-   * Refuse one of a server's tools for this session, whatever its trust mode
-   * and scope allow. The deny outlives reconnects and config reloads, like a
-   * session trust mode, and ends with the process, the server's removal or
-   * {@link clearServerToolDenial}. A call to the tool not yet sent is refused.
+   * Refuse one of a server's tools for this session, whatever its trust mode,
+   * scope and a kept allow say. The deny outlives reconnects and config
+   * reloads, like a session trust mode, and ends with the process, the
+   * server's removal or {@link clearServerToolDenial}. A call to the tool not
+   * yet sent is refused. {@link storeServerToolRule} keeps one past a restart.
    */
   denyServerTool(serverName: string, toolName: string): void {
     this.ensurePolicyOwner(serverName, `tool '${toolName}'`);
-    this.invalidatePolicyLifetime(serverName, `its tool '${toolName}' was denied`);
-    this.permissions.denyTool(serverName, toolName, 'denied by the owner for this session');
-    this._emitPolicyUpdate(serverName);
+    const denied = this.sessionToolDenials.get(serverName) ?? new Set<string>();
+    denied.add(toolName);
+    this.sessionToolDenials.set(serverName, denied);
+    this.syncToolRules(serverName);
   }
 
-  /** End this session's deny of one tool, so its trust mode and scope decide it again; false when it had none. */
+  /**
+   * End this session's deny of one tool; false when it had none. A deny kept
+   * in the server's config still applies; otherwise its trust mode and scope
+   * (or a kept allow) decide the tool again.
+   */
   clearServerToolDenial(serverName: string, toolName: string): boolean {
-    if (this.permissions.getServerPermissions(serverName)?.toolOverrides.get(toolName)?.verdict !== 'deny') return false;
-    this.invalidatePolicyLifetime(serverName, `its tool '${toolName}' was allowed again`);
-    this.permissions.clearToolOverride(serverName, toolName);
-    this._emitPolicyUpdate(serverName);
+    const denied = this.sessionToolDenials.get(serverName);
+    if (!denied?.delete(toolName)) return false;
+    if (denied.size === 0) this.sessionToolDenials.delete(serverName);
+    this.syncToolRules(serverName);
     return true;
+  }
+
+  /**
+   * Keep one tool's rule with the server's entry in its MCP config file, then
+   * apply it: `deny` refuses every call to the tool, `allow` lets it past the
+   * server's path and host scope, `clear` drops the kept one. The entry must be
+   * in a file this program writes (the owner's global file or the project's
+   * `.goodvibes/mcp.json`); an allow only in the global one. The roots are the
+   * workspace the servers were started from unless given.
+   *
+   * An allow loosens what a server may do: every caller that reaches this
+   * method for one is the owner's own act (Settings, the owner's own command,
+   * an owner-only operator method), never a model's.
+   */
+  async storeServerToolRule(
+    serverName: string,
+    toolName: string,
+    rule: McpToolRule,
+    workspace?: McpConfigRoots,
+  ): Promise<{ readonly scope: McpConfigScope; readonly path: string; readonly changed: boolean; readonly reload: McpReloadResult }> {
+    const roots = workspace ?? this.startedRoots;
+    if (!roots) throw new Error(`The MCP servers were not started from a workspace yet, so no rule for ${serverName} tool '${toolName}' was kept. Run /mcp reload, then try again.`);
+    const entry = loadMcpEffectiveConfig(roots).servers.find((candidate) => candidate.server.name === serverName);
+    if (!entry) {
+      throw new Error(`No MCP server named '${serverName}' is configured, so no rule for its tool '${toolName}' was kept. `
+        + `Known servers: ${this.serverNames.join(', ') || '(none)'}. Run /mcp servers to list them.`);
+    }
+    const source = entry.source;
+    if (!source.writable || source.scope === 'external') {
+      throw new Error(`${serverName} is configured in ${source.path}, a file another program owns, so no rule for its tool '${toolName}' can be kept there. `
+        + `Add ${serverName} to your own MCP config (/mcp add with --scope global) to keep per-tool rules, or use /mcp deny for this session.`);
+    }
+    const scope = source.scope;
+    const written = await withMcpConfigLock(roots, scope, () => setMcpServerToolRule(roots, scope, serverName, toolName, rule));
+    return { scope, path: written.path, changed: written.changed, reload: await this.reload(roots) };
+  }
+
+  /** The per-tool overrides in force: kept allows, then kept denials, then this session's denials; a deny wins. */
+  private toolOverridesFor(serverName: string): McpToolPermission[] {
+    const config = this.serverConfigs.get(serverName);
+    const overrides = new Map<string, McpToolPermission>();
+    for (const toolName of config?.allowedTools ?? []) overrides.set(toolName, { toolName, verdict: 'allow', note: TOOL_RULE_NOTES.storedAllow });
+    for (const toolName of config?.deniedTools ?? []) overrides.set(toolName, { toolName, verdict: 'deny', note: TOOL_RULE_NOTES.storedDeny });
+    for (const toolName of this.sessionToolDenials.get(serverName) ?? []) {
+      if (overrides.get(toolName)?.verdict !== 'deny') overrides.set(toolName, { toolName, verdict: 'deny', note: TOOL_RULE_NOTES.sessionDeny });
+    }
+    return [...overrides.values()];
+  }
+
+  /** Every per-tool rule on a server, each with where it came from, for the surfaces that show them. */
+  private toolRuleRecords(serverName: string): McpToolRuleRecord[] {
+    const config = this.serverConfigs.get(serverName);
+    const session = this.sessionToolDenials.get(serverName) ?? new Set<string>();
+    const denied = new Set([...(config?.deniedTools ?? []), ...session]);
+    return [
+      ...(config?.deniedTools ?? []).map((toolName): McpToolRuleRecord => ({ toolName, rule: 'deny', source: 'stored', inEffect: true })),
+      ...[...session].map((toolName): McpToolRuleRecord => ({ toolName, rule: 'deny', source: 'session', inEffect: true })),
+      ...(config?.allowedTools ?? []).map((toolName): McpToolRuleRecord => ({ toolName, rule: 'allow', source: 'stored', inEffect: !denied.has(toolName) })),
+    ];
+  }
+
+  /**
+   * Bring a registered server's per-tool overrides in line with its config and
+   * this session's denials. When they change, calls not yet sent end (the
+   * policy lifetime) and the policy update is emitted. A server with no policy
+   * record yet gets its overrides when it registers.
+   */
+  private syncToolRules(serverName: string): void {
+    const record = this.permissions.getServerPermissions(serverName);
+    if (!record) return;
+    const next = this.toolOverridesFor(serverName);
+    const same = next.length === record.toolOverrides.size && next.every((override) => {
+      const current = record.toolOverrides.get(override.toolName);
+      return current?.verdict === override.verdict && current.note === override.note;
+    });
+    if (same) return;
+    this.invalidatePolicyLifetime(serverName, 'its per-tool allows or denials changed');
+    this.permissions.replaceToolOverrides(serverName, next);
+    this._emitPolicyUpdate(serverName);
   }
 
   /**
@@ -1272,6 +1392,7 @@ export class McpRegistry {
       await executePolicyCheck(() => client.connect(), signal);
       assertHostCurrent(); assertProcessCurrent();
       this.permissions.registerServer(name, this.policyProfile(name, serverConfig));
+      this.permissions.replaceToolOverrides(name, this.toolOverridesFor(name));
       // A server that finishes starting does not change a catalog captured
       // before it: that read listed the servers connected then, and the client
       // it would replace is checked by identity there.
@@ -1520,6 +1641,8 @@ export class McpRegistry {
       trustMode: permissions.profile.mode,
       allowedPaths: [...permissions.profile.allowedPaths],
       allowedHosts: [...permissions.profile.allowedHosts],
+      deniedTools: [...permissions.toolOverrides.values()].filter((override) => override.verdict === 'deny').map((override) => override.toolName),
+      allowedTools: [...permissions.toolOverrides.values()].filter((override) => override.verdict === 'allow').map((override) => override.toolName),
     });
   }
 }

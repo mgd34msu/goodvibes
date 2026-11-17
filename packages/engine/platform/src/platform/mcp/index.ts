@@ -10,6 +10,7 @@ export type {
   McpSandboxBindingRecord,
   McpServerRecord,
   McpServerSecurityRecord,
+  McpStoredToolRuleResult,
 } from './mcp-api.js';
 export {
   MCP_DEFAULT_TRUST_MODE,
@@ -18,6 +19,7 @@ export {
   loadMcpEffectiveConfig,
   loadWritableMcpConfig,
   removeMcpServerConfig,
+  setMcpServerToolRule,
   upsertMcpServerConfig,
 } from './config.js';
 export type {
@@ -28,4 +30,5 @@ export type {
   McpEffectiveConfig,
   McpServerConfig,
   McpServerConfigEntry,
+  McpToolRule,
 } from './config.js';

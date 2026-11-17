@@ -253,6 +253,17 @@ export interface McpToolPermission {
   note?: string | undefined;
 }
 
+/** One per-tool allow or deny on a server, and where it came from. */
+export interface McpToolRuleRecord {
+  /** Tool name on the server (not qualified). */
+  readonly toolName: string;
+  readonly rule: 'allow' | 'deny';
+  /** `session`: denied with /mcp deny, until the process exits; `stored`: kept with the server's entry in its MCP config file. */
+  readonly source: 'session' | 'stored';
+  /** False for an allow that a deny of the same tool overrides: a deny from any source wins. */
+  readonly inEffect: boolean;
+}
+
 /** Complete permission configuration for a single MCP server. */
 export interface McpServerPermissions {
   /** Server name. */

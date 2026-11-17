@@ -19082,6 +19082,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "allowedHosts": [
             "sample"
           ],
+          "deniedTools": [
+            "sample"
+          ],
+          "allowedTools": [
+            "sample"
+          ],
           "source": {
             "scope": "sample",
             "kind": "sample",
@@ -19142,6 +19148,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "sample"
             ],
             "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
               "sample"
             ],
             "source": {
@@ -19244,6 +19256,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "allowedHosts": [
               "sample"
             ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
             "source": {
               "scope": "sample",
               "kind": "sample",
@@ -19295,6 +19313,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "allowedHosts": [
             "sample"
           ],
+          "deniedTools": [
+            "sample"
+          ],
+          "allowedTools": [
+            "sample"
+          ],
           "source": {
             "scope": "sample",
             "kind": "sample",
@@ -19303,6 +19327,231 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         }
       ]
+    }
+  },
+  "mcp.servers.tools.allow": {
+    "methodId": "mcp.servers.tools.allow",
+    "http": {
+      "method": "POST",
+      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/allow"
+    },
+    "status": 200,
+    "body": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "allow",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.tools.clear": {
+    "methodId": "mcp.servers.tools.clear",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}"
+    },
+    "status": 200,
+    "body": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "allow",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "mcp.servers.tools.deny": {
+    "methodId": "mcp.servers.tools.deny",
+    "http": {
+      "method": "POST",
+      "path": "/api/mcp/config/servers/{serverName}/tools/{toolName}/deny"
+    },
+    "status": 200,
+    "body": {
+      "serverName": "sample",
+      "toolName": "sample",
+      "rule": "allow",
+      "scope": "project",
+      "path": "sample",
+      "changed": false,
+      "reload": {
+        "added": 0,
+        "changed": 0,
+        "removed": 0,
+        "unchanged": 0,
+        "servers": [
+          {
+            "name": "sample",
+            "action": "added",
+            "connected": false
+          }
+        ]
+      },
+      "config": {
+        "locations": [
+          {
+            "scope": "sample",
+            "kind": "sample",
+            "path": "sample",
+            "writable": false
+          }
+        ],
+        "servers": [
+          {
+            "name": "sample",
+            "command": "sample",
+            "url": "sample",
+            "args": [
+              "sample"
+            ],
+            "envKeys": [
+              "sample"
+            ],
+            "headerKeys": [
+              "sample"
+            ],
+            "role": "sample",
+            "trustMode": "sample",
+            "allowedPaths": [
+              "sample"
+            ],
+            "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
+              "sample"
+            ],
+            "source": {
+              "scope": "sample",
+              "kind": "sample",
+              "path": "sample",
+              "writable": false
+            }
+          }
+        ]
+      }
     }
   },
   "mcp.servers.upsert": {
@@ -19358,6 +19607,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "sample"
             ],
             "allowedHosts": [
+              "sample"
+            ],
+            "deniedTools": [
+              "sample"
+            ],
+            "allowedTools": [
               "sample"
             ],
             "source": {

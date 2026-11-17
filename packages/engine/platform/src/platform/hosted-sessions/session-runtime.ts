@@ -538,11 +538,14 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       ownerTurnText = source.text;
       // The permit proves the owner's own app sent this input and no turn is in
       // flight (checked above), so it starts this session's next
-      // untrusted-content turn, as an operator's input does in `submit`.
+      // untrusted-content turn, as an operator's input does in `submit`. For
+      // the same reason the turn is the owner's own (`ownerDirect`): the gate
+      // asks the owner about its edits and commands instead of refusing them as
+      // input from a surface anyone can write to.
       await withUntrustedContentScope(contentScope, () => {
         ledger.startTurn();
         return withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
-          origin: { source: 'native-hosted-conversation', surface: 'service', metadata: { inputId, correlationId } } }));
+          origin: { source: 'native-hosted-conversation', surface: 'service', ownerDirect: true, metadata: { inputId, correlationId } } }));
       });
       const after = readNativeConversationTurnStatus(permit);
       if (after !== 'settled') throw new Error(after === 'retryable'

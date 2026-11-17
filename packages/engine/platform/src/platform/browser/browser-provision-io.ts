@@ -7,6 +7,7 @@ import { platform } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
+import { suiteRuntimeExecutable } from '../runtime/suite-runtime.js';
 import { extractTarGzTree } from './browser-driver-archive.js';
 import type { BrowserDriverResolution, BrowserProvisionIo, CommandOutcome } from './browser-types.js';
 
@@ -444,7 +445,9 @@ async function installDriverPackage(targetRoot: string, lifetime: BrowserProvisi
   ];
   for (const [command, args] of attempts) {
     assertProvisionCurrent(lifetime);
-    const outcome = await runCommand(command, args, { timeoutMs: 300_000, cwd: targetRoot, signal: lifetime.signal });
+    // The driver is the suite's own: a checkout installation's bun before the user's.
+    const executable = command === 'bun' ? suiteRuntimeExecutable('bun') ?? command : command;
+    const outcome = await runCommand(executable, args, { timeoutMs: 300_000, cwd: targetRoot, signal: lifetime.signal });
     assertProvisionCurrent(lifetime);
     if (outcome.code === 0) {
       const recorded = recordedDriverIntegrity(targetRoot, command);

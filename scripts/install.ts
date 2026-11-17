@@ -64,10 +64,13 @@ export function wrapper(options: Options, name: typeof COMMANDS[number], arch = 
   const header = '#!/bin/sh\nset -eu\n# Managed by the goodvibes-jev installer.\n';
   // An update moves current. Keep each process and its admitted runtime on the
   // same physical release for its entire lifetime, including subsequent execs.
+  // The release's private bun and node are named by GOODVIBES_SUITE_RUNTIME for
+  // the suite's own needs; PATH stays the user's, so project commands run with
+  // the runtimes the user's shell resolves.
   const pinRelease = `goodvibes_release=$(CDPATH= cd ${quote(current)} && pwd -P)\n`;
   if (name === 'goodvibes-uninstall') return `${header}${pinRelease}exec "$goodvibes_release/runtime/bun" "$goodvibes_release/uninstall.js" --prefix ${quote(options.prefix)} "$@"\n`;
   const product = name === 'goodvibes' ? 'tui' : name === 'goodvibes-agent' ? 'agent' : 'daemon';
-  return `${header}if [ -f ${quote(join(options.dataDir, 'environment'))} ]; then\n  set -a\n  . ${quote(join(options.dataDir, 'environment'))}\n  set +a\nfi\n${pinRelease}export GOODVIBES_HOME=${quote(options.dataDir)}\nexport GOODVIBES_DAEMON_HOME=${quote(join(options.dataDir, '.goodvibes/daemon'))}\nexport TYPESAFE_DEFAULT_MODEL=jev-latest\nexport PATH="$goodvibes_release/runtime:$PATH"\nexec "$goodvibes_release/${product}/${name}-linux-${arch}" "$@"\n`;
+  return `${header}if [ -f ${quote(join(options.dataDir, 'environment'))} ]; then\n  set -a\n  . ${quote(join(options.dataDir, 'environment'))}\n  set +a\nfi\n${pinRelease}export GOODVIBES_HOME=${quote(options.dataDir)}\nexport GOODVIBES_DAEMON_HOME=${quote(join(options.dataDir, '.goodvibes/daemon'))}\nexport TYPESAFE_DEFAULT_MODEL=jev-latest\nexport GOODVIBES_SUITE_RUNTIME="$goodvibes_release/runtime"\nexec "$goodvibes_release/${product}/${name}-linux-${arch}" "$@"\n`;
 }
 export async function assertPortFree(port: number): Promise<void> {
   await new Promise<void>((yes, no) => {

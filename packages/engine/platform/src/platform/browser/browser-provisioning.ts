@@ -1,5 +1,6 @@
 import { captureJudgmentFailure } from '../gate/failure-input.js';
 import { basename, dirname } from 'node:path';
+import { suiteRuntimeExecutable } from '../runtime/suite-runtime.js';
 import { assertProvisionCurrent, ownProvisionLifetime, missingLibrary, networkBlocked, programNotInstalled, type BrowserProvisionLifetime } from './browser-failure-reading.js';
 import type {
   BrowserProvisionFailure,
@@ -149,6 +150,11 @@ export function installRuntimeCandidatesFor(execPath: string): readonly InstallR
   candidates.push(isInterpreter
     ? { command: execPath, env: {} }
     : { command: execPath, env: { BUN_BE_BUN: '1' } });
+  // A checkout installation's own bun and node (GOODVIBES_SUITE_RUNTIME), then the user's.
+  for (const name of ['bun', 'node'] as const) {
+    const own = suiteRuntimeExecutable(name);
+    if (own) candidates.push({ command: own, env: {} });
+  }
   candidates.push({ command: 'bun', env: {} }, { command: 'node', env: {} });
   const seen = new Set<string>();
   return candidates.filter((candidate) => {

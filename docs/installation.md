@@ -251,6 +251,12 @@ downloads that version privately when the `bun` on your PATH differs. Its receip
 layout is distinct from release-binary installations. The curl installer does not
 fall back to building source when a release asset is unavailable.
 
+A checkout installation keeps a private copy of the Bun and Node it was built
+with in its release directory, for the suite's own needs (installing the browser
+driver). The command wrappers name that directory in `GOODVIBES_SUITE_RUNTIME`
+and leave `PATH` as yours, so a command the agent runs in your project uses the
+same `bun`, `node` and `npm` your shell does, as with a release installation.
+
 A checkout installation that fails, or is interrupted with Ctrl-C or a
 termination signal or a hang-up (closing the terminal), restores the previously
 installed version, restarts the service if it was running before, and releases

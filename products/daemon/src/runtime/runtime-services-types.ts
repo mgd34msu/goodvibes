@@ -12,7 +12,7 @@ import type { BrowserJudgmentService } from '@goodvibes-jev/engine/platform/plat
  * anywhere else in the app had to change.
  */
 
-import type { ConfigManager, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
+import type { ConfigManager, HelperModel, ServiceRegistry, SubscriptionManager, ToolLLM } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
 import type { AutomationDeliveryManager, AutomationManager } from '@goodvibes-jev/engine/platform/platform/automation';
 import type { ChannelDeliveryRouter, ChannelPolicyManager, ChannelPluginRegistry, RouteBindingManager, SurfaceRegistry } from '@goodvibes-jev/engine/platform/platform/channels';
@@ -225,6 +225,8 @@ export interface RuntimeServices {
   readonly modelLimitsService: ModelLimitsService;
   readonly providerRegistry: ProviderRegistry;
   readonly toolLLM: ToolLLM;
+  /** The one helper route for supporting work; the orchestrator, resume summaries and titles share it. */
+  readonly helperModel: HelperModel;
   readonly distributedRuntime: DistributedRuntimeManager;
   /**
    * The paired-phone feature for this host: the grants ledger, the capture

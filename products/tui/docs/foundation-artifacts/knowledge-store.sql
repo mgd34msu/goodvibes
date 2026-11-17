@@ -1,6 +1,10 @@
 CREATE TABLE IF NOT EXISTS native_conversation_captures (project_id TEXT NOT NULL, principal_id TEXT NOT NULL, input_id TEXT NOT NULL, request_id TEXT NOT NULL, format_version INTEGER NOT NULL, state_json TEXT NOT NULL, PRIMARY KEY(project_id, principal_id, input_id), UNIQUE(project_id, principal_id, request_id));
 
+CREATE TABLE IF NOT EXISTS native_conversation_transcripts (project_id TEXT NOT NULL, session_id TEXT NOT NULL, revision TEXT NOT NULL, messages_json TEXT NOT NULL, PRIMARY KEY(project_id, session_id, revision));
+
 CREATE TABLE IF NOT EXISTS work_ledgers (project_id TEXT PRIMARY KEY NOT NULL, format_version INTEGER NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS work_ledger_events (project_id TEXT NOT NULL, sequence INTEGER NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, signature TEXT NOT NULL, event_json TEXT NOT NULL, PRIMARY KEY (project_id, sequence));
 
 CREATE TABLE IF NOT EXISTS native_work_executions (project_id TEXT NOT NULL, key_hash TEXT NOT NULL, format_version INTEGER NOT NULL, state_json TEXT NOT NULL, attempt_id TEXT NOT NULL, PRIMARY KEY(project_id, key_hash), UNIQUE(project_id, attempt_id));
 

@@ -672,7 +672,7 @@ function readClientMessageId(value: unknown): string | undefined | Response {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_CLIENT_MESSAGE_ID_LENGTH || !CLIENT_MESSAGE_ID_PATTERN.test(value)) {
     return jsonErrorResponse(
-      { error: `messageId must be 1 to ${MAX_CLIENT_MESSAGE_ID_LENGTH} characters of letters, digits, '.', '_', ':' or '-'.`, code: 'INVALID_MESSAGE_ID' },
+      { error: `messageId must be 1 to ${MAX_CLIENT_MESSAGE_ID_LENGTH} characters of letters, digits, '.', '_', ':' or '-', so the message was not stored. Send it again with such an id, or without one.`, code: 'INVALID_MESSAGE_ID' },
       { status: 400 },
     );
   }

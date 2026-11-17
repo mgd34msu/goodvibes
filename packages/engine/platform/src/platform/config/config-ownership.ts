@@ -223,11 +223,7 @@ export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS = [
   // ruled replicated, which is what carries the token to a node that takes
   // over a handover.
   'google.oauth.refreshToken',
-  // The mailbox password references earlier builds kept under `email.*`. The
-  // settings are gone (moved to surfaces.email.* at load), but the secrets they
-  // named stay daemon-owned so the daemon lifts them into its own store at boot
-  // and copies them to the mailbox password's own name
-  // (email/carried-mail-password.ts).
+  // Mailbox password references under `email.*` name a daemon-owned secret.
   'email.passwordRef',
   'email.smtpPasswordRef',
   // The calendar connector's `calendar.*` and `google.*` keys are real

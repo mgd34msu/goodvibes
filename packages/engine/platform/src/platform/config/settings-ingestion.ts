@@ -509,18 +509,6 @@ export interface IngestSettingsOptions {
   readonly write?: ((line: string) => void) | undefined;
   /** Called for every notice, refusals included, before a refusal throws. */
   readonly onNotice?: ((entry: SettingsIngestionNotice) => void) | undefined;
-  /**
-   * The caller's own load-time migrations, run BETWEEN the floor check and the
-   * key screen.
-   *
-   * They have to run first or the screen lies. `sandbox.judgmentAutoApprove` is
-   * a retired key the platform's own migration folds into `sandbox.judgment` on
-   * every load, screening before that runs reports it as an unknown form of a
-   * key the reader knows, which is true of the raw file and false of the config
-   * the reader actually builds. A key the platform is about to rewrite itself is
-   * not a key the platform does not understand.
-   */
-  readonly migrate?: ((raw: Record<string, unknown>) => Record<string, unknown>) | undefined;
   /** Host settings the reading manager registered; see {@link screenSettingsForIngestion}. */
   readonly hostKeys?: ReadonlySet<string> | undefined;
 }
@@ -559,7 +547,7 @@ export function ingestSettingsFile(
     throw new SettingsIngestionRefusal(entry);
   }
 
-  const result = screenSettingsForIngestion(options.migrate ? options.migrate(raw) : raw, file, options.diagnosticMode, options.hostKeys);
+  const result = screenSettingsForIngestion(raw, file, options.diagnosticMode, options.hostKeys);
   for (const entry of result.notices) announce(entry);
   const refusal = result.notices.find((entry) => entry.action === 'refused');
   if (refusal) throw new SettingsIngestionRefusal(refusal);

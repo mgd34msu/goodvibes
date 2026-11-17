@@ -462,14 +462,6 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | `contract.nudgeTtlMs` | `300000` | Lifetime of a mid-run nudge on the message bus |
 | `ui.contractMessages` | `both` | Where `[Contract]` system messages show: `panel`, `conversation` or `both` |
 
-A settings file that still holds the retired loop's keys is migrated once on
-load (`applyContractSettingsMigrationPass`, `config/manager-migration-passes.ts`):
-each key moves to its `contract.*` counterpart (the heartbeat timeout to
-`contract.heartbeatTimeoutMs`, the fix-attempt limit to `contract.maxFixRounds`,
-the message placement to `ui.contractMessages`), and the old score threshold is
-removed with a migration receipt, since acceptance is now a per-criterion
-reading whose strictness is `contract.acceptanceStakes`.
-
 ### Events and fleet
 
 Contracts report on the `contracts` runtime event domain (`CONTRACT_*` types,

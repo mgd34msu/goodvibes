@@ -12,15 +12,6 @@
  *   entry) or a schema-honest disabled value;
  * - constant bindings have no separate off switch, so the request fails with
  *   the real settings keys to configure instead.
- *
- * This intentionally differs from the platform's load-time MIGRATION of persisted
- * legacy featureFlags entries (migrateLegacyFeatureToggles preserves
- * historical AND-of-both-switches ambiguity); an explicit request has no such
- * ambiguity, the operator wants the feature on or off now.
- *
- * Legacy `featureFlags` / `featureFlags.<id>` set-config keys from stored
- * onboarding plans are accepted and expanded here so old plans keep working
- * against the domain keys.
  */
 import {
   FEATURE_SETTINGS,

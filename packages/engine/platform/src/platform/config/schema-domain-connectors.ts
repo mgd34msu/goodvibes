@@ -7,9 +7,7 @@
  * `listDaemonOwnedConfigPaths()` derives credential names from.
  *
  * The mailbox is not here. It has one set of keys, `surfaces.email.*`
- * (schema-domain-daemon-mailbox.ts), read by every product and by the daemon;
- * the `email.*` keys earlier builds also had are moved onto those at load
- * (retired-settings-migration.ts).
+ * (schema-domain-daemon-mailbox.ts), read by every product and by the daemon.
  *
  * Secret-bearing rows (`calendar.google.clientSecretRef`,
  * `calendar.microsoft.clientSecretRef`, `calendar.google.icsUrl`) are declared

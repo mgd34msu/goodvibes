@@ -19,15 +19,6 @@ import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 export const DAEMON_RELEASES_LATEST_URL = 'https://github.com/mgd34msu/goodvibes/releases/latest';
 /** The one repository whose releases may replace the installed programs. */
 const RELEASES_PATH_PREFIX = '/mgd34msu/goodvibes/releases';
-const LEGACY_DAEMON_RELEASE_FEEDS = ['https://github.com/mgd34msu/goodvibes-daemon/releases/latest', 'https://github.com/mgd34msu/goodvibes-tui/releases/latest',
-  'https://github.com/mgd34msu/goodvibes-jev/releases/latest'];
-/** Exact historical defaults only; near matches and custom channels retain their owner intent. */
-export function migrateLegacyDaemonReleaseFeed(parsed: Record<string, unknown>): Record<string, unknown> {
-  const update = parsed.update;
-  if (!update || typeof update !== 'object' || Array.isArray(update) || !('releasesUrl' in update)
-    || typeof update.releasesUrl !== 'string' || !LEGACY_DAEMON_RELEASE_FEEDS.includes(update.releasesUrl)) return parsed;
-  return { ...parsed, update: { ...update, releasesUrl: DAEMON_RELEASES_LATEST_URL } };
-}
 
 /** Daemon self-update: hourly check, verify, idle-moment swap, auto-restart. */
 export interface UpdateConfig {

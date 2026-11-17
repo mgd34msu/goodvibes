@@ -132,8 +132,6 @@ export {
   resolveGoodVibesTreeDirectory,
 } from './goodvibes-home.js';
 export type { GoodVibesHomeOwnership } from './goodvibes-home.js';
-export { migrateDangerDaemonAlias, migrateLegacyFeatureToggles } from './migrations.js';
-export type { DangerDaemonMigrationResult, LegacySettingsMigrationResult } from './migrations.js';
 
 import { readFileSync } from 'fs';
 import { ConfigManager } from './manager.js';
@@ -189,10 +187,7 @@ export interface DaemonEnabledReader {
  * Resolve whether the local session daemon should run.
  *
  * `daemon.enabled` governs (default `true`, daemon on by default,
- * loopback-bound). The deprecated `danger.daemon` alias that used to
- * override this was removed in CHANGELOG 1.0.0 (its explicit-`false` off-switch is
- * preserved for existing users by a one-time config migration onto
- * `daemon.enabled`, applied at {@link ConfigManager.load}, see migrations.ts).
+ * loopback-bound).
  *
  * This lives in the shared platform config module (not TUI-local) so the standalone
  * daemon CLI and the TUI's adopt-or-start path resolve the flag identically.

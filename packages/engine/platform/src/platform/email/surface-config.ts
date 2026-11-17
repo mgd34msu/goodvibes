@@ -26,12 +26,6 @@
  *   mailbox    imap.mailbox        →  INBOX
  *   drafts     imap.draftsMailbox  →  the server's own `\Drafts` folder
  *
- * The flat spellings earlier builds also read (`username`, `imapHost`,
- * `imapPort`, `imapUser`, `imapPassword`), and the connector's `email.*` keys,
- * are moved onto these when a settings file loads
- * (config/retired-settings-migration.ts), so a mailbox configured any of those
- * ways resolves the same.
- *
  * A port counts as set only when the operator set it: the config manager answers an
  * unset key with its default, so the security answer could otherwise never pick
  * the port. A reader that cannot tell (a plain function) treats a value equal to

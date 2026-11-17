@@ -23,7 +23,6 @@ import { readHostManagedSettingLock, readStrictManagedSettingLock } from '../run
 import { requireSurfaceRoot, resolveSharedDirectory, resolveSurfaceDirectory, resolveSurfaceSharedFile } from '../runtime/surface-root.js';
 import { summarizeError } from '../utils/error-display.js';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
-import { runDaemonTierMigrationPasses, runLoadMigrationPasses } from './manager-migration-passes.js';
 import {
   SHARED_CONFIG_KEYS,
   isSharedConfigKey,
@@ -148,8 +147,7 @@ interface ConfigCliOverrides {
   surfaceRoot?: string | undefined;
   /**
    * True only in the daemon composition, which OWNS the daemon tier file. A
-   * client READS it and migrates its own view, never the bytes; the default is
-   * that non-writing answer. See MigrationOwnership in ./manager-migration-passes.ts.
+   * client only READS it; the default is that non-writing answer.
    */
   ownsDaemonTier?: boolean | undefined;
 }
@@ -1744,7 +1742,7 @@ export class ConfigManager {
       unknown: (file, keys) => { this.unknownSettingForms.keep(file, keys, this.ingestionSink()); },
     };
   }
-  private ingest(parsed: Record<string, unknown>, file: string, migrate?: (raw: Record<string, unknown>) => Record<string, unknown>): Record<string, unknown> {
+  private ingest(parsed: Record<string, unknown>, file: string): Record<string, unknown> {
     // Existing ingestion/migration may remove malformed categories in place.
     // Capture the host's restrictive projection first, but commit it only
     // AFTER that same persisted-setting validation gate accepts the layer.
@@ -1752,7 +1750,7 @@ export class ConfigManager {
       ? new Map(this.hostLoadValues) : null;
     const hostSource = nextHost ? structuredClone(parsed) : null;
     const malformedHostKeys = nextHost ? this.hostSettings.overlay(nextHost, parsed, this.hostLayerOf(file)) : [];
-    const ingested = ingestManagerSettings(parsed, file, this.ingestionSink(), migrate, new Set(this.hostSettings.keys()));
+    const ingested = ingestManagerSettings(parsed, file, this.ingestionSink(), new Set(this.hostSettings.keys()));
     if (nextHost) {
       this.hostLoadValues = nextHost;
       if (hostSource) this.hostLoadSources?.set(file, hostSource);
@@ -1785,16 +1783,14 @@ export class ConfigManager {
       this.ingestionNotices = [];
       if (this.hostSettings.active ? hostSettingsFileExists(this.configPath) : existsSync(this.configPath)) {
         try {
-          const migrated = this.ingest(JSON.parse(readFileSync(this.configPath, 'utf-8')) as Record<string, unknown>,
-            this.configPath, parsed => this.applyLoadMigrations(parsed, this.configPath));
+          const migrated = this.ingest(JSON.parse(readFileSync(this.configPath, 'utf-8')) as Record<string, unknown>, this.configPath);
           staged.nonRuntime = sanitizeConfigShape(deepMerge(staged.nonRuntime, migrated) as GoodVibesConfig);
           staged.recordLayer(migrated, 'global');
         } catch (error) { throw this.loadFailure('Global', this.configPath, error); }
       }
       if (this.projectConfigPath && (this.hostSettings.active ? hostSettingsFileExists(this.projectConfigPath) : existsSync(this.projectConfigPath))) {
         try {
-          const ingested = this.ingest(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')) as Record<string, unknown>,
-            this.projectConfigPath, parsed => this.applyLoadMigrations(parsed, this.projectConfigPath!));
+          const ingested = this.ingest(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')) as Record<string, unknown>, this.projectConfigPath);
           const restricted = restrictProjectLayer(ingested, staged.nonRuntime, this.projectConfigPath, this.hostSettings);
           for (const notice of restricted.notices) { announceIngestionNotice(notice); this.recordIngestionNotice(notice); }
           const migrated = restricted.layer;
@@ -1827,9 +1823,7 @@ export class ConfigManager {
   private loadDaemonTier(staged: ConfigRuntimeState): void {
     if (!this.daemonTierPath) return;
     try {
-      const stored = this.ingest(readDaemonTierFile(this.daemonTierPath), this.daemonTierPath,
-        raw => runDaemonTierMigrationPasses(raw, this.daemonTierPath!,
-          (id, text) => this.migrationReceipt(id, text), { ownsFile: this.daemonTierOwner }));
+      const stored = this.ingest(readDaemonTierFile(this.daemonTierPath), this.daemonTierPath);
       const applied = overlayDaemonTierFrom(stored, (key, value) => {
         const { parent, field } = resolveOrCreateDaemonPath(staged.nonRuntime as unknown as Record<string, unknown>, key);
         parent[field] = value;
@@ -1892,10 +1886,6 @@ export class ConfigManager {
     });
   }
 
-  /** Apply the canonical migration order, persisting only for a writable reader. */
-  private applyLoadMigrations(parsed: Record<string, unknown>, sourcePath: string): Record<string, unknown> {
-    return runLoadMigrationPasses(parsed, sourcePath, (id, text) => this.migrationReceipt(id, text), { ownsFile: !this.readOnly });
-  }
   private requireWritable(): void {
     if (this.readOnly) throw new PreparedMutationRefusal('read-only', 'ConfigManager is read-only.');
   }

@@ -34,16 +34,6 @@ configurable capability, never unreachable machinery.
 - There is no separate kill switch: to switch a capability off, change its
   settings key.
 
-## Migration from the legacy featureFlags config
-
-Configs written before the dissolution carried a `featureFlags` record. On
-first load the platform migrates each entry onto its domain settings key (explicit
-choices preserved: a legacy `disabled` maps to the feature's off value, a
-legacy `enabled` defers to an existing domain switch it used to AND with),
-removes the legacy record, persists the rewritten file, and logs a one-line
-receipt. `sandbox.judgmentAutoApprove` migrates onto `sandbox.judgment` the
-same way. No user action is needed.
-
 ## Capability catalog
 
 | Feature | Setting (enablement) | Active when | Default | Restart | Notes |

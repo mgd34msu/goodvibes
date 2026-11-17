@@ -28,9 +28,6 @@
  * Each fact has one key: `host`, `user`, `from`, `password` for the account,
  * and `imap.*` / `smtp.*` for what differs per protocol. Every mail reader
  * resolves them through `readSurfaceEmailSettings` (email/surface-config.ts).
- * The flat spellings earlier builds also read (`username`, `imapHost`,
- * `imapPort`, `imapUser`, `imapPassword`) are moved onto these at load by
- * retired-settings-migration.ts.
  *
  * ── Why this also fixes credential storage ────────────────────────────────
  *

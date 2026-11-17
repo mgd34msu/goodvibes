@@ -198,9 +198,8 @@ turned an hourly sweep into an hourly reminder.
 Two keys change as a result:
 
 - `occasions.cadenceDays` now governs only conflict re-raise (§4.12).
-- `occasions.finalStretchDays` is REMOVED, with a load-time migration that strips
-  it from existing settings files and files a receipt. A count of two has nothing
-  to tune, and a setting that changes nothing is worse than no setting.
+- `occasions.finalStretchDays` is REMOVED. A count of two has nothing to tune,
+  and a setting that changes nothing is worse than no setting.
 
 ### 4.7 Quiet hours: 8am to 10pm, in the owner's timezone
 Hours inside that range are fine to nudge in; anything outside it is not, so the

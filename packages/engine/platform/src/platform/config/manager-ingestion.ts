@@ -53,13 +53,11 @@ export function ingestManagerSettings(
   parsed: Record<string, unknown>,
   file: string,
   sink: IngestionNoticeSink,
-  /** The manager's load-time migrations; run before the screen. See IngestSettingsOptions.migrate. */
-  migrate?: ((raw: Record<string, unknown>) => Record<string, unknown>) | undefined,
   knownHostKeys?: ReadonlySet<string>,
 ): Record<string, unknown> {
   const noticedKeys = new Set<string>();
   const result = ingestSettingsFile(parsed, file, {
-    diagnosticMode: sink.diagnosticMode, ...(migrate ? { migrate } : {}), ...(knownHostKeys ? { hostKeys: knownHostKeys } : {}),
+    diagnosticMode: sink.diagnosticMode, ...(knownHostKeys ? { hostKeys: knownHostKeys } : {}),
     onNotice: (entry) => { noticedKeys.add(entry.key); noticeTo(sink, entry); },
   });
   for (const entry of result.unknownKeys) noticedKeys.add(entry.key);

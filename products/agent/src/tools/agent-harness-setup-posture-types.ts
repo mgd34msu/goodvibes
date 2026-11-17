@@ -135,7 +135,6 @@ export interface SetupConnectedHostAuthPosture {
     readonly connectedHostStatus: string;
     readonly pairingPosture: string;
     readonly qrPairingRoute: string;
-    readonly manualTokenRoute: string;
     readonly provisionTokenRoute: string;
     readonly tokenProvisioningOwner: string;
     readonly tokenProvisioningSource: string;

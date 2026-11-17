@@ -68,9 +68,9 @@ export const COMMON_COMMAND_HELP = {
     ],
   },
   pair: {
-    usage: ['pair', 'qrcode'],
-    summary: 'Print companion pairing connection details and a QR code.',
-    examples: ['pair', 'qrcode'],
+    usage: ['pair [--name <device name>]', 'qrcode'],
+    summary: 'Mint a named, revocable device token on the connected host and print its pairing link and QR code.',
+    examples: ['pair', 'pair --name "my phone"', 'qrcode'],
   },
   completion: {
     usage: ['completion <bash|zsh|fish>'],

@@ -37,7 +37,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     '  tasks                      List/show in-process tasks or submit a non-interactive task',
     '  acp                        Run as an Agent Client Protocol agent over stdio (for editors)',
     '  host pair|unpair          Review explicit TUI host pairing (--bootstrap-shared; --apply), or forget it',
-    '  pair|qrcode                Print companion pairing payload and QR code',
+    '  pair|qrcode                Mint a named device token on the connected host; print its link and QR code',
     '  surfaces                   Inspect/check/enable/disable browser/listener/external surfaces',
     '  listener test              Test HTTP listener/webhook readiness',
     '  control-plane status       Inspect daemon auth, local admin, tokens, and ports',

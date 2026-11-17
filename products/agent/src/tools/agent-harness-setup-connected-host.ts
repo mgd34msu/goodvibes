@@ -100,7 +100,6 @@ export async function connectedHostAuthPosture(
       connectedHostStatus: 'host action:"status" includeParameters:true',
       pairingPosture: 'agent_harness mode:"pairing_posture" includeParameters:true',
       qrPairingRoute: 'agent_harness mode:"pairing_route" pairingRouteId:"qr-pairing"',
-      manualTokenRoute: 'agent_harness mode:"pairing_route" pairingRouteId:"manual-token-display"',
       provisionTokenRoute: provisionConnectedHostTokenRoute(),
       tokenProvisioningOwner: 'connected GoodVibes host canonical token store',
       tokenProvisioningSource: 'platform getOrCreateCompanionToken writes ~/.goodvibes/daemon/operator-tokens.json with mode 0600; Agent exposes it only through confirmed setup and never returns the raw token',

@@ -429,7 +429,6 @@ export interface AgentWorkspaceCompanionAccessSummary {
   readonly tokenError: string | null;
   readonly pairingReady: boolean;
   readonly qrCommand: '/pair';
-  readonly manualTokenCommand: '/pair --show-token --yes';
   readonly nextStep: string;
 }
 

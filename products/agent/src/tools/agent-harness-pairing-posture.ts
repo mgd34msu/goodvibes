@@ -165,16 +165,9 @@ function pairingRoutes(): readonly PairingRoute[] {
     {
       id: 'qr-pairing',
       label: 'QR pairing',
-      detail: 'Owner-terminal route: the user types /pair in the live Agent terminal to print the QR setup details. The QR payload carries the connected-host operator token, so a model invocation of /pair is refused.',
+      detail: 'Owner-terminal route: the user types /pair (optionally --name <device name>) in the live Agent terminal; it mints a named, revocable device token on the connected host and shows its link and QR code. Granting a new device access is the owner's to type, so a model invocation of /pair is refused. The device token is revoked in the web app under settings, security, devices.',
       effect: 'owner-terminal-only',
       command: '/pair',
-    },
-    {
-      id: 'manual-token-display',
-      label: 'Manual token display',
-      detail: 'Owner-terminal fallback: the user types /pair --show-token --yes in the live Agent terminal to print the raw companion token for manual setup. A model invocation is refused.',
-      effect: 'owner-terminal-only',
-      command: '/pair --show-token --yes',
     },
     {
       id: 'pairing-ui',
@@ -283,7 +276,7 @@ function describeRoute(route: PairingRoute, options: {
       policy: {
         effect: route.effect,
         values: 'Pairing posture returns the endpoint binding with its advertised address, and token presence only; raw companion tokens, QR payloads and the absolute token file path are never returned by this read-only mode.',
-        mutation: 'Pairing display and manual token display are owner-terminal flows that a model cannot run. Companion connection, channel sends, provider/model changes, approval actions, and attachment flows stay explicit visible user flows.',
+        mutation: 'Device pairing (/pair, which mints a device token) is an owner-terminal flow that a model cannot run. Companion connection, channel sends, provider/model changes, approval actions, and attachment flows stay explicit visible user flows.',
       },
       modelAccess: {
         inspectPairing: 'agent_harness mode:"pairing_posture"',
@@ -416,7 +409,7 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
       status: controlPlaneReady ? 'ready' : hasToken && endpointEnabledUnknown(state) ? 'attention' : 'setup-needed',
       userOutcome: 'Pair a phone or companion surface without exposing the raw operator token in chat.',
       summary: controlPlaneReady
-        ? 'A connected-host operator token is present and the control plane is enabled; QR and manual setup are owner-terminal flows the user starts with /pair.'
+        ? 'A connected-host operator token is present and the control plane is enabled; pairing is an owner-terminal flow the user starts with /pair, which mints a named, revocable device token on the connected host and shows its link and QR code.'
         : !hasToken
           ? 'No connected-host operator token is present, so companion pairing needs local token provisioning first.'
           : endpointEnabledUnknown(state)
@@ -427,7 +420,7 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
         : !hasToken
           ? 'Provision connected-host auth (setupRoutes), then enable the control plane before QR pairing.'
           : 'Enable the control plane (host action:"service" endpointId:"controlPlane"), then ask the user to type /pair.',
-      capabilities: ['QR pairing', 'manual setup fallback', 'token-safe handoff'],
+      capabilities: ['QR pairing', 'pairing link', 'revocable device token'],
       modelRoute: 'agent_harness mode:"pairing_route" pairingRouteId:"qr-pairing"',
       userRoute: '/pair',
       setupRoutes: [
@@ -723,7 +716,7 @@ export async function pairingPostureSummary(context: CommandContext, rawArgs: Ag
       routes: filtered.map((route) => describeRoute(route, { includeParameters, deviceCapabilityMap: deviceMap })),
       returned: filtered.length,
       total: routes.length,
-      policy: `${deviceMap.policy} QR display, manual token display, companion connection, channel delivery, task, approval, provider/model, and attachment actions remain explicit visible user flows.`,
+      policy: `${deviceMap.policy} Device pairing (/pair), companion connection, channel delivery, task, approval, provider/model, and attachment actions remain explicit visible user flows.`,
     };
     current.assertCurrent?.();
     return result;

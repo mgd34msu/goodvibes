@@ -85,7 +85,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
     '  secrets                    List, set, link, delete, and test GoodVibes secret refs',
     '  sessions                   List, show, export, or resume saved sessions',
     '  tasks                      Inspect connected-host task summaries (submission is blocked)',
-    '  pair|qrcode                Print companion pairing payload and QR code',
+    '  pair|qrcode                Mint a named device token on the connected host; print its link and QR code',
     '  bundle export|inspect|import',
     '                             Export/inspect bundles; import restores config only',
     '  import openclaw [path]     Migrate an OpenClaw workspace (dry-run default, --apply to write)',

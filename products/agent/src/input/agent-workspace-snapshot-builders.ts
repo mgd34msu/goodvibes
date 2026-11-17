@@ -291,7 +291,7 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
   const nextStep = tokenRecord.error
     ? 'Repair the connected-host operator token file through the owning GoodVibes host, then rerun /pair.'
     : pairingReady
-      ? 'Use /pair to scan the QR code. Manual token display stays hidden unless /pair --show-token --yes is used.'
+      ? 'Type /pair (optionally --name <device name>): it mints a named, revocable device token on the connected host and shows its link and QR code to scan.'
       : 'Pair or provision connected-host access through the owning GoodVibes host, then rerun /pair.';
   return {
     surface: GOODVIBES_AGENT_PAIRING_SURFACE,
@@ -302,7 +302,6 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
     tokenError: tokenRecord.error ?? null,
     pairingReady,
     qrCommand: '/pair',
-    manualTokenCommand: '/pair --show-token --yes',
     nextStep,
   } as const;
 }

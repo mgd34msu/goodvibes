@@ -241,7 +241,7 @@ export const COMPLETION_COMMANDS: readonly CompletionCommand[] = [
   {
     name: 'pair',
     aliases: ['pair', 'qrcode', 'qr'],
-    description: 'Print companion pairing payload and QR code',
+    description: 'Mint a named device token and print its pairing link and QR code',
     subcommands: [],
   },
   {

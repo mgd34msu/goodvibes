@@ -74,7 +74,8 @@ reviewed skills, routines and memory, read from the same `~/.goodvibes/agent`
 stores the Agent uses) and the session has the Agent's `profile`, `occasions`,
 `agent_artifacts`, `agent_documents`, `agent_research_runs`,
 `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`,
-`agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_channel_send`, `browser` and `google`
+`agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_learning_consolidation`, `agent_channel_send`,
+`browser` and `google`
 tools beside the platform tools (using the daemon's own channel delivery, media providers, webhook notifier,
 memory store, the browser its `browser.*` methods drive, and the Google account and `calendar.events.*`
 methods it holds), and `agent_work_plan` when the session is in the daemon's own project. Its `schedule`,
@@ -91,8 +92,7 @@ it created, where a signup alias opens this daemon's own watch for the verificat
 Agent's read-mode table, so a mode reads or changes exactly as it does in the Agent, and a
 `profile` or `occasions` call is admitted with the scopes the paired Agent's credential holds. The Agent tools that work through the Agent's own
 command session are named in that prompt with the platform tool that covers the
-same facts; the Agent tools not yet hosted are named too; a call to either is
-refused with the reason and the next step. Creation submits `initialPrompt` without waiting for its turn to finish.
+same facts, and a call to one is refused with the reason and the next step. Creation submits `initialPrompt` without waiting for its turn to finish.
 A creation response therefore does not prove successful model execution.
 A `clientId` belongs to the principal that first attached it: another principal that attaches or detaches the same `clientId` is refused with 403 `HOSTED_CLIENT_FORBIDDEN`, so choose a `clientId` of your own.
 

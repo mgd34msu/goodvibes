@@ -1,6 +1,6 @@
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolRegistry, type ToolInputProjector } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
+import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureCatalogSnapshot } from './agent-harness-catalog-ranking.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import {

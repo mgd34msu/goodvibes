@@ -1,6 +1,6 @@
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import { createDaemonOperatorInvoke } from './daemon-operator-client.ts';
-import type { captureOperatorConnection } from './operator-connection-owner.ts';
+import { createDaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 const CREATED_METHODS = new Set(['automation.jobs.create', 'automation.schedules.create']);
 const SELECTED_TARGETS: Readonly<Record<string, 'jobId' | 'scheduleId'>> = {

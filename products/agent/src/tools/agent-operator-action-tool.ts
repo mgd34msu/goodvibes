@@ -5,7 +5,7 @@ import { redactSensitiveDataAsync } from '@goodvibes-jev/engine/platform/platfor
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { assertOperatorEffect } from '../agent/operator-connection-owner.ts';
+import { assertOperatorEffect } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { findOperatorContractMethod } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { assertSafeOperatorPathValue, createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward } from './agent-operator-input-projector.ts';
 import {

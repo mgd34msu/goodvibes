@@ -19,7 +19,7 @@
  * offline-tolerant, matching the away-digest's existing silent-failure
  * contract. It never falls back to the local automation manager.
  */
-import { createConnectedHost, isHostFailure, type ConnectedHost } from './connected-host-client.ts';
+import { createConnectedHost, isHostFailure, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentConnectedHostConfigReader, AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export const AUTOMATION_RUNS_LIST_METHOD = 'automation.runs.list';

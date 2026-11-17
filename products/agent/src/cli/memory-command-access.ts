@@ -15,7 +15,7 @@ import { MemorySpineClient, createLocalMemoryAccess } from '@goodvibes-jev/engin
 import { createSessionSpineRestProbe } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { createSpineConnectionResolver } from '../runtime/session-spine-rest-transport.ts';
 import { createMemorySpineRestTransport } from '../runtime/memory-spine-rest-transport.ts';
-import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CliCommandRuntime } from './management.ts';
 
 /** The label a command prints for the host's store. */

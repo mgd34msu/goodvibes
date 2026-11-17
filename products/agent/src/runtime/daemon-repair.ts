@@ -35,7 +35,7 @@ import {
 import {
   connectedHostPort,
   dialHostForConfiguredHost,
-} from '../config/connected-host-dial.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   createDaemonCliRunner,
   installDaemonService,

@@ -88,7 +88,7 @@ import { createAutonomySurfacing, buildCalendarEventsLister, buildSkillDraftProp
 import { bindApprovals } from './shell/approvals-binding.ts';
 import { listAutomationRunsSince } from './agent/automation-runs-source.ts';
 import { listUpcomingSchedules } from './agent/automation-schedules-source.ts';
-import { createConnectedHost } from './agent/connected-host-client.ts';
+import { createConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import './core/hardware-profile.ts';
 import { readApprovalPostureFromConfig } from './permissions/approval-posture.ts';
 import { cancelConversationGeneration, installRemoteConversationRouting } from './shell/remote-conversation-wiring.ts';

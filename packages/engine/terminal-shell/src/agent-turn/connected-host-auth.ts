@@ -1,4 +1,4 @@
-import { agentHostPairingStorePath, canonicalizePairingHost, readAgentHostPairing, type AgentHostPairing } from './connected-host-pairing-store.ts';
+import { agentHostPairingStorePath, canonicalizePairingHost, readAgentHostPairing, type AgentHostPairing } from './connected-host-pairing-store.js';
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';

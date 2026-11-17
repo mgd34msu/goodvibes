@@ -7,7 +7,7 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
 import { operatorMethodIsReadOnly, resolveOperatorContractMethod } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { getOperatorActions, isOperatorActionId, targetValue } from '../agent/operator-actions.ts';
-import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
+import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { captureOperatorAutomationTarget, type OperatorAutomationTarget } from '../agent/operator-automation-target.ts';
 import { captureOperatorRequestPolicy } from '../agent/operator-request-policy.ts';
 

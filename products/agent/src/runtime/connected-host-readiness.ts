@@ -1,5 +1,5 @@
-import { canonicalizePairingHost } from './connected-host-pairing-store.ts';
-import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostConnection } from '../agent/connected-host-client.ts';
+import { canonicalizePairingHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
 import { isNativeOwnerPrincipal } from './native-paired-principal.ts';
 

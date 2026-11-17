@@ -20,7 +20,7 @@
 
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createConnectedHost } from './connected-host-client.ts';
+import { createConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export const UNKNOWN_PRINCIPAL_LABEL = 'unknown principal';
 

@@ -16,9 +16,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { createHostPairingStore, type HostPairingAttempt } from '@goodvibes-jev/engine/terminal-shell/host-pairing-store';
-import { parseMintedPairingToken, readHostPairingResponse } from '../runtime/native-paired-principal.ts';
-import type { CapturedOperatorConnection } from './operator-connection-owner.ts';
+import { createHostPairingStore, type HostPairingAttempt } from '../host-pairing-store.js';
+import { parseMintedPairingToken, readHostPairingResponse } from '../native/native-paired-principal.js';
+import type { CapturedOperatorConnection } from './operator-connection-owner.js';
 
 const DELEGATION_UNAVAILABLE_REASON = 'The Agent delegation credential store is unavailable.';
 const store = createHostPairingStore({

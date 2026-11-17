@@ -1,9 +1,9 @@
 import { createSupportBundleCommand } from '@goodvibes-jev/engine/terminal-shell/support-bundle-command';
-import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { existsSync } from 'node:fs';
 import { createShellPathService } from '@/runtime/index.ts';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
-import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { getOnboardingCheckMarkerPath } from '../runtime/onboarding/index.ts';
 import { CONFIG_SCHEMA } from '../config/index.ts';
 import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';

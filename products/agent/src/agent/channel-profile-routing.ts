@@ -35,7 +35,7 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './channel-store-lifetime.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';
+import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /** The daemon method that owns the routing table. */
 export const CHANNEL_ROUTING_ASSIGN_METHOD = 'channels.routing.assign';

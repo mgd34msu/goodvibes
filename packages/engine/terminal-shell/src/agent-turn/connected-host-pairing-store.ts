@@ -10,7 +10,7 @@ import {
   type CompleteHostPairingResult,
   type RemoveHostPairingResult,
   type HostPairingIO,
-} from '@goodvibes-jev/engine/terminal-shell/host-pairing-store';
+} from '../host-pairing-store.js';
 export const AGENT_HOST_PAIRING_MAX_RECORDS = HOST_PAIRING_MAX_RECORDS;
 export const AGENT_HOST_PAIRING_MAX_BYTES = HOST_PAIRING_MAX_BYTES;
 export const AGENT_HOST_PAIRING_UNAVAILABLE_REASON = 'Agent host pairing store is unavailable.';

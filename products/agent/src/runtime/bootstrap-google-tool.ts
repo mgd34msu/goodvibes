@@ -20,7 +20,7 @@ import { getOutwardApprovalStore, OUTWARD_APPROVAL_GESTURE } from '../trust/outw
 import type { ConfigManager, SecretsManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { retainGoogleConnectionOwners } from '../tools/agent-google-admission.ts';
-import { createConnectedHost, resolveConnectedHost, type ConnectedHost } from '../agent/connected-host-client.ts';
+import { createConnectedHost, resolveConnectedHost, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /** The slice of the runtime this wiring needs. Nothing wider. */
 export interface GoogleToolWiringDeps {

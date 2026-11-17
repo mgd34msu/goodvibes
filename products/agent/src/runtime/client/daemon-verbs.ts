@@ -40,14 +40,14 @@
 import { statSync } from 'node:fs';
 import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentHostPairingStorePath } from '../connected-host-pairing-store.ts';
-import { connectedHostOperatorTokenPath } from '../connected-host-auth.ts';
+import { agentHostPairingStorePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostOperatorTokenPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPrecondition, observeImportFile,
   assertImportFileCurrent } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '../connected-host-auth.ts';
-import { resolveConnectedHostBaseUrl } from '../../config/connected-host-dial.ts';
+import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentDaemonVerbCallerOptions {
   readonly configManager: ConfigManager;

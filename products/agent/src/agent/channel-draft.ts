@@ -44,7 +44,7 @@ import { retainChannelStoreSource, type ChannelStoreEffectOptions } from './chan
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import type { AgentChannelDeliveryInput } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
-import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';
+import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export const CHANNEL_DRAFTS_LIST_METHOD = 'channels.drafts.list';
 export const CHANNEL_DRAFTS_GET_METHOD = 'channels.drafts.get';

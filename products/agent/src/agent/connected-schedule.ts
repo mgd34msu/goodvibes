@@ -12,7 +12,7 @@
  */
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { parseEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
-import { createConnectedHost, isHostFailure, type HostFailureKind } from './connected-host-client.ts';
+import { createConnectedHost, isHostFailure, type HostFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;

@@ -24,7 +24,7 @@ import type { RuntimeEndpointId } from './endpoints.ts';
 import '@goodvibes-jev/engine/terminal-shell';
 import { captureJudgmentPort, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
 import { retainCliConfig } from '@goodvibes-jev/engine/terminal-shell';
-import { dialHostForConfiguredHost } from '../config/connected-host-dial.ts';
+import { dialHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 
 export interface CliServicePosture {

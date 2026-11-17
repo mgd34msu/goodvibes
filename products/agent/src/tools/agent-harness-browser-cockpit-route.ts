@@ -2,7 +2,7 @@ import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
 import { readOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
-import { urlHostForConfiguredHost } from '../config/connected-host-dial.ts';
+import { urlHostForConfiguredHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /** This browser opens on THIS host, so a wildcard bind resolves to loopback. */
 const browserConnectHost = urlHostForConfiguredHost;

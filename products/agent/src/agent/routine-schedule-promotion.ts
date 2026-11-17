@@ -1,8 +1,8 @@
-import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { classifyConnectedHostError, type ConnectedHostFailure } from './connected-host-failure.ts';
 import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

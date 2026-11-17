@@ -23,7 +23,7 @@ import {
   readAgentRuntimeProfileSelection,
 } from '../agent/runtime-profile.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
-import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { summarizePersonaItem, summarizeNoteItem, summarizeResearchRunItem, summarizeRoutineScheduleReceipt, summarizeSkillBundleItem, summarizeSkillItem } from './agent-workspace-local-library-snapshot.ts';
 import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './agent-workspace-review-packet-utils.ts';
 import { readMailboxStatus } from './commands/email-settings.ts';

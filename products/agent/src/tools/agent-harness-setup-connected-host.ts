@@ -1,12 +1,12 @@
 import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { serviceExpectedOutcome, type ServiceMethodId } from './agent-service-lifecycle.ts';
 import { captureAsyncHarnessInput } from './agent-harness-async-input.ts';
-import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { getOperatorContract } from '@goodvibes-jev/engine/platform/contracts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { CliServicePosture } from '../cli/service-posture.ts';
-import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
 import { operatorMethodRoute, provisionConnectedHostTokenRoute } from './agent-harness-setup-posture-utils.ts';
 import { homeRelativePath } from './agent-harness-tool-utils.ts';

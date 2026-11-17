@@ -15,7 +15,7 @@ import {
   type ConnectedHostSource,
   type ConnectedHostUnavailable,
   type HostFailureKind,
-} from '../agent/connected-host-client.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { operatorContractMethods } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { CommandContext } from './command-registry.ts';
 

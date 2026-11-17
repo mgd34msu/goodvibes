@@ -1,12 +1,12 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
-import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostConnection } from '../agent/connected-host-client.ts';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentDaemonVerbCallerOptions } from './client/daemon-verbs.ts';
-import { readConnectedHostOperatorToken } from './connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { isHostPairingBootstrapPrincipal, isNativePairedPrincipal, parseMintedPairingToken, readHostPairingResponse } from './native-paired-principal.ts';
-import { agentHostPairingStorePath, beginAgentHostPairing, canonicalizePairingHost, clearAgentHostPairingAttempt, completeAgentHostPairing, readAgentHostPairing, removeAgentHostPairing, type RemoveAgentHostPairingResult } from './connected-host-pairing-store.ts';
+import { agentHostPairingStorePath, beginAgentHostPairing, canonicalizePairingHost, clearAgentHostPairingAttempt, completeAgentHostPairing, readAgentHostPairing, removeAgentHostPairing, type RemoveAgentHostPairingResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface AgentHostPairingResult {
   readonly status:

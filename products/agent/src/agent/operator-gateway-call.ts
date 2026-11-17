@@ -7,9 +7,9 @@
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { operatorRouteLabel, type FamilyGatewayRemote } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { delegatedOperatorConnection, forgetDelegatedCredential } from './agent-delegation-credential.ts';
-import { createConnectedHost, isHostFailure, type HostCallApplied, type HostRefusal } from './connected-host-client.ts';
-import { captureOperatorConnection } from './operator-connection-owner.ts';
+import { delegatedOperatorConnection, forgetDelegatedCredential } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { createConnectedHost, isHostFailure, type HostCallApplied, type HostRefusal } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { AgentConnectedHostConfigReader, AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export type OperatorGatewayCallFailureKind =

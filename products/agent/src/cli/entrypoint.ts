@@ -9,13 +9,13 @@ import {
 } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 export type { ShellEntrypointRoots } from '@goodvibes-jev/engine/terminal-shell/cli-entrypoint';
 import { readConnectedHostReadiness } from '../runtime/connected-host-readiness.ts';
-import { canonicalizePairingHost, readAgentHostPairing } from '../runtime/connected-host-pairing-store.ts';
-import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { canonicalizePairingHost, readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { extractNativeHeadlessOptions } from './native-headless-options.ts';
 import { headlessRunFlagErrors } from '@goodvibes-jev/engine/terminal-shell/headless-turn-events';
 import { runNativeHeadlessCommand } from './native-headless-command.ts';
 import { existsSync } from 'node:fs';
-import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { fetchDaemonCredentialAvailability } from '../config/credential-status.ts';
 import { join } from 'node:path';
 import { AgentConfigManager, type ConfigManager } from '../config/index.ts';

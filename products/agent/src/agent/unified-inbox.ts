@@ -19,7 +19,7 @@
  */
 
 import { readSurfaceMessageText, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
-import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from './daemon-operator-client.ts';
+import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { UNKNOWN_PRINCIPAL_LABEL } from './principal-attribution.ts';
 import { renderForModel, untrustedFrom } from './untrusted-content.ts';
 

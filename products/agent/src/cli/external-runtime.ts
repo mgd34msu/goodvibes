@@ -1,7 +1,7 @@
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
-import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface CliExternalRuntimeInspectionOptions {
   readonly configManager: Pick<ConfigManager, 'get'>;

@@ -3,7 +3,7 @@ import * as nativeOs from 'node:os';
 import type { CommandContext } from '../input/command-registry.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointConfigReader } from '../cli/endpoints.ts';
-import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from '../input/agent-workspace-voice-media.ts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';

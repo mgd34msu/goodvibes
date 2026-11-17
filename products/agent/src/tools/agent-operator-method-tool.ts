@@ -6,8 +6,8 @@ import { logger, redactStructuredDataAsync } from '@goodvibes-jev/engine/platfor
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { AgentConnectedHostConfigReader } from '../agent/routine-schedule-promotion.ts';
-import { assertOperatorEffect, captureOperatorConnection } from '../agent/operator-connection-owner.ts';
-import { delegatedOperatorConnection, forgetDelegatedCredential } from '../agent/agent-delegation-credential.ts';
+import { assertOperatorEffect, captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { delegatedOperatorConnection, forgetDelegatedCredential } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { isOperatorAutomationTargetMethod } from '../agent/operator-automation-target.ts';
 import { publishOperatorMethodReceipt } from '../agent/operator-method-receipt.ts';
 import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';

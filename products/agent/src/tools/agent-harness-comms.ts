@@ -7,8 +7,8 @@ import { captureHarnessLocalEffect } from './agent-harness-local-effect.ts';
 import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { resolveChannelDraftNativeReference } from './agent-channel-draft-reference.ts';
-import { captureOperatorConnection } from '../agent/operator-connection-owner.ts';
-import { delegatedOperatorConnection, forgetDelegatedCredential } from '../agent/agent-delegation-credential.ts';
+import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { delegatedOperatorConnection, forgetDelegatedCredential } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger, labelUntrustedContent } from '../trust/untrusted-content.ts';
 import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
@@ -53,7 +53,7 @@ import {
   createDaemonOperatorInvoke,
   resolveDaemonOperatorConnection,
   type DaemonOperatorInvoke,
-} from '../agent/daemon-operator-client.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**

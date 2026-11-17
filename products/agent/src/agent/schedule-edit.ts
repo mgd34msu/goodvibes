@@ -10,7 +10,7 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
   buildAutonomySchedulePrompt,
 } from './autonomy-schedule.ts';
-import { createConnectedHost, isHostFailure } from './connected-host-client.ts';
+import { createConnectedHost, isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { findOperatorHttpBinding } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   ROUTINE_SCHEDULE_LIST_METHOD,

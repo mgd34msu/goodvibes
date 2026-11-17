@@ -2,7 +2,7 @@ import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes-j
 import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { formatEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
-import { createConnectedHost, isHostFailure } from './connected-host-client.ts';
+import { createConnectedHost, isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { isRoutineScheduleDeliverySurfaceKind } from './routine-schedule-args.ts';

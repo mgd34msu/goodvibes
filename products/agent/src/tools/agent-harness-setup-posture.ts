@@ -1,14 +1,14 @@
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { rankStatefulCatalog } from './agent-harness-stateful-catalog-source.ts';
-import { readAgentHostPairing } from '../runtime/connected-host-pairing-store.ts';
-import { resolveConnectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { readAgentHostPairing } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { resolveConnectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { join } from 'node:path';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { deriveStep1Capabilities, deriveStep1CapabilityFlags } from '../runtime/onboarding/index.ts';
-import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { clearSetupWizardCheckpoint, saveSetupWizardCheckpoint, setupWizardCheckpointPath } from '../agent/setup-wizard-checkpoint.ts';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';

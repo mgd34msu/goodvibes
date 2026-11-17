@@ -1,11 +1,11 @@
 import { assertCurrentToolEffect } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { lstatSync } from 'node:fs';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { connectedHostOperatorTokenPath } from '../runtime/connected-host-auth.ts';
-import { agentHostPairingStorePath } from '../runtime/connected-host-pairing-store.ts';
-import { resolveConnectedHost, type ConnectedHostSource, type ConnectedHostUnavailable } from './connected-host-client.ts';
-import type { AgentConnectedHostConfigReader } from './routine-schedule-promotion.ts';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { connectedHostOperatorTokenPath } from './connected-host-auth.js';
+import { agentHostPairingStorePath } from './connected-host-pairing-store.js';
+import { resolveConnectedHost, type ConnectedHostSource, type ConnectedHostUnavailable } from './connected-host-client.js';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 
 /** File identity, size and change time; `absent` when there is no file, `symlink` for a link. One `lstat`. */
 function credentialStamp(path: string): string {

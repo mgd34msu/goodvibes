@@ -17,7 +17,7 @@ import { createBrowserAgentPlatform, type BrowserAgentPlatform } from '@goodvibe
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { VERSION } from '../version.ts';
 import { normalizeAgentKnowledgeScopeAliases } from '../agent/knowledge-scope-alias.ts';
-import { resolveConnectedHost } from '../agent/connected-host-client.ts';
+import { resolveConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { AGENT_KNOWLEDGE_METHODS, type ConnectedHostCallMethod } from './agent-knowledge-methods.ts';
 import { isRecord, readString } from './agent-knowledge-format.ts';
 

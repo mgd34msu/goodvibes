@@ -30,15 +30,15 @@ import { categoryForCode, categoryForStatus, GoodVibesError, httpStatusOf } from
 import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes-jev/engine/operator-client';
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/platform/platform/config';
-import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { connectedHostBaseUrl } from './connected-host-dial.js';
 import {
   connectedHostOperatorTokenPath,
   readConnectedHostOperatorToken,
   type ConnectedHostCredentialSource,
   type ConnectedHostOperatorToken,
-} from '../runtime/connected-host-auth.ts';
-import { agentHostPairingStorePath } from '../runtime/connected-host-pairing-store.ts';
-import { assertSafeOperatorPathValue, findOperatorContractMethod, findOperatorHttpBinding, READ_ONLY_HTTP_METHODS } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+} from './connected-host-auth.js';
+import { agentHostPairingStorePath } from './connected-host-pairing-store.js';
+import { assertSafeOperatorPathValue, findOperatorContractMethod, findOperatorHttpBinding, READ_ONLY_HTTP_METHODS } from './operator-contract-routes.js';
 
 export type ConnectedHostSource = ConnectedHostCredentialSource;
 

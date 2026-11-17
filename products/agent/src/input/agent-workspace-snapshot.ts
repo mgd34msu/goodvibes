@@ -1,4 +1,4 @@
-import { readConnectedHostOperatorToken } from '../runtime/connected-host-auth.ts';
+import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { basename, sep } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
@@ -37,7 +37,7 @@ import {
   type AgentWorkspaceReadFailures,
 } from './agent-workspace-snapshot-builders.ts';
 import type { AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
-import { connectedHostBaseUrl } from '../config/connected-host-dial.ts';
+import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 // Re-exported so this module's public surface still carries this builder,
 // whose body now lives in agent-workspace-snapshot-builders.ts.

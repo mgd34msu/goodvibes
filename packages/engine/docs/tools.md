@@ -63,6 +63,21 @@ current status and the moves that remain, for example
 | `workflow` | `cancel` applies to a workflow that is still in progress. Cancelling a workflow that already finished or was already cancelled is refused with the reason, and its completion time is unchanged. |
 | `task` | `create` never replaces an existing task ref; use `status` to move it. A handoff to a session this host does not know, or of a finished task, is refused. A handoff marks the task `blocked` until the destination session runs `acknowledge` with the handoff id, which returns the task to the status it had. |
 
+## Captured commands
+
+A command in a contract view runs in one Linux bubblewrap spawn that mounts the
+member's view (its worktree) in place: read-write for a member that may change
+it, read-only for a planner or any other read-only view. Nothing is copied. The
+owner's read rules are turned into mount masks once per command: a denied or
+reserved directory (`.git`, `.goodvibes`, `.ssh`, `.aws`, `.gnupg`) is an empty
+tmpfs and a denied file is `/dev/null`, so the command cannot read them; writes
+there are discarded. The project's `node_modules` is mounted read-only with the
+same masks (computed once per agent), and the pinned Node, npm and Bun runtimes
+are read-only binds. Authority over the view is proven before the spawn and
+before the result is returned; a member's writes land in its own worktree as the
+command makes them, and integration detects conflicts when the work merges. The
+result names how many paths were hidden.
+
 ## Captured Bun commands
 
 Captured `exec` consumes its construction-owned ordinary Bun admission directly;
@@ -76,15 +91,15 @@ alias. Shell and separately admitted Node commands remain available. A compiled
 product executable and known OS Bun aliases cannot substitute for that admission.
 No package download or interpreter-mode environment override is introduced.
 Authorized project Bun configuration and preloads retain their normal behavior;
-generated files publish only to the mutable member view through existing checks.
+generated files land only in a mutable member view.
 
 ## Captured REPL evaluation
 
 Captured contract/Agent views support one-shot JavaScript and TypeScript eval
-through the existing Linux bubblewrap projection backend and trusted Bun runtime.
+through the captured command backend above and the trusted Bun runtime.
 The normal tool admission and exec safety reading still apply. The backend checks
-the live original-owner and captured-view authority before projection reads,
-execution and result delivery. A supplied workspace path cannot change that binding.
+the live original-owner and captured-view authority before execution and result
+delivery. A supplied workspace path cannot change that binding.
 
 Each call starts a fresh process. JSON bindings become named globals, and the
 printed completion value and console output are returned in `result`. Variables

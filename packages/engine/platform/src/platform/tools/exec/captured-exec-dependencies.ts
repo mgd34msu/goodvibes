@@ -1,20 +1,23 @@
-import { RetainedFileBytes, type RetainedFileSlice } from '../../utils/retained-file-bytes.js';
-import { checkCapturedInputsInBatches } from './captured-exec-validation.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
-/** Construction-admitted immutable dependency inputs. No prefix is a read grant. */
-import { chmod, copyFile, lstat, mkdir, readdir, realpath, symlink, unlink } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+/**
+ * The project's installed dependencies (`node_modules`) as a read-only mount
+ * for captured commands. Nothing is copied: the source tree is bound where the
+ * member's view expects it, and the owner's read rules over it become mount
+ * masks, computed once per admission (the first command that needs them).
+ * Each command checks that the source root is still the admitted directory
+ * (one `lstat` and one `realpath`). No prefix is a read grant.
+ */
+import { lstat, readdir, realpath } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   assertContractInputAuthority,
-  withContractInputReadBatch,
-  authorizeContractInputPath,
   contractInputAuthoritySourceRoot,
   contractInputAuthorityRoot,
   registerContractInputReadAssertion,
-  registerContractInputCleanup,
 } from '../../contract/input-authority.js';
 import { CONTRACT_INPUT_EXCLUSIONS } from '../../contract/input-snapshot.js';
 import type { CapturedExecAuthority } from './captured-exec.js';
+import { computeCapturedMasks, type CapturedMasks } from './captured-exec-masks.js';
 
 export interface CapturedExecDependencyRoot {
   readonly sourceRoot: string;
@@ -23,28 +26,12 @@ export interface CapturedExecDependencyRoot {
 /** Serialization or model arguments cannot manufacture an admitted input. */
 export interface CapturedExecDependencyInput { readonly kind: 'captured-exec-dependency-input' }
 type Binding = Pick<CapturedExecAuthority, 'authority' | 'root' | 'readAccessFilter' | 'signal' | 'retainInputResource'>;
-interface DependencyRead {
-  readonly source: string;
-  readonly canonical: string;
-  readonly alias: string;
-  readonly identity: string;
-}
-interface WorkspaceLink {
-  readonly source: string;
-  readonly canonical: string;
-  readonly captured: string;
-  readonly alias: string;
-  readonly path: string;
-  readonly identity: string;
-}
 interface Admission {
   readonly binding: Binding;
+  readonly sourceRoot: string;
   readonly target: string;
-  readonly retained: RetainedFileBytes;
-  readonly files: readonly { path: string; source: string; bytes: RetainedFileSlice; mode: number }[];
-  readonly workspaceLinks: readonly WorkspaceLink[];
-  readonly fileLinks: readonly { path: string; target: string }[];
-  readonly checkWorkspaceRead: (captured: string, originalAlias: string, projectedAlias: string, signal?: AbortSignal) => Promise<void>;
+  /** The owner's rules over the tree, read once on first use. */
+  masks: Promise<CapturedMasks> | undefined;
   readonly check: (signal?: AbortSignal) => Promise<void>;
 }
 const admissions = new WeakMap<CapturedExecDependencyInput, Admission>();
@@ -55,8 +42,17 @@ function contained(root: string, path: string): boolean {
 function excluded(path: string): boolean {
   return path.split(sep).some((part) => CONTRACT_INPUT_EXCLUSIONS.includes(part as typeof CONTRACT_INPUT_EXCLUSIONS[number]));
 }
-const fingerprint = (stat: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint; mode: bigint }): string =>
-  `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.mode}`;
+
+/** An empty directory left as a mount point by an earlier command is not dependency material. */
+async function holdsCapturedBytes(target: string): Promise<boolean> {
+  try {
+    const stat = await lstat(target);
+    return !stat.isDirectory() || (await readdir(target)).length > 0;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
 
 export async function admitCapturedExecDependency(
   binding: Binding,
@@ -78,122 +74,37 @@ export async function admitCapturedExecDependency(
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || await realpath(sourceRoot) !== sourceRoot)
     throw new Error('dependency source root is redirected');
-  // Existing captured bytes always win over newer live dependency material.
-  try { await lstat(target); return undefined; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  // Dependencies the member's own view already holds always win over the project's.
+  if (await holdsCapturedBytes(target)) return undefined;
   const rootIdentity = `${rootStat.dev}:${rootStat.ino}`;
-  const checkRoot = async (full = true, signal: AbortSignal | undefined = binding.signal): Promise<void> => {
+  const check = async (signal: AbortSignal | undefined = binding.signal): Promise<void> => {
+    signal = binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : binding.signal ?? signal;
     signal?.throwIfAborted();
     if (contractInputAuthorityRoot(binding.authority) !== resolve(binding.root)) throw new Error('dependency authority root changed');
-    if (full) await assertContractInputAuthority(binding.authority, binding.root, signal);
     const stat = await lstat(sourceRoot, { bigint: true });
     if (!stat.isDirectory() || stat.isSymbolicLink() || await realpath(sourceRoot) !== sourceRoot || `${stat.dev}:${stat.ino}` !== rootIdentity)
       throw new Error('dependency source root changed');
+    if (!await executePolicyCheck(() => filter(sourceRoot), signal) || !await executePolicyCheck(() => filter(target), signal))
+      throw new Error('dependency input is access-restricted');
   };
-  const readAllowed = (path: string, signal: AbortSignal | undefined = binding.signal): Promise<boolean> =>
-    executePolicyCheck(() => filter(path), signal);
-  const workspaceLinks: WorkspaceLink[] = [];
-  const fileLinks: { path: string; target: string }[] = [];
-  const workspaceReads = new Map<string, readonly [string, string, string]>();
-  const checkWorkspaceRead = async (captured: string, originalAlias: string, projectedAlias: string, signal: AbortSignal | undefined = binding.signal): Promise<void> => {
-    await executePolicyCheck(() => authorizeContractInputPath(binding.authority, captured, filter, signal), signal);
-    if (!await readAllowed(originalAlias, signal) || !await readAllowed(projectedAlias, signal)) throw new Error('workspace dependency alias is access-restricted');
-    await checkRoot(true, signal);
-    workspaceReads.set(`${captured}\0${projectedAlias}`, [captured, originalAlias, projectedAlias]);
-  };
-  const reads: DependencyRead[] = [];
-  const files: { path: string; source: string; bytes: RetainedFileSlice; mode: number }[] = [];
-  const checkRead = async (read: DependencyRead, full = true, signal: AbortSignal | undefined = binding.signal): Promise<void> => {
-    signal?.throwIfAborted();
-    if (!await readAllowed(read.source, signal) || !await readAllowed(read.canonical, signal) || !await readAllowed(read.alias, signal)) throw new Error('dependency input is access-restricted');
-    await checkRoot(full, signal);
-    if (await realpath(read.source) !== read.canonical || fingerprint(await lstat(read.canonical, { bigint: true })) !== read.identity)
-      throw new Error('dependency source changed after admission');
-  };
-  const check = async (signal: AbortSignal | undefined = binding.signal): Promise<void> => {
-    signal = binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : binding.signal ?? signal;
-    await withContractInputReadBatch(binding.authority, async () => {
-      await checkRoot(true, signal);
-      // This metadata-only sweep never releases bytes or grants another operation.
-      // Full recorded-view/Git validation brackets it; each entry still checks
-      // the live opaque token, source-root identity, current original/alias
-      // permissions and immutable file identity. No grant survives this sweep.
-      await checkCapturedInputsInBatches(reads, (read, current) => checkRead(read, false, current), signal);
-      for (const link of workspaceLinks) {
-        if (fingerprint(await lstat(link.source, { bigint: true })) !== link.identity || await realpath(link.source) !== link.canonical)
-          throw new Error('workspace dependency link changed after admission');
-        await checkWorkspaceRead(link.captured, link.source, link.alias, signal);
-      }
-      for (const read of workspaceReads.values()) await checkWorkspaceRead(...read, signal);
-      await checkRoot(true, signal);
-    });
-  };
-  const retained = await RetainedFileBytes.capture(async capture => {
-    const visit = async (source: string, alias: string, path: string, ancestors: ReadonlySet<string>): Promise<void> => {
-      const canonical = await realpath(source);
-      if (!contained(sourceRoot, canonical)) {
-        const ownerRelative = relative(owner, canonical);
-        const linkStat = await lstat(source, { bigint: true });
-        if (!ownerRelative || !contained(owner, canonical) || excluded(ownerRelative) || !linkStat.isSymbolicLink())
-          throw new Error('dependency alias escapes declared input');
-        const captured = resolve(binding.root, ownerRelative);
-        // The original target supplies mapping metadata only. Its current bytes
-        // are never opened: the same authority must already hold a captured target.
-        await checkWorkspaceRead(captured, source, alias);
-        const capturedStat = await lstat(captured);
-        if (!capturedStat.isFile() && !capturedStat.isDirectory()) throw new Error('workspace dependency target is not captured');
-        workspaceLinks.push({ source, canonical, captured, alias, path, identity: fingerprint(linkStat) });
-        return;
-      }
-      if (excluded(relative(sourceRoot, canonical))) throw new Error('dependency alias escapes declared input');
-      if (!await readAllowed(source) || !await readAllowed(canonical) || !await readAllowed(alias)) return;
-      await checkRoot(false);
-      const stat = await lstat(canonical, { bigint: true });
-      if (stat.isDirectory()) {
-        reads.push({ source, canonical, alias, identity: fingerprint(stat) });
-        if (ancestors.has(canonical)) throw new Error('cyclic dependency alias');
-        const next = new Set(ancestors); next.add(canonical);
-        for (const entry of await readdir(canonical)) {
-          if (excluded(entry)) continue;
-          await visit(join(source, entry), join(alias, entry), join(path, entry), next);
-        }
-      } else if (stat.isFile()) {
-        if ((await lstat(source)).isSymbolicLink()) fileLinks.push({ path, target: relative(sourceRoot, canonical) });
-        const read = { source, canonical, alias, identity: fingerprint(stat) };
-        const bytes = await capture.capture(canonical, binding.signal);
-        await checkRead(read, false);
-        reads.push(read);
-        files.push({ path, source: canonical, bytes, mode: Number(stat.mode & 0o777n) });
-      } else throw new Error('dependency special-file input is unsupported');
-    };
-    // Admission bytes remain private until the complete fresh sweep succeeds.
-    // Each read retains current permission/root/file identity checks; full
-    // recorded-view validation brackets collection before a token can escape.
-    await checkRoot();
-    await withContractInputReadBatch(binding.authority, () => visit(sourceRoot, target, '', new Set()));
-    await check();
-  }, binding.signal);
-  let published = false;
-  try {
-    await check();
-    const token = Object.freeze({ kind: 'captured-exec-dependency-input' as const });
-    admissions.set(token, { binding, target, retained: retained.files, files, workspaceLinks, fileLinks, checkWorkspaceRead, check });
-    // Future provider delivery rechecks cached dependency-derived output too.
-    registerContractInputReadAssertion(binding.authority, check);
-    const dispose = registerContractInputCleanup(binding.authority, () => retained.files.close());
-    try { binding.retainInputResource?.(dispose); } catch (error) { dispose(); throw error; }
-    published = true;
-    return token;
-  } finally { if (!published) retained.files.close(); }
+  await check();
+  const token = Object.freeze({ kind: 'captured-exec-dependency-input' as const });
+  admissions.set(token, { binding, sourceRoot, target, masks: undefined, check });
+  // Provider delivery of dependency-derived output rechecks the root too (O(1)).
+  registerContractInputReadAssertion(binding.authority, check);
+  return token;
 }
 
+/**
+ * The read-only mounts and masks of a command's admitted dependencies. The
+ * masks are computed on the first command and reused: they are the owner's
+ * rules over a tree no captured command can write.
+ */
 export async function projectCapturedExecDependencies(
   binding: CapturedExecAuthority,
-  temporary: string,
-  signal: AbortSignal | undefined,
-  capturedProjection: string,
-): Promise<{ readonly mounts: readonly { source: string; target: string }[]; readonly check: () => Promise<void> }> {
-  signal = binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : binding.signal ?? signal;
+  signal: AbortSignal,
+): Promise<{ readonly mounts: readonly { source: string; target: string }[]; readonly argv: readonly string[]; readonly check: () => Promise<void> }> {
+  const combined = binding.signal ? AbortSignal.any([binding.signal, signal]) : signal;
   const states: Admission[] = [];
   for (const token of binding.dependencyInputs ?? []) {
     const state = admissions.get(token);
@@ -204,62 +115,23 @@ export async function projectCapturedExecDependencies(
     states.push(state);
   }
   const check = async (): Promise<void> => {
-    signal?.throwIfAborted();
-    for (const state of states) await state.check(signal);
-    signal?.throwIfAborted();
+    combined.throwIfAborted();
+    for (const state of states) await state.check(combined);
   };
   await check();
   const mounts: { source: string; target: string }[] = [];
+  const argv: string[] = [];
   for (const state of states) {
-    const staged = join(temporary, `dependencies-${mounts.length}`);
-    signal?.throwIfAborted();
-    await mkdir(staged);
-    for (const file of state.files) {
-      signal?.throwIfAborted();
-      const destination = join(staged, file.path);
-      await mkdir(dirname(destination), { recursive: true });
-      signal?.throwIfAborted();
-      await state.retained.copyTo(file.bytes, destination, file.mode, signal);
-      if (!await state.retained.matchesFile(file.bytes, destination, signal)) throw new Error('dependency source changed while copying');
-      await chmod(destination, file.mode);
-    }
-    const copyWorkspace = async (link: WorkspaceLink, suffix: string): Promise<void> => {
-      signal?.throwIfAborted();
-      const captured = join(link.captured, suffix);
-      const originalAlias = join(link.source, suffix);
-      const projectedAlias = join(link.alias, suffix);
-      await state.checkWorkspaceRead(captured, originalAlias, projectedAlias, signal);
-      signal?.throwIfAborted();
-      const input = join(capturedProjection, relative(binding.root, captured));
-      const stat = await lstat(input);
-      const destination = join(staged, link.path, suffix);
-      if (stat.isDirectory() && !stat.isSymbolicLink()) {
-        await mkdir(destination, { recursive: true });
-        for (const entry of await readdir(input)) await copyWorkspace(link, join(suffix, entry));
-      } else if (stat.isFile() && !stat.isSymbolicLink()) {
-        await state.checkWorkspaceRead(captured, originalAlias, projectedAlias, signal);
-        signal?.throwIfAborted();
-        await mkdir(dirname(destination), { recursive: true });
-        signal?.throwIfAborted();
-        await copyFile(input, destination);
-        await chmod(destination, stat.mode & 0o777);
-      } else throw new Error('workspace dependency projection contains an unsupported alias');
-    };
-    await withContractInputReadBatch(binding.authority, async () => {
-      for (const link of state.workspaceLinks) await copyWorkspace(link, '');
-    });
-    // Preserve executable file aliases so Node resolves relative imports from
-    // the admitted canonical package. Directory aliases remain filtered copies:
-    // linking them could expose a child denied under the alias path.
-    for (const link of state.fileLinks) {
-      signal?.throwIfAborted();
-      if (!state.files.some((file) => file.path === link.target)) throw new Error('dependency executable alias target is not admitted');
-      await unlink(join(staged, link.path));
-      signal?.throwIfAborted();
-      await symlink(relative(dirname(link.path), link.target), join(staged, link.path));
-    }
-    mounts.push({ source: staged, target: state.target });
+    const filter = state.binding.readAccessFilter!;
+    state.masks ??= computeCapturedMasks(state.sourceRoot, state.target, async (rel, current) =>
+      await executePolicyCheck(() => filter(join(state.sourceRoot, rel)), current)
+        && await executePolicyCheck(() => filter(join(state.target, rel)), current), binding.signal ?? new AbortController().signal);
+    let masks: CapturedMasks;
+    try { masks = await state.masks; }
+    catch (error) { state.masks = undefined; throw error; }
+    combined.throwIfAborted();
+    mounts.push({ source: state.sourceRoot, target: state.target });
+    argv.push('--ro-bind', state.sourceRoot, state.target, ...masks.argv);
   }
-  await check();
-  return { mounts, check };
+  return { mounts, argv, check };
 }

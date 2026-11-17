@@ -52,7 +52,7 @@ export async function startCapturedBackground(
   const adopted = await manager.trackOwnedBoundary({ owner: binding.authority, cmd: command, includeReadyOutput: Boolean(input.until && !input.background), started, completion, readOutput, stop });
   if (!adopted.success) return adopted;
   return { ...adopted,
-    sandboxed: true, sandbox_boundary: 'captured authorized projection retained by its runtime owner', sandbox_network: network,
-    sandbox_note: 'Background file changes are published to the captured view after completion and current-authority/conflict checks.' };
+    sandboxed: true, sandbox_boundary: 'captured view mounted for a background command retained by its runtime owner', sandbox_network: network,
+    sandbox_note: 'Background file changes land in the captured view as the command writes them; output is released after the owner\'s authority is proven again.' };
 
 }

@@ -1,10 +1,14 @@
-/** Ordinary Bun is an explicit, pinned runtime input, never a PATH fallback. */
-import { RetainedFileBytes, type RetainedFileSlice } from '../../utils/retained-file-bytes.js';
+/**
+ * Ordinary Bun is an explicit, pinned runtime input, never a PATH fallback.
+ * The executable is pinned at construction (canonical path and stat identity),
+ * proven an ordinary interpreter once in an empty boundary, and mounted
+ * read-only at /captured-runtime/bin/bun; nothing is copied. Every command
+ * compares the pinned identity again (one `realpath`, one `lstat`).
+ */
 import { accessSync, constants, existsSync, lstatSync, realpathSync } from 'node:fs';
-import { chmod, lstat, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { assertContractInputAuthority, contractInputAuthorityRoot, registerContractInputReadAssertion, registerContractInputCleanup } from '../../contract/input-authority.js';
+import { chmod, lstat, realpath, writeFile } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep, join } from 'node:path';
+import { assertContractInputAuthority, contractInputAuthorityRoot, registerContractInputReadAssertion } from '../../contract/input-authority.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { resolveProcessCapturedBunRuntimeExecutable } from '../../runtime/captured-bun-runtime.js';
 import { probeCapturedBunRuntime, type CapturedExecAuthority } from './captured-exec.js';
@@ -15,9 +19,7 @@ export interface CapturedExecBunRuntimeInput { readonly kind: 'captured-exec-bun
 const TARGET = '/captured-runtime/bin/bun';
 const states = new WeakMap<CapturedExecBunRuntimeInput, {
   readonly binding: Binding;
-  readonly files: RetainedFileBytes;
-  readonly bytes: RetainedFileSlice;
-  readonly mode: number;
+  readonly canonical: string;
   readonly check: (signal?: AbortSignal) => Promise<void>;
 }>();
 const identity = (s: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint; mode: bigint }): string =>
@@ -56,48 +58,27 @@ export function createCapturedExecBunRuntimeAdmission(
       // One admission serves every call of this owner, so it runs under the owner's signal only.
       // A caller's own signal cancels that caller's wait (executePolicyCheck below), never the shared work:
       // otherwise one cancelled first call would leave a rejected promise for every later call.
-      const combined = binding.signal;
       const check = async (current: AbortSignal | undefined = binding.signal): Promise<void> => {
         current = binding.signal && current ? AbortSignal.any([binding.signal, current]) : binding.signal ?? current;
-        await assertContractInputAuthority(binding.authority, binding.root, current);
+        current?.throwIfAborted();
         if (contractInputAuthorityRoot(binding.authority) !== resolve(binding.root)) throw new Error('Bun runtime authority changed');
-        for (const path of [source, original.canonical, TARGET]) {
-          current?.throwIfAborted();
-          if (!await executePolicyCheck(() => filter(path), current)) throw new Error('Bun runtime input is access-restricted');
-        }
-        await assertContractInputAuthority(binding.authority, binding.root, current);
         if (await realpath(source) !== original.canonical || identity(await lstat(original.canonical, { bigint: true })) !== original.identity)
           throw new Error('Bun runtime executable changed since trusted construction');
-        await assertContractInputAuthority(binding.authority, binding.root, current);
+        for (const path of [source, original.canonical]) {
+          if (!await executePolicyCheck(() => filter(path), current)) throw new Error('Bun runtime input is access-restricted');
+        }
         current?.throwIfAborted();
       };
-      await check(combined);
-      const retained = await RetainedFileBytes.capture(writer => writer.capture(original.canonical, combined), combined);
-      let published = false;
-      try {
-        await check(combined);
-        const mode = Number((await lstat(original.canonical, { bigint: true })).mode & 0o777n);
-        await check(combined);
-        const temporary = await mkdtemp(join(tmpdir(), 'captured-bun-admission-'));
-        try {
-          const staged = join(temporary, 'bun');
-          await retained.files.copyTo(retained.value, staged, mode, combined);
-          if (!await retained.files.matchesFile(retained.value, staged, combined)) throw new Error('Bun runtime changed during admission');
-          await chmod(staged, mode);
-          await check(combined);
-          // This proof sees no project mount or host configuration, and receives
-          // no BUN_BE_BUN marker. A product executable is not an interpreter.
-          if (!await probeCapturedBunRuntime(staged, combined)) throw new Error('Declared Bun runtime is not an available ordinary interpreter');
-          await check(combined);
-        } finally { await rm(temporary, { recursive: true, force: true }); }
-        const token = Object.freeze({ kind: 'captured-exec-bun-runtime' as const });
-        states.set(token, { binding, files: retained.files, bytes: retained.value, mode, check });
-        registerContractInputReadAssertion(binding.authority, check);
-        const dispose = registerContractInputCleanup(binding.authority, () => retained.files.close());
-        try { binding.retainInputResource?.(dispose); } catch (error) { dispose(); throw error; }
-        published = true;
-        return token;
-      } finally { if (!published) retained.files.close(); }
+      await assertContractInputAuthority(binding.authority, binding.root, binding.signal);
+      await check();
+      // This proof sees no project mount or host configuration, and receives
+      // no BUN_BE_BUN marker. A product executable is not an interpreter.
+      if (!await probeCapturedBunRuntime(original.canonical, binding.signal)) throw new Error('Declared Bun runtime is not an available ordinary interpreter');
+      await check();
+      const token = Object.freeze({ kind: 'captured-exec-bun-runtime' as const });
+      states.set(token, { binding, canonical: original.canonical, check });
+      registerContractInputReadAssertion(binding.authority, check);
+      return token;
     })();
     return executePolicyCheck(() => admission!, signal);
   };
@@ -120,7 +101,6 @@ export async function projectCapturedExecBunRuntime(binding: CapturedExecAuthori
   // product or another interpreter supplied by the OS substrate.
   const refusal = join(temporary, 'bun-runtime-unavailable');
   await writeFile(refusal, '#!/bin/sh\nprintf "%s\\n" "Captured Bun runtime is unavailable or access-restricted." >&2\nexit 126\n', { mode: 0o755 });
-  signal?.throwIfAborted();
   await chmod(refusal, 0o755);
   signal?.throwIfAborted();
   const aliases: string[] = [];
@@ -137,10 +117,5 @@ export async function projectCapturedExecBunRuntime(binding: CapturedExecAuthori
     aliases.push('--ro-bind', refusal, target);
   }
   if (!state) return { argv: ['--ro-bind', refusal, TARGET, ...aliases], check: async () => {} };
-  const staged = join(temporary, 'bun-runtime');
-  await state.files.copyTo(state.bytes, staged, state.mode, signal);
-  if (!await state.files.matchesFile(state.bytes, staged, signal)) throw new Error('Bun runtime changed during projection');
-  await chmod(staged, state.mode);
-  await state.check(signal);
-  return { check: () => state.check(signal), argv: ['--ro-bind', staged, TARGET, ...aliases] };
+  return { check: () => state.check(signal), argv: ['--ro-bind', state.canonical, TARGET, ...aliases] };
 }

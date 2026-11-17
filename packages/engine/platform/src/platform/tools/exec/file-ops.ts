@@ -132,6 +132,7 @@ function movedTarget(target: string, specifier: string, map: MoveMap): { readonl
 async function updateImportsAfterMoves(
   moves: readonly { readonly src: string; readonly dst: string }[],
   projectRoot: string,
+  include?: (path: string) => Promise<boolean>,
 ): Promise<{ updated: Map<number, string[]>; warnings: string[]; sourcesMoved: Map<number, number> }> {
   const map = await buildMoveMap(moves);
   const updated = new Map<number, string[]>();
@@ -146,6 +147,8 @@ async function updateImportsAfterMoves(
   for (const moved of map.byNew.keys()) files.add(moved);
 
   for (const file of files) {
+    // A file the caller may not read is left as it is.
+    if (include && !await include(file)) continue;
     let content: string;
     try {
       content = await readFile(file, 'utf-8');
@@ -254,6 +257,8 @@ export async function executeFileOperations(
   access?: {
     beforeOperation: (op: ExecFileOp) => Promise<void>;
     beforeImportUpdates: () => Promise<void>;
+    /** Which project files the import rewrite may read and change; absent, every file. */
+    importFile?: (path: string) => Promise<boolean>;
   },
   assertCurrent?: () => void,
 ): Promise<{ fileOpResults: FileOpResult[]; fileOpError?: string; fileOpFailedIndex?: number | undefined; fileOpWarnings?: string[] }> {
@@ -293,7 +298,7 @@ export async function executeFileOperations(
     assertCurrent?.();
     const moveResults = pendingImportUpdates.map(({ src, dst }) => fileOpResults.find((r) => r.source === src && r.destination === dst));
     try {
-      const updateResult = await updateImportsAfterMoves(pendingImportUpdates, projectRoot);
+      const updateResult = await updateImportsAfterMoves(pendingImportUpdates, projectRoot, access?.importFile);
       for (const [move, { src }] of pendingImportUpdates.entries()) {
         const matchingResult = moveResults[move];
         const updated = updateResult.updated.get(move) ?? [];

@@ -1,6 +1,4 @@
-import { checkCapturedInputsInBatches } from './captured-exec-validation.js';
 import { logger } from '../../utils/logger.js';
-import { RetainedFileBytes, type RetainedFileCapture, type RetainedFileSlice } from '../../utils/retained-file-bytes.js';
 import { projectCapturedExecBunRuntime, type CapturedExecBunRuntimeInput } from './captured-bun-runtime-input.js';
 import { resolveProcessCapturedBunRuntimeExecutable } from '../../runtime/captured-bun-runtime.js';
 import { collectCommandNodes } from '../../runtime/permissions/normalization/ast.js';
@@ -9,29 +7,35 @@ import { MAX_INPUT_LENGTH, MAX_TOKEN_COUNT, tokenize } from '../../runtime/permi
 import { projectCapturedExecNodeRuntime, type CapturedExecNodeRuntimeInput } from './captured-exec-runtime-input.js';
 import { assertCapturedPublicationOwner, type CapturedPublicationLease } from '../shared/captured-publication.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
-import { discardCapturedProjection } from './captured-exec-cleanup.js';
-import { PartialCapturedPublication, publishCapturedProjection } from './captured-exec-publication.js';
+import { discardCapturedTemporary } from './captured-exec-cleanup.js';
 import { executeCapturedFileOperations } from './captured-exec-file-ops.js';
+import { computeCapturedMasks } from './captured-exec-masks.js';
 import { CapturedBoundaryRefusal, capturedRefusalText } from './captured-exec-refusal.js';
 import { createSafeRegex } from '../../utils/safe-regex.js';
 import { runInteractiveCommand, type ExecInteractionRuntime } from './interactive.js';
 import { projectCapturedExecDependencies, type CapturedExecDependencyInput } from './captured-exec-dependencies.js';
-/** Commands see a permission-filtered disposable copy, never the host workspace.
- * This is a filesystem boundary, not another command/risk/retry evaluator.
+/**
+ * A captured command runs in one bubblewrap spawn that mounts the member's
+ * view (its worktree) in place: read-write for a member that may change it,
+ * read-only otherwise. The owner's read rules become mount masks computed once
+ * per command (a denied or reserved directory is an empty tmpfs, a denied file
+ * is /dev/null), dependencies and pinned runtimes are read-only binds, and
+ * authority is proven once before the spawn and once before the result is
+ * returned. Nothing is copied or compared. This is a filesystem boundary, not
+ * another command/risk/retry evaluator.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync } from 'node:fs';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   assertContractInputAuthority,
-  withContractInputReadBatch,
   authorizeContractInputPath,
   contractInputAuthorityMutable,
+  contractInputAuthoritySourceRoot,
   type ContractInputAuthority,
 } from '../../contract/input-authority.js';
-import { CONTRACT_INPUT_EXCLUSIONS } from '../../contract/input-snapshot.js';
 import type { ReadAccessFilter } from '../shared/read-access.js';
 import type { ExecCommandInput, ExecCommandResult, ExecFileOp } from './schema.js';
 
@@ -57,10 +61,12 @@ export interface CapturedExecAuthority {
 export type CapturedExecAvailability =
   | { readonly available: true; readonly backend: 'linux-bwrap-projection' }
   | { readonly available: false; readonly reason: 'unsupported-platform' | 'unsupported-architecture' | 'missing-bwrap' | 'unusable-boundary'; readonly message: string };
-const held = (reason: string): string => `Captured exec held: ${reason}. Output withheld; no file changes were applied. Re-read the files you rely on, then rerun if still needed.`;
-const CANCELLED = 'Captured exec cancelled. Output withheld; no file changes were applied.';
-const HELD_AFTER_PUBLISH = 'Captured exec held after its file changes were applied: the changes are in the project; only output is withheld. Do not rerun to repeat them; read the changed files instead.';
-const timedOutNote = (timeoutMs: number): string => `Captured exec timed out after ${timeoutMs}ms. Output withheld; no file changes were applied.`;
+const held = (reason: string): string => `Captured exec held: ${reason}. Output withheld; nothing was changed. Re-read the files you rely on, then rerun if still needed.`;
+const cancelledNote = (wrote: boolean): string => wrote
+  ? 'Captured exec cancelled. Output withheld; any file changes it made before it stopped are in the project, so read the files before rerunning.'
+  : 'Captured exec cancelled before it ran. Output withheld; nothing was changed.';
+const HELD_AFTER_RUN = 'Captured exec held after it ran: its file changes are in the project; only output is withheld. Do not rerun to repeat them; read the changed files instead.';
+const timedOutNote = (timeoutMs: number, wrote: boolean): string => `Captured exec timed out after ${timeoutMs}ms and was stopped. Output withheld; ${wrote ? 'any file changes it made before it stopped are in the project' : 'nothing was changed'}.`;
 
 
 /** These are not exec schema inputs; never pretend that supplied stdin ran. */
@@ -195,7 +201,7 @@ export interface CapturedExecutionObserver {
   readonly beforeSpawn?: (() => void) | undefined;
   /** Final publication restriction; retained jobs supply their independent owner constraint. */
   readonly beforePublish?: (() => void) | undefined;
-  /** Construction-only repair candidate. Never publishes projection changes. */
+  /** Construction-only repair candidate: formatted in a private file over its path; nothing else is writable for that run. */
   readonly repairCandidate?: { readonly path: string; readonly content: string; readonly receive: (content: string) => void } | undefined;
   /** Construction-only owner for nested write/edit validators, never model input. */
   readonly publicationLease?: CapturedPublicationLease | undefined;
@@ -257,41 +263,35 @@ export async function runCapturedCommand(
   const combined = binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : binding.signal ?? signal;
   const operations = new AbortController();
   const operationSignal = combined ? AbortSignal.any([combined, operations.signal]) : operations.signal;
+  const mutable = contractInputAuthorityMutable(binding.authority);
+  const candidate = observer.repairCandidate;
   let temporary: string | undefined;
-  let originalBytes: RetainedFileBytes | undefined;
-  let outputBytes: RetainedFileBytes | undefined;
+  let placeholder: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let monitor: ReturnType<typeof setInterval> | undefined;
   let killed = false;
   let timedOut = false;
-  let invalid = false;
   let untilMatched = false;
-  let validation: Promise<void> = Promise.resolve();
-  let validating = false;
   let stop = (): void => {};
   let childCompletion: Promise<number | null> | undefined;
-  const paths = new Set<string>();
-  let checkDependencies = async (): Promise<void> => {};
+  let checkInputs = async (): Promise<void> => {};
   const authorize = (path: string, current: AbortSignal = operationSignal): Promise<string> => executePolicyCheck(
     () => authorizeContractInputPath(binding.authority, path, binding.readAccessFilter, current), current);
+  // Authority is proven once before the command starts and once before its
+  // result is returned; the mounts and masks hold the boundary in between.
   const check = async (): Promise<void> => executePolicyCheck(async () => {
-    if (observer.repairCandidate) {
+    if (candidate) {
       if (!observer.publicationLease) throw new Error('repair requires its active publication owner');
       assertCapturedPublicationOwner(observer.publicationLease, binding.authority);
     }
     if (!binding.readAccessFilter) throw new Error('captured exec requires original-owner read authorization');
     await assertContractInputAuthority(binding.authority, root, combined);
-    await withContractInputReadBatch(binding.authority, () => checkCapturedInputsInBatches([...paths], async (path, current) => { await authorize(path, current); }, operationSignal));
-    await checkDependencies();
-    if (observer.repairCandidate) assertCapturedPublicationOwner(observer.publicationLease!, binding.authority);
+    await checkInputs();
   }, operationSignal);
-  let published = false;
+  // Once the command has started in a writable view, its writes are in the project.
+  let wrote = false;
   // A timed-out PTY run reports the prompt it was waiting on, but only after
-  // authority is proven again before the stopped run's operations are released.
+  // authority is proven again.
   let promptDiagnostics: Pick<ExecCommandResult, 'pending_prompt' | 'prompt_declined'> = {};
-  // What the command printed, once authority was proven after it ended; a
-  // refusal of its file changes alone still returns this.
-  let ran: Pick<ExecCommandResult, 'exit_code' | 'stdout' | 'stderr' | 'stdout_truncated' | 'stderr_truncated'> | undefined;
   try {
     if (!within(root, resolve(workingDirectory)) || !within(root, cwd)) throw new Error('outside captured working directory');
     if (['/usr', '/bin', '/lib', '/lib64', '/proc', '/dev'].some((path) => within(path, root) || within(root, path)))
@@ -304,9 +304,7 @@ export async function runCapturedCommand(
     };
     if (input.background) throw new Error('captured background must be retained by its ProcessManager owner');
     await using untilPattern = input.until ? await createSafeRegex(input.until.pattern, '', { operation: 'exec until pattern', signal: operationSignal }) : undefined;
-    await check();
     const availability = await probeCapturedExecAvailability();
-    await check();
     if (!availability.available) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: availability.message, success: false, denied: true,
       sandboxed: false, sandbox_boundary: 'captured boundary unavailable', captured_exec_availability: availability, duration_ms: Date.now() - start };
     if (cwd !== root) await authorize(cwd);
@@ -318,7 +316,6 @@ export async function runCapturedCommand(
         binding = Object.freeze({ ...binding, nodeRuntimeInput });
       } catch (error) {
         operationSignal.throwIfAborted();
-        await check();
         // The command still runs, with a stub that says the runtime is
         // unavailable; the cause is logged so it is not lost behind that stub.
         logger.warn('captured exec: Node runtime admission failed', { error: error instanceof Error ? error.message : String(error) });
@@ -330,122 +327,94 @@ export async function runCapturedCommand(
         binding = Object.freeze({ ...binding, bunRuntimeInput });
       } catch (error) {
         operationSignal.throwIfAborted();
-        await check();
         logger.warn('captured exec: Bun runtime admission failed', { error: error instanceof Error ? error.message : String(error) });
       }
     }
     temporary = await mkdtemp(join(tmpdir(), 'goodvibes-captured-exec-'));
-    const projection = join(temporary, 'view');
-    await mkdir(projection);
-    const originals = new Map<string, { bytes: RetainedFileSlice; mode: number }>();
-    const originalDirectories = new Map<string, number>();
-    const retainedOriginals = await RetainedFileBytes.capture(async capture => {
-      const populate = async (dir: string): Promise<void> => {
-        const entries = await readdir(join(root, dir), { withFileTypes: true });
-        const visit = async (entry: (typeof entries)[number], current: AbortSignal = operationSignal): Promise<void> => {
-          if (CONTRACT_INPUT_EXCLUSIONS.includes(entry.name as typeof CONTRACT_INPUT_EXCLUSIONS[number])) return;
-          const rel = join(dir, entry.name);
-          const source = join(root, rel);
-          try { await authorize(source, current); }
-          catch { current.throwIfAborted(); await assertContractInputAuthority(binding.authority, root, current); return; }
-          const stat = await lstat(source);
-          if (stat.isDirectory()) { originalDirectories.set(rel, stat.mode & 0o777); await mkdir(join(projection, rel), { recursive: true, mode: stat.mode & 0o777 }); await chmod(join(projection, rel), stat.mode & 0o777); await populate(rel); }
-          else if (stat.isFile() && !stat.isSymbolicLink()) {
-            const bytes = await capture.capture(source, current);
-            await authorize(source, current);
-            originals.set(rel, { bytes, mode: stat.mode & 0o777 });
-          }
-        };
-        for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
-        await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
-      };
-      await withContractInputReadBatch(binding.authority, () => populate(''));
-    }, operationSignal);
-    const originalByteOwner = retainedOriginals.files;
-    originalBytes = originalByteOwner;
-    await withContractInputReadBatch(binding.authority, () => checkCapturedInputsInBatches([...originals], async ([rel, original], current) => {
-      const source = join(root, rel), destination = join(projection, rel);
-      await originalByteOwner.copyTo(original.bytes, destination, original.mode, current);
-      if (!await originalByteOwner.matchesFile(original.bytes, destination, current)) throw new Error('captured input changed while copying');
-      await authorize(source, current);
-      paths.add(source);
-    }, operationSignal));
-    const candidate = observer.repairCandidate;
+    if (observer.fileOps?.some((operation) => operation.op !== 'delete' || !operation.dry_run) && !mutable)
+      throw new Error('immutable captured input cannot apply file operations');
+    const fileOperations = await executeCapturedFileOperations(root, observer.fileOps, authorize, () => { wrote = true; });
+    observer.onFileOperations?.(fileOperations);
+    // A repair candidate is formatted in a private file mounted over its path;
+    // the rest of the view is read-only for that run and nothing is applied.
     let candidateRelative: string | undefined;
+    let candidateFile: string | undefined;
     if (candidate) {
       if (!observer.publicationLease) throw new Error('repair requires its active publication owner');
       assertCapturedPublicationOwner(observer.publicationLease, binding.authority);
       const target = resolve(root, candidate.path);
       candidateRelative = relative(root, target);
       await authorize(target);
-      if (!candidateRelative || !originals.has(candidateRelative))
-        throw new Error('repair candidate requires one existing admitted file');
-      paths.add(target);
-      await writeFile(join(projection, candidateRelative), candidate.content, 'utf8');
-      await check();
+      const stat = await lstat(target).catch(() => undefined);
+      if (!candidateRelative || !stat?.isFile() || stat.isSymbolicLink()) throw new Error('repair candidate requires one existing admitted file');
+      candidateFile = join(temporary, 'repair-candidate');
+      await writeFile(candidateFile, candidate.content, { encoding: 'utf8', mode: stat.mode & 0o777 });
     }
-    if (observer.fileOps?.some((operation) => operation.op !== 'delete' || !operation.dry_run) && !contractInputAuthorityMutable(binding.authority))
-      throw new Error('immutable captured input cannot apply file operations');
-    const fileOperations = await executeCapturedFileOperations(root, projection, observer.fileOps,
-      authorize, new Set([...paths, ...[...originalDirectories.keys()].map((rel) => join(root, rel))]));
-    observer.onFileOperations?.(fileOperations);
-    const dependencies = await projectCapturedExecDependencies(binding, temporary, operationSignal, projection);
+    const dependencies = await projectCapturedExecDependencies(binding, operationSignal);
     const nodeRuntime = await projectCapturedExecNodeRuntime(binding, temporary, operationSignal);
     const bunRuntime = await projectCapturedExecBunRuntime(binding, temporary, operationSignal);
-    checkDependencies = async () => { await dependencies.check(); await nodeRuntime.check(); await bunRuntime.check(); };
-    await check();
+    checkInputs = async () => { await dependencies.check(); await nodeRuntime.check(); await bunRuntime.check(); };
+    // The owner's read rules over the view, as mount masks: one pass per command.
+    const filter = binding.readAccessFilter;
+    if (!filter) throw new Error('captured exec requires original-owner read authorization');
+    const sourceRoot = contractInputAuthoritySourceRoot(binding.authority);
+    const masks = await computeCapturedMasks(root, root, async (rel, current) =>
+      await executePolicyCheck(() => filter(join(sourceRoot, rel)), current)
+        && await executePolicyCheck(() => filter(join(root, rel)), current),
+    operationSignal, { skip: new Set(dependencies.mounts.map((mount) => relative(root, mount.target))) });
     const script = observer.script;
     if (script && !/^\.goodvibes-repl-[a-f0-9-]+\.ts$/.test(script.name)) throw new Error('Invalid captured script name');
     if (script) {
       await writeFile(join(temporary, 'repl-source.ts'), script.content, { flag: 'wx', mode: 0o400 });
-      await writeFile(join(projection, script.name), '', { flag: 'wx', mode: 0o400 });
+      // The source is mounted over an empty file of its own name, removed after the run.
+      await writeFile(join(root, script.name), '', { flag: 'wx', mode: 0o400 });
+      placeholder = join(root, script.name);
     }
     const filterPath = join(temporary, 'sockets.bpf');
     await writeFile(filterPath, socketFilter(network));
+    // Masks can be many: bwrap reads them from a file descriptor, NUL-separated.
+    const argsPath = join(temporary, 'mounts.args');
+    const mountArgs = [...masks.argv, ...dependencies.argv,
+      ...(script ? ['--ro-bind', join(temporary, 'repl-source.ts'), placeholder!] : []),
+      ...(candidateFile ? ['--bind', candidateFile, join(root, candidateRelative!)] : []),
+      ...(!mutable || candidate ? ['--remount-ro', root] : [])];
+    await writeFile(argsPath, mountArgs.map((arg) => `${arg}\0`).join(''));
+    await check();
     const fd = openSync(filterPath, 'r');
+    const argsFd = openSync(argsPath, 'r');
     const argv = runtimeArgv(Boolean(binding.nodeRuntimeInput || binding.nodeRuntimeAdmission), Boolean(binding.bunRuntimeInput || binding.bunRuntimeAdmission));
     argv.push(...nodeRuntime.argv, ...bunRuntime.argv);
-    argv.push(contractInputAuthorityMutable(binding.authority) ? '--bind' : '--ro-bind', projection, root,
-      '--chdir', cwd, '--seccomp', '3');
-    if (script) argv.push('--ro-bind', join(temporary, 'repl-source.ts'), join(root, script.name));
-    for (const mount of dependencies.mounts) argv.push('--ro-bind', mount.source, mount.target);
+    argv.push('--bind', root, root, '--args', '4', '--chdir', cwd, '--seccomp', '3');
     const environment = { ...ambientEnvironment, PATH: '/captured-runtime/bin:/usr/bin:/bin', HOME: '/home/captured', TMPDIR: '/tmp', LANG: ambientEnvironment.LANG ?? 'C.UTF-8', ...input.env };
     const boundaryStop = new AbortController();
     const executionSignal = combined ? AbortSignal.any([combined, boundaryStop.signal]) : boundaryStop.signal;
     stop = () => { killed = true; operations.abort(); boundaryStop.abort(); };
-    monitor = setInterval(() => {
-      if (validating) return;
-      validating = true;
-      validation = check().catch(() => { invalid = true; stop(); }).finally(() => { validating = false; });
-    }, 50);
-    monitor.unref?.();
     let stdout = ''; let stderr = '';
     let stdoutDropped = false; let stderrDropped = false;
     let exitCode: number | null;
     let modeResult: ExecCommandResult | undefined;
     if (observer.interaction) {
       try {
+        wrote = wrote || (mutable && !candidate);
         modeResult = await runInteractiveCommand({
           cmdStr: command, cwd: undefined, env: environment, timeoutMs, startTime: start,
           sandboxArgv: ['/usr/bin/bwrap', ...argv, '--'], interaction: observer.interaction,
-          signal: executionSignal, beforeSpawn: observer.beforeSpawn, extraStdio: [fd], beforeOutput: check,
+          signal: executionSignal, beforeSpawn: observer.beforeSpawn, extraStdio: [fd, argsFd], beforeOutput: check,
         });
         stdout = modeResult.stdout; stderr = modeResult.stderr; exitCode = modeResult.exit_code;
         timedOut = modeResult.timed_out === true;
         killed = killed || timedOut || modeResult.cancelled === true;
         if (timedOut && (modeResult.pending_prompt !== undefined || modeResult.prompt_declined)) {
-          clearInterval(monitor);
-          await validation;
           try {
             await check();
-            if (!invalid) promptDiagnostics = {
+            promptDiagnostics = {
               ...(modeResult.pending_prompt !== undefined ? { pending_prompt: modeResult.pending_prompt } : {}),
               ...(modeResult.prompt_declined ? { prompt_declined: true } : {}),
             };
           } catch { /* Authority did not hold; the prompt stays withheld with the output. */ }
         }
         if (killed) operations.abort();
-      } finally { closeSync(fd); clearInterval(monitor); }
+      } finally { closeSync(fd); closeSync(argsFd); }
     } else {
       argv.push('--', '/bin/sh', '-c', command);
       let child: ReturnType<typeof spawn>;
@@ -453,14 +422,15 @@ export async function runCapturedCommand(
         executionSignal.throwIfAborted();
         if (candidate) assertCapturedPublicationOwner(observer.publicationLease!, binding.authority);
         observer.beforeSpawn?.();
-        child = spawn('/usr/bin/bwrap', argv, { env: environment, stdio: ['ignore', 'pipe', 'pipe', fd] });
-      } finally { closeSync(fd); }
+        child = spawn('/usr/bin/bwrap', argv, { env: environment, stdio: ['ignore', 'pipe', 'pipe', fd, argsFd] });
+        wrote = wrote || (mutable && !candidate);
+      } finally { closeSync(fd); closeSync(argsFd); }
       childCompletion = new Promise<number | null>((resolveExit, reject) => {
         child.once('error', reject); child.once('close', resolveExit);
       });
       void childCompletion.catch(() => {});
       stop = () => { killed = true; operations.abort(); child.kill('SIGKILL'); };
-      const onAbort = (): void => { invalid = true; stop(); };
+      const onAbort = (): void => { stop(); };
       executionSignal.addEventListener('abort', onAbort, { once: true });
       if (executionSignal.aborted) onAbort();
       const timeout = (): void => { timedOut = true; stop(); };
@@ -490,6 +460,7 @@ export async function runCapturedCommand(
             while (untilDirty && !untilMatched) {
               untilDirty = false;
               if (await untilPattern.test((stdout.slice(-UNTIL_PATTERN_WINDOW_CHARS) + stderr.slice(-UNTIL_PATTERN_WINDOW_CHARS)).slice(-UNTIL_PATTERN_WINDOW_CHARS))) {
+                // The readiness line is output a caller acts on: authority holds before it is reported.
                 await check();
                 untilMatched = true;
                 clearTimeout(timer);
@@ -498,7 +469,7 @@ export async function runCapturedCommand(
                 observer.onUntilMatched?.();
               }
             }
-          } catch { invalid = true; stop(); }
+          } catch { stop(); }
           finally { checkingUntil = false; }
         })();
       };
@@ -506,83 +477,23 @@ export async function runCapturedCommand(
       child.stderr!.on('data', (data: Buffer) => capture(data, 'stderr'));
       observer.onStarted?.({ pid: child.pid!, readOutput: async () => {
         await check();
-        const snapshot = { cmd: command, cwd, exit_code: child.exitCode, stdout, stderr, success: true, sandboxed: true };
-        await check();
-        return snapshot;
+        return { cmd: command, cwd, exit_code: child.exitCode, stdout, stderr, success: true, sandboxed: true };
       } });
       exitCode = await childCompletion;
       await untilCompletion;
-      clearInterval(monitor); clearTimeout(timer); executionSignal.removeEventListener('abort', onAbort);
+      clearTimeout(timer); executionSignal.removeEventListener('abort', onAbort);
     }
-    await validation;
-    await check();
-    if (invalid) throw new CapturedBoundaryRefusal('authority', root, "the owner's read authority over the project changed during the run");
-    if (killed) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: timedOut ? timedOutNote(timeoutMs) : CANCELLED, success: false, timed_out: timedOut,
-      ...(timedOut ? promptDiagnostics : { cancelled: true }), duration_ms: Date.now() - start };
-    ran = { exit_code: exitCode, stdout, stderr, ...(stdoutDropped ? { stdout_truncated: true } : {}), ...(stderrDropped ? { stderr_truncated: true } : {}) };
-    if (script) await rm(join(projection, script.name), { force: true });
-    const changes = new Map<string, { path: string; bytes: RetainedFileSlice; mode: number }>();
-    const present = new Set<string>();
-    const directories = new Map<string, number>();
-    const inspect = async (dir: string, capture?: RetainedFileCapture): Promise<boolean> => {
-      let retained = false;
-      const entries = await readdir(join(projection, dir), { withFileTypes: true });
-      const visit = async (entry: (typeof entries)[number], current: AbortSignal = operationSignal): Promise<void> => {
-        const rel = join(dir, entry.name);
-        const target = join(root, rel);
-        if (dependencies.mounts.some((mount) => mount.target === target)) return;
-        const reserved = CONTRACT_INPUT_EXCLUSIONS.find(name => name === entry.name);
-        if (reserved !== undefined) throw new CapturedBoundaryRefusal('reserved', rel, `the command wrote ${rel} inside the reserved directory ${reserved}`);
-        await authorize(target, current);
-        paths.add(target);
-        const stat = await lstat(join(projection, rel));
-        if (stat.isDirectory()) {
-          const children = await inspect(rel, capture);
-          if (!originalDirectories.has(rel) && !children && dependencies.mounts.some((mount) => within(target, mount.target))) return;
-          directories.set(rel, stat.mode & 0o777);
-          retained = true;
-        }
-        else if (stat.isFile() && !stat.isSymbolicLink()) {
-          if (candidateRelative === rel && stat.nlink !== 1) throw new CapturedBoundaryRefusal('alias', rel, `the command left ${rel} as a hard link`);
-          const path = join(projection, rel);
-          present.add(rel);
-          retained = true;
-          if (capture) {
-            const previous = originals.get(rel);
-            if (!previous || previous.mode !== (stat.mode & 0o777) || !await originalByteOwner.matchesFile(previous.bytes, path, current)) {
-              const bytes = await capture.capture(path, current);
-              changes.set(rel, { path, bytes, mode: stat.mode & 0o777 });
-            }
-          }
-        } else throw new CapturedBoundaryRefusal('alias', rel, `the command left a symlink or special file at ${rel}`);
-      };
-      for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
-      await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
-      return retained;
-    };
-    // Read-only commands and repair candidates still inspect all output paths,
-    // but never publish them. Retain output payload only for actual publication.
-    if (!candidate && contractInputAuthorityMutable(binding.authority)) {
-      const retainedOutputs = await RetainedFileBytes.capture(async capture => {
-        await withContractInputReadBatch(binding.authority, () => inspect('', capture));
-      }, operationSignal);
-      outputBytes = retainedOutputs.files;
-    } else {
-      await withContractInputReadBatch(binding.authority, () => inspect(''));
+    if (killed) {
+      return { cmd: command, cwd, exit_code: null, stdout: '', stderr: timedOut ? timedOutNote(timeoutMs, wrote) : cancelledNote(wrote), success: false, timed_out: timedOut,
+        ...(timedOut ? promptDiagnostics : { cancelled: true }), ...(wrote ? { captured_changes_published: true } : {}), duration_ms: Date.now() - start };
     }
+    // The one proof after the run: the view, its owner and the mounted inputs are still the admitted ones.
     await check();
     untilPattern?.assertCurrent();
-    if (outputBytes)
-      await publishCapturedProjection(binding, { originals: originalByteOwner, changes: outputBytes }, originals, originalDirectories, present, directories, changes, combined, observer.publicationLease, observer.beforePublish);
-    published = outputBytes !== undefined && (changes.size > 0
-      || [...originals.keys()].some((rel) => !present.has(rel))
-      || [...directories.keys()].some((rel) => !originalDirectories.has(rel))
-      || [...originalDirectories.keys()].some((rel) => !directories.has(rel)));
-    await check();
-    if (candidate && candidateRelative) {
+    if (wrote) observer.beforePublish?.();
+    if (candidate && candidateFile) {
       assertCapturedPublicationOwner(observer.publicationLease!, binding.authority);
-      if (!present.has(candidateRelative)) throw new Error('repair removed its target');
-      const bytes = await readFile(join(projection, candidateRelative));
+      const bytes = await readFile(candidateFile);
       combined?.throwIfAborted();
       const text = bytes.toString('utf8');
       if (!Buffer.from(text, 'utf8').equals(bytes)) throw new Error('repair candidate is not valid UTF-8');
@@ -593,41 +504,34 @@ export async function runCapturedCommand(
     if (input.expect?.exit_code !== undefined && exitCode !== input.expect.exit_code) failures.push('exit_code expectation failed');
     if (input.expect?.stdout_contains !== undefined && !stdout.includes(input.expect.stdout_contains)) failures.push('stdout expectation failed');
     if (input.expect?.stderr_contains !== undefined && !stderr.includes(input.expect.stderr_contains)) failures.push('stderr expectation failed');
+    const hiddenNote = masks.hidden.length > 0
+      ? `; ${masks.hidden.length} path${masks.hidden.length === 1 ? '' : 's'} hidden by the owner's read rules or reserved` : '';
     return { ...modeResult, cmd: command, cwd, exit_code: exitCode, stdout, stderr, ...(stdoutDropped ? { stdout_truncated: true } : {}), ...(stderrDropped ? { stderr_truncated: true } : {}), success: (input.until ? untilMatched : (modeResult?.success ?? exitCode === 0)) && failures.length === 0,
-      duration_ms: Date.now() - start, sandboxed: true, sandbox_boundary: `captured authorized projection; isolated PID/mounts; network ${network}`, sandbox_network: network,
+      duration_ms: Date.now() - start, sandboxed: true, sandbox_boundary: `captured view mounted ${mutable && !candidate ? 'read-write' : 'read-only'}${hiddenNote}; isolated PID/mounts; network ${network}`, sandbox_network: network,
       captured_exec_availability: availability, ...(failures.length ? { expectation_error: failures.join('; ') } : {}) };
   } catch (error) {
     stop();
     await childCompletion?.catch(() => {});
-    // A rollback that could not finish leaves some of the command's changes on disk.
-    if (error instanceof PartialCapturedPublication) published = true;
-    if (timedOut && !published) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: timedOutNote(timeoutMs), success: false, timed_out: true,
-      ...promptDiagnostics, duration_ms: Date.now() - start };
     const aborted = combined?.aborted === true;
     const reason = error instanceof Error ? error.message : String(error);
-    if (!aborted) logger.warn('captured exec: file changes not applied', {
+    if (!aborted) logger.warn('captured exec: held', {
       ...(error instanceof CapturedBoundaryRefusal ? { kind: error.kind, path: error.path } : {}), error: reason,
     });
     const refusal = !aborted && error instanceof CapturedBoundaryRefusal ? error : undefined;
-    // A refusal of the file changes alone (a conflict, a link, a reserved
-    // path) found after authority was proven keeps the command's output; an
-    // authority problem, a cancel or an unexpected failure withholds it. What
-    // else differs is whether the changes already landed, which decides if a
-    // rerun is safe.
-    const keepsOutput = refusal !== undefined && refusal.kind !== 'authority' && ran !== undefined;
-    const diagnosis = published && !refusal ? HELD_AFTER_PUBLISH
-      : refusal ? capturedRefusalText(refusal, published, keepsOutput)
-        : aborted ? CANCELLED : held(`the run could not be confirmed against the owner's current files (${reason})`);
-    return { cmd: command, cwd, exit_code: null, stdout: '', ...(keepsOutput ? ran : {}),
-      stderr: keepsOutput && ran!.stderr ? `${diagnosis}\n${ran!.stderr}` : diagnosis, success: false, denied: true,
+    // A file-operation refusal (a link, a reserved path) keeps nothing to show;
+    // an authority problem after the run withholds the output. Whether the
+    // command already wrote decides whether a rerun is safe.
+    const diagnosis = refusal ? capturedRefusalText(refusal, wrote, false)
+      : wrote ? HELD_AFTER_RUN
+        : aborted ? cancelledNote(false) : held(`the run could not be confirmed against the owner's current files (${reason})`);
+    return { cmd: command, cwd, exit_code: null, stdout: '', stderr: diagnosis, success: false, denied: true,
       ...(refusal ? { captured_refusal: { kind: refusal.kind, path: refusal.path, reason: diagnosis } } : {}),
-      ...(aborted ? { cancelled: true } : {}), ...(published ? { captured_changes_published: true } : {}), duration_ms: Date.now() - start };
+      ...(aborted ? { cancelled: true } : {}), ...(wrote ? { captured_changes_published: true } : {}), duration_ms: Date.now() - start };
   } finally {
-    clearTimeout(timer); clearInterval(monitor);
-    try {
-      if (temporary) await discardCapturedProjection(temporary);
-    } finally {
-      try { originalBytes?.close(); } finally { outputBytes?.close(); }
-    }
+    clearTimeout(timer);
+    if (placeholder) await rm(placeholder, { force: true }).catch((error: unknown) => {
+      logger.warn('captured exec: could not remove the script mount point', { path: placeholder, error: error instanceof Error ? error.message : String(error) });
+    });
+    if (temporary) await discardCapturedTemporary(temporary);
   }
 }

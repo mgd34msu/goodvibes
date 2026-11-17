@@ -2212,8 +2212,9 @@ term, or a stored-payment-method consent checkbox. A checkout it cannot classify
 with confidence is refused rather than attempted, a false refusal costs one
 manual purchase, a false accept costs a recurring charge nobody is watching.
 The refusal says which it was: a confident finding of a repeating charge is
-`recurring-charge`; a reading that could not confirm a single payment, with
-nothing showing a subscription, is `recurring-unconfirmed`. A cart line the
+`recurring-charge`; a reading that could not confirm a single payment is
+`recurring-unconfirmed`, and its reason says which way the reading leaned (towards
+a repeating charge, towards a single payment, or neither). A cart line the
 reading could not tie to a requested item is likewise `cart-unconfirmed`, not a
 claim that the shop added something (`cart-mismatch`).
 

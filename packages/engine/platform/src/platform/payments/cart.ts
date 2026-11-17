@@ -205,8 +205,8 @@ export interface RecurringCheck {
   readonly recurring: boolean;
   /**
    * `one-off`: a confident no. `recurring`: a confident yes. `not-confirmed-one-off`:
-   * anything else; nothing showed a repeating charge, the reading just could not
-   * confirm a single payment. Both refusals stop the purchase.
+   * anything else; the reading could not confirm a single payment, and the
+   * reason says which way it leaned. Both refusals stop the purchase.
    */
   readonly outcome: 'one-off' | 'recurring' | 'not-confirmed-one-off';
   readonly code: 'recurring-charge' | 'recurring-unconfirmed' | null;
@@ -246,13 +246,20 @@ export async function detectRecurringCharge(orderSummaryText: string, options: C
         + 'one yourself if you want it.',
     };
   }
+  // The reading did not act, so say which way it leaned: a lean towards yes is
+  // not "nothing indicated a subscription".
+  const lean = reading.verdict === 'yes'
+    ? 'The reading leaned towards a repeating charge but was not sure.'
+    : reading.verdict === 'no'
+      ? 'The reading leaned towards a single payment but was not sure enough to buy.'
+      : 'The reading could not tell either way.';
   return {
     recurring: true,
     outcome,
     code: 'recurring-unconfirmed',
     reason:
       `Refused: I could not confirm this is a single payment, so I did not buy it; the summary I read was ${String(orderSummaryText.length)} characters. `
-      + 'Nothing indicated a subscription. Start the purchase again with an order summary that holds only this order, '
+      + `${lean} Start the purchase again with an order summary that holds only this order, `
       + 'without adverts or account offers, or buy this one yourself.',
   };
 }

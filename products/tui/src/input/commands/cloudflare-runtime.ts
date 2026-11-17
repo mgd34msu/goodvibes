@@ -104,22 +104,6 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
       discover: '[--token-ref <ref>] [--fast]', validate: '[--token <token> | --token-env <name> | --token-ref <ref>]',
       provision: '[component...] [--account <id>] [--no-verify]', verify: '[--worker-url <url>]', disable: '[--keep-cron] [--keep-worker-subdomain]',
     },
-    confirm(args) {
-      if ((args[0] ?? '').toLowerCase() !== 'disable') return undefined;
-      const line = readCloudflareLine('disable', args.slice(1));
-      if (!line.ok) return undefined; // The handler refuses the line and nothing changes.
-      const keepCron = hasFlag(line.parsed, 'keep-cron');
-      const keepSubdomain = hasFlag(line.parsed, 'keep-worker-subdomain');
-      return {
-        title: 'Disable the Cloudflare integration?',
-        detail: [
-          'The integration is turned off in config, the Worker\'s daemon credential is removed and this daemon\'s tunnel connector stops.',
-          `The Worker cron is ${keepCron ? 'kept (--keep-cron)' : 'disabled (add --keep-cron to keep it)'}; the workers.dev route is ${keepSubdomain ? 'kept (--keep-worker-subdomain)' : 'disabled (add --keep-worker-subdomain to keep it)'}.`,
-          '/cloudflare provision sets it up again.',
-        ].join('\n'),
-        confirmLabel: 'Disable',
-      };
-    },
     async handler(args, ctx) {
       const subcommand = (args[0] ?? 'status').toLowerCase();
       if (subcommand === 'setup' || subcommand === 'onboarding') {
@@ -335,6 +319,7 @@ export function registerCloudflareRuntimeCommands(registry: CommandRegistry): vo
             `  ok: ${result.ok ? 'yes' : 'no'}`,
             `  remote: ${result.remote === 'disabled' ? 'disabled at Cloudflare' : 'not fully disabled at Cloudflare; see the steps below'}`,
             ...formatProvisionSteps(result.steps),
+            '  /cloudflare provision sets it up again; nothing was deleted at Cloudflare.',
           ].join('\n'));
           return;
         }

@@ -254,7 +254,7 @@ export {
   detectInstallKind, announceReachability, boundedLatestRelease, runReachabilityCheck, resolveSelfDirectory, probeVersionLine,
   buildReachabilityNotices, reachabilityNoticeLines, INSTALLED_COMMANDS, removeRecoveryPoint, exportRemoteArtifactForAgent, importRemoteArtifact,
   RemoteRunnerRegistry, RemoteSupervisor, DistributedRuntimeManager, getDistributedNodeHostContract,
-  createTaskManager, PhasedToolExecutor, budgetPhase, permissionPhase,
+  createTaskManager,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 export type InstallKind = Operations.InstallKind;
 export type ReachabilityCheckInput = Operations.ReachabilityCheckInput;
@@ -336,12 +336,6 @@ export type DistributedRuntimeAuditRecord = Operations.DistributedRuntimeAuditRe
 export type DistributedPeerAuth = Operations.DistributedPeerAuth;
 export type DistributedNodeHostContract = Operations.DistributedNodeHostContract;
 export type TaskManager = Operations.TaskManager;
-export type TaskHooks = Operations.TaskHooks;
-export type ToolRuntimeContext = Operations.ToolRuntimeContext;
-export type RuntimeStoreAccess = Operations.RuntimeStoreAccess;
-export type ToolExecutionPhase = Operations.ToolExecutionPhase;
-export type PhaseResult = Operations.PhaseResult;
-export type ToolExecutionRecord = Operations.ToolExecutionRecord;
 
 // Runtime shell compatibility aliases, grouped live re-exports.
 // WorktreeRegistry is a class: the value re-export carries its instance type,

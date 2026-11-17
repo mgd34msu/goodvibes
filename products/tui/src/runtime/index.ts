@@ -291,9 +291,6 @@ export {
   DistributedRuntimeManager,
   getDistributedNodeHostContract,
   createTaskManager,
-  PhasedToolExecutor,
-  budgetPhase,
-  permissionPhase,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 // Snapshot-retention symbols (SnapshotPruner, RetentionPolicy,
 // DEFAULT_RETENTION_CONFIG) are intentionally NOT re-exported here. No app code
@@ -396,12 +393,6 @@ export type DistributedRuntimeAuditRecord = Operations.DistributedRuntimeAuditRe
 export type DistributedPeerAuth = Operations.DistributedPeerAuth;
 export type DistributedNodeHostContract = Operations.DistributedNodeHostContract;
 export type TaskManager = Operations.TaskManager;
-export type TaskHooks = Operations.TaskHooks;
-export type ToolRuntimeContext = Operations.ToolRuntimeContext;
-export type RuntimeStoreAccess = Operations.RuntimeStoreAccess;
-export type ToolExecutionPhase = Operations.ToolExecutionPhase;
-export type PhaseResult = Operations.PhaseResult;
-export type ToolExecutionRecord = Operations.ToolExecutionRecord;
 
 // Runtime shell compatibility aliases, grouped live re-exports.
 // WorktreeRegistry is a class: the value re-export carries its instance type,

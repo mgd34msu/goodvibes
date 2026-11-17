@@ -193,7 +193,8 @@ evaluators read that one value.
 decision model. `/tool verify <name>` also asks whether that one tool's
 description explains what it does and when to use it (one reading per distinct
 description, remembered). The timeout, output-policy and idempotency checks
-apply only to tools built for the phased executor (`PhasedTool`).
+apply only to a tool object that declares that metadata (`category`,
+`phaseTimeouts`, `cancellable`, `idempotent`) beside its definition.
 
 Handler-level argument validation is still required for untrusted runtime input.
 Contract verification prevents malformed tools from being registered; it does

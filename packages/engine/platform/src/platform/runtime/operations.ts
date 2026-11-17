@@ -2,7 +2,6 @@ export { TREE_GLYPHS_CONFIG_KEY, readTreeGlyphSet, type TreeGlyphSetName } from 
 export * from './remote/index.js';
 export type { RemoteSessionBundle } from './remote/types.js';
 export * from './tasks/index.js';
-export * from './tools/index.js';
 export { AcpTaskAdapter } from './tasks/adapters/index.js';
 export { OpsControlPlane, OpsIllegalActionError, OpsTargetNotFoundError, OpsActionUnavailableError } from './ops/control-plane.js';
 export type { OpsAgentCanceller } from './ops/control-plane.js';

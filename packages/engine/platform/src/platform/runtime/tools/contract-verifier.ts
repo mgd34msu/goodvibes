@@ -6,8 +6,9 @@
  *    tool with a malformed schema is refused where it enters.
  * 2. Permission class: the category on the tool's definition (an engine tool's
  *    comes from ENGINE_TOOL_CATEGORIES), the one the gate classes its calls by.
- * 3-5. Timeout/cancellation, output policy and idempotency: metadata only the
- *    phased executor's tools (PhasedTool) carry; plain tools are not checked.
+ * 3-5. Timeout/cancellation, output policy and idempotency: metadata a tool
+ *    object may carry beside its definition (ToolContractMetadata); a tool
+ *    without it is not checked on those dimensions.
  *
  * Every check is code except one: whether the description explains what the
  * tool does and when to use it is read by Jev for a single tool
@@ -19,8 +20,19 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../decision-policy.js';
 import { PERMISSION_CATEGORIES, toolCategoryOf, type Tool, type ToolDefinition } from '../../types/tools.js';
 import { descriptionQuality } from './batteries/description-quality.js';
-import type { PhasedTool } from './adapter.js';
 import { TOOL_CLASS_BY_CATEGORY } from './output-policy.js';
+
+/** Contract metadata a tool object may carry beside its definition. */
+export interface ToolContractMetadata {
+  /** The tool's category, which selects its output policy. */
+  readonly category?: 'read' | 'write' | 'execute' | 'delegate' | 'network' | undefined;
+  /** Per-step timeouts in milliseconds. */
+  readonly phaseTimeouts?: Readonly<Record<string, number>> | undefined;
+  /** Whether the tool stops when its abort signal fires. */
+  readonly cancellable?: boolean | undefined;
+  /** Whether repeating a call with the same arguments is safe. */
+  readonly idempotent?: unknown;
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -69,7 +81,7 @@ export interface ContractVerificationResult {
   readonly violations: readonly ContractViolation[];
   /** Unix timestamp (ms) when this result was produced. */
   readonly verifiedAt: number;
-  /** Whether this tool was verified as a PhasedTool (has extended metadata). */
+  /** Whether the tool carries contract metadata (a category on the tool object). */
   readonly isPhasedTool: boolean;
   /** Structural checks never certify the semantic quality of a description. */
   readonly descriptionQuality?: 'assessed' | 'not-evaluated';
@@ -225,10 +237,10 @@ async function checkDescription(def: ToolDefinition): Promise<ContractViolation[
 /**
  * Check 2, Timeout and cancellation semantics.
  *
- * For PhasedTools: validates that phase timeouts are positive integers and that
+ * For a tool with metadata: validates that its timeouts are positive integers and that
  * long-running tool categories declare cancellable=true.
  */
-function checkTimeoutCancellation(phased: Partial<PhasedTool>, toolName: string): ContractViolation[] {
+function checkTimeoutCancellation(phased: ToolContractMetadata, toolName: string): ContractViolation[] {
   const violations: ContractViolation[] = [];
 
   if (phased.phaseTimeouts !== undefined) {
@@ -285,11 +297,11 @@ function checkPermissionClass(definition: ToolDefinition, strict: boolean): Cont
 /**
  * Check 4, Output policy alignment.
  *
- * For PhasedTools: validates that the tool's category maps to a known ToolClass
+ * For a tool with metadata: validates that its category maps to a known ToolClass
  * with a configured output policy. All default policies exist, but third-party
  * categories would fail this check.
  */
-function checkOutputPolicy(phased: Partial<PhasedTool>, toolName: string): ContractViolation[] {
+function checkOutputPolicy(phased: ToolContractMetadata, toolName: string): ContractViolation[] {
   const violations: ContractViolation[] = [];
 
   if (phased.category === undefined) {
@@ -313,7 +325,7 @@ function checkOutputPolicy(phased: Partial<PhasedTool>, toolName: string): Contr
 /** Check idempotency declarations on side-effecting tools.
  * Strict mode requires an explicit idempotent boolean on the tool object.
  */
-function checkIdempotency(phased: Partial<PhasedTool> & { idempotent?: unknown }, toolName: string, strict: boolean): ContractViolation[] {
+function checkIdempotency(phased: ToolContractMetadata, toolName: string, strict: boolean): ContractViolation[] {
   const violations: ContractViolation[] = [];
 
   // Only applies to side-effecting categories
@@ -326,8 +338,7 @@ function checkIdempotency(phased: Partial<PhasedTool> & { idempotent?: unknown }
       dimension: 'idempotency',
       severity: strict ? 'error' : 'warn',
       message: `Tool '${toolName}' (category='${phased.category}') has no idempotency declaration.`,
-      hint: 'Add idempotent: true|false to the PhasedTool to declare whether repeated calls with the same args are safe. '
-        + 'This enables the executor to deduplicate in-flight calls and surface dedup status in diagnostics.',
+      hint: 'Add idempotent: true|false to the tool to declare whether repeated calls with the same args are safe.',
     });
   } else if (typeof phased.idempotent !== 'boolean') {
     violations.push({
@@ -402,7 +413,7 @@ export class ToolContractVerifier {
    * @returns A ContractVerificationResult with all violations and a pass/fail flag.
    */
   verifyStructure(tool: Tool): ContractVerificationResult {
-    const phased = tool as Partial<PhasedTool>;
+    const phased = tool as Tool & ToolContractMetadata;
     const isPhasedTool = 'category' in phased && phased.category !== undefined;
 
     const violations: ContractViolation[] = [
@@ -450,7 +461,7 @@ export class ToolContractVerifier {
   static formatResult(result: ContractVerificationResult): string {
     const lines: string[] = [];
     const status = result.passed ? 'PASS' : 'FAIL';
-    const phasedNote = result.isPhasedTool ? ' [phased]' : ' [basic]';
+    const phasedNote = result.isPhasedTool ? ' [metadata]' : ' [basic]';
     lines.push(`[${status}] ${result.toolName}${phasedNote}`);
 
     if (result.violations.length === 0) {

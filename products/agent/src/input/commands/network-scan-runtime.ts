@@ -10,6 +10,20 @@ import {
   NETWORK_SCAN_ENABLE_COMMAND,
 } from '../../runtime/lan-scan-consent.ts';
 import { commandRefusal } from './confirmation.ts';
+import { LOCAL_WRITE_VERB, READ_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbs } from './command-verbs.ts';
+
+/**
+ * Turning scanning on is the owner's consent to probe other devices on his
+ * network, and it scans at once, so it counts only when he types it; a model
+ * may read the status and turn scanning off.
+ */
+const NETWORK_SCAN_ON = ownerOnlyVerb('outward', 'gives consent to scan other devices on the local network');
+const NETWORK_SCAN_VERBS: CommandVerbs = {
+  defaultVerb: 'status',
+  verbs: { status: READ_VERB, on: NETWORK_SCAN_ON, enable: NETWORK_SCAN_ON, off: LOCAL_WRITE_VERB, disable: LOCAL_WRITE_VERB },
+  // An unknown verb prints the usage and changes nothing.
+  otherwise: READ_VERB,
+};
 
 function statusText(storePath: string, decision: ReturnType<typeof loadLanScanConsent>): string {
   if (!decision || decision.decision === 'declined') {
@@ -38,7 +52,7 @@ function statusText(storePath: string, decision: ReturnType<typeof loadLanScanCo
  * network never is until this command turns it on, and turning it on scans at once.
  */
 export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): void {
-  registry.register({
+  registry.register(withCommandVerbs({
     name: 'network-scan',
     effect: 'local-state',
     aliases: ['discover-lan'],
@@ -76,5 +90,5 @@ export function registerNetworkScanRuntimeCommands(registry: CommandRegistry): v
 
       throw commandRefusal(`Usage: /network-scan [on|off|status]\n${statusText(storePath, loadLanScanConsent(shellPaths, GOODVIBES_AGENT_SURFACE_ROOT))}`);
     },
-  });
+  }, NETWORK_SCAN_VERBS));
 }

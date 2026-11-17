@@ -1,7 +1,6 @@
 /** Browser-safe immutable conversation evidence. A snapshot is never execution authority. */
 import { captureNativeSelectedDiffContext, nativeSelectedDiffContextSchema, nativeSelectedDiffSelectorSchema, type NativeSelectedDiffContext } from './native-diff-context.js';
 import { array, enum as enumSchema, literal, strictObject, string, type z } from 'zod/v4';
-import { randomUUID } from 'node:crypto';
 
 /*
  * A transcript has no size cap: it is acceptance evidence for the work, and a
@@ -73,7 +72,7 @@ export function createNativeContinuationSnapshotOwner() {
   const owner = freeze({});
   const owns = (value: NativeConversationContinuation) => nativeApply(nativeWeakGet, snapshotOwners, [value]) === owner;
   const capture = (sessionId: string, messages: NativeConversationContinuation['messages'], selectedDiff?: NativeSelectedDiffContext): NativeConversationContinuation => {
-    const result = captureNativeConversationContinuation({ version: 2, sessionId, revision: randomUUID(), messages, ...(selectedDiff ? { selectedDiff } : {}) });
+    const result = captureNativeConversationContinuation({ version: 2, sessionId, revision: crypto.randomUUID(), messages, ...(selectedDiff ? { selectedDiff } : {}) });
     nativeApply(nativeWeakSet, snapshotOwners, [result, owner]); return result;
   };
   return freeze({ capture, owns, withSelectedDiff(value: NativeConversationContinuation, selectedDiff: NativeSelectedDiffContext): NativeConversationContinuation {

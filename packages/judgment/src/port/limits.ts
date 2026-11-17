@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import { JudgmentError } from './errors.ts';
 import type { EntryType, Questions } from './types.ts';
 
@@ -32,7 +31,35 @@ export interface SerializedInput {
   readonly bytes: number;
 }
 
-const utf8Bytes = (text: string): number => Buffer.byteLength(text, 'utf8');
+/**
+ * UTF-8 length of `text`, counted without encoding it. This module is part of
+ * the runtime-neutral `decisions` subpath that browsers load, so it cannot use
+ * Node's `Buffer`. A lone surrogate counts as the three bytes of U+FFFD, as
+ * every UTF-8 encoder writes it.
+ */
+function utf8Bytes(text: string): number {
+  const length = text.length;
+  let bytes = length;
+  for (let index = 0; index < length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) continue;
+    if (code < 0x800) {
+      bytes += 1;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < length) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        // A surrogate pair is two code units and four bytes.
+        bytes += 2;
+        index += 1;
+      } else {
+        bytes += 2;
+      }
+    } else {
+      bytes += 2;
+    }
+  }
+  return bytes;
+}
 
 export function serializeInput(state: EntryType, questions: Questions): SerializedInput {
   const stateText = JSON.stringify(state) ?? 'null', questionsText = JSON.stringify(questions);

@@ -231,13 +231,18 @@ async function writeSuccessfulTextEdits(
   }
 }
 
+/** How long an edit waits for a project's first import-graph build before answering without dependents. */
+const FIRST_GRAPH_WAIT_MS = 2_000;
+
 /**
  * Names the files that import what this call wrote, nearest first, from the
  * one import graph per project root that find and repo-map share (patched for
  * this write, so no file is read here). Only source files have dependents; on
- * the first edit under a root the caller waits for that root's one build. It
- * never compiles or runs anything: a compiler picked up from the project would
- * run outside the exec tool's approval path.
+ * the first edit under a root the caller waits for that root's one build at
+ * most {@link FIRST_GRAPH_WAIT_MS}, then answers that the dependents are not
+ * known yet while the build finishes for later edits. It never compiles or
+ * runs anything: a compiler picked up from the project would run outside the
+ * exec tool's approval path.
  */
 export async function describeEditDependents(
   cwd: string,
@@ -248,14 +253,22 @@ export async function describeEditDependents(
   if (sources.length === 0 || signal?.aborted) return undefined;
   try {
     const pending = latestProjectImportGraph(cwd);
-    const graph = signal
-      ? await new Promise<Awaited<typeof pending> | undefined>((resolve, reject) => {
-          const onAbort = () => resolve(undefined);
-          signal.addEventListener('abort', onAbort, { once: true });
-          pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
-        })
-      : await pending;
-    if (!graph) return undefined;
+    // The write is already on disk: its result is not held for a whole-project scan.
+    const outcome = await new Promise<Awaited<typeof pending> | 'cancelled' | 'building'>((resolve, reject) => {
+      const onAbort = () => resolve('cancelled');
+      const timer = setTimeout(() => resolve('building'), FIRST_GRAPH_WAIT_MS);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      pending.then(resolve, reject).finally(() => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      });
+    });
+    if (outcome === 'cancelled') return undefined;
+    if (outcome === 'building') {
+      pending.catch((error: unknown) => logger.warn('[import-graph] Background build failed', { error: summarizeError(error) }));
+      return '\nDependents: not known yet; this project\'s import graph is still being built, and later edits will name the files that import what changed.';
+    }
+    const graph = outcome;
 
     const written = new Set(sources);
     const direct = new Set<string>();

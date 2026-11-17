@@ -10,8 +10,8 @@ conversation through `SessionManager` (one temp file, one rename). This is the c
 resume`, `--continue`, `--resume` and the session browser read. The first line of the file carries
 the session's title, model and message count, so listing sessions reads one line per file.
 
-Saved sessions are kept until you delete them. The start-up retention sweep that bounds journals,
-logs and crash snapshots (`atRest.retentionMaxAgeDays`, `atRest.retentionMaxTotalMb`) never removes
+Saved sessions are kept until you delete them. The start-up retention sweep that bounds agent
+journals, logs and crash snapshots (`atRest.retentionMaxAgeDays`, `atRest.retentionMaxTotalMb`) never removes
 a saved conversation, whether it was saved at turn end or with `/session save`.
 
 ## Crash snapshot
@@ -33,21 +33,15 @@ succeeds and when a quit's save succeeds, so a snapshot on disk always holds som
 session does not. When the session id moves on (a resume, a fork, `/session save <name>`, a
 recovery restore), the liveness marker moves with it. An idle
 session writes nothing; the one-minute tick then only refreshes the liveness marker that records
-this session as open in this terminal, and moves an unchanged snapshot's file time so an older
-version reading the same directory does not take it for a crash.
+this session as open in this terminal.
 
 On the next start the TUI offers the newest snapshot that is not older than its session's own
 saved file, unless the liveness marker shows that session is still open in another terminal, in
 which case the snapshot is that terminal's live state and the next one is considered instead.
-Choosing Remove deletes that one snapshot; a later crash of the same session is offered again.
+A crash relaunched at once is offered at once. Choosing Remove deletes that one snapshot; a later crash of the same session is offered again.
 
 A kill at any moment loses at most the streaming text of the turn in flight and any tool calls of
 that turn that had not finished. A completed turn is never lost.
-
-Journals written by earlier versions (`transcript-<sessionId>.journal`) are still replayed once
-when their session is opened, whichever way it is opened (`/session resume`, `/load`, Enter in
-`/sessions`, the session picker or browser, `--continue`, `--resume`, and the same commands in
-`goodvibes-agent`); the load says how many turns it recovered. Nothing writes new ones.
 
 ## Side branches left out of a restore
 

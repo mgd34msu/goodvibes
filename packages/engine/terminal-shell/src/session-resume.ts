@@ -190,7 +190,7 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
     notices: describeLeftOutBranches(leftOut),
   };
 }
-import { rmSync, utimesSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from './work-tree-fold-store.js';
@@ -318,24 +318,6 @@ export function markConversationDurable(conversation: RevisionedConversation, se
 export function conversationChangedSinceDurable(conversation: RevisionedConversation, sessionId: string): boolean {
   const last = durableCopies.get(conversation);
   return last === undefined || last.sessionId !== sessionId || last.revision !== conversation.revisionSource.revision();
-}
-
-/**
- * Keep an unchanged crash snapshot looking live without rewriting it: one
- * `utimes` on the snapshot when it is the newest copy of the conversation. A
- * reader that judges liveness by the file's time (an older build) then does not
- * take this terminal's working state for a crash. Never touches a snapshot the
- * store has already superseded, which a newer time would bring back to life.
- */
-export function keepCrashSnapshotFresh(surface: SessionSurface, conversation: RevisionedConversation, sessionId: string): void {
-  const last = durableCopies.get(conversation);
-  if (last?.copy !== 'snapshot' || conversationChangedSinceDurable(conversation, sessionId)) return;
-  try {
-    const now = new Date();
-    utimesSync(surface.recoveryFile(sessionId), now, now);
-  } catch {
-    // No snapshot on disk: nothing to keep fresh.
-  }
 }
 
 /**

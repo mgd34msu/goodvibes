@@ -12,8 +12,7 @@ import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/pla
  *      outside a turn (/undo, /title, a branch switch), only when the
  *      conversation's revision moved since it was last written (core/turn-event-wiring.ts
  *      writes it at turn moments and the store save at turn end deletes it), so
- *      an idle session writes nothing. An unchanged snapshot only has its file
- *      time moved, so a reader that judges by file time still sees it as live.
+ *      an idle session writes nothing.
  *   3. Follows a change of the live session id that did not go through a
  *      resume (a fork, `/session save <name>`, a recovery restore): the marker
  *      moves to the new id, and the conversation counts as saved under the new
@@ -26,7 +25,6 @@ import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
 import {
   conversationChangedSinceDurable,
-  keepCrashSnapshotFresh,
   markConversationDurable,
   moveLiveSessionArtifacts,
 } from '../core/session-resume-core.ts';
@@ -94,9 +92,7 @@ export function startRecoveryAutosave(options: StartRecoveryAutosaveOptions): Re
       if (conversationChangedSinceDurable(conversation, sessionId)) markConversationDurable(conversation, sessionId, 'store');
     }
     try {
-      if (!writeCrashSnapshotIfChanged({ conversation, sessionId, surface, buildSessionContinuityHints })) {
-        keepCrashSnapshotFresh(surface, conversation, sessionId);
-      }
+      writeCrashSnapshotIfChanged({ conversation, sessionId, surface, buildSessionContinuityHints });
     } catch (error) {
       logger.warn('[Recovery] Autosave snapshot failed', { error: summarizeError(error) });
     }

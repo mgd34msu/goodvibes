@@ -29,8 +29,9 @@
  * LIVENESS, is anything still holding it?
  * A snapshot whose session another running process has marked open
  * (session-liveness-marker.ts) is that process's working state, not a crash, and
- * neither check here reports it. The unsolicited boot offer additionally skips
- * any snapshot whose file was touched within LIVE_REFRESH_WINDOW_MS, see there.
+ * neither check here reports it. Every terminal that writes a snapshot marks
+ * its session open from start to exit, so a crash relaunched at once is offered
+ * at once.
  */
 
 import {
@@ -238,38 +239,6 @@ function sessionStoreMtimeNs(sessionsDir: string, sessionId: string): bigint | n
 }
 
 /**
- * How recently a snapshot must have been written to count as ACTIVELY
- * REFRESHED, i.e. a live process is still maintaining it, so it is that
- * process's working state and not an orphaned crash.
- *
- * A running terminal moves its snapshot's modification time once a minute
- * and rewrites it only when the conversation changed, so a file touched
- * within a cadence and a half is being kept alive by something running right
- * now. This is deliberately
- * evidence-on-disk written with the snapshot itself, so a live terminal whose
- * liveness-marker write failed is still not offered as a crash.
- *
- * The tradeoff, stated plainly: a genuine crash relaunched inside this window
- * is not offered on that first immediate relaunch. The snapshot is untouched
- * and is offered on the next one, once it stops looking live. Nagging a user
- * about state they never lost is the worse failure.
- */
-const LIVE_REFRESH_WINDOW_MS = 90_000;
-
-/**
- * True when this snapshot is being actively refreshed by a live writer, and so
- * is not an orphaned crash to offer.
- *
- * A snapshot mtime in the future (clock skew, a file copied off another
- * machine) reads as fresh here and is left alone. That direction is the safe
- * one: suppressing an offer never destroys anything, and the file stays on
- * disk to be offered once the clock catches up.
- */
-function isActivelyRefreshed(snapshotMtimeNs: bigint, nowMs: number, windowMs: number): boolean {
-  return BigInt(nowMs) * 1_000_000n - snapshotMtimeNs < BigInt(windowMs) * 1_000_000n;
-}
-
-/**
  * True when another running process has this session open, so its snapshot is
  * that process's working state. This process's own marker does not count: a
  * process asking about its own session is asking about its own crash residue.
@@ -306,10 +275,9 @@ function isSupersededByOwnStore(sessionsDir: string, sessionId: string, snapshot
  * save of its own session (see the SUPERSESSION note at the top of this file).
  * Returns null when no live crash snapshot exists.
  *
- * A snapshot whose session another process has open, or that a live process
- * is still refreshing, is NOT offered: this is an unsolicited boot-time
- * question, and asking about state nobody lost is the defect these rules exist
- * to prevent. The next candidate is considered instead, so a live session's
+ * A snapshot whose session another process has open is NOT offered: this is
+ * an unsolicited boot-time question, and asking about state nobody lost is the
+ * defect these rules exist to prevent. The next candidate is considered instead, so a live session's
  * snapshot never hides an older orphaned one.
  */
 export function checkRecoveryFile(options?: SessionPersistenceOptions): RecoveryFileInfo | null {
@@ -321,8 +289,7 @@ export function checkRecoveryFile(options?: SessionPersistenceOptions): Recovery
  * newer than that session's own durable store file, under exactly the rule
  * `checkRecoveryFile` uses. Returns its meta, or null when that session has no
  * snapshot, its snapshot was already superseded, or another running process
- * has the session open (its snapshot is that process's working state). The
- * freshness window does not apply: this answers a direct question.
+ * has the session open (its snapshot is that process's working state).
  *
  * This is the probe for a consumer's resume-a-named-session flow (`--continue`
  * and friends): loading the store copy directly would silently drop the tail of
@@ -362,13 +329,9 @@ function findLiveRecoveryCandidate(
   try {
     const sessionsDir = resolveSessionsDirPath(options);
     const surface = isSurfaceOptions(options) ? requireSurface(options) : undefined;
-    // One clock read for the whole scan, so two candidates a millisecond apart
-    // are not judged against two different "now"s.
-    const nowMs = Date.now();
     for (const entry of listRecoveryCandidates(options)) {
-      // Newest-first; the first snapshot that no live writer is maintaining
-      // and its own session has not already superseded is the one to offer.
-      if (isActivelyRefreshed(entry.mtimeNs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
+      // Newest-first; the first snapshot no running process holds open and its
+      // own session has not already superseded is the one to offer.
       let selected: ReturnType<typeof readRecoveryMetaObservation>;
       try {
         selected = readRecoveryMetaObservation(entry.path);
@@ -377,7 +340,6 @@ function findLiveRecoveryCandidate(
         continue;
       }
       const { info, physical, mtimeNs } = selected;
-      if (isActivelyRefreshed(mtimeNs, nowMs, LIVE_REFRESH_WINDOW_MS)) continue;
       if (isSupersededByOwnStore(sessionsDir, info.sessionId, mtimeNs)) continue;
       if (isOpenInAnotherProcess(surface, info.sessionId)) continue;
       return { path: entry.path, info, physical };

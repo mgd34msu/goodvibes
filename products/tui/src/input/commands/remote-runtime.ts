@@ -115,11 +115,7 @@ export function registerRemoteRuntimeCommands(registry: CommandRegistry): void {
       const activeConnections = [...peerSnapshot.acp.activeConnections];
       const subcommand = args[0]?.toLowerCase() ?? 'show';
 
-      if (await handleRemoteSetupCommand(args, ctx, activeConnections, {
-        listContracts: () => remoteRunners.listContracts(),
-        exportSessionBundle: (path) => remoteRunners.exportSessionBundle(path),
-        importSessionBundle: (path) => remoteRunners.importSessionBundle(path),
-      })) {
+      if (await handleRemoteSetupCommand(args, ctx, activeConnections, remoteRunners)) {
         return;
       }
 

@@ -165,6 +165,13 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         runtimeStore: createRuntimeStore(),
         featureFlags: services.featureFlags,
         surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
+        // The daemon's own leaderboard and local context-window readings: the
+        // same surface root and providers directory, so a floor built when a
+        // workspace's next session starts reads and fetches neither again.
+        providerHostFacts: {
+          benchmarkStore: services.benchmarkStore,
+          localContextIngestion: services.providerRegistry.localContextReadings,
+        },
         workingDir: workspaceRoot,
         homeDirectory: services.homeDirectory,
         // A contract a hosted turn starts sees the owner's reads from that turn at once.

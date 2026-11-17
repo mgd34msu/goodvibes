@@ -8,6 +8,7 @@ import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
 import type { FavoritesStore } from './favorites.js';
 import type { BenchmarkStore } from './model-benchmarks.js';
 import type { ModelLimitsService } from './model-limits.js';
+import type { LocalContextIngestionService } from './local-context-ingestion.js';
 import type { ManualModelPrice } from './model-pricing.js';
 import type { ReasoningEffortSpec } from './reasoning-effort.js';
 
@@ -123,6 +124,13 @@ export interface ProviderRegistryOptions {
   readonly favoritesStore: Pick<FavoritesStore, 'load'>;
   readonly benchmarkStore: Pick<BenchmarkStore, 'getBenchmarks' | 'getKnownBenchmarks' | 'readBenchmarks' | 'getTopBenchmarkModelIds' | 'benchmarksSettled'>;
   readonly modelLimitsService?: ModelLimitsService | undefined;
+  /**
+   * Context-window readings of local and custom provider servers, keyed by
+   * provider name. A second registry over the same providers directory (a
+   * daemon's hosted-session workspace floor) borrows its host registry's, so
+   * building it does not probe servers the host has just read. Default: its own.
+   */
+  readonly localContextIngestion?: LocalContextIngestionService | undefined;
   readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
   /** Own subscriptions when this registry borrows a longer-lived configuration. */

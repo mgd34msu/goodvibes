@@ -122,7 +122,7 @@ import type { FeatureFlagManager } from './feature-flags/index.js';
 import { disposeRuntimeFeatureFlags, resolveRuntimeFeatureFlags } from './feature-flag-composition.js';
 import { attachComposedInstrumentation, releaseComposedTelemetry } from './telemetry/index.js';
 import { createProviderStack } from './provider-stack.js';
-import type { ProviderModelDiscoveryMode, ProviderRegistryFactory } from './provider-stack.js';
+import type { ProviderModelDiscoveryMode, ProviderRegistryFactory, ProviderStackHostFacts } from './provider-stack.js';
 import { createAgentGraph } from './agent-graph.js';
 import { composeContractRunner, nativeAgentFleetCapacity, resumeContracts } from './contract-composition.js';
 import type { ContractRunner } from '../contract/runner.js';
@@ -149,6 +149,7 @@ export type {
   ProviderModelDiscoveryMode,
   ProviderRegistryConstructionOptions,
   ProviderRegistryFactory,
+  ProviderStackHostFacts,
 } from './provider-stack.js';
 // The manager itself, beside the two types this module already published. Every
 // composition that brokers its asks, this one, the platform's daemon-grade graph,
@@ -391,6 +392,13 @@ export interface ClientRuntimeServicesOptions {
    */
   readonly modelDiscovery?: ProviderModelDiscoveryMode | undefined;
   /**
+   * The benchmark leaderboard and local servers' context-window readings of a
+   * host's own provider stack, lent to this composition so building it fetches
+   * and probes none of them again (a daemon's hosted-session workspace floor).
+   * Default: this composition loads its own.
+   */
+  readonly providerHostFacts?: ProviderStackHostFacts | undefined;
+  /**
    * Whether the hook dispatcher is handed the agent manager. Default: `attach`.
    *
    * `withhold` is a deliberate capability boundary, not an oversight: a hook
@@ -536,6 +544,7 @@ function composeClientRuntimeServices(
     surfaceRoot,
     ...(options.providerRegistryFactory === undefined ? {} : { providerRegistryFactory: options.providerRegistryFactory }),
     ...(options.modelDiscovery === undefined ? {} : { modelDiscovery: options.modelDiscovery }),
+    ...(options.providerHostFacts === undefined ? {} : { hostFacts: options.providerHostFacts }),
   });
 
   const agents = createAgentGraph({

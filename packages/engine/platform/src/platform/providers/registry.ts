@@ -117,7 +117,7 @@ export class ProviderRegistry {
   private readonly gatewayPricing: GatewayPricingService;
   private readonly runtimeMetadataDeps: ProviderRuntimeMetadataDeps;
   private readonly runtimeBus: RuntimeEventBus | null;
-  private readonly localContextIngestionService = new LocalContextIngestionService();
+  private readonly localContextIngestionService: LocalContextIngestionService;
   private catalogModels: CatalogModel[] = [];
   private pricingCatalog: PricingCatalog | null = null;
   private syntheticCanonicalModels: CanonicalModel[] = [];
@@ -159,6 +159,7 @@ export class ProviderRegistry {
     this.cacheHitTracker = options.cacheHitTracker;
     this.favoritesStore = options.favoritesStore;
     this.benchmarkStore = options.benchmarkStore;
+    this.localContextIngestionService = options.localContextIngestion ?? new LocalContextIngestionService();
     this.modelLimitsService = options.modelLimitsService
       ?? new ModelLimitsService({ cachePath: getModelLimitsCachePath(this.getPersistenceRoot()) });
     this.gatewayPricing = new GatewayPricingService({ cacheDir: this.getPersistenceRoot() });
@@ -1092,6 +1093,9 @@ export class ProviderRegistry {
 
   /** Model tier readings (routing.model-tier), for the route planner. */
   get modelTiers(): ModelTierStore { return this.routingReadings.tiers; }
+
+  /** The context-window readings this registry takes from local and custom servers, to lend a second registry over the same providers. */
+  get localContextReadings(): LocalContextIngestionService { return this.localContextIngestionService; }
 
   /** The benchmark leaderboard, for the route planner's ordering of each tier's candidates. */
   get benchmarks(): Pick<BenchmarkStore, 'getKnownBenchmarks' | 'readBenchmarks' | 'benchmarksSettled'> { return this.benchmarkStore; }

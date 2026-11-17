@@ -29,6 +29,7 @@ import { CacheHitTracker } from '../providers/cache-strategy.js';
 import { ProviderCapabilityRegistry } from '../providers/capabilities.js';
 import { FavoritesStore } from '../providers/favorites.js';
 import { BenchmarkStore } from '../providers/model-benchmarks.js';
+import type { LocalContextIngestionService } from '../providers/local-context-ingestion.js';
 import { ModelLimitsService } from '../providers/model-limits.js';
 import { ProviderOptimizer } from '../providers/optimizer.js';
 import { ProviderRegistry } from '../providers/registry.js';
@@ -59,6 +60,21 @@ export type ProviderRegistryFactory = (options: ProviderRegistryConstructionOpti
  */
 export type ProviderModelDiscoveryMode = 'run' | 'skip';
 
+/**
+ * Provider facts a host's own stack already holds for the same machine and the
+ * same providers directory, lent to a second stack it composes (the daemon's
+ * hosted-session workspace floors). The benchmark leaderboard and the local
+ * servers' context windows are the same for every workspace; without the loan
+ * each floor built after a workspace's last session ended read the leaderboard
+ * file again (and fetched it from the network whenever the host's copy was
+ * missing or stale) and probed every custom server's endpoints again. The host
+ * keeps owning their load and refresh.
+ */
+export interface ProviderStackHostFacts {
+  readonly benchmarkStore: BenchmarkStore;
+  readonly localContextIngestion: LocalContextIngestionService;
+}
+
 export interface ProviderStackOptions {
   readonly configManager: ConfigManager;
   readonly subscriptionManager: SubscriptionManager;
@@ -73,6 +89,8 @@ export interface ProviderStackOptions {
   readonly providerRegistryFactory?: ProviderRegistryFactory | undefined;
   /** Whether to run model discovery and the benchmark load at construction. Default: `run`. */
   readonly modelDiscovery?: ProviderModelDiscoveryMode | undefined;
+  /** Facts a host's own stack lends this one; see {@link ProviderStackHostFacts}. Default: this stack loads its own. */
+  readonly hostFacts?: ProviderStackHostFacts | undefined;
   readonly registerDispose?: ((release: () => void) => void) | undefined;
 }
 
@@ -128,7 +146,8 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
   const providerCapabilityRegistry = new ProviderCapabilityRegistry();
   const cacheHitTracker = new CacheHitTracker();
   const favoritesStore = new FavoritesStore({ dir: shellPaths.resolveUserPath(surfaceRoot) });
-  const benchmarkStore = new BenchmarkStore({ dir: shellPaths.resolveUserPath(surfaceRoot) });
+  const hostFacts = options.hostFacts;
+  const benchmarkStore = hostFacts?.benchmarkStore ?? new BenchmarkStore({ dir: shellPaths.resolveUserPath(surfaceRoot) });
   const modelLimitsService = new ModelLimitsService({
     cachePath: shellPaths.resolveUserPath(surfaceRoot, 'model-limits.json'),
   });
@@ -144,6 +163,7 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     favoritesStore,
     benchmarkStore,
     modelLimitsService,
+    ...(hostFacts ? { localContextIngestion: hostFacts.localContextIngestion } : {}),
     featureFlags: options.featureFlags,
     runtimeBus: options.runtimeBus,
     registerDispose: options.registerDispose,
@@ -152,10 +172,11 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
   // Default `run`: every composition did this unconditionally before the option
   // existed, so an omitted option changes nothing.
   // The benchmark leaderboard is the same kind of network pass: the route
-  // planner orders each tier's candidates by it, so it loads with discovery.
+  // planner orders each tier's candidates by it, so it loads with discovery,
+  // unless a host lent its own leaderboard, which that host loads and refreshes.
   if ((options.modelDiscovery ?? 'run') === 'run') {
     providerRegistry.initProviderModelDiscovery();
-    benchmarkStore.initBenchmarks();
+    if (!hostFacts) benchmarkStore.initBenchmarks();
   }
   // ONE credential chain (env -> secrets -> subscription): boot applies secrets-backed keys; a secrets write/delete
   // replaces LIVE (no restart) only the builtins whose key changed; badges/picker/chat read the same instances.

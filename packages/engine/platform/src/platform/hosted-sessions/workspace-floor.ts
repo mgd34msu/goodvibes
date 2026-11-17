@@ -33,7 +33,11 @@
  *
  * So: floors are keyed by resolved workspace root, reference-counted by the
  * sessions using them, and disposed when the last one goes. A workspace with no
- * live hosted session holds no watchers.
+ * live hosted session holds no watchers. Building the floor again for that
+ * workspace's next session adds tens of milliseconds to its create and repeats
+ * no network work the host already did when the product lends its provider
+ * facts (`providerHostFacts`), which is less than keeping an idle floor's
+ * memory and watchers would cost.
  *
  * ── Why the factory is injected ────────────────────────────────────────────
  *

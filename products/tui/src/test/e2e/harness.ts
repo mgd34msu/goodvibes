@@ -96,26 +96,6 @@ export async function freePort(): Promise<number> {
   });
 }
 
-export async function waitFor<T>(
-  what: string,
-  probe: () => T | undefined | null | false | Promise<T | undefined | null | false>,
-  timeoutMs = 30_000,
-  intervalMs = 150,
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  let last: unknown;
-  while (Date.now() < deadline) {
-    try {
-      const value = await probe();
-      if (value) return value;
-    } catch (error) {
-      last = error;
-    }
-    await Bun.sleep(intervalMs);
-  }
-  throw new Error(`E2E: timed out after ${timeoutMs}ms waiting for ${what}${last ? ` (last error: ${String(last)})` : ''}`);
-}
-
 // ── the scripted model ──────────────────────────────────────────────────────
 
 export interface ChatMessage {
@@ -390,7 +370,8 @@ export interface TuiSession {
   type(text: string): void;
   key(name: string): void;
   resize(cols: number, rows: number): void;
-  waitForScreen(what: string, predicate: (screen: string) => boolean, timeoutMs?: number): Promise<string>;
+  /** Resolves with the screen once `predicate` holds after a write; rejects if the binary exits first. The file's own limit bounds it. */
+  waitForScreen(what: string, predicate: (screen: string) => boolean): Promise<string>;
   /** True while the binary is still running in the pane. */
   alive(): boolean;
   stop(): Promise<void>;
@@ -408,6 +389,9 @@ export function launchTui(e2eHome: E2EHome, options: { cols?: number; rows?: num
   const cols = options.cols ?? 100, rows = options.rows ?? 30;
   const frame = new TerminalFrame(cols, rows);
   const decoder = new TextDecoder();
+  // Every write the program makes wakes the waiters, so a wait checks the screen
+  // exactly when it can have changed and never on a timer.
+  let changed = Promise.withResolvers<void>();
   // exec keeps the child PID on the compiled binary; only stderr is redirected,
   // preserving the real owner-terminal contract on stdin and stdout.
   const child = Bun.spawn(['/bin/sh', '-c', 'exec "$@" 2>"$GV_E2E_STDERR"', 'gv-e2e', binary], {
@@ -415,25 +399,32 @@ export function launchTui(e2eHome: E2EHome, options: { cols?: number; rows?: num
     terminal: { cols, rows, data: (terminal, bytes) => {
       appendFileSync(rawPath, bytes);
       frame.write(decoder.decode(bytes, { stream: true }), reply => terminal.write(reply));
+      const wake = changed; changed = Promise.withResolvers<void>(); wake.resolve();
     } },
   });
+  const exited = child.exited.then((code) => { throw new Error(`E2E: the binary exited (${code}) before the screen showed what was awaited`); });
+  void exited.catch(() => {});
+  /** Wait for the next write; `poke` runs before each wait, for a probe that must be resent until it is seen. */
+  const until = async (predicate: () => boolean, poke?: () => void): Promise<void> => {
+    while (!predicate()) {
+      const next = changed.promise;
+      poke?.();
+      await Promise.race([next, exited]);
+    }
+  };
   const keys: Readonly<Record<string, string>> = {
     Enter: '\r', Escape: '\x1b', BSpace: '\x7f', 'C-u': '\x15',
     Up: '\x1b[A', Down: '\x1b[B', Right: '\x1b[C', Left: '\x1b[D',
     PageUp: '\x1b[5~', PageDown: '\x1b[6~', Home: '\x1b[H', End: '\x1b[F',
   };
   let stopping: Promise<void> | undefined;
-  // First paint can precede stdin subscription. The pairing driver proves the
-  // same boundary with an unsent idempotent echo, then clears it before use.
+  // First paint can precede stdin subscription: an idempotent probe is resent on
+  // each repaint until the composer echoes it, then cleared before use.
   const ready = (async () => {
-    await waitFor('the native PTY input area', () => inputAreaVisible(frame.text()), 45_000, 15);
-    await waitFor('the live native PTY composer', () => {
-      if (frame.text().includes('┃  x')) return true;
-      child.terminal!.write('\x15x');
-      return false;
-    }, 10_000, 30);
+    await until(() => inputAreaVisible(frame.text()));
+    await until(() => frame.text().includes('┃  x'), () => child.terminal!.write('\x15x'));
     child.terminal!.write('\x15');
-    await waitFor('the empty live native PTY composer', () => inputAreaVisible(frame.text()) && !frame.text().includes('┃  x'), 10_000, 15);
+    await until(() => inputAreaVisible(frame.text()) && !frame.text().includes('┃  x'));
   })();
   void ready.catch(() => {});
   return {
@@ -446,25 +437,22 @@ export function launchTui(e2eHome: E2EHome, options: { cols?: number; rows?: num
       child.terminal!.write(bytes);
     },
     resize: (cols, rows) => { frame.resize(cols, rows); child.terminal!.resize(cols, rows); },
-    waitForScreen: async (what, predicate, timeoutMs = 30_000) => {
+    waitForScreen: async (what, predicate) => {
       try {
         await ready;
-        return await waitFor(what, () => predicate(frame.text()) && frame.text(), timeoutMs, 15);
+        await until(() => predicate(frame.text()));
+        return frame.text();
       } catch (error) {
         const stderr = readFileSync(stderrPath, 'utf8').slice(-2000);
-        throw new Error(`${String(error)}\n--- screen ---\n${frame.text()}\n--- stderr ---\n${stderr}`);
+        throw new Error(`waiting for ${what}: ${String(error)}\n--- screen ---\n${frame.text()}\n--- stderr ---\n${stderr}`);
       }
     },
     alive: () => child.exitCode === null && child.signalCode === null,
     stop: () => stopping ??= (async () => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill('SIGTERM');
-          timer = setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); }, 2000);
-        }
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
         await child.exited;
-      } finally { clearTimeout(timer); child.terminal?.close(); }
+      } finally { child.terminal?.close(); }
       const violations = env.GOODVIBES_TEST_NETWORK_VIOLATIONS;
       if (violations && existsSync(violations) && readFileSync(violations, 'utf8')) throw new Error('E2E compiled process attempted unexpected external I/O');
     })(),

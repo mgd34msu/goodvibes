@@ -37,7 +37,7 @@
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "test": "bun ../../packages/engine/scripts/test.ts .",
     "test:e2e": "bun ../../packages/engine/scripts/test.ts --e2e .",
-    "test:e2e:fast": "bun ../../packages/engine/scripts/test.ts src/test/e2e/startup.e2e.test.ts src/test/e2e/first-turn.e2e.test.ts",
+    "test:e2e:fast": "bun ../../packages/engine/scripts/test.ts src/test/e2e/first-turn.e2e.test.ts",
     "package:install-check": "bun run scripts/package-install-check.ts",
     "build:prod": "bun scripts/run-toolchain.ts build",
     "build:all": "bun scripts/run-toolchain.ts build --all",

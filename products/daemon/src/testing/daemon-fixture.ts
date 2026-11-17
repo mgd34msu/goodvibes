@@ -143,6 +143,8 @@ export async function startDaemonFixture(options: DaemonFixtureOptions): Promise
       configDir,
       workingDir: workingDirectory,
       homeDir: homeDirectory,
+      // This is the daemon composition: it owns the daemon's settings file, as boot.ts does.
+      ownsDaemonTier: true,
     });
     if (options.watchedMailbox !== undefined) {
       configManager.set('surfaces.email.inbound.accounts', JSON.stringify([options.watchedMailbox]));

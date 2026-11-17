@@ -299,9 +299,9 @@ export class MemoryStore {
   /** A pass asked for while one ran: null when none, else whether it re-embeds every row. */
   private rebuildVectorIndexAgain: boolean | null = null;
   private readonly embeddingRegistry: MemoryEmbeddingProviderRegistry;
-  private mutationRevision = 0;
   private backendEpoch = 0;
-  private readonly operations = new WeakMap<MemoryOperationOptions, { revision: number }>();
+  /** Operations this store captured; a write runs only under one of them. */
+  private readonly operations = new WeakSet<MemoryOperationOptions>();
   /** SQLite's data_version as of the last look; another connection's commit changes it. */
   private seenDataVersion = 0;
   /** Counts the times another process was seen to have committed to the memory file. */
@@ -355,19 +355,18 @@ export class MemoryStore {
   }
 
   /**
-   * A write binds to the mutation revision: any other write in between makes
-   * it refuse. A read binds only to the backend incarnation, so a search that
-   * awaits ranking still answers when an unrelated write lands meanwhile.
+   * An operation binds to the caller's lifecycle and the backend incarnation.
+   * Writes need nothing more: each one reads and writes its rows in one
+   * synchronous step on the current rows, so one write landing beside another
+   * cannot be built on stale rows, and neither is refused for it.
    */
-  private captureOperation(options?: MemoryOperationOptions, mode: 'write' | 'read' = 'write'): MemoryOperationOptions {
+  private captureOperation(options?: MemoryOperationOptions): MemoryOperationOptions {
     if (options && this.operations.has(options)) return options;
     const lifecycle = captureMemoryOperation(options), scope = this.captureOperationScope();
-    const state = { revision: this.mutationRevision };
     const operation = captureMemoryOperation({ signal: lifecycle.signal, assertCurrent: () => {
       assertMemoryOperationCurrent(lifecycle); scope();
-      if (mode === 'write' && this.mutationRevision !== state.revision) throw new Error('Memory operation source changed');
     } });
-    this.operations.set(operation, state);
+    this.operations.add(operation);
     return operation;
   }
 
@@ -437,7 +436,7 @@ export class MemoryStore {
 
   /** Retrieve a single record by ID. */
   get(id: string, options?: MemoryOperationOptions): MemoryRecord | null {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return null;
 
@@ -457,7 +456,7 @@ export class MemoryStore {
    * query, the `engine.state.memory-search` rerank orders what retrieval found.
    */
   async search(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
     if (filter.semantic) {
@@ -475,7 +474,7 @@ export class MemoryStore {
    * compareByTrust order. Bulk reads (getAll, review queue, export) use it.
    */
   retrieve(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): MemoryRecord[] {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
 
@@ -564,7 +563,7 @@ export class MemoryStore {
    * answers. `score` is the similarity on a 0 to 100 scale.
    */
   async semanticCandidates(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]> {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
     const query = filter.query?.trim();
@@ -586,7 +585,7 @@ export class MemoryStore {
 
   /** Semantic search: the vector index builds the shortlist, the rerank orders it (memory-search-ranking.ts). */
   async searchSemantic(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): Promise<MemorySemanticSearchResult[]> {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
     return awaitMemoryOperation(() => rankSemanticSearch(this, filter, operation), operation);
@@ -594,14 +593,14 @@ export class MemoryStore {
 
   /** Records to review, most in need of a person first (compareReviewNeed: stored fields only, no model request). */
   async reviewQueue(limit = 10, scope?: MemoryScope, options?: MemoryOperationOptions): Promise<MemoryRecord[]> {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     return rankReviewQueue(this.retrieve(scope ? { scope } : {}, operation), limit);
   }
 
   /** Exports the records the filter selects; a query here filters, it does not rank. */
   exportBundle(filter: MemorySearchFilter = {}, options?: MemoryOperationOptions): MemoryBundle {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     const records = this.retrieve(filter, operation);
     const recordIds = new Set(records.map((record) => record.id));
@@ -773,7 +772,7 @@ export class MemoryStore {
 
   /** Get all links where this record is either source or target. */
   linksFor(id: string, options?: MemoryOperationOptions): MemoryLink[] {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) return [];
 
@@ -920,8 +919,8 @@ export class MemoryStore {
   // ── Usage counters, store meta, consolidation proposals ──────────────────────
   //
   // None of these is a record field another write computes from, so they are
-  // written straight to the image without moving mutationRevision (a usage
-  // count landing mid-way must never make a memory write refuse), and saved in
+  // written straight to the image (a usage count landing mid-way must never
+  // make a memory write refuse), and saved in
   // the background like update/review/delete.
 
   /**
@@ -1083,7 +1082,7 @@ export class MemoryStore {
   }
 
   vectorStats(options?: MemoryOperationOptions): MemoryVectorStats {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     return this.vectorIndex?.stats() ?? {
       backend: 'sqlite-vec',
@@ -1099,7 +1098,7 @@ export class MemoryStore {
   }
 
   async doctor(options?: MemoryOperationOptions): Promise<MemoryDoctorReport> {
-    const operation = this.captureOperation(options, 'read');
+    const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     return {
       vector: this.vectorStats(),
@@ -1205,18 +1204,14 @@ export class MemoryStore {
   }
 
   /**
-   * The commit point. The caller's lifecycle and the write's revision are
-   * checked before the statement runs and nowhere after: once the row is in
-   * the image it is published, and a check after it could only report a
-   * write that happened as failed.
+   * The commit point. The caller's lifecycle is checked before the statement
+   * runs and nowhere after: once the row is in the image it is published, and
+   * a check after it could only report a write that happened as failed.
    */
   private runMutation(sql: Parameters<SQLiteStore['run']>[0], params: Parameters<SQLiteStore['run']>[1], operation: MemoryOperationOptions, onPublished?: () => void): void {
     assertMemoryOperationCurrent(operation);
-    const state = this.operations.get(operation);
-    if (!state) throw new Error('Memory operation is not owned by this store');
-    const revision = ++this.mutationRevision;
+    if (!this.operations.has(operation)) throw new Error('Memory operation is not owned by this store');
     this.sqlite.run(sql, params);
-    state.revision = revision;
     onPublished?.();
   }
 
@@ -1279,7 +1274,6 @@ export class MemoryStore {
   private withdrawUnsavedAdd(id: string): void {
     try {
       this.sqlite.run('DELETE FROM memory_records WHERE id = ?', [id]);
-      this.mutationRevision++;
       this.vectorIndex?.delete(id);
     } catch (error) {
       logger.warn('MemoryStore: could not withdraw an add whose save failed', { id, error: summarizeError(error) });

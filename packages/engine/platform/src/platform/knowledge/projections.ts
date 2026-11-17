@@ -1,6 +1,5 @@
 import { generatedProjectionIdentity, generatedProjectionIdentityMetadata, KnowledgeProjectionIdentityHeldError, preservedUnscopedProjectionIds } from './store-generated-projection-selector.js';
 import { sameKnowledgeRecord } from './store-record-representation.js';
-import { SQLitePublicationError } from '../state/sqlite-store-persistence.js';
 import type { ArtifactStore } from '../artifacts/index.js';
 import { registerGeneratedKnowledgeSourceReferences } from './source-structural-references.js';
 import {
@@ -207,8 +206,7 @@ export class KnowledgeProjectionService {
       assertCurrent: assertIdentityCurrent,
       ...(target ? { target } : {}),
     }); } catch (error) {
-      if (error instanceof KnowledgeProjectionIdentityHeldError
-        || error instanceof SQLitePublicationError && error.phase === 'indeterminate') throw error;
+      if (error instanceof KnowledgeProjectionIdentityHeldError) throw error;
       try { originalPublication(); } catch { throw new KnowledgeProjectionIdentityHeldError('concurrent-update'); }
       throw error;
     }

@@ -2057,7 +2057,10 @@ export class ConfigManager {
           staged.recordLayer(migrated, 'global');
         } catch (error) { throw this.loadFailure('Global', this.configPath, error); }
       }
-      if (this.projectConfigPath && (this.hostSettings.active ? hostSettingsFileExists(this.projectConfigPath) : existsSync(this.projectConfigPath))) {
+      // One file serving as both layers (a program started in the home directory) is the global file, loaded above:
+      // read again as a project file, the owner's own settings would be refused as repository content.
+      if (this.projectConfigPath && this.projectConfigPath !== this.configPath
+        && (this.hostSettings.active ? hostSettingsFileExists(this.projectConfigPath) : existsSync(this.projectConfigPath))) {
         try {
           const ingested = this.ingest(JSON.parse(readFileSync(this.projectConfigPath, 'utf-8')) as Record<string, unknown>, this.projectConfigPath);
           const restricted = restrictProjectLayer(ingested, staged.nonRuntime, this.projectConfigPath, this.hostSettings);

@@ -132,14 +132,15 @@ interface CopilotModelsResponse {
  * Fetch GitHub Copilot's live model list: GET /models on the same
  * per-account Copilot API host (and using the same exchanged session token)
  * the provider-owned session store resolves for chat requests, no new
- * credential source, no new env vars. Verified 2026-07-13 against public,
- * independently-implemented Copilot API proxies (e.g. ericc-ch/copilot-api's
- * `getModels()`, which hits the identical `${baseUrl}/models` endpoint with
- * the same Bearer session token, Editor-Version/User-Agent headers, and a
- * `Copilot-Integration-Id` header) and against GitHub community reports of
- * `curl https://api.githubcopilot.com/models` with that same auth working
- * for the token-exchange flow, no live Copilot subscription was available
- * in this environment to call the endpoint directly. Response shape is
+ * credential source, no new env vars. The request sends the Bearer session
+ * token and the client's own identity (`copilotIdeHeaders`: `Editor-Version`
+ * and `User-Agent` both `GoodVibes/<version>`, plus `X-Github-Api-Version`),
+ * and no `Copilot-Integration-Id`. The endpoint and response shape follow
+ * independently implemented Copilot API proxies (ericc-ch/copilot-api's
+ * `getModels()` hits the same `${baseUrl}/models`), which send VS Code's
+ * identity and an integration id instead; that GitHub accepts the GoodVibes
+ * identity has not been checked against the live service. A refusal is
+ * reported with its status and the bundled list is used. Response shape is
  * OpenAI-like (`{ data: [{ id, capabilities: { type } }] }`); only
  * `type: 'chat'` entries are kept so embedding-only models don't leak into
  * the chat model picker. Each kept entry's `supported_endpoints` and `vendor`

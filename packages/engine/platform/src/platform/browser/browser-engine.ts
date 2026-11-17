@@ -99,16 +99,6 @@ class BrowserClickOutcomeUnknownError extends Error {
 }
 
 /**
- * Whether a driver deadline error shows the click reached the page. The
- * driver's call log names the step it was on; a click that timed out while
- * waiting for the element to become clickable never logged performing it.
- */
-function clickReachedPage(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /performing click action|click action done/i.test(message);
-}
-
-/**
  * The browser capability itself: provisioning, sessions, and every page
  * operation, with no Agent-surface types in sight.
  */
@@ -927,11 +917,29 @@ export class BrowserEngine {
       await revalidate(); current();
       credentialCurrent(passwordInDocument); current();
       const urlBefore = page.url();
+      const button = args.button ?? 'left';
+      const clickCount = args.clickCount ?? 1;
+      const startedMs = Date.now();
+      // Wait for the control to become clickable with the driver's trial mode,
+      // which runs the actionability checks and never sends input. A deadline
+      // here is a fact that nothing reached the page. Once the real click is
+      // entered, a deadline or failure cannot say whether the site received
+      // it, so its outcome is unknown.
+      try {
+        await work.action(signal => locator.click({ signal, button, clickCount, timeout: deadlineMs, trial: true }));
+      } catch (error) {
+        if (isDeadlineError(error)) {
+          throw deadlineError({ action: 'click', deadlineMs, next: 'The element never became clickable. Call action:"snapshot" to check it is present, visible, enabled and not covered.' });
+        }
+        throw error;
+      }
+      current();
+      const clickTimeout = Math.max(1_000, deadlineMs - (Date.now() - startedMs));
       try {
         await work.action(async signal => {
           if (ownership?.beforeDispatch) { await ownership.beforeDispatch(); current(); }
           attempted = true;
-          return locator.click({ signal, button: args.button ?? 'left', clickCount: args.clickCount ?? 1, timeout: deadlineMs });
+          return locator.click({ signal, button, clickCount, timeout: clickTimeout });
         });
         await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_NAVIGATION_TIMEOUT_MS }).catch(() => undefined));
         this.snapshots.clear(sessionId, pageId);
@@ -948,11 +956,6 @@ export class BrowserEngine {
           next: 'Refs are cleared after a click. Call action:"snapshot" for current refs.',
         };
       } catch (error) {
-        if (attempted && isDeadlineError(error) && !clickReachedPage(error)) {
-          // Nothing was sent to the page, so this is an ordinary deadline with a next step, not an unknown outcome.
-          attempted = false;
-          throw deadlineError({ action: 'click', deadlineMs, next: 'The element never became clickable. Call action:"snapshot" to check it is present, visible, enabled and not covered.' });
-        }
         if (attempted) throw new BrowserClickOutcomeUnknownError();
         throw error;
       }
@@ -988,6 +991,11 @@ export class BrowserEngine {
       const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, current, 'type', ownership, args); current();
       const { locator, element, revalidate, passwordInDocument } = await scope.resolve(args.ref);
       credentialCurrent(passwordInDocument); current();
+      if (!paymentFlowSubmit && placesOrder(element)) {
+        // Typing focuses or clicks the control and presses keys on it, which
+        // activates a control that places an order.
+        throw new BrowserSessionError(`"${element.name}" places an order, and an order placed with the browser tools skips your spending limits, so nothing was typed into it.`, ORDER_SUBMIT_REFUSAL_FIX);
+      }
       const timeout = deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
       const act = (run: (signal: AbortSignal) => Promise<unknown>) => boundedBrowserCall({
         action: 'type', deadlineMs: timeout, next: 'Call action:"snapshot" to check the field is present and enabled.',
@@ -1094,6 +1102,7 @@ export class BrowserEngine {
     args: { readonly ref: string; readonly values: readonly string[]; readonly timeoutMs?: number | undefined },
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
+    const paymentFlowSubmit = isPaymentCheckoutAction(ownership);
     args = { ...args, values: [...args.values] }; target = { ...target }; ownership = ownership && { ...ownership };
     const work = new BrowserControlIdentityWork(ownership);
     return this.withTarget(target, async ({ sessionId, pageId, page }) => {
@@ -1101,6 +1110,10 @@ export class BrowserEngine {
       const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, scope.current, 'select', ownership, args); scope.current();
       const { locator, element, revalidate, assertCurrent, passwordInDocument } = await scope.resolve(args.ref);
       credentialCurrent(passwordInDocument);
+      if (!paymentFlowSubmit && placesOrder(element)) {
+        // A choice whose change handler takes the order is activated by selecting.
+        throw new BrowserSessionError(`"${element.name}" places an order, and an order placed with the browser tools skips your spending limits, so nothing was selected in it.`, ORDER_SUBMIT_REFUSAL_FIX);
+      }
       await revalidate(); assertCurrent();
       credentialCurrent(passwordInDocument); assertCurrent();
       const deadlineMs = deadlineFor(args.timeoutMs, DEFAULT_ACTION_TIMEOUT_MS);
@@ -1123,11 +1136,15 @@ export class BrowserEngine {
       const credentialCurrent = await this.credentialInteraction(scope.snapshot, sessionId, pageId, work, scope.current, 'press', ownership, args); scope.current();
       const { locator, element, revalidate, assertCurrent, passwordInDocument } = await scope.resolve(args.ref);
       credentialCurrent(passwordInDocument);
+      // Any key on a control that places an order can activate it: Enter or
+      // Space on a button or link, whatever its markup, and a page's own key
+      // handlers can act on others. Only the payment flow's own click places
+      // an order, so every key on such a control is refused here.
+      if (!paymentFlowSubmit && placesOrder(element)) {
+        throw new BrowserSessionError(`"${element.name}" places an order, and an order placed with the browser tools skips your spending limits, so ${args.key} was not pressed.`, ORDER_SUBMIT_REFUSAL_FIX);
+      }
       if (keyCanSubmit(args.key, element.submits)) {
         if (!paymentFlowSubmit) {
-          if (element.submits && placesOrder(element)) {
-            throw new BrowserSessionError(`"${element.name}" places an order, and an order placed with the browser tools skips your spending limits, so ${args.key} was not pressed.`, ORDER_SUBMIT_REFUSAL_FIX);
-          }
           await BrowserEngine.refuseOrderSubmitByKey(locator, work, `Pressing ${args.key}`);
           await revalidate(); scope.current();
         }

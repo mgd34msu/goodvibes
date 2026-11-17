@@ -21,66 +21,31 @@ export interface HelpLine {
 }
 
 /** The plain text of help lines, for callers that print them. */
-export function helpLineText(lines: readonly (string | HelpLine)[]): string[] {
-  return lines.map((line) => (typeof line === 'string' ? line : line.text));
+export function helpLineText(lines: readonly HelpLine[]): string[] {
+  return lines.map((line) => line.text);
 }
 
-// Lines still passed as plain strings are read by their wording; a typed
-// HelpLine never is.
-const FACT_PREFIXES = [
-  'Key:',
-  'Current:',
-  'Default:',
-  'Type:',
-  'Source:',
-  'Feature:',
-  'Setting:',
-  'Applies:',
-  'Connection:',
-  'Role:',
-  'Trust mode:',
-  'State:',
-  'Active route:',
-  'Preferred route:',
-  'OAuth configured:',
-  'Freshness:',
-  'Expires:',
-];
-const WARN_PREFIXES = [
-  'Locked:',
-  'Conflict:',
-  'Pending restart:',
-  'Not available in this build:',
-  'Confirmation required:',
-  'Kill reason:',
-  'Secret handling:',
-];
-const FOLDED_FACTS: ReadonlyArray<readonly [string, (value: string) => string]> = [
-  ['Key: ', (v) => v],
-  ['Default: ', (v) => `default ${v}`],
-  ['Type: ', (v) => v],
-  ['Source: ', (v) => `source ${v}`],
-];
+/** A prose line; '' separates paragraphs. */
+export const helpText = (text: string): HelpLine => ({ kind: 'text', text });
+/** A section title. */
+export const helpHeading = (text: string): HelpLine => ({ kind: 'heading', text });
+/** A constraint or confirmation, shown first in the warning color. */
+export const helpWarning = (text: string): HelpLine => ({ kind: 'warning', text });
+/** A `Label: value` fact; `folded` is its entry in the one facts row. */
+export const helpFact = (label: string, value: string, folded?: string): HelpLine =>
+  ({ kind: 'fact', text: `${label}: ${value}`, ...(folded === undefined ? {} : { folded }) });
+
 export function fitValue(value: string, width: number, editing: boolean, label = ''): string {
   if (editing) return tailText(value, Math.max(8, width - getDisplayWidth(label) - 4));
   return clipText(value, Math.max(8, Math.floor(width * 0.45)));
 }
-function readUntypedLine(line: string): HelpLine {
-  if (line.startsWith('Current: ')) return { kind: 'fact', text: line, onRow: true };
-  const fold = FOLDED_FACTS.find(([prefix]) => line.startsWith(prefix));
-  if (fold) return { kind: 'fact', text: line, folded: fold[1](line.slice(fold[0].length)) };
-  if (WARN_PREFIXES.some((prefix) => line.startsWith(prefix))) return { kind: 'warning', text: line };
-  if (line.endsWith(':')) return { kind: 'heading', text: line };
-  return { kind: FACT_PREFIXES.some((prefix) => line.startsWith(prefix)) ? 'fact' : 'text', text: line };
-}
-
 /** Products supply documentation content; wrapping, fact folding and windowing have one implementation. */
 export function createSettingsDocumentation<
   Modal extends {
     contextScroll?: number | undefined;
   },
 >(
-  context: (modal: Modal) => readonly (string | HelpLine)[],
+  context: (modal: Modal) => readonly HelpLine[],
   presentation: {
     readonly clampStoredOffset: boolean;
     readonly countIndicatorRow: boolean;
@@ -88,7 +53,8 @@ export function createSettingsDocumentation<
 ) {
   function docLines(modal: Modal, hasSelection: boolean, width: number): DocLine[] {
     const t = activeTokens();
-    const source = context(modal).map((line) => (typeof line === 'string' ? readUntypedLine(line) : line));
+    // Every line states its kind; nothing is read from its wording.
+    const source = context(modal);
     // With a selected row, the first line (its name) is already on the row.
     const lines = (hasSelection ? source.slice(1) : source).filter((line) => line.onRow !== true);
     const facts = lines.flatMap((line) => (line.kind === 'fact' && line.folded !== undefined ? [line.folded] : []));

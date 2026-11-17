@@ -1,13 +1,9 @@
 import { maskConcealedText } from '../concealed-input.js';
 import { NOTIFICATIONS_METADATA_ONLY_KEY } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { inferSubscriptionRouteReason, type SubscriptionEntry } from '../settings-subscriptions.js';
-import { helpLineText, type HelpLine } from './settings-documentation.js';
+import { helpFact as fact, helpHeading as heading, helpText as text, type HelpLine } from './settings-documentation.js';
 
-const text = (line: string): HelpLine => ({ kind: 'text', text: line });
-const heading = (line: string): HelpLine => ({ kind: 'heading', text: line });
-const blank: HelpLine = { kind: 'text', text: '' };
-/** A `Label: value` fact; `folded` is its entry in the one facts row. */
-const fact = (label: string, value: string, folded?: string): HelpLine => ({ kind: 'fact', text: `${label}: ${value}`, folded });
+const blank: HelpLine = text('');
 export function formatDefaultValue(value: unknown): string {
   if (value === '') return '(empty)';
   if (value === null || value === undefined) return '(unset)';
@@ -35,7 +31,8 @@ export function createSettingContext<Modal extends SettingContextModal, Entry ex
   readonly formatValue: (entry: Entry) => string;
   readonly label: (entry: Entry) => string;
   readonly source: (entry: Entry) => string;
-  readonly detail: (entry: Entry) => string[];
+  /** The product's own lines for one setting (lock, conflict, ownership), each with its kind. */
+  readonly detail: (entry: Entry) => readonly HelpLine[];
   readonly enumDescriptions: Readonly<Partial<Record<string, Readonly<Partial<Record<string, string>>>>>>;
   readonly routingKeys: readonly string[];
   readonly describeUiRouting: (value: string) => string;
@@ -48,15 +45,12 @@ export function createSettingContext<Modal extends SettingContextModal, Entry ex
     }
     return policy.formatValue(entry);
   }
-  /**
-   * The help for one setting, each line with its kind (see HelpLine). The
-   * product's own detail lines stay plain strings, read by their wording.
-   */
-  function buildSettingHelp(modal: Modal, entry: Entry): Array<string | HelpLine> {
+  /** The help for one setting, each line with its kind (see HelpLine). */
+  function buildSettingHelp(modal: Modal, entry: Entry): HelpLine[] {
     const type = `${entry.setting.type}${entry.setting.enumValues ? ` with ${entry.setting.enumValues.length} possible value(s)` : ''}`;
     const source = `${policy.source(entry)}${entry.sourceLabel ? ` from ${entry.sourceLabel}` : ''}`;
     const defaultValue = formatDefaultValue(entry.setting.default);
-    const lines: Array<string | HelpLine> = [
+    const lines: HelpLine[] = [
       text(policy.label(entry)),
       fact('Key', entry.setting.key, entry.setting.key),
       { ...fact('Current', currentSettingValue(modal, entry, true)), onRow: true },
@@ -107,11 +101,7 @@ export function createSettingContext<Modal extends SettingContextModal, Entry ex
       );
     return lines;
   }
-  /** The same help as plain text lines. */
-  function buildSettingContext(modal: Modal, entry: Entry): string[] {
-    return helpLineText(buildSettingHelp(modal, entry));
-  }
-  return { currentSettingValue, buildSettingHelp, buildSettingContext };
+  return { currentSettingValue, buildSettingHelp };
 }
 export function createSubscriptionContext<Modal extends { readonly subscriptionLogoutConfirmationTarget: string | null }>(policy: {
   readonly confirmLogout: (provider: string) => string;
@@ -144,6 +134,6 @@ export function createSubscriptionContext<Modal extends { readonly subscriptionL
       ...((entry.nextActions ?? []).length ? [blank, heading('Next actions:'), ...(entry.nextActions ?? []).map(text)] : []),
     ];
   };
-  // Help lines with their kinds, and the same lines as plain text.
-  return Object.assign((modal: Modal, entry: SubscriptionEntry | null): string[] => helpLineText(help(modal, entry)), { help });
+  // Help lines with their kinds; helpLineText gives their plain text.
+  return help;
 }

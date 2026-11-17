@@ -1,4 +1,4 @@
-import { helpLineText, type HelpLine } from './settings-documentation.js';
+import type { HelpLine } from './settings-documentation.js';
 
 type McpTrustModal = { readonly mcpAllowAllConfirmationTarget: string | null };
 type McpTrustEntry = {
@@ -40,9 +40,4 @@ export function buildMcpHelp(modal: McpTrustModal, entry: McpTrustEntry | null):
     text('allow-all: allow unrestricted MCP operations for this server after explicit confirmation.'),
     text('blocked: prevent this MCP server from being used.'),
   ];
-}
-
-/** The same help as plain text lines. */
-export function buildMcpContext(modal: McpTrustModal, entry: McpTrustEntry | null): string[] {
-  return helpLineText(buildMcpHelp(modal, entry));
 }

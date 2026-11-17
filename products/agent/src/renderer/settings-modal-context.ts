@@ -1,11 +1,12 @@
 import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
 import { SHARED_CATEGORY_INFO } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-metadata';
-import { buildMcpContext } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-trust-context';
+import { buildMcpHelp } from '@goodvibes-jev/engine/terminal-shell/renderer/mcp-trust-context';
+import { helpFact, helpText, helpWarning, type HelpLine } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
 /**
  * settings-modal-context.ts, the documentation the settings modal shows for
  * the selected row: category purposes, enum value meanings, and the facts and
- * explanations for settings, features, MCP servers and subscriptions. Pure
- * text builders; settings-modal.ts lays them out with the surface kit.
+ * explanations for settings, features, MCP servers and subscriptions, each
+ * line with its kind (HelpLine); settings-modal.ts lays them out with the surface kit.
  */
 
 import { GATE_PRESETS } from '@goodvibes-jev/engine/platform/platform/gate';
@@ -173,25 +174,26 @@ function describeFeatureEnablement(entry: FlagEntry): string {
   return `Always available; its settings (${entry.feature.settings.join(', ')}) govern runtime activation directly.`;
 }
 
-function buildFlagContext(entry: FlagEntry | null): string[] {
-  if (!entry) return ['Feature Controls', 'No feature control is selected.'];
+function buildFlagHelp(entry: FlagEntry | null): HelpLine[] {
+  if (!entry) return [helpText('Feature Controls'), helpText('No feature control is selected.')];
+  const defaultState = entry.feature.defaultEnabled ? 'enabled' : 'disabled';
   return [
-    entry.feature.name,
-    `ID: ${entry.feature.id}`,
-    `Domain: ${entry.feature.domain}`,
-    `State: ${entry.state}`,
-    `Default: ${entry.feature.defaultEnabled ? 'enabled' : 'disabled'}`,
-    `Current value: ${entry.feature.enablement.key} = ${entry.enablementValue}`,
-    `Live toggleable: ${entry.feature.restartRequired ? 'no' : 'yes'}`,
-    '',
-    entry.feature.description,
-    '',
-    describeFeatureEnablement(entry),
-    `Settings: ${entry.feature.settings.join(', ')}`,
-    '',
-    entry.feature.restartRequired
+    helpText(entry.feature.name),
+    helpFact('ID', entry.feature.id),
+    helpFact('Domain', entry.feature.domain),
+    helpFact('State', entry.state),
+    helpFact('Default', defaultState, `default ${defaultState}`),
+    helpFact('Current value', `${entry.feature.enablement.key} = ${entry.enablementValue}`),
+    helpFact('Live toggleable', entry.feature.restartRequired ? 'no' : 'yes'),
+    helpText(''),
+    helpText(entry.feature.description),
+    helpText(''),
+    helpText(describeFeatureEnablement(entry)),
+    helpFact('Settings', entry.feature.settings.join(', ')),
+    helpText(''),
+    helpText(entry.feature.restartRequired
       ? 'Impact: the domain settings key is saved now and takes effect on the next Agent launch or owning-host reload.'
-      : 'Impact: changes to the domain settings key apply immediately through the live settings bridge.',
+      : 'Impact: changes to the domain settings key apply immediately through the live settings bridge.'),
   ];
 }
 
@@ -207,24 +209,24 @@ export function categoryItemCount(modal: SettingsModal, category: SettingsCatego
  * The documentation lines for the current selection (its name first), then
  * the category's purpose. While searching, the selected result is explained.
  */
-export function settingContextLines(modal: SettingsModal): string[] {
+export function settingContextLines(modal: SettingsModal): HelpLine[] {
   const category = modal.currentCategory;
-  const lines: string[] = [];
+  const lines: HelpLine[] = [];
   if (modal.searchFocused) {
     const selected = modal.getSelected();
-    if (selected) lines.push(...buildSettingContext(modal, selected));
-    else lines.push('Search', 'No setting matches the search.');
+    if (selected) lines.push(...buildSettingHelp(modal, selected));
+    else lines.push(helpText('Search'), helpText('No setting matches the search.'));
     return lines;
   }
-  if (category === 'flags') lines.push(...buildFlagContext(modal.getSelectedFlag()));
-  else if (category === 'mcp') lines.push(...buildMcpContext(modal, modal.getSelectedMcp()));
-  else if (category === 'subscriptions') lines.push(...buildSubscriptionContext(modal, modal.getSelectedSubscription()));
+  if (category === 'flags') lines.push(...buildFlagHelp(modal.getSelectedFlag()));
+  else if (category === 'mcp') lines.push(...buildMcpHelp(modal, modal.getSelectedMcp()));
+  else if (category === 'subscriptions') lines.push(...buildSubscriptionHelp(modal, modal.getSelectedSubscription()));
   else {
     const selected = modal.getSelected();
-    if (selected) lines.push(...buildSettingContext(modal, selected));
-    else lines.push(category, 'No setting is selected in this category.');
+    if (selected) lines.push(...buildSettingHelp(modal, selected));
+    else lines.push(helpText(category), helpText('No setting is selected in this category.'));
   }
-  lines.push('', `Category purpose: ${CATEGORY_INFO[category]}`);
+  lines.push(helpText(''), helpText(`Category purpose: ${CATEGORY_INFO[category]}`));
   return lines;
 }
 
@@ -233,25 +235,25 @@ import {
   createSubscriptionContext,
   formatDefaultValue,
 } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-context';
-export const { currentSettingValue, buildSettingContext } = createSettingContext<SettingsModal, SettingEntry>({
+export const { currentSettingValue, buildSettingHelp } = createSettingContext<SettingsModal, SettingEntry>({
   isSecretKey: isSecretConfigKey,
   cursor: '▏',
   formatValue,
   label: getSettingLabel,
   source: (entry) => entry.effectiveSource ?? 'default',
   detail(entry) {
-    const lines: string[] = [];
+    const lines: HelpLine[] = [];
     if (entry.setting.key === 'payments.cvvHandling' && entry.currentValue === 'prompt') {
-      lines.push('', CVV_PROMPT_TRADEOFF_WARNING);
+      lines.push(helpWarning(CVV_PROMPT_TRADEOFF_WARNING));
     }
 
-    if (entry.metadataUnavailable) lines.push(`Editing unavailable: ${entry.metadataUnavailable}`);
-    else if (entry.locked) lines.push(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`);
-    if (entry.conflict) lines.push(`Conflict: inspect with /settings and resolve host-owned sync state in the owning host.`);
-    if (isDaemonOwnedConfigKey(entry.setting.key)) lines.push('', HOST_OWNED_SETTING_RULE);
+    if (entry.metadataUnavailable) lines.push(helpWarning(`Editing unavailable: ${entry.metadataUnavailable}`));
+    else if (entry.locked) lines.push(helpWarning(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`));
+    if (entry.conflict) lines.push(helpWarning(`Conflict: inspect with /settings and resolve host-owned sync state in the owning host.`));
+    if (isDaemonOwnedConfigKey(entry.setting.key)) lines.push(helpText(''), helpText(HOST_OWNED_SETTING_RULE));
 
     if (entry.setting.key === 'permissions.mode') {
-      lines.push('', 'Legacy behavior.autoApprove selects YOLO. Choosing an execution mode replaces that override.');
+      lines.push(helpText(''), helpText('Legacy behavior.autoApprove selects YOLO. Choosing an execution mode replaces that override.'));
     }
 
     return lines;
@@ -264,7 +266,7 @@ export const { currentSettingValue, buildSettingContext } = createSettingContext
       ? 'Editing: Enter opens the theme picker with live preview. Enter saves the selected theme; Esc restores the previous theme.'
       : undefined,
 });
-const buildSubscriptionContext = createSubscriptionContext<SettingsModal>({
+const buildSubscriptionHelp = createSubscriptionContext<SettingsModal>({
   confirmLogout: (provider) => `Press Enter again to sign out ${provider}. Move selection or close config to cancel.`,
   beginLogout: 'Press Enter to review sign-out for this provider session.',
   login: (provider) => `Open Agent Workspace -> Start and choose Sign in to a provider for ${provider}.`,

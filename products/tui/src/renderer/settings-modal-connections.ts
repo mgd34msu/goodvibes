@@ -11,6 +11,7 @@ import type { SettingsModal } from '../input/settings-modal.ts';
 import { selectedConnectionEntry } from '../input/settings-modal-connections.ts';
 import { connectionSurfaceLabel } from '../input/commands/connection-status.ts';
 import type { KitRow } from './surface-kit-list.ts';
+import { helpFact, helpHeading, helpText, type HelpLine } from '@goodvibes-jev/engine/terminal-shell/renderer/settings-documentation';
 
 /**
  * The Connections rows: one row per surface, saying what it actually is.
@@ -37,17 +38,17 @@ export function connectionRows(modal: SettingsModal, selectable: boolean): KitRo
  * listed in full rather than summarized, a truncated instruction is a wrong
  * instruction.
  */
-export function buildConnectionContext(modal: SettingsModal): string[] {
+export function buildConnectionHelp(modal: SettingsModal): HelpLine[] {
   const entry = selectedConnectionEntry(modal);
-  if (!entry) return ['Connections', 'No connection surface is selected.'];
+  if (!entry) return [helpText('Connections'), helpText('No connection surface is selected.')];
   return [
-    connectionSurfaceLabel(entry.surface),
-    `State: ${entry.state}`,
-    entry.detail,
-    ...(entry.nextActions.length > 0 ? ['', 'Next steps:', ...entry.nextActions] : []),
-    '',
-    entry.surface === 'mail'
+    helpText(connectionSurfaceLabel(entry.surface)),
+    helpFact('State', entry.state),
+    helpText(entry.detail),
+    ...(entry.nextActions.length > 0 ? [helpText(''), helpHeading('Next steps:'), ...entry.nextActions.map((action) => helpText(action))] : []),
+    helpText(''),
+    helpText(entry.surface === 'mail'
       ? 'Use it from the transcript with /mail (status, list, read, draft, send).'
-      : 'Use it from the transcript with /calendar (status, list, get, create).',
+      : 'Use it from the transcript with /calendar (status, list, get, create).'),
   ];
 }

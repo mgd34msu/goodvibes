@@ -67,16 +67,16 @@ export function createRuntimeOpsApi(options: RuntimeOpsApiOptions): OpsApi {
         return options.taskManager.failTask(taskId, input);
       },
       cancel(taskId, note) {
-        requireControlPlane(options.opsControlPlane).cancelTask(taskId, note);
+        return requireControlPlane(options.opsControlPlane).cancelTask(taskId, note);
       },
       pause(taskId, note) {
-        requireControlPlane(options.opsControlPlane).pauseTask(taskId, note);
+        return requireControlPlane(options.opsControlPlane).pauseTask(taskId, note);
       },
       resume(taskId, note) {
-        requireControlPlane(options.opsControlPlane).resumeTask(taskId, note);
+        return requireControlPlane(options.opsControlPlane).resumeTask(taskId, note);
       },
       retry(taskId, note) {
-        requireControlPlane(options.opsControlPlane).retryTask(taskId, note);
+        return requireControlPlane(options.opsControlPlane).retryTask(taskId, note);
       },
     },
     agents: {

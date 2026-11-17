@@ -143,7 +143,7 @@ export class OpsControlPlane {
    * @throws {OpsTargetNotFoundError} if the task doesn't exist.
    * @throws {OpsIllegalActionError} if the task is in a terminal state.
    */
-  public cancelTask(taskId: string, note?: string): void {
+  public cancelTask(taskId: string, note?: string): void | Promise<void> {
     const task = this._taskManager.getTask(taskId);
     if (!task) {
       throw new OpsTargetNotFoundError(taskId, 'task');
@@ -168,12 +168,9 @@ export class OpsControlPlane {
       }),
     );
 
-    emitOpsTaskCancelled(this._bus, this._makeCtx(taskId), {
-      taskId,
-      reason: 'ops_cancel',
-      note,
-      outcome: 'success',
-    });
+    return this._afterOwner(taskId, (errorMessage) => emitOpsTaskCancelled(this._bus, this._makeCtx(taskId), errorMessage === undefined
+      ? { taskId, reason: 'ops_cancel', note, outcome: 'success' }
+      : { taskId, reason: 'ops_cancel', note, outcome: 'error', errorMessage }));
   }
 
   /**
@@ -186,7 +183,7 @@ export class OpsControlPlane {
    * @throws {OpsTargetNotFoundError} if the task doesn't exist.
    * @throws {OpsIllegalActionError} if the task is not running.
    */
-  public pauseTask(taskId: string, note?: string): void {
+  public pauseTask(taskId: string, note?: string): void | Promise<void> {
     const task = this._taskManager.getTask(taskId);
     if (!task) {
       throw new OpsTargetNotFoundError(taskId, 'task');
@@ -211,12 +208,9 @@ export class OpsControlPlane {
       }),
     );
 
-    emitOpsTaskPaused(this._bus, this._makeCtx(taskId), {
-      taskId,
-      reason: 'ops_pause',
-      note,
-      outcome: 'success',
-    });
+    return this._afterOwner(taskId, (errorMessage) => emitOpsTaskPaused(this._bus, this._makeCtx(taskId), errorMessage === undefined
+      ? { taskId, reason: 'ops_pause', note, outcome: 'success' }
+      : { taskId, reason: 'ops_pause', note, outcome: 'error', errorMessage }));
   }
 
   /**
@@ -229,7 +223,7 @@ export class OpsControlPlane {
    * @throws {OpsTargetNotFoundError} if the task doesn't exist.
    * @throws {OpsIllegalActionError} if the task is not blocked.
    */
-  public resumeTask(taskId: string, note?: string): void {
+  public resumeTask(taskId: string, note?: string): void | Promise<void> {
     const task = this._taskManager.getTask(taskId);
     if (!task) {
       throw new OpsTargetNotFoundError(taskId, 'task');
@@ -254,12 +248,9 @@ export class OpsControlPlane {
       }),
     );
 
-    emitOpsTaskResumed(this._bus, this._makeCtx(taskId), {
-      taskId,
-      reason: 'ops_resume',
-      note,
-      outcome: 'success',
-    });
+    return this._afterOwner(taskId, (errorMessage) => emitOpsTaskResumed(this._bus, this._makeCtx(taskId), errorMessage === undefined
+      ? { taskId, reason: 'ops_resume', note, outcome: 'success' }
+      : { taskId, reason: 'ops_resume', note, outcome: 'error', errorMessage }));
   }
 
   /**
@@ -274,7 +265,7 @@ export class OpsControlPlane {
    * @throws {OpsTargetNotFoundError} if the task doesn't exist.
    * @throws {OpsIllegalActionError} if the task is not in a retryable state.
    */
-  public retryTask(taskId: string, note?: string): void {
+  public retryTask(taskId: string, note?: string): void | Promise<void> {
     const task = this._taskManager.getTask(taskId);
     if (!task) {
       throw new OpsTargetNotFoundError(taskId, 'task');
@@ -300,12 +291,9 @@ export class OpsControlPlane {
       }),
     );
 
-    emitOpsTaskRetried(this._bus, this._makeCtx(taskId), {
-      taskId,
-      reason: 'ops_retry',
-      note,
-      outcome: 'success',
-    });
+    return this._afterOwner(taskId, (errorMessage) => emitOpsTaskRetried(this._bus, this._makeCtx(taskId), errorMessage === undefined
+      ? { taskId, reason: 'ops_retry', note, outcome: 'success' }
+      : { taskId, reason: 'ops_retry', note, outcome: 'error', errorMessage }));
   }
 
   // ── Agent actions ─────────────────────────────────────────────────────────
@@ -414,6 +402,23 @@ export class OpsControlPlane {
   // ── Private helpers ───────────────────────────────────────────────────────
 
   /** Runs a mutation; if it throws, records the failure in the audit log and rethrows. */
+  /**
+   * Report a task verb's outcome once its owner acted: at once when the owner
+   * acted synchronously, when its promise settles when it acts asynchronously
+   * (the returned promise rejects with the owner's error).
+   */
+  private _afterOwner(taskId: string, report: (errorMessage?: string) => void): void | Promise<void> {
+    const acting = this._taskManager.whenOwnerActed?.(taskId);
+    if (!acting) {
+      report();
+      return;
+    }
+    return acting.then(() => report(), (error: unknown) => {
+      report(error instanceof Error ? error.message : String(error));
+      throw error;
+    });
+  }
+
   private _audited<T>(run: () => T, recordFailure: (errorMessage: string) => void): T {
     try {
       return run();

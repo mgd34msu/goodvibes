@@ -70,7 +70,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
     description: 'Operator Control Plane: view audit log, cancel/pause/resume/retry tasks and agents',
     usage: 'view | task <cancel|pause|resume|retry> <id> [note] | agent cancel <id> [note]',
     argsHint: '[view|task|agent]',
-    handler(args, ctx) {
+    async handler(args, ctx) {
       const sub = args[0];
 
       if (sub === 'view' || sub === undefined) {
@@ -93,22 +93,23 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
         try {
           switch (action) {
             case 'cancel':
-              opsApi.tasks.cancel(taskId, note);
+              await opsApi.tasks.cancel(taskId, note);
               break;
             case 'pause':
-              opsApi.tasks.pause(taskId, note);
+              await opsApi.tasks.pause(taskId, note);
               break;
             case 'resume':
-              opsApi.tasks.resume(taskId, note);
+              await opsApi.tasks.resume(taskId, note);
               break;
             case 'retry':
-              opsApi.tasks.retry(taskId, note);
+              await opsApi.tasks.retry(taskId, note);
               break;
             default:
               ctx.print(`Unknown task action "${action}". Use: cancel, pause, resume, retry`);
               return;
           }
-          ctx.print(`[Ops] Task ${taskId}: ${action} dispatched.`);
+          // Printed once the task's owner acted, so it never reports a change that did not happen.
+          ctx.print(`[Ops] Task ${taskId}: ${action} done.`);
         } catch (e) {
           ctx.print(`[Ops] Error: ${summarizeError(e)}`);
         }

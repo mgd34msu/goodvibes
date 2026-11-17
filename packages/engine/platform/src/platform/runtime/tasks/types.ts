@@ -235,4 +235,12 @@ export interface TaskManager {
    * @throws If the task does not exist or is not in a retryable state.
    */
   retryTask(taskId: string): RuntimeTask;
+
+  /**
+   * When the last cancel, pause, resume or retry went to an owner that acts
+   * asynchronously, its pending act: the verb returned the row unchanged, and
+   * this resolves once the row moved or rejects with the owner's error (the
+   * row unchanged). Undefined when nothing is pending.
+   */
+  whenOwnerActed?(taskId: string): Promise<void> | undefined;
 }

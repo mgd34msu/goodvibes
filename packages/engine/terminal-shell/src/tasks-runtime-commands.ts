@@ -224,19 +224,19 @@ export function createTasksRuntimeCommands<Context extends TaskCommandContext>(p
           const note = args.slice(2).join(' ').trim() || undefined;
           switch (subcommand) {
             case 'cancel':
-              opsApi.tasks.cancel(taskId, note);
+              await opsApi.tasks.cancel(taskId, note);
               ctx.print(`Cancelled task ${taskId}.`);
               return;
             case 'pause':
-              opsApi.tasks.pause(taskId, note);
+              await opsApi.tasks.pause(taskId, note);
               ctx.print(`Paused task ${taskId}.`);
               return;
             case 'resume':
-              opsApi.tasks.resume(taskId, note);
+              await opsApi.tasks.resume(taskId, note);
               ctx.print(`Resumed task ${taskId}.`);
               return;
             case 'retry':
-              opsApi.tasks.retry(taskId, note);
+              await opsApi.tasks.retry(taskId, note);
               ctx.print(`Re-queued task ${taskId}.`);
               return;
             default:

@@ -13,10 +13,14 @@ export interface OpsTaskApi {
   update(taskId: string, input: TaskUpdateParams): RuntimeTask;
   complete(taskId: string, result?: unknown): RuntimeTask;
   fail(taskId: string, input: TaskFailParams): RuntimeTask;
-  cancel(taskId: string, note?: string): void;
-  pause(taskId: string, note?: string): void;
-  resume(taskId: string, note?: string): void;
-  retry(taskId: string, note?: string): void;
+  /**
+   * The verbs return a promise when the task's owner acts asynchronously: it
+   * settles once the owner did (or failed to do) what was asked.
+   */
+  cancel(taskId: string, note?: string): void | Promise<void>;
+  pause(taskId: string, note?: string): void | Promise<void>;
+  resume(taskId: string, note?: string): void | Promise<void>;
+  retry(taskId: string, note?: string): void | Promise<void>;
 }
 
 export interface OpsAgentApi {

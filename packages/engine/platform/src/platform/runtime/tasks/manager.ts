@@ -13,10 +13,15 @@
  *
  * A task row mirrors work owned elsewhere (an agent, an ACP subagent, a
  * caller of the ops API). A verb changes the row only after the owner acted
- * on it; a verb the owner does not implement is refused with that reason.
+ * on it: at once for an owner that acts synchronously, when its promise
+ * resolves for one that acts asynchronously (see whenOwnerActed). An owner
+ * that fails leaves the row as it was; a verb the owner does not implement is
+ * refused with that reason.
  */
 
 import { GoodVibesError } from '@goodvibes-jev/engine/errors';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { createDomainDispatch } from '../store/index.js';
 import type { RuntimeStore, DomainDispatch } from '../store/index.js';
 import type { RuntimeEventBus } from '../events/index.js';
@@ -161,8 +166,10 @@ export class UnifiedTaskManager implements TaskManager {
   private readonly _sessionId: () => string;
   private readonly _featureFlags: FeatureFlagReader;
   private readonly _controllers: TaskControllerResolver;
-  /** Ids of the tasks createTask recorded; see RECORD_ONLY_CONTROLLER. */
+  /** Ids of the tasks createTask recorded and the store still holds; see RECORD_ONLY_CONTROLLER. */
   private readonly _recordOnly = new Set<string>();
+  /** A verb whose owner acts asynchronously, per task, until the owner settles it. */
+  private readonly _ownerActs = new Map<string, Promise<void>>();
 
   /**
    * @param store - The Zustand runtime store to dispatch state updates to.
@@ -193,11 +200,50 @@ export class UnifiedTaskManager implements TaskManager {
     return action as NonNullable<TaskController[V]>;
   }
 
-  /** Run the owner's verb; a failure it reports leaves the row as it was. */
-  private _runVerb(action: () => void | Promise<void>): void {
+  /**
+   * Run the owner's verb, then move the row. An owner that acts synchronously
+   * moves it at once (a throw leaves it unchanged). One that acts
+   * asynchronously moves it when its promise resolves; until then the row is
+   * returned unchanged and {@link whenOwnerActed} settles with the owner, and
+   * a rejection leaves the row as it was.
+   */
+  private _actThenMove(task: RuntimeTask, verb: TaskVerb, action: () => void | Promise<void>, move: () => RuntimeTask, target: TaskLifecycleState): RuntimeTask {
+    if (this._ownerActs.has(task.id)) {
+      throw new GoodVibesError(
+        `[TaskManager] Task ${task.id} was not changed: its owner (${task.owner}) is still acting on an earlier request. Read the task again once that settles.`,
+        { code: 'TASK_OWNER_ACTING', category: 'bad_request', source: 'runtime', recoverable: true },
+      );
+    }
     const result = action();
-    // An owner that acts asynchronously reports its outcome through its own task events.
-    if (result instanceof Promise) result.catch(() => undefined);
+    if (!(result instanceof Promise)) return move();
+    const acted = result.then(
+      () => {
+        this._ownerActs.delete(task.id);
+        // The owner may have reported the move itself (its own task events) while it acted.
+        if (this._current(task.id)?.status === target) return;
+        move();
+      },
+      (error: unknown) => {
+        this._ownerActs.delete(task.id);
+        logger.warn('[TaskManager] the task owner did not carry out a verb; the task is unchanged', {
+          taskId: task.id, owner: task.owner, verb, error: summarizeError(error),
+        });
+        throw error;
+      },
+    );
+    this._ownerActs.set(task.id, acted);
+    // Nobody may wait on it; the rejection is logged above and handed to whoever does.
+    acted.catch(() => undefined);
+    return task;
+  }
+
+  /**
+   * The owner's pending act on this task, when the last verb went to an owner
+   * that acts asynchronously: resolves once the row moved, rejects with the
+   * owner's error (the row unchanged). Undefined when nothing is pending.
+   */
+  public whenOwnerActed(taskId: string): Promise<void> | undefined {
+    return this._ownerActs.get(taskId);
   }
 
   private _isEnabled(): boolean {
@@ -238,6 +284,9 @@ export class UnifiedTaskManager implements TaskManager {
 
     // Persist to store
     this._dispatchCreated(task);
+    // Ids the store has since evicted (ended tasks) are dropped, so the set
+    // holds only rows the store still has.
+    for (const recorded of this._recordOnly) if (this._current(recorded) === undefined) this._recordOnly.delete(recorded);
     this._recordOnly.add(id);
 
     // Emit event
@@ -272,8 +321,7 @@ export class UnifiedTaskManager implements TaskManager {
     this._requireTransition(task, 'running');
     if (task.status !== 'blocked') throw new TaskTransitionError(task.id, task.status, 'running');
     const resume = this._requireVerb(task, 'resume');
-    this._runVerb(() => resume());
-    return this._applyTransition(task, 'running', {});
+    return this._actThenMove(task, 'resume', () => resume(), () => this._applyTransition(task, 'running', {}), 'running');
   }
 
   public blockTask(taskId: string, reason: string): RuntimeTask {
@@ -282,12 +330,11 @@ export class UnifiedTaskManager implements TaskManager {
     // Checked before the owner acts, so a refused move never reaches the owner.
     this._requireTransition(task, 'blocked');
     const pause = this._requireVerb(task, 'pause');
-    this._runVerb(() => pause());
-
-    const updated = this._applyTransition(task, 'blocked', {});
-
-    emitTaskBlocked(this._bus, this._makeCtx(taskId), { taskId, reason });
-    return updated;
+    return this._actThenMove(task, 'pause', () => pause(), () => {
+      const updated = this._applyTransition(task, 'blocked', {});
+      emitTaskBlocked(this._bus, this._makeCtx(taskId), { taskId, reason });
+      return updated;
+    }, 'blocked');
   }
 
   public completeTask(taskId: string, result?: unknown): RuntimeTask {
@@ -301,6 +348,8 @@ export class UnifiedTaskManager implements TaskManager {
       endedAt: now,
       result,
     });
+    // A completed task is terminal and never retried, so no verb reaches it again.
+    this._recordOnly.delete(taskId);
 
     emitTaskCompleted(this._bus, this._makeCtx(taskId), { taskId, durationMs });
     return updated;
@@ -341,19 +390,16 @@ export class UnifiedTaskManager implements TaskManager {
     // Checked before the owner acts, so a refused move never reaches the owner.
     this._requireTransition(task, 'cancelled');
     const cancel = this._requireVerb(task, 'cancel');
-    this._runVerb(() => cancel(params?.reason));
-
-    const now = Date.now();
-    const updated = this._applyTransition(task, 'cancelled', {
-      endedAt: now,
-    });
-
-    emitTaskCancelled(this._bus, this._makeCtx(taskId), {
-      taskId,
-      reason: params?.reason,
-    });
-
-    return updated;
+    return this._actThenMove(task, 'cancel', () => cancel(params?.reason), () => {
+      const updated = this._applyTransition(task, 'cancelled', {
+        endedAt: Date.now(),
+      });
+      emitTaskCancelled(this._bus, this._makeCtx(taskId), {
+        taskId,
+        reason: params?.reason,
+      });
+      return updated;
+    }, 'cancelled');
   }
 
   public updateTask(taskId: string, params: TaskUpdateParams): RuntimeTask {
@@ -410,9 +456,7 @@ export class UnifiedTaskManager implements TaskManager {
       throw new TaskTransitionError(task.id, task.status, 'queued');
     }
     const retry = this._requireVerb(task, 'retry');
-    this._runVerb(() => retry());
-
-    return this._applyTransition(task, 'queued', {
+    return this._actThenMove(task, 'retry', () => retry(), () => this._applyTransition(task, 'queued', {
       startedAt: undefined,
       endedAt: undefined,
       error: undefined,
@@ -420,7 +464,7 @@ export class UnifiedTaskManager implements TaskManager {
       retryAt: undefined,
       retryDelayMs: undefined,
       queuedAt: Date.now(),
-    });
+    }), 'queued');
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────

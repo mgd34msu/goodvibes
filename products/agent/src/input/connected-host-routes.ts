@@ -7,7 +7,6 @@
  */
 import { homedir } from 'node:os';
 import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostInvokeOptions, type ConnectedHostSelection, type ConnectedHostSource, type ConnectedHostUnavailable, type HostFailureKind } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
-import { operatorContractMethods } from '@goodvibes-jev/engine/terminal-shell/agent-turn/operator-contract-routes';
 import type { CommandContext } from './command-registry.ts';
 
 export interface ConnectedHostConnection {
@@ -95,37 +94,6 @@ export async function readConnectedHostMethod(
       ...(error.source === undefined ? {} : { source: error.source }),
     };
   }
-}
-
-let getMethodByPath: Map<string, string> | null = null;
-
-/** The read method the contract serves on exactly this path (no path parameters). */
-function readMethodForPath(path: string): string | undefined {
-  if (!getMethodByPath) {
-    getMethodByPath = new Map();
-    for (const method of operatorContractMethods()) {
-      const template = method.http?.path;
-      if (method.http?.method?.toUpperCase() === 'GET' && template && !template.includes('{')) getMethodByPath.set(template, method.id);
-    }
-  }
-  return getMethodByPath.get(path);
-}
-
-/** A read named by its path; the path must be one the operator contract serves. */
-export async function fetchConnectedHostReadOnlyRoute(
-  context: CommandContext,
-  route: string,
-  options: { readonly timeoutMs?: number } = {},
-): Promise<ConnectedHostRouteResult> {
-  const methodId = readMethodForPath(route);
-  if (methodId) return readConnectedHostMethod(context, methodId, {}, options);
-  return {
-    ok: false,
-    route: `GET ${route}`,
-    kind: 'connected_host_route_unavailable',
-    baseUrl: resolveConnectedHostConnection(context).baseUrl,
-    message: `the operator contract this Agent was built with serves no read on ${route}; next: update the Agent`,
-  };
 }
 
 export function formatConnectedHostRouteFailure(

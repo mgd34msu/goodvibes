@@ -6,6 +6,8 @@ import { getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } 
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import { captureOperatorConnection } from './operator-connection-owner.js';
 import { captureOperatorAutomationTarget } from './operator-automation-target.js';
+import { createDaemonOperatorInvoke } from './daemon-operator-client.js';
+import { findSameSchedule, ROUTINE_SCHEDULE_LIST_METHOD } from './schedule-delivery-targets.js';
 import { executeOperatorMethodWithReceipt } from './operator-method-receipt.js';
 import { scheduleNextRouteLines } from './schedule-next-routes.js';
 import { agentArtifactEffectGuard, captureAgentExportPath } from './artifact-effect.js';
@@ -76,6 +78,20 @@ export function captureScheduleEffect(rawArgs: Record<string, unknown>, options:
     assertCurrent,
     /** True once the request was handed to the transport: from then on a failure cannot say it was not applied. */
     get sent() { return sent; },
+    /**
+     * The schedule on the connected host that is the one `payload` would
+     * create, or undefined. The host takes no idempotency key, so a create
+     * whose answer was lost would add a second standing schedule on the
+     * natural retry; one list read first finds the one already made. A host
+     * that cannot list schedules yields no match and the create goes ahead.
+     */
+    async findExisting(payload: Record<string, unknown>): Promise<{ readonly id: string } | undefined> {
+      const listed = await createDaemonOperatorInvoke(() => capture.connection)(ROUTINE_SCHEDULE_LIST_METHOD, {},
+        { ...(options?.signal ? { signal: options.signal } : {}), assertCurrent });
+      if (!listed.ok) return undefined;
+      const job = findSameSchedule(listed.body, payload as Parameters<typeof findSameSchedule>[1]);
+      return job && typeof job.id === 'string' && job.id.trim() ? { id: job.id } : undefined;
+    },
     async invoke(methodId: string, input: Record<string, unknown>): Promise<Awaited<ReturnType<Tool['execute']>>> {
       let payload = input;
       if (methodId === 'automation.jobs.update') {
@@ -106,6 +122,11 @@ export function captureScheduleEffect(rawArgs: Record<string, unknown>, options:
       return receipt.result;
     },
   };
+}
+
+/** The answer for a create the host already holds: nothing new was created, and nothing was sent. */
+export function formatExistingScheduleResult(id: string, heading: string): Awaited<ReturnType<Tool['execute']>> {
+  return { success: true, output: [`${heading} already exists (an earlier request created it); nothing new was created.`, `  schedule ${id}`, ...scheduleNextRouteLines(id)].join('\n') };
 }
 
 /** Redacted child output is used only for presentation, never as effect authority. */

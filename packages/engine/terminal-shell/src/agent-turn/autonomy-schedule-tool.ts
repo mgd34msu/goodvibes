@@ -1,4 +1,4 @@
-import { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from './schedule-effect.js';
+import { captureScheduleEffect, createScheduleInputProjector, formatExistingScheduleResult, formatScheduleOperatorResult } from './schedule-effect.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
@@ -158,6 +158,9 @@ export function createAgentAutonomyScheduleTool(
         if (parsed.errors.length > 0) return { success: false, error: parsed.errors.join('\n') };
         const preview = buildAutonomySchedulePreview(parsed);
         effect.assertCurrent();
+        // A retry after a lost answer finds the schedule the first attempt made instead of adding a second.
+        const existing = await effect.findExisting(preview.payload);
+        if (existing) return formatExistingScheduleResult(existing.id, 'GoodVibes schedule for autonomous Agent work');
         // Once the host has answered, its answer is the outcome: no check runs after it.
         const result = await effect.invoke('automation.schedules.create', preview.payload);
         return formatScheduleOperatorResult(result, 'Created GoodVibes schedule for autonomous Agent work');

@@ -20,7 +20,7 @@ import { classifyFailure, httpStatusOf } from '@goodvibes-jev/engine/errors';
 import { createBrowserAgentPlatform, type BrowserAgentPlatform } from '@goodvibes-jev/engine/platform/browser/agent';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { normalizeAgentKnowledgeScopeAliases } from './knowledge-scope-alias.js';
-import { resolveConnectedHost } from './connected-host-client.js';
+import { fetchConnectedHostStatus, resolveConnectedHost } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { AGENT_KNOWLEDGE_METHODS, type ConnectedHostCallMethod } from './knowledge-methods.js';
 import { isRecord } from './knowledge-format.js';
@@ -99,7 +99,6 @@ export const AGENT_KNOWLEDGE_READ_DEADLINE_MS = 15_000;
 export const AGENT_KNOWLEDGE_WRITE_DEADLINE_MS = 60_000;
 /** Batch imports and reindex walk many sources on the host. */
 export const AGENT_KNOWLEDGE_BATCH_DEADLINE_MS = 600_000;
-const STATUS_PROBE_DEADLINE_MS = 3_000;
 
 const BATCH_METHOD_IDS: ReadonlySet<string> = new Set([
   AGENT_KNOWLEDGE_METHODS.ingestUrls.kind,
@@ -298,25 +297,8 @@ export async function getAgentKnowledgeJson<TData>(
   return invokeKnowledgeRoute<TData>(connection, route, query, options);
 }
 
-/** One bounded `GET /status`: does a GoodVibes host answer at this address at all. */
-export async function fetchConnectedHostStatus(connection: AgentKnowledgeConnection,
-  options: AgentKnowledgeRequestOptions = {}): Promise<{ readonly ok: boolean; readonly status: number; readonly body: unknown }> {
-  options.assertCurrent?.();
-  const deadline = AbortSignal.timeout(STATUS_PROBE_DEADLINE_MS);
-  try {
-    const response = await (connection.fetch ?? fetch)(`${connection.baseUrl}/status`, {
-      redirect: 'error',
-      signal: options.signal ? AbortSignal.any([options.signal, deadline]) : deadline,
-      headers: connection.token ? { authorization: `Bearer ${connection.token}` } : undefined,
-    });
-    const text = await response.text();
-    let body: unknown = text;
-    try { body = JSON.parse(text); } catch { body = text; }
-    return { ok: response.ok, status: response.status, body };
-  } catch (error) {
-    return { ok: false, status: 0, body: summarizeError(error) };
-  }
-}
+/** The one bounded `/status` probe, owned by the connected-host client. */
+export { fetchConnectedHostStatus };
 
 /** The host's own words for a refusal, on one line and bounded. */
 function hostMessage(error: unknown): string {

@@ -20,7 +20,7 @@
  * contract. It never falls back to the local automation manager.
  */
 import { createConnectedHost, isHostFailure, type ConnectedHost } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
-import type { AgentConnectedHostConfigReader, AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
+import { connectedHostOf, type AgentConnectedHostConfigReader, type AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export const AUTOMATION_RUNS_LIST_METHOD = 'automation.runs.list';
 
@@ -129,7 +129,7 @@ export async function listAutomationRunsSince(
 ): Promise<AutomationRunsSinceResult> {
   const client = 'invoke' in host
     ? host
-    : createConnectedHost(() => ({ baseUrl: host.baseUrl, token: host.token, credential: host.tokenPath }));
+    : createConnectedHost(() => connectedHostOf(host));
   try {
     const output: unknown = await client.invoke(AUTOMATION_RUNS_LIST_METHOD, { since }, { signal: options.signal });
     const record = isRecord(output) ? output : {};

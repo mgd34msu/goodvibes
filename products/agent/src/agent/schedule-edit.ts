@@ -12,7 +12,7 @@ import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/na
 import { createConnectedHost, isHostFailure } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_ROUTE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 import { SCHEDULE_EDIT_METHOD, SCHEDULE_EDIT_ROUTE, type ScheduleEditCurrentSchedule, type ScheduleEditFieldDiff, type ScheduleEditPreview, type ScheduleEditResult } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-edit';
-import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
+import { connectedHostOf, connectionUnavailableKind, connectionUnavailableMessage, type AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export { SCHEDULE_EDIT_METHOD, SCHEDULE_EDIT_ROUTE, buildScheduleEditPayload, buildScheduleEditPreview, parseScheduleEditArgs, scheduleEditKindFromValue, type ParseScheduleEditOptions, type ParsedScheduleEditArgs, type ScheduleEditCurrentSchedule, type ScheduleEditFailure, type ScheduleEditFieldDiff, type ScheduleEditPreview, type ScheduleEditResult, type ScheduleEditSuccess } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-edit';
 
@@ -109,7 +109,7 @@ function buildCurrentScheduleContext(
 }
 
 function connectedHostFor(connection: AgentConnectedHostConnection) {
-  return createConnectedHost(() => ({ baseUrl: connection.baseUrl, token: connection.token, credential: connection.tokenPath }));
+  return createConnectedHost(() => connectedHostOf(connection));
 }
 
 /**
@@ -167,8 +167,8 @@ export async function editConnectedSchedule(
   if (!connection.token) {
     return {
       ok: false,
-      kind: 'auth_required',
-      error: `No connected-host operator token found at ${connection.tokenPath}`,
+      kind: connectionUnavailableKind(connection),
+      error: connectionUnavailableMessage(connection),
       route: SCHEDULE_EDIT_ROUTE,
       baseUrl: connection.baseUrl,
     };

@@ -18,7 +18,7 @@
  * reading for that host is already held), one on Ctrl+R; nothing per repaint.
  */
 import type { CommandContext } from './command-registry.ts';
-import { fetchConnectedHostReadOnlyRoute, resolveConnectedHostConnection } from './connected-host-routes.ts';
+import { readConnectedHostMethod, resolveConnectedHostConnection } from './connected-host-routes.ts';
 
 const HOST_PROBE_DEADLINE_MS = 3_000;
 
@@ -93,7 +93,7 @@ async function probeWithoutCredential(baseUrl: string): Promise<CheckedReading> 
 }
 
 function probeWithCredential(context: CommandContext, baseUrl: string): Promise<CheckedReading> {
-  return fetchConnectedHostReadOnlyRoute(context, '/status', { timeoutMs: HOST_PROBE_DEADLINE_MS }).then((result): CheckedReading => {
+  return readConnectedHostMethod(context, 'control.status', {}, { timeoutMs: HOST_PROBE_DEADLINE_MS }).then((result): CheckedReading => {
     const checkedAt = Date.now();
     if (result.ok) {
       return { state: 'checked', checkedAt, reachable: true, credentialAccepted: true, credentialPresent: true, detail: `The host at ${baseUrl} answered and accepted this Agent's credential.` };

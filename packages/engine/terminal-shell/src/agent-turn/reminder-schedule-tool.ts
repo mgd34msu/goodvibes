@@ -1,4 +1,4 @@
-import { captureScheduleEffect, createScheduleInputProjector, formatScheduleOperatorResult } from './schedule-effect.js';
+import { captureScheduleEffect, createScheduleInputProjector, formatExistingScheduleResult, formatScheduleOperatorResult } from './schedule-effect.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
@@ -168,8 +168,14 @@ export function createAgentReminderScheduleTool(
         const payload = provenance
           ? { ...preview.payload, prompt: `Request provenance:\n${provenance}\n\n${preview.payload.prompt}` }
           : preview.payload;
-        const result = await effect.invoke('automation.schedules.create', payload);
+        // A retry after a lost answer finds the reminder the first attempt made instead of adding a second.
+        const existing = await effect.findExisting(payload);
         const when = `${String(rawArgs.scheduleKind ?? '')} ${String(rawArgs.scheduleValue ?? '')}`.trim();
+        if (existing) {
+          await recordEffect('succeeded', `Reminder already scheduled (${when}); nothing new was created.`, existing.id);
+          return formatExistingScheduleResult(existing.id, 'GoodVibes schedule for Agent reminder');
+        }
+        const result = await effect.invoke('automation.schedules.create', payload);
         if (result.success) await recordEffect('succeeded', `Reminder scheduled (${when}).`, createdScheduleId(result.output));
         else await recordEffect('failed', result.error ?? 'The connected host refused the reminder schedule.');
         return formatScheduleOperatorResult(result, 'Created GoodVibes schedule for Agent reminder');

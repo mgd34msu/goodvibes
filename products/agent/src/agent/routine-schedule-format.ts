@@ -107,7 +107,9 @@ export function formatRoutineScheduleSuccess(result: RoutineSchedulePromotionSuc
   const id = readString(record, 'id') ?? '(unknown)';
   const status = readString(record, 'status') ?? (record.enabled === false ? 'paused' : 'enabled');
   return [
-    'Created GoodVibes schedule for Agent routine',
+    result.alreadyExisted
+      ? 'GoodVibes schedule for Agent routine already exists (an earlier request created it); nothing new was created'
+      : 'Created GoodVibes schedule for Agent routine',
     `  routine ${result.routineName} (${result.routineId})`,
     `  schedule ${id}`,
     `  status ${status}`,

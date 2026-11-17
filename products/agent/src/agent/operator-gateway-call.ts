@@ -6,7 +6,7 @@
  */
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
 import { createConnectedHost, isHostFailure, type HostCallApplied, type HostRefusal } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
-import type { AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
+import { connectedHostOf, type AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
 
 export type OperatorGatewayCallFailureKind =
   | 'auth_required'
@@ -62,7 +62,7 @@ export async function invokeOperatorGatewayMethod<TMethodId extends OperatorMeth
   options: OperatorGatewayCallOptions = {},
 ): Promise<OperatorGatewayCallResult<OperatorMethodOutput<TMethodId>>> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const host = createConnectedHost(() => ({ baseUrl: connection.baseUrl, token: connection.token, credential: connection.tokenPath }));
+  const host = createConnectedHost(() => connectedHostOf(connection));
   // Wrap the typed result before it is awaited: awaiting a still-generic
   // operator output makes TypeScript expand every method's output.
   return host.invoke(methodId, payload, { signal: options.signal }).then(

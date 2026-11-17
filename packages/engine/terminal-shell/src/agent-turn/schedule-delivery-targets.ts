@@ -17,6 +17,7 @@
  */
 
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
+import { parseEveryInterval } from '@goodvibes-jev/engine/platform/platform/automation';
 import { getModelIdFromProviderModel, getProviderIdFromModel } from './provider-model.js';
 
 type ScheduleCreateInput = OperatorMethodInput<'automation.schedules.create'>;
@@ -239,4 +240,44 @@ export function normalizeProviderModel(provider: string | undefined, model: stri
     ...(normalizedProvider ? { provider: normalizedProvider } : {}),
     model: getModelIdFromProviderModel(model),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The schedule a lost create already made
+// ---------------------------------------------------------------------------
+
+function isScheduleRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The listed job that is the schedule `payload` would create, or undefined.
+ * The host takes no idempotency key on `automation.schedules.create`, so a
+ * create whose answer was lost (a daemon restart, a laptop asleep mid-request)
+ * would add a second standing schedule on the natural retry; every create path
+ * reads the list first and matches here. Same name, same kind and time, and the
+ * same prompt: matching the prompt keeps two different schedules that share a
+ * name (the first 48 characters of a reminder) and a time from reading as one.
+ * `listed` is the `automation.schedules.list` answer; any other shape matches nothing.
+ */
+export function findSameSchedule(listed: unknown, payload: ScheduleCreateInput): Record<string, unknown> | undefined {
+  const jobs: readonly unknown[] = isScheduleRecord(listed) && Array.isArray(listed.jobs) ? listed.jobs : [];
+  let intervalMs: number | undefined;
+  if (payload.kind === 'every') {
+    try { intervalMs = parseEveryInterval(String(payload.every)); } catch { return undefined; }
+  }
+  return jobs.find((job): job is Record<string, unknown> => {
+    if (!isScheduleRecord(job) || job.name !== payload.name) return false;
+    const execution = job.execution;
+    if (isScheduleRecord(execution) && typeof execution.prompt === 'string' && execution.prompt !== payload.prompt) return false;
+    const schedule = job.schedule;
+    if (!isScheduleRecord(schedule) || schedule.kind !== payload.kind) return false;
+    if (payload.kind === 'cron') {
+      const zone = typeof schedule.timezone === 'string' ? schedule.timezone : undefined;
+      // Without a timezone the host stores its own local zone, so only an explicit zone is compared.
+      return schedule.expression === payload.cron && (!payload.timezone || zone === payload.timezone);
+    }
+    if (payload.kind === 'every') return schedule.intervalMs === intervalMs;
+    return typeof schedule.at === 'number' && schedule.at === Date.parse(String(payload.at));
+  });
 }

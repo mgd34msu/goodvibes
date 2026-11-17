@@ -435,18 +435,29 @@ function hostMessage(error: unknown): string {
   return text.length > 300 ? `${text.slice(0, 300)}...` : text || 'no message';
 }
 
-async function hostAnswersStatus(baseUrl: string, token: string, fetchImpl: FetchLike, signal: AbortSignal | undefined): Promise<boolean> {
+/**
+ * One bounded `GET /status`: does a GoodVibes host answer at this address at
+ * all. The one probe every connected-host caller uses to tell a host older
+ * than this Agent (it answers) from nothing listening (it does not).
+ */
+export async function fetchConnectedHostStatus(
+  connection: { readonly baseUrl: string; readonly token: string | null; readonly fetch?: typeof fetch | undefined },
+  options: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined } = {},
+): Promise<{ readonly ok: boolean; readonly status: number; readonly body: unknown }> {
+  options.assertCurrent?.();
   const deadline = AbortSignal.timeout(STATUS_PROBE_DEADLINE_MS);
   try {
-    const response = await fetchImpl(`${baseUrl}/status`, {
-      headers: { authorization: `Bearer ${token}` },
+    const response = await (connection.fetch ?? globalThis.fetch)(`${connection.baseUrl}/status`, {
       redirect: 'error',
-      signal: signal ? AbortSignal.any([signal, deadline]) : deadline,
+      signal: options.signal ? AbortSignal.any([options.signal, deadline]) : deadline,
+      headers: connection.token ? { authorization: `Bearer ${connection.token}` } : undefined,
     });
-    await response.body?.cancel();
-    return response.ok;
-  } catch {
-    return false;
+    const text = await response.text();
+    let body: unknown = text;
+    try { body = JSON.parse(text); } catch { body = text; }
+    return { ok: response.ok, status: response.status, body };
+  } catch (error) {
+    return { ok: false, status: 0, body: hostMessage(error) };
   }
 }
 
@@ -523,7 +534,8 @@ async function classifyFailure(error: unknown, facts: CallFacts): Promise<HostFa
         });
       case 'not_found': {
         // A 404 alone cannot tell a host older than this Agent from no GoodVibes host at all.
-        const answers = await hostAnswersStatus(connection.baseUrl, connection.token, facts.fetchImpl, facts.callerSignal);
+        const answers = (await fetchConnectedHostStatus({ baseUrl: connection.baseUrl, token: connection.token, fetch: facts.fetchImpl },
+          { signal: facts.callerSignal })).ok;
         return answers
           ? failure('connected_host_incompatible', 'no', {
             code: 'incompatible', status, reason, retryable: false,

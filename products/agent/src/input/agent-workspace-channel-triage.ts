@@ -1,7 +1,7 @@
 import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts } from '@goodvibes-jev/engine/terminal-shell/agent-turn/channel-delivery-receipts';
 import type { CommandContext } from './command-registry.ts';
 import {
-  fetchConnectedHostReadOnlyRoute,
+  readConnectedHostMethod,
   resolveConnectedHostConnection,
   type ConnectedHostConnection,
   type ConnectedHostRouteFailure,
@@ -383,9 +383,9 @@ export async function buildAgentWorkspaceChannelTriage(
   const channels = buildAgentWorkspaceChannels(context);
   const connection = resolveConnectedHostConnection(context);
   const [deliveriesResult, messagesResult, bindingsResult] = await Promise.all([
-    fetchConnectedHostReadOnlyRoute(context, '/api/deliveries'),
-    fetchConnectedHostReadOnlyRoute(context, '/api/control-plane/messages'),
-    fetchConnectedHostReadOnlyRoute(context, '/api/routes/bindings'),
+    readConnectedHostMethod(context, 'deliveries.list'),
+    readConnectedHostMethod(context, 'control.messages.list'),
+    readConnectedHostMethod(context, 'routes.bindings.list'),
   ]);
   const readiness = channelTriageReadiness(channels, limit);
   const deliveries = deliveryTriage(deliveriesResult, limit);

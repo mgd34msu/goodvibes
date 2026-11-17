@@ -1,5 +1,5 @@
 import type { OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
-import { createConnectedHost, isHostFailure, type HostCallApplied, type HostFailureKind, type HostRefusal } from './connected-host-client.js';
+import { createConnectedHost, isHostFailure, type ConnectedHostSource, type ConnectedHostUnavailable, type HostCallApplied, type HostFailureKind, type HostRefusal } from './connected-host-client.js';
 import { assertSafeOperatorPathValue, requireOperatorHttpBinding, type JsonRecord } from './operator-contract-routes.js';
 import { scheduleNextRouteLines } from './schedule-next-routes.js';
 
@@ -77,6 +77,10 @@ export interface OperatorActionConnection {
   readonly baseUrl: string;
   readonly token: string | null;
   readonly tokenPath?: string | undefined;
+  /** Which source the credential came from. */
+  readonly source?: ConnectedHostSource | undefined;
+  /** Why there is no usable credential (dial turned off, none found, host too old), when `token` is null. */
+  readonly unavailable?: ConnectedHostUnavailable | undefined;
   /** How the action reaches the host: absent, the network; in a daemon-hosted turn, the daemon's own request path. */
   readonly fetch?: typeof fetch | undefined;
 }
@@ -267,6 +271,8 @@ export async function postOperatorAction(
     baseUrl: connection.baseUrl,
     token: connection.token,
     credential: connection.tokenPath ?? 'the connected-host credential',
+    ...(connection.source === undefined ? {} : { source: connection.source }),
+    ...(connection.unavailable === undefined ? {} : { unavailable: connection.unavailable }),
     ...(connection.fetch === undefined ? {} : { fetch: connection.fetch }),
   }), { validateResponses: false });
   const input = { ...(request.body ?? {}), [request.descriptor.targetField]: request.targetId };

@@ -1,8 +1,6 @@
-import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
-import { classifyConnectedHostError, type ConnectedHostFailure } from './connected-host-failure.ts';
-import { createBrowserGoodVibesPlatform } from '@goodvibes-jev/engine/platform/browser';
+import { resolveConnectedHost, type ConnectedHostConnection, type ConnectedHostSource, type ConnectedHostUnavailable } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-client';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import { connectedHostBaseUrl } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-dial';
+import { createConnectedSchedule } from './connected-schedule.ts';
 import { formatAgentRecordReviewState } from '@goodvibes-jev/engine/terminal-shell/agent-turn/record-labels';
 import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
 import { formatAgentSkillRequirement } from '@goodvibes-jev/engine/terminal-shell/agent-turn/skill-registry';
@@ -23,7 +21,12 @@ export interface AgentConnectedHostConfigReader {
 export interface AgentConnectedHostConnection {
   readonly baseUrl: string;
   readonly token: string | null;
+  /** Where the credential was looked for, safe to show: a file path, a store name or a setting. */
   readonly tokenPath: string;
+  /** Which source the credential came from. */
+  readonly source?: ConnectedHostSource;
+  /** Present when `token` is null: why (dial turned off, no credential, host too old) and the next step. */
+  readonly unavailable?: ConnectedHostUnavailable;
 }
 
 // The delivery-target vocabulary is owned by schedule-delivery-targets.ts and
@@ -67,6 +70,8 @@ export interface RoutineSchedulePromotionSuccess {
   readonly routineName: string;
   readonly schedule: ScheduleCreateOutput;
   readonly request: ScheduleCreateInput;
+  /** True when the host already held this exact schedule (a retry after a lost answer), so nothing was created. */
+  readonly alreadyExisted?: true | undefined;
 }
 
 export interface RoutineSchedulePromotionFailure {
@@ -182,20 +187,47 @@ export type RoutineScheduleCorrelationResult =
   | RoutineScheduleCorrelationFailure;
 
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
+/**
+ * The connected host and credential, through the Agent's one resolution
+ * (`resolveConnectedHost`): one precedence, `daemon.connectedHost.enabled` and
+ * the host build check honoured, and the reason carried when there is no token.
+ */
 export function resolveAgentConnectedHostConnection(
   configManager: AgentConnectedHostConfigReader,
   homeDirectory: string,
 ): AgentConnectedHostConnection {
-  const baseUrl = connectedHostBaseUrl(
-    configManager.get('controlPlane.host'),
-    configManager.get('controlPlane.port'),
-  );
-  const credential = readConnectedHostOperatorToken(homeDirectory, baseUrl);
-  return { baseUrl, token: credential.token, tokenPath: credential.path };
+  const resolved = resolveConnectedHost({ configManager, homeDirectory });
+  return {
+    baseUrl: resolved.baseUrl,
+    token: resolved.token,
+    tokenPath: resolved.credential,
+    ...(resolved.source === undefined ? {} : { source: resolved.source }),
+    ...(resolved.unavailable === undefined ? {} : { unavailable: resolved.unavailable }),
+  };
+}
+
+/** The connected-host client's view of an Agent connection, the reason for a missing credential included. */
+export function connectedHostOf(connection: AgentConnectedHostConnection): ConnectedHostConnection {
+  return {
+    baseUrl: connection.baseUrl,
+    token: connection.token,
+    credential: connection.tokenPath,
+    ...(connection.source === undefined ? {} : { source: connection.source }),
+    ...(connection.unavailable === undefined ? {} : { unavailable: connection.unavailable }),
+  };
+}
+
+/** The failure kind of a connection without a token: a host older than this build is incompatible, anything else needs a credential. */
+export function connectionUnavailableKind(connection: AgentConnectedHostConnection): 'auth_required' | 'connected_host_incompatible' {
+  return connection.unavailable?.code === 'host_too_old' ? 'connected_host_incompatible' : 'auth_required';
+}
+
+/** Why a connection without a token cannot be used, with the next step. */
+export function connectionUnavailableMessage(connection: AgentConnectedHostConnection): string {
+  const unavailable = connection.unavailable;
+  if (!unavailable) return `No connected-host operator token found at ${connection.tokenPath}`;
+  const next = unavailable.next[0];
+  return `${unavailable.reason}${next ? `; ${next}` : ''}`;
 }
 
 export function buildRoutineSchedulePrompt(routine: AgentRoutineRecord): string {
@@ -295,20 +327,6 @@ export function buildRoutineSchedulePreview(
   };
 }
 
-/** Schedule-facing compatibility export; gateway callers share the same classifier. */
-export type { ConnectedHostFailure as ConnectedHostScheduleFailure } from './connected-host-failure.ts';
-
-export function classifyConnectedHostScheduleError<Route extends string>(
-  error: unknown,
-  connection: AgentConnectedHostConnection,
-  options: { readonly route: Route; readonly incompatibleMessage: string },
-): Promise<ConnectedHostFailure<Route>> {
-  return classifyConnectedHostError(error, connection, { ...options, site: 'agent.routine-schedule.failure' });
-}
-
-const SCHEDULE_CREATE_INCOMPATIBLE_MESSAGE =
-  'Connected GoodVibes host compatibility does not satisfy Agent schedule requirements; automation.schedules.create is unavailable.';
-
 /**
  * What stands between a routine and an unattended, recurring connected schedule. The workspace
  * shows the same gate ("needs setup / review before it can be trusted for schedule promotion"):
@@ -326,35 +344,29 @@ export function routinePromotionBlockers(routine: AgentRoutineRecord, surface: '
   return blockers;
 }
 
+/**
+ * Create the routine's standing schedule on the connected host, within the
+ * connected-host client's write deadline. A retry after a lost answer returns
+ * the schedule the first attempt made instead of adding a second one that runs
+ * the routine twice on every tick.
+ */
 export async function promoteRoutineToConnectedSchedule(
   connection: AgentConnectedHostConnection,
   preview: RoutineSchedulePromotionPreview,
+  options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<RoutineSchedulePromotionResult> {
-  if (!connection.token) {
-    return {
-      ok: false,
-      kind: 'auth_required',
-      error: `No connected-host operator token found at ${connection.tokenPath}`,
-      route: ROUTINE_SCHEDULE_ROUTE,
-      baseUrl: connection.baseUrl,
-    };
+  const created = await createConnectedSchedule(connection, preview.payload, options);
+  if (!created.ok) {
+    return { ok: false, kind: created.kind, error: created.error, route: ROUTINE_SCHEDULE_ROUTE, baseUrl: created.baseUrl };
   }
-  try {
-    const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl, authToken: connection.token });
-    const schedule = await platformClient.operator.invoke(ROUTINE_SCHEDULE_METHOD, preview.payload);
-    return {
-      ok: true,
-      kind: ROUTINE_SCHEDULE_METHOD,
-      route: ROUTINE_SCHEDULE_ROUTE,
-      routineId: preview.routineId,
-      routineName: preview.routineName,
-      schedule,
-      request: preview.payload,
-    };
-  } catch (error) {
-    return classifyConnectedHostScheduleError(error, connection, {
-      route: ROUTINE_SCHEDULE_ROUTE,
-      incompatibleMessage: SCHEDULE_CREATE_INCOMPATIBLE_MESSAGE,
-    });
-  }
+  return {
+    ok: true,
+    kind: ROUTINE_SCHEDULE_METHOD,
+    route: ROUTINE_SCHEDULE_ROUTE,
+    routineId: preview.routineId,
+    routineName: preview.routineName,
+    schedule: created.schedule,
+    request: preview.payload,
+    ...(created.alreadyExisted ? { alreadyExisted: true as const } : {}),
+  };
 }

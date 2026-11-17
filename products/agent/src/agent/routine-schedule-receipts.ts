@@ -7,6 +7,7 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { isRoutineScheduleDeliverySurfaceKind } from './routine-schedule-args.ts';
 import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_METHOD, ROUTINE_SCHEDULE_ROUTE } from '@goodvibes-jev/engine/terminal-shell/agent-turn/schedule-delivery-targets';
+import { connectedHostOf, connectionUnavailableKind, connectionUnavailableMessage } from './routine-schedule-promotion.ts';
 import type { AgentConnectedHostConnection, RoutineScheduleCorrelation, RoutineScheduleCorrelationFailure, RoutineScheduleCorrelationResult, RoutineScheduleCorrelationSuccess, RoutineScheduleDeliveryKind, RoutineScheduleKind, RoutineScheduleLiveRecord, RoutineSchedulePromotionPreview, RoutineSchedulePromotionResult, RoutineScheduleReceipt, RoutineScheduleReceiptDeliveryTarget, RoutineScheduleReceiptSnapshot } from './routine-schedule-promotion.ts';
 
 type ScheduleCreateInput = RoutineSchedulePromotionPreview['payload'];
@@ -561,7 +562,7 @@ function correlateReceipts(
 
 /** The connected-host client over a connection the caller already resolved. */
 function scheduleHost(connection: AgentConnectedHostConnection) {
-  return createConnectedHost(() => ({ baseUrl: connection.baseUrl, token: connection.token, credential: connection.tokenPath }));
+  return createConnectedHost(() => connectedHostOf(connection));
 }
 
 /** A failed list, from the client's own classification (status, errno, contract): no model reading, no extra probe. */
@@ -608,8 +609,8 @@ export async function reconcileRoutineScheduleReceipts(
   if (!connection.token) {
     return {
       ok: false,
-      kind: 'auth_required',
-      error: `No connected-host operator token found at ${connection.tokenPath}`,
+      kind: connectionUnavailableKind(connection),
+      error: connectionUnavailableMessage(connection),
       route: ROUTINE_SCHEDULE_ROUTE,
       baseUrl: connection.baseUrl,
     };
@@ -664,7 +665,7 @@ export interface LiveSchedulesFetch {
  */
 export async function fetchLiveSchedules(connection: AgentConnectedHostConnection): Promise<LiveSchedulesFetch> {
   if (!connection.token) {
-    return { ok: false, schedules: [], error: `No connected-host operator token found at ${connection.tokenPath}` };
+    return { ok: false, schedules: [], error: connectionUnavailableMessage(connection) };
   }
   try {
     const output = await scheduleHost(connection).invoke(ROUTINE_SCHEDULE_LIST_METHOD, {});

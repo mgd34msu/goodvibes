@@ -127,6 +127,13 @@ export interface CapabilityInvocation {
    * prerequisites, so a route can never be advertised without being there.
    */
   readonly availability: CapabilityProbe;
+  /**
+   * What this route alone needs, in place of the declaration's prerequisites,
+   * for a route that reaches the capability another way (a calendar read from
+   * a private feed address needs no Google account). The first available route
+   * whose prerequisites hold makes the capability ready.
+   */
+  readonly prerequisites?: readonly CapabilityPrerequisite[] | undefined;
 }
 
 /**

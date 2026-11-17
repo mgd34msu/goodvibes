@@ -187,17 +187,26 @@ function calendarRead(options: BuiltinCapabilityOptions): CapabilityDeclaration 
         modelRoute: 'google action:"calendar.list"',
         availability: { kind: 'model-tool-registered', toolName: 'google' },
       },
-    ],
-    prerequisites: googleAccountPrerequisites(),
-    configurationEvidence: [
-      googleAdoptableEvidence(options),
-      // A private ICS feed reads a calendar without OAuth at all.
       {
-        kind: 'config-value-present',
-        key: 'calendar.google.icsUrl',
-        label: 'A private calendar feed address',
+        // A private calendar feed address (/google calendar-address) is
+        // subscribed as a feed; /calendar upcoming reads it with no Google
+        // account at all.
+        kind: 'model-tool',
+        toolName: 'workspace',
+        modelRoute: 'workspace action:"run_command" command:"/calendar upcoming --days 7"',
+        availability: { kind: 'model-tool-registered', toolName: 'workspace' },
+        prerequisites: [
+          {
+            id: 'google-calendar-feed',
+            label: 'A private calendar feed address',
+            probe: { kind: 'config-value-present', key: GOOGLE_CONFIG_KEYS.calendarIcsUrl, label: 'A private calendar feed address' },
+            fix: 'Store the calendar\'s private address with: /google calendar-address <address>',
+          },
+        ],
       },
     ],
+    prerequisites: googleAccountPrerequisites(),
+    configurationEvidence: [googleAdoptableEvidence(options)],
   };
 }
 

@@ -43,12 +43,14 @@ export function mcpConfigLocations(homeDirectory: string, workingDirectory: stri
 }
 
 export function knownServiceEvidence(homeDirectory: string, _workingDirectory = homeDirectory): readonly KnownServiceEvidence[] {
+  // Only what `/google adopt` reads. gcloud's application-default login is
+  // not here: it carries gcloud's own client and Cloud scopes, never mail or
+  // calendar access, so it is no evidence that either could work.
   const gmailMcpDirectory = join(homeDirectory, '.gmail-mcp');
   const googleCredentialPaths = [
     join(gmailMcpDirectory, 'credentials.json'),
     join(gmailMcpDirectory, 'gcp-oauth.keys.json'),
     join(gmailMcpDirectory, 'google-workspace-credentials.json'),
-    join(homeDirectory, '.config', 'gcloud', 'application_default_credentials.json'),
   ];
   const googleFix = [
     'These are Google credentials this build reads natively, no MCP server and no hand-made credential file is involved.',

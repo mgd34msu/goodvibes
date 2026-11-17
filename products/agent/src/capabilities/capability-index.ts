@@ -43,10 +43,10 @@ export function resetCapabilityIndexForTests(): void {
 }
 
 function resolvePrerequisites(
-  declaration: CapabilityDeclaration,
+  prerequisites: CapabilityDeclaration['prerequisites'],
   context: ProbeContext,
 ): readonly ResolvedPrerequisite[] {
-  return declaration.prerequisites.map((prerequisite) => {
+  return prerequisites.map((prerequisite) => {
     const result = runCapabilityProbe(prerequisite.probe, context);
     return {
       id: prerequisite.id,
@@ -60,10 +60,19 @@ function resolvePrerequisites(
 }
 
 function resolveDeclaration(declaration: CapabilityDeclaration, context: ProbeContext): ResolvedCapability {
-  const prerequisites = resolvePrerequisites(declaration, context);
-  const invocation = declaration.invocations.find((candidate) =>
-    runCapabilityProbe(candidate.availability, context).satisfied);
-  const blocking = prerequisites.filter((entry) => !entry.satisfied && !entry.optional);
+  // Each available route is judged by its own prerequisites (or the
+  // declaration's); the first whose prerequisites hold is the one offered, and
+  // with none ready the first available route says what is missing.
+  const routes = declaration.invocations
+    .filter((candidate) => runCapabilityProbe(candidate.availability, context).satisfied)
+    .map((candidate) => {
+      const resolved = resolvePrerequisites(candidate.prerequisites ?? declaration.prerequisites, context);
+      return { invocation: candidate, prerequisites: resolved, blocking: resolved.filter((entry) => !entry.satisfied && !entry.optional) };
+    });
+  const chosen = routes.find((route) => route.blocking.length === 0) ?? routes[0];
+  const invocation = chosen?.invocation;
+  const prerequisites = chosen?.prerequisites ?? resolvePrerequisites(declaration.prerequisites, context);
+  const blocking = chosen?.blocking ?? [];
 
   const base = {
     id: declaration.id,

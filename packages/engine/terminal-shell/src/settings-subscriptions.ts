@@ -1,5 +1,5 @@
 import type { ProviderAuthFreshness, ProviderAuthRoute } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
-import { listBuiltinSubscriptionProviders } from '@goodvibes-jev/engine/platform/platform/config';
+import { listBuiltinSubscriptionProviders, subscriptionAuthFreshness, subscriptionState } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SubscriptionManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ServiceInspectionQuery } from '@goodvibes-jev/engine/platform/platform/runtime/ui';
 export interface SubscriptionEntry {
@@ -69,16 +69,21 @@ export function buildSubscriptionEntries(manager: SubscriptionManager | null, se
         });
     }
     for (const subscription of manager.list()) {
-        const freshness = determineFreshness(subscription.expiresAt);
-        const issues = freshness === 'expired'
-            ? ['Stored subscription session is expired and needs refresh.']
-            : freshness === 'expiring'
-                ? ['Stored subscription session expires within 24 hours.']
-                : [];
-        const nextActions = freshness === 'expired'
-            ? [`Refresh or replace the ${subscription.provider} subscription session.`]
-            : freshness === 'expiring'
-                ? [`Verify or renew the ${subscription.provider} subscription session soon.`]
+        // The platform's one reading of a stored session: a revoked one is
+        // ended, and a lapsed access token with a refresh token renews itself.
+        const lifecycle = subscriptionState(subscription);
+        const freshness = subscriptionAuthFreshness(subscription);
+        const issues = lifecycle === 'revoked'
+            ? ['The provider ended this subscription session; it can no longer be used.']
+            : lifecycle === 'expired'
+                ? ['Stored subscription session is expired and has no refresh token.']
+                : lifecycle === 'expiring'
+                    ? ['Stored subscription session expires within 24 hours and cannot renew itself.']
+                    : [];
+        const nextActions = lifecycle === 'revoked' || lifecycle === 'expired'
+            ? [hints.login(subscription.provider)]
+            : lifecycle === 'expiring'
+                ? [`Sign in to ${subscription.provider} again before it expires: ${hints.login(subscription.provider)}`]
                 : [];
         providers.set(subscription.provider, {
             provider: subscription.provider,
@@ -98,16 +103,6 @@ export function buildSubscriptionEntries(manager: SubscriptionManager | null, se
     }
     return [...providers.values()].sort((a, b) => a.provider.localeCompare(b.provider));
 }
-function determineFreshness(expiresAt?: number | undefined): ProviderAuthFreshness {
-    if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt))
-        return 'healthy';
-    if (expiresAt <= Date.now())
-        return 'expired';
-    if (expiresAt <= Date.now() + 24 * 60 * 60 * 1000)
-        return 'expiring';
-    return 'healthy';
-}
-
 export function inferSubscriptionRouteReason(entry: SubscriptionEntry): string | undefined {
   if (entry.routeReason?.trim()) return entry.routeReason;
   if (entry.state === 'active' && entry.oauthConfigured) {

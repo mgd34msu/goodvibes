@@ -13,6 +13,8 @@
     "../judgment/scripts/process-owner.ts",
     "../../products/agent/src/config/host-settings.ts",
     "../../products/tui/src/config/host-settings.ts",
+    "../../products/tui/src/config/tui-extension-settings.ts",
+    "../../products/tui/src/core/memory-provenance.ts",
     "../../products/agent/src/runtime/native-data-writer.ts",
     "../../products/agent/src/version.ts",
     "../../products/tui/src/runtime/native-data-writer.ts",

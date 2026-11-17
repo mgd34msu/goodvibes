@@ -261,8 +261,8 @@ export function createAgentReviewPacketShareTool(
         ...(readString(args.channel) ? { channel: readString(args.channel) } : {}),
         ...(readString(args.route) ? { route: readString(args.route) } : {}),
         ...(readString(args.webhook) ? { webhook: readString(args.webhook) } : {}),
-        ...(readString(args.link) ? { link: readString(args.link) } : {}),
         // Refused by the delivery parse with the targets that work.
+        ...(readString(args.link) ? { link: readString(args.link) } : {}),
       };
       let surface: 'none' | 'files' | 'text';
       try { surface = targetSurface(channelDeliveryRouter, target); }

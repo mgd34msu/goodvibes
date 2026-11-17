@@ -205,11 +205,11 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.messages.list',
     title: 'List Companion Chat Messages',
-    description: 'Return the message list for a companion-chat session.',
+    description: 'Return the messages of a companion-chat session, oldest first. With neither `limit` nor `before` the whole transcript is returned. With `limit` (1-1000, default 100 when only `before` is given) and/or `before` (a message id) one page is returned: the messages just before `before`, or the newest ones. Every answer carries `total` and `more`; while `more` is true, pass `nextBefore` back as `before` to read the page before it. A `before` that names no message in the chat is 404 MESSAGE_NOT_FOUND.',
     category: 'companion',
     scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/messages' },
-    inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
+    inputSchema: objectSchema({ sessionId: STRING_SCHEMA, limit: NUMBER_SCHEMA, before: STRING_SCHEMA }, ['sessionId']),
     outputSchema: COMPANION_CHAT_MESSAGES_LIST_SCHEMA,
   }),
   methodDescriptor({

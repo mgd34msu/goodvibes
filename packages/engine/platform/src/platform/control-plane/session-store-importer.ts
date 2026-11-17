@@ -280,7 +280,10 @@ async function mergeCompanionDir(
   skippedFiles: string[],
 ): Promise<void> {
   const persistence = new CompanionChatPersistence(source.path);
-  const stored = await persistence.loadAll();
+  // Only a chat this run may add needs its transcript; any other is only recorded as folded.
+  const stored = await persistence.loadAll({
+    transcriptFor: (meta) => state.added.has(meta.id) || (!state.folded.has(meta.id) && !state.sessions.has(meta.id)),
+  });
   for (const { meta, messages } of stored) {
     const converted = companionMessagesToShared(meta.id, messages);
     if (!foldSession(state, companionSessionToShared(meta, converted, source.project ?? 'unknown'))) continue;

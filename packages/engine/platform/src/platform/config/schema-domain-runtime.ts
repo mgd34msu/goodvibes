@@ -25,6 +25,9 @@ export interface CheckinConfig {
 
 export const runtimeConfigDefaults = {
   runtime: {
+    companionChat: {
+      closedRetentionDays: 0,
+    },
     companionChatLimiter: {
       perSessionLimit: 0,
     },
@@ -601,6 +604,15 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     type: 'boolean',
     default: false,
     description: 'Require a recent WebAuthn step-up assertion on mutating operator calls arriving via relay (checked against a passkey registered through pairing or the step-up verbs)',
+  },
+  {
+    key: 'runtime.companionChat.closedRetentionDays',
+    type: 'number',
+    default: 0,
+    description:
+      'Days after a companion chat is closed before its saved files are deleted. ' +
+      '0 (the default) keeps closed chats forever. Read on every cleanup pass, so a change applies without a restart.',
+    ...intRange(0, 36_500),
   },
   {
     key: 'runtime.companionChatLimiter.perSessionLimit',

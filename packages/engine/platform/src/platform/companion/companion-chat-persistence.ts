@@ -234,11 +234,13 @@ export class CompanionChatPersistence {
   }
 
   /**
-   * Every saved chat with its whole transcript, read without changing anything
-   * on disk. For the start-up fold into the shared session store, which may
-   * run beside the manager.
+   * Every saved chat, read without changing anything on disk. For the start-up
+   * fold into the shared session store, which may run beside the manager.
+   * Summaries are read first; a transcript is opened only for a chat
+   * `transcriptFor` accepts (all of them when it is absent), so a fold that
+   * already holds a chat does not parse its history again on every start.
    */
-  async loadAll(): Promise<PersistedChatSession[]> {
+  async loadAll(options: { readonly transcriptFor?: ((meta: CompanionChatSession) => boolean) | undefined } = {}): Promise<PersistedChatSession[]> {
     const rejected: RejectedChatFile[] = [];
     this.#rejected = rejected;
     let names: string[];
@@ -255,7 +257,8 @@ export class CompanionChatPersistence {
         if (name.endsWith(META_SUFFIX)) {
           const id = name.slice(0, -META_SUFFIX.length);
           const meta = readMeta(JSON.parse(readFileSync(join(this.sessionsDir, name), 'utf-8')) as unknown, id);
-          const lines = present.has(`${id}${LOG_SUFFIX}`) ? readFileSync(join(this.sessionsDir, `${id}${LOG_SUFFIX}`), 'utf-8') : '';
+          const wanted = options.transcriptFor?.(meta) ?? true;
+          const lines = wanted && present.has(`${id}${LOG_SUFFIX}`) ? readFileSync(join(this.sessionsDir, `${id}${LOG_SUFFIX}`), 'utf-8') : '';
           results.push({ meta, messages: readRecords(parseLines(lines)).messages });
         }
       } catch (err) {

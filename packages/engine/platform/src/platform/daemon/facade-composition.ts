@@ -426,6 +426,11 @@ export function resolveDaemonFacadeRuntime(
     hookDispatcher: runtimeServices.hookDispatcher,
     // The per-session limit follows runtime.companionChatLimiter.perSessionLimit on every check, not only the boot environment.
     rateLimiter: { configManager: runtimeServices.configManager },
+    // Read on every sweep, so a change to the setting applies without a restart.
+    closedSessionRetentionMs: () => {
+      const days = runtimeServices.configManager.get('runtime.companionChat.closedRetentionDays');
+      return typeof days === 'number' && days > 0 ? days * 86_400_000 : undefined;
+    },
     runtimeBus,
     artifactStore: runtimeServices.artifactStore,
   });

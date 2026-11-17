@@ -66,6 +66,10 @@ export interface ServiceConfig {
 }
 
 export interface RuntimeConfig {
+  companionChat: {
+    /** Days after a companion chat closes before its files are deleted; 0 keeps them forever. */
+    closedRetentionDays: number;
+  };
   companionChatLimiter: {
     perSessionLimit: number;
   };

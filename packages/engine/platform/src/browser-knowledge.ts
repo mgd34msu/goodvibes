@@ -177,7 +177,11 @@ export interface BrowserKnowledgePlatform extends ScopedBrowserPlatform<BrowserK
         sessionId: string,
         input: OperatorInputWithout<'companion.chat.messages.create', 'sessionId'>,
       ): Promise<OperatorMethodOutput<'companion.chat.messages.create'>>;
-      list(sessionId: string): Promise<OperatorMethodOutput<'companion.chat.messages.list'>>;
+      /** The whole transcript, or one page of it with `limit` and/or `before` (see `nextBefore`). */
+      list(
+        sessionId: string,
+        page?: OperatorInputWithout<'companion.chat.messages.list', 'sessionId'>,
+      ): Promise<OperatorMethodOutput<'companion.chat.messages.list'>>;
       /**
        * Interrupt-and-send: cancels the in-flight turn (honest partial +
        * terminal turn.cancelled to every subscriber) and runs this message
@@ -268,7 +272,7 @@ export function createBrowserKnowledgePlatformFromRoutes(
       },
       messages: {
         create: (id, input) => invoke('companion.chat.messages.create', { sessionId: id, ...input }),
-        list: (id) => invoke('companion.chat.messages.list', { sessionId: id }),
+        list: (id, page) => invoke('companion.chat.messages.list', { sessionId: id, ...(page ?? {}) }),
         steer: (id, input) => invoke('companion.chat.messages.steer', { sessionId: id, ...input }),
       },
       turns: {

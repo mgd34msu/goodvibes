@@ -212,7 +212,13 @@ export const COMPANION_CHAT_SESSIONS_LIST_SCHEMA = objectSchema({
 export const COMPANION_CHAT_MESSAGES_LIST_SCHEMA = objectSchema({
   sessionId: STRING_SCHEMA,
   messages: arraySchema(COMPANION_CHAT_MESSAGE_SCHEMA),
-}, ['sessionId', 'messages']);
+  /** Messages in the whole transcript. */
+  total: NUMBER_SCHEMA,
+  /** Older messages exist before this page. */
+  more: BOOLEAN_SCHEMA,
+  /** Pass as `before` to read the page before this one; present while `more` is true. */
+  nextBefore: STRING_SCHEMA,
+}, ['sessionId', 'messages', 'total', 'more']);
 
 export const SHARED_SESSION_ROUTING_INTENT_SCHEMA = objectSchema({
   providerId: STRING_SCHEMA,

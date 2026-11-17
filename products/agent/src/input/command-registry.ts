@@ -172,6 +172,8 @@ export interface CommandWorkspaceServices extends CommandWorkspaceUiServices, Co
 
 export interface CommandPlatformConfigServices extends TerminalCommandPlatformConfigServices {
   readonly voiceSetup?: AgentVoiceSetupService;
+  /** This app's runtime store, read by `/state`. */
+  readonly runtimeStore?: { getState(): object };
   /** Live memory-governance snapshot source (/health memory); absent against an older host build. */
   readonly memoryGovernor?: AgentMemoryDiagnostics;
   readonly mediaProviderRegistry?: MediaProviderRegistry;

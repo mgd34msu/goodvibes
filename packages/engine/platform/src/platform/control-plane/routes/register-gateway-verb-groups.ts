@@ -92,6 +92,7 @@ import { registerPowerGatewayMethods, type PowerGatewayService } from './power.j
 import { registerDevicesGatewayMethods, type DevicesGatewayService } from './devices.js';
 import { registerMemoryGatewayMethods, type MemoryGatewayService } from './memory.js';
 import { registerVoiceSetupGatewayMethods, type VoiceSetupGatewayService } from './voice-setup.js';
+import { registerRuntimeStateGatewayMethods } from './runtime-state.js';
 import { registerBrowserGatewayMethods } from './browser.js';
 import { composeDaemonBrowser, type BrowserCompositionDeps } from './browser-composition.js';
 import { registerCalendarGatewayMethods, type CalendarGatewayService } from './calendar.js';
@@ -585,6 +586,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   if (deps.deviceCapabilities) registerDevicesGatewayMethods(catalog, deps.deviceCapabilities);
   if (deps.memoryGovernor) registerMemoryGatewayMethods(catalog, deps.memoryGovernor);
   if (deps.voiceSetup) registerVoiceSetupGatewayMethods(catalog, deps.voiceSetup);
+  registerRuntimeStateGatewayMethods(catalog, deps.runtimeStore);
   if (calendarGateway) registerCalendarGatewayMethods(catalog, calendarGateway);
   registerDaemonEmailVerbs(catalog, { ...deps, configManager: deps.configManager });
   const browserGateway = composeDaemonBrowser(deps);

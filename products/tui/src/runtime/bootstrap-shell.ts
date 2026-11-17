@@ -252,6 +252,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     requestPermission: (request) => permissionPromptRef.requestPermission(request),
     webSearchService: services.webSearchService,
     voiceSetup: services.voiceSetup,
+    runtimeStore,
     mediaProviders: services.mediaProviders,
     workspaceCheckpointManager: services.workspaceCheckpointManager,
     gatewayMethods: services.gatewayMethods,

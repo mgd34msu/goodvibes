@@ -96,6 +96,7 @@ export interface BootstrapCommandSectionOptions {
   readonly voiceProviderRegistry?: VoiceProviderRegistry;
   readonly voiceService?: VoiceService;
   readonly voiceSetup?: AgentVoiceSetupService;
+  readonly runtimeStore?: { getState(): object };
   readonly memoryGovernor?: AgentMemoryDiagnostics;
   readonly mediaProviderRegistry?: MediaProviderRegistry;
   readonly artifactStore?: ArtifactStore;
@@ -288,6 +289,7 @@ export function createBootstrapCommandPlatformSection(
     | 'voiceProviderRegistry'
     | 'voiceService'
     | 'voiceSetup'
+    | 'runtimeStore'
     | 'memoryGovernor'
     | 'mediaProviderRegistry'
     | 'artifactStore'
@@ -302,6 +304,7 @@ export function createBootstrapCommandPlatformSection(
     voiceProviderRegistry: options.voiceProviderRegistry,
     voiceService: options.voiceService,
     voiceSetup: options.voiceSetup,
+    runtimeStore: options.runtimeStore,
     memoryGovernor: options.memoryGovernor,
     mediaProviderRegistry: options.mediaProviderRegistry,
     artifactStore: options.artifactStore,

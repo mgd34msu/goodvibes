@@ -457,6 +457,8 @@ A panel follows one pattern: construct it with its data sources, read `getSnapsh
 
 Runtime state is read from the runtime store itself: `getState()` returns every domain with its `revision` and `lastUpdatedAt`, the UI read models (`createUiReadModels`) present it to the terminal apps and the web UI, and the runtime event stream carries each transition as it happens.
 
+To debug it, `runtime.state.get` (operator method, admin, `read:health`; `GET /api/runtime/state?domains=session,agents`) returns the daemon's store by domain, and `/state [domain...]` prints the terminal app's or the Agent's own store. Both go through `snapshotRuntimeState` (`runtime/state-snapshot.ts`): dates are ISO text, errors `{ name, message }`, bigints decimal text, binary data `"<N bytes>"`; credential fields read `[REDACTED]`, owner-profile fields `[REDACTED_PROFILE]` and credential-shaped text is masked; nesting stops at 8 levels and a snapshot at 20,000 values, each cut reading `"[Truncated]"` with `truncated: true`. Nothing is computed until a snapshot is asked for.
+
 ### Provider health
 
 The provider registry owns provider health. Every provider call goes through `instrumentedLlmCall`, which records the outcome: a failure on credentials marks the provider `auth_error` until a call succeeds or the provider is registered again, a spent account marks it `unavailable` the same way, a rate limit marks it `rate_limited` until its retry-after (60 seconds when none is given), and a network, timeout or server failure marks it `unavailable` for 60 seconds. A successful call clears it. Providers whose model listing failed in the startup sweep are reported `unavailable` until they are called successfully.

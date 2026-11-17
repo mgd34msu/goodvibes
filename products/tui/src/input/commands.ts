@@ -39,6 +39,7 @@ import { registerPlatformServicesRuntimeCommands } from './commands/platform-ser
 import { registerTeamworkRuntimeCommands } from './commands/teamwork-runtime.ts';
 import { registerMarketplaceRuntimeCommands } from './commands/marketplace-runtime.ts';
 import { registerGuidanceRuntimeCommands } from './commands/guidance-runtime.ts';
+import { registerStateRuntimeCommands } from './commands/state-runtime.ts';
 import { registerRemoteRuntimeCommands } from './commands/remote-runtime.ts';
 import { registerTeleportRuntimeCommands } from './commands/teleport-runtime.ts';
 import { registerSubscriptionRuntimeCommands } from './commands/subscription-runtime.ts';
@@ -138,6 +139,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: 'Teamwork', register: registerTeamworkRuntimeCommands },
   { category: 'Marketplace', register: registerMarketplaceRuntimeCommands },
   { category: 'Guidance', register: registerGuidanceRuntimeCommands },
+  { category: 'Diagnostics', register: registerStateRuntimeCommands },
   { category: 'Remote', register: registerRemoteRuntimeCommands },
   { category: 'Remote', register: registerTeleportRuntimeCommands },
   { category: 'Subscriptions', register: registerSubscriptionRuntimeCommands },

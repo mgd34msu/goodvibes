@@ -14,6 +14,7 @@ import { registerNotifyRuntimeCommands } from './commands/notify-runtime.ts';
 import { registerProductRuntimeCommands } from './commands/product-runtime.ts';
 import { registerPlatformAccessRuntimeCommands } from './commands/platform-access-runtime.ts';
 import { registerGuidanceRuntimeCommands } from './commands/guidance-runtime.ts';
+import { registerStateRuntimeCommands } from './commands/state-runtime.ts';
 import { registerSubscriptionRuntimeCommands } from './commands/subscription-runtime.ts';
 import { registerSecurityRuntimeCommands } from './commands/security-runtime.ts';
 import { registerMcpRuntimeCommands } from './commands/mcp-runtime.ts';
@@ -113,6 +114,7 @@ export function registerBuiltinCommands(
   registerProductRuntimeCommands(registry);
   registerPlatformAccessRuntimeCommands(registry);
   registerGuidanceRuntimeCommands(registry);
+  registerStateRuntimeCommands(registry);
   registerSubscriptionRuntimeCommands(registry);
   registerSecurityRuntimeCommands(registry);
   registerMcpRuntimeCommands(registry);

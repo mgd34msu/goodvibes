@@ -71,6 +71,7 @@ export type CreateBootstrapCommandContextOptions = {
   voiceProviderRegistry?: VoiceProviderRegistry;
   voiceService?: VoiceService;
   voiceSetup?: AgentVoiceSetupService;
+  runtimeStore?: { getState(): object };
   memoryGovernor?: AgentMemoryDiagnostics;
   mediaProviderRegistry?: MediaProviderRegistry;
   artifactStore?: ArtifactStore;
@@ -157,6 +158,7 @@ export function createBootstrapCommandContext(options: CreateBootstrapCommandCon
       'voiceProviderRegistry',
       'voiceService',
       'voiceSetup',
+      'runtimeStore',
       'memoryGovernor',
       'mediaProviderRegistry',
       'artifactStore',

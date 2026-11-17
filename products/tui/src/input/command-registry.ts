@@ -324,6 +324,8 @@ export interface CommandPlatformConfigServices extends TerminalCommandPlatformCo
   readonly featureFlagManager?: FeatureFlagManager;
   /** The platform's voice setup (`/voice wake setup`, the wake switch): one owner of the plan and its facts. */
   readonly voiceSetup?: import('@goodvibes-jev/engine/platform/platform/runtime/voice-setup').VoiceSetupService;
+  /** This app's runtime store, read by `/state`. */
+  readonly runtimeStore?: { getState(): object };
 
   /** Direct-command consumer (`/search`) alongside the existing agent-tool consumer. */
   readonly webSearchService?: import('@goodvibes-jev/engine/platform/platform/web-search').WebSearchService;

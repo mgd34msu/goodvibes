@@ -7,6 +7,7 @@ import { builtinGatewayPowerMethodDescriptors } from './method-catalog-power.js'
 import { builtinGatewayDeviceMethodDescriptors } from './method-catalog-devices.js';
 import { builtinGatewayMemoryMethodDescriptors } from './method-catalog-memory.js';
 import { builtinGatewayVoiceSetupMethodDescriptors } from './method-catalog-voice-setup.js';
+import { builtinGatewayRuntimeStateMethodDescriptors } from './method-catalog-runtime-state.js';
 import { builtinGatewayFleetMethodDescriptors } from './method-catalog-fleet.js';
 import { builtinGatewayFleetControlMethodDescriptors } from './routes/fleet-control.js';
 import { builtinGatewayHostedSessionMethodDescriptors } from './method-catalog-hosted-sessions.js';
@@ -20,6 +21,7 @@ export const builtinGatewayControlMethodDescriptors: readonly GatewayMethodDescr
   ...builtinGatewayDeviceMethodDescriptors,
   ...builtinGatewayMemoryMethodDescriptors,
   ...builtinGatewayVoiceSetupMethodDescriptors,
+  ...builtinGatewayRuntimeStateMethodDescriptors,
   ...builtinGatewayControlCompanionMethodDescriptors,
   ...builtinGatewayControlAutomationMethodDescriptors,
   ...builtinGatewayFleetMethodDescriptors,

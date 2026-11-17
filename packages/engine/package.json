@@ -2542,11 +2542,6 @@
       "types": "./terminal-shell/dist/composer-controller.d.ts",
       "import": "./terminal-shell/dist/composer-controller.js"
     },
-    "./terminal-shell/runtime-setting-reset": {
-      "bun": "./terminal-shell/src/runtime-setting-reset.ts",
-      "types": "./terminal-shell/dist/runtime-setting-reset.d.ts",
-      "import": "./terminal-shell/dist/runtime-setting-reset.js"
-    },
     "./terminal-shell/audio/retained-wake-clip": {
       "bun": "./terminal-shell/src/audio/retained-wake-clip.ts",
       "types": "./terminal-shell/dist/audio/retained-wake-clip.d.ts",

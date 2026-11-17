@@ -15,7 +15,6 @@ export const { handleSettingsModalToken } = createSettingsModalRoute<
   toggleFocusKey: 'toggleFocusRegion',
   cancelInlineEditOnEscape: true,
   toggleFlagCategory: false,
-  extendedResetShortcuts: true,
   openSettingsAction(context, action, requestRender, changed, setExecutionMode) {
     if (action === 'decision-router') { openDecisionRouterSettings(context, changed); return; }
     if (action === 'judgment-provider' || action === 'judgment-model' || action === 'judgment-fallbacks' || action === 'decision-policy' || action === 'permission-mode') {

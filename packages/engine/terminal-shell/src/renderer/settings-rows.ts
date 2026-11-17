@@ -129,7 +129,6 @@ export function settingsNavigationHints(
     readonly resetPending: boolean;
     readonly categoryFocused: boolean;
     readonly flagToggle: boolean;
-    readonly extendedReset: boolean;
   },
 ): KitHint[] {
   if (policy.resetPending)
@@ -176,11 +175,5 @@ export function settingsNavigationHints(
     ['←→', 'category'],
     ['pgup pgdn', 'docs'],
     ['ctrl+r', 'reset'],
-    ...(policy.extendedReset
-      ? ([
-          ['shift+r', 'reset category'],
-          ['ctrl+shift+r', 'reset all'],
-        ] satisfies KitHint[])
-      : []),
   ];
 }

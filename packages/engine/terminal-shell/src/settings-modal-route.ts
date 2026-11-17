@@ -1,6 +1,6 @@
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
 import { isTextBackspace } from './delete-key-policy.js';
-import { syncRuntimeAfterSettingReset, type RuntimeSettingResetContext } from './runtime-setting-reset.js';
+import type { OpenSelection, SelectionItem } from './selection-modal.js';
 export type SettingsRouteState<Context, Target, Action extends string> = {
   settingsModal: {
     active: boolean;
@@ -77,12 +77,11 @@ export type SettingsRouteState<Context, Target, Action extends string> = {
   handleEscape: () => void;
 };
 /** Keyboard state machine shared by terminal settings, with explicit product focus and action policies. */
-export function createSettingsModalRoute<Context extends RuntimeSettingResetContext, Target, Action extends string>(policy: {
+export function createSettingsModalRoute<Context extends { readonly openSelection?: OpenSelection | undefined }, Target, Action extends string>(policy: {
   readonly focusKey: 'focusRegion' | 'focusPane';
   readonly toggleFocusKey: 'toggleFocusRegion' | 'toggleFocusPane';
   readonly cancelInlineEditOnEscape: boolean;
   readonly toggleFlagCategory: boolean;
-  readonly extendedResetShortcuts: boolean;
   readonly openSettingsAction: (context: Context, action: Action, requestRender: () => void, changed: () => void, setExecutionMode: (value: string) => void) => void;
 }) {
   function consumeSettingsPickerRequest(state: SettingsRouteState<Context, Target, Action>): void {
@@ -122,14 +121,9 @@ export function createSettingsModalRoute<Context extends RuntimeSettingResetCont
     if (state.settingsModal.handleResetConfirmKey) {
       const key = token.type === 'key' ? (token.logicalName ?? '') : token.type === 'text' ? token.value : '';
       const resetResult = state.settingsModal.handleResetConfirmKey(key);
+      // The session follows provider.model and provider.reasoningEffort through
+      // the model selection's own reaction to the write, so nothing is copied here.
       if (resetResult !== 'inactive') {
-        if (typeof resetResult === 'object' && resetResult.result === 'confirmed') {
-          // Sync runtime for every reset entry so provider.model / reasoningEffort
-          // stay consistent with the live session without requiring a restart.
-          for (const entry of resetResult.entries) {
-            syncRuntimeAfterSettingReset(state.commandContext, entry.key, entry.value);
-          }
-        }
         state.requestRender();
         return true;
       }
@@ -137,8 +131,8 @@ export function createSettingsModalRoute<Context extends RuntimeSettingResetCont
     // The search row is always live: printable text goes to the query. While
     // the query is non-empty the list shows search results across every
     // category (searchFocused); clearing it returns to the category view. Space
-    // toggles the selected setting only while the query is empty; resets are
-    // key chords (ctrl+r selected, shift+R category, ctrl+shift+R all) so every
+    // toggles the selected setting only while the query is empty. Ctrl+R is the
+    // one reset key: every terminal sends it as a key, never as text, so every
     // letter can be searched for.
     const modal = state.settingsModal;
     const searching = modal.searchQuery.length > 0;
@@ -154,8 +148,32 @@ export function createSettingsModalRoute<Context extends RuntimeSettingResetCont
       else modal.setSearchQuery(query);
     };
     const resetSelected = (): void => {
-      const reset = modal.resetSelected?.();
-      if (reset) syncRuntimeAfterSettingReset(state.commandContext, reset.key, reset.value);
+      modal.resetSelected?.();
+    };
+    // Ctrl+R: where the settings screen can reset more than one setting, ask
+    // which (this setting, this category, all). The two wide resets keep their
+    // own confirmation. A screen that resets one setting only does it at once.
+    const openReset = (): void => {
+      const open = state.commandContext?.openSelection;
+      const items: SelectionItem[] = [
+        { id: 'setting', label: 'This setting', detail: 'Put the selected setting back to its default now.' },
+        ...(modal.initiateResetCategory && !searching
+          ? [{ id: 'category', label: 'This category', detail: `Put every setting in "${modal.currentCategory}" back to its default. Asks before it does.` }]
+          : []),
+        ...(modal.initiateResetAll
+          ? [{ id: 'all', label: 'All settings', detail: 'Put every setting back to its default. Asks before it does.' }]
+          : []),
+      ];
+      if (!open || items.length === 1) {
+        resetSelected();
+        return;
+      }
+      open('Reset to default', items, { preSelectId: 'setting' }, (result) => {
+        if (result?.item.id === 'setting') resetSelected();
+        else if (result?.item.id === 'category') modal.initiateResetCategory?.();
+        else if (result?.item.id === 'all') modal.initiateResetAll?.();
+        state.requestRender();
+      });
     };
     if (token.type === 'key') {
       const focusRegion = modal[policy.focusKey] ?? 'settings';
@@ -192,19 +210,8 @@ export function createSettingsModalRoute<Context extends RuntimeSettingResetCont
         if (searching) modal.moveDown?.();
         else if (modal.moveFocusedDown) modal.moveFocusedDown();
         else modal.moveDown?.();
-      } else if (
-        policy.extendedResetShortcuts &&
-        token.logicalName === 'r' &&
-        token.shift &&
-        token.ctrl &&
-        !modal.editingMode &&
-        !searching
-      ) {
-        modal.initiateResetAll?.();
       } else if (token.logicalName === 'r' && token.ctrl && !modal.editingMode) {
-        resetSelected();
-      } else if (policy.extendedResetShortcuts && token.logicalName === 'r' && token.shift && !modal.editingMode && !searching) {
-        modal.initiateResetCategory?.();
+        openReset();
       } else if (token.logicalName === 'pageup' && !modal.editingMode) {
         modal.scrollContext?.(-3);
       } else if (token.logicalName === 'pagedown' && !modal.editingMode) {

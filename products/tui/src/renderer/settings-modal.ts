@@ -151,7 +151,6 @@ function settingsHints(modal: SettingsModal): KitHint[] {
     resetPending: modal.resetCategoryConfirm !== null || modal.resetAllConfirm !== null,
     categoryFocused: modal.focusRegion === 'categories',
     flagToggle: false,
-    extendedReset: true,
   });
 }
 

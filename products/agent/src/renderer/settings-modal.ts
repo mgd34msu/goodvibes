@@ -162,7 +162,6 @@ function settingsHints(modal: SettingsModal): KitHint[] {
     resetPending: false,
     categoryFocused: modal.focusPane === 'categories',
     flagToggle: true,
-    extendedReset: false,
   });
 }
 

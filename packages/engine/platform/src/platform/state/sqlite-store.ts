@@ -623,7 +623,7 @@ export class SQLiteStore {
       const entry = input && expectedReadsets.get(input.expected);
       const selectors = input ? captureSelectors(input.selectors) : [];
       if (!entry || entry.store !== this || entry.selectors.length !== selectors.length
-        || entry.selectors.some((selector, index) => selector.kind !== selectors[index]?.kind || selector.id !== selectors[index]?.id)) {
+        || entry.selectors.some((selector: PersistedKnowledgeRecordSelector, index: number) => selector.kind !== selectors[index]?.kind || selector.id !== selectors[index]?.id)) {
         throw new TypeError('SQLiteStore: expected readset does not belong to this selection');
       }
       return entry;

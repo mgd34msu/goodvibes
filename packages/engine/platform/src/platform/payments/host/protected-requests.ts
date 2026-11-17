@@ -324,9 +324,10 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     let staged: string | undefined, published = false;
     try {
       this.declareMultiRecipientCheckpoint(request.window); current(check);
-      if (request.replyHistory) {
+      const replyHistory = request.replyHistory;
+      if (replyHistory) {
         if (!this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
-        assertSynchronousJudgmentGuard(() => this.declareHistory(request.replyHistory), () => new ProtectedPaymentRequestError());
+        assertSynchronousJudgmentGuard(() => this.declareHistory(replyHistory), () => new ProtectedPaymentRequestError());
         current(check);
       }
       const path = this.path(request.purchaseId), key = this.keyBytes(true, check);

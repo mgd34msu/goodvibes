@@ -1505,7 +1505,7 @@ export class PairingTokenManager {
    * say what else stopped working.
    */
   revokeWithMinted(id: string): { readonly revoked: boolean; readonly alsoRevoked: readonly string[] } {
-    return this.mutate(snapshot => {
+    return this.mutate<{ readonly revoked: boolean; readonly alsoRevoked: readonly string[] }>(snapshot => {
       if (!snapshot.tokens.some(record => record.id === id)) return { value: { revoked: false, alsoRevoked: [] }, changed: false };
       const ids = withMintedDescendants(snapshot.tokens, id);
       snapshot.tokens = snapshot.tokens.filter(record => !ids.has(record.id));

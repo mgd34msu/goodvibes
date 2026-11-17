@@ -2024,7 +2024,7 @@ export class ConfigManager {
     for (const key of this.hostSettings.keys()) staged.mark(key);
     for (const [path, tier] of [[this.configPath, 'global'], [this.projectConfigPath, 'project']] as const) {
       const raw = path ? stores.get(path) : undefined;
-      if (!raw) continue;
+      if (!path || !raw) continue;
       const layer = this.hostLayerOf(path);
       for (const key of this.hostSettings.overlay(this.hostSettings.defaults(), raw, layer)) defaultOrigins.add(key);
       for (const key of this.hostSettings.keys()) {

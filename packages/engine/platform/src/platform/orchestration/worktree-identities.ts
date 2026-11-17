@@ -125,8 +125,9 @@ export class WorktreeIdentityRegistry {
     this.parent.assertCurrent();
     if (this.writer) {
       const ownerChanged = () => refused('the owner of the worktree record store changed while it was being written');
-      if (this.writer.declare !== this.declare || !this.declare) throw ownerChanged();
-      assertSynchronousJudgmentGuard(() => this.declare.call(this.writer, 'worktree-opaque-identities-v1'), ownerChanged);
+      const writer = this.writer, declare = this.declare;
+      if (writer.declare !== declare || !declare) throw ownerChanged();
+      assertSynchronousJudgmentGuard(() => declare.call(writer, 'worktree-opaque-identities-v1'), ownerChanged);
       if (this.writer.declare !== this.declare) throw ownerChanged();
       this.parent.assertCurrent();
     }

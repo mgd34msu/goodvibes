@@ -533,7 +533,7 @@ export function reapOrchestrationSnapshots(projectRoot: SnapshotRoot, options?: 
   }
 
   let terminalExpired = 0;
-  const withinTtl: DatedFile[] = [];
+  const withinTtl: (DatedFile & { readonly overCap: boolean })[] = [];
   for (const file of terminal) {
     if (now - file.at > TERMINAL_SNAPSHOT_MAX_AGE_MS) {
       const removed = removeFile(file, () => directory.assertCurrent());

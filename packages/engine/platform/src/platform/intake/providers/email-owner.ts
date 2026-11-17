@@ -9,7 +9,8 @@
  * mirror does not hold yet.
  */
 import { createProtectedSourceOwner } from '../../security/source-screening/owner.js';
-import type { ProtectedSourceOwnerOptions, ProtectedSource } from '../../security/source-screening/types.js';
+import { createClassicProtectedSourceOwner } from '../../security/source-screening/classic-owner.js';
+import type { LocalSourceScreeningAuthority, ProtectedSourceOwnerOptions, ProtectedSource } from '../../security/source-screening/types.js';
 import { MailboxConsumerUnavailableError, type MailboxConsumer, type MailboxReaderState } from '../../email/inbound/mailbox-consumers.js';
 import type { GmailInboundMessage, ImapInboundMessage, InboundMailboxMessage, MailboxReadPosition } from '../../email/inbound/ports.js';
 import type { OwnedInboxReadLease } from '../registration.js';
@@ -22,12 +23,26 @@ export interface EmailInboxAccount {
   readonly port: number;
   readonly username: string;
   readonly mailbox: string;
-  readonly security: 'tls';
+  /** `plaintext` only for a loopback mail server, the same rule the mailbox reader follows. */
+  readonly security: 'tls' | 'plaintext';
 }
+/**
+ * No privacy screening route is available (no decision model in use, or the
+ * hosted screening consent or credentials are missing): mail is still kept,
+ * checked only by code for credential and card text, and every row says it was
+ * not screened.
+ */
+export interface UnscreenedMailOptions {
+  readonly kind: 'unscreened';
+  readonly authority: Pick<LocalSourceScreeningAuthority, 'ownerId' | 'revision' | 'signal' | 'assertCurrent'>;
+}
+export type EmailInboxScreening = ProtectedSourceOwnerOptions | UnscreenedMailOptions;
+/** What a row of mail no screening route read starts with, on every surface that lists the inbox. */
+export const NOT_SCREENED_LABEL = '[Not screened]';
 export interface EmailInboxOwnerOptions {
   readonly identity: AccountInboxIdentity;
   readonly account: EmailInboxAccount;
-  readonly screening: ProtectedSourceOwnerOptions;
+  readonly screening: EmailInboxScreening;
   /** The selected account's own currentness; throws once its settings or credential changed. */
   readonly assertCurrent: () => void;
   /** Optional metadata-only routing capability. */
@@ -134,9 +149,12 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
   };
   current();
   const screeningOptions = options.screening;
-  const screening = createProtectedSourceOwner('kind' in screeningOptions
-    ? { ...screeningOptions, authority: { ...screeningOptions.authority, signal, assertCurrent: current } }
-    : { ...screeningOptions, authority: { ...screeningOptions.authority, signal, assertCurrent: current } });
+  const screening = 'kind' in screeningOptions && screeningOptions.kind === 'unscreened'
+    ? createClassicProtectedSourceOwner({ ownerId: screeningOptions.authority.ownerId, revision: screeningOptions.authority.revision,
+      signal, assertCurrent: current })
+    : createProtectedSourceOwner('kind' in screeningOptions
+      ? { ...screeningOptions, authority: { ...screeningOptions.authority, signal, assertCurrent: current } }
+      : { ...screeningOptions, authority: { ...screeningOptions.authority, signal, assertCurrent: current } });
 
   let sink: PushedProviderSink | null = null;
   const requireSink = (): PushedProviderSink => {
@@ -223,8 +241,10 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
       }
       const subject = projected[projected.length - 2]!;
       const body = projected[projected.length - 1]!;
+      // Only code checked this message (no decision model, or no screening route): the row says so.
+      const shown = judged.receipt.provenance === 'classic' ? `${NOT_SCREENED_LABEL} ${subject}` : subject;
       rows.push({ id: input.id, provider: 'email', kind: 'dm', fromDigest, ...(routeId === undefined ? {} : { routeId }),
-        subjectPreview: prefix(subject, 200), bodyPreview: prefix(body, 500), receivedAt: input.sentAt, unread: input.unread });
+        subjectPreview: prefix(shown, 200), bodyPreview: prefix(body, 500), receivedAt: input.sentAt, unread: input.unread });
       // The message's own date: mail written before a purchase can never confirm it.
       observations.push({ id: input.id, senderAddress: input.from, subject, body, receivedAtMs: input.sentAt });
     } finally {

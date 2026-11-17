@@ -12,7 +12,7 @@ const metadata = z.string().min(1).max(500);
 const bindingSchema = z.discriminatedUnion('provider', [
   z.object({ provider: z.literal('slack'), account: z.object({ workspaceId: metadata, userId: metadata }).strict() }).strict(),
   z.object({ provider: z.literal('email'), account: z.object({ host: metadata, username: metadata, mailbox: metadata,
-    port: z.number().int().min(1).max(65535), security: z.literal('tls') }).strict() }).strict(),
+    port: z.number().int().min(1).max(65535), security: z.enum(['tls', 'plaintext']) }).strict() }).strict(),
   z.object({ provider: z.literal('owned-triage'), providerId: metadata, accountScopeId: metadata }).strict(),
 ]);
 export type AccountInboxBinding = z.infer<typeof bindingSchema>;

@@ -13,6 +13,8 @@
  *
  *  - one delivered message is announced to the owner exactly once and
  *    recorded once;
+ *  - with no decision model and no screening consent the message is still in
+ *    the mail inbox (channels.inbox.list), once, labelled not screened;
  *  - nothing more is announced while nothing more arrives;
  *  - after a daemon restart the same message is not announced again, and a
  *    message that arrived while the daemon was down is announced once.
@@ -62,6 +64,12 @@ const recordsAbout = (subject: string): number => {
     } catch { /* a torn last line */ }
   }
   return uids.size;
+};
+/** The mail inbox's email rows naming this subject (channels.inbox.list), as the web UI and the apps read them. */
+const inboxRowsAbout = async (token: string, subject: string): Promise<{ rows: Array<Record<string, unknown>>; text: string }> => {
+  const listed = await api(daemon, token, 'GET', '/api/channels/inbox?provider=email&limit=100');
+  const items = ((listed.body as { items?: Array<Record<string, unknown>> } | null)?.items ?? []);
+  return { rows: items.filter((item) => JSON.stringify(item).includes(subject)), text: `${listed.status} ${listed.text}` };
 };
 /** The notice outcome the daemon recorded for this subject (latest). */
 const noticeStatusOf = (subject: string): string => {
@@ -123,6 +131,15 @@ try {
     `notices ${noticesAbout(subject).length} ${short(noticesAbout(subject).map((post) => post.body.message), 300)}; records naming it ${recordsAbout(subject)}`,
     announced === true && noticesAbout(subject).length === 1 && recordsAbout(subject) === 1);
 
+  // The same message is in the mail inbox once, labelled as not screened (no decision model, no screening consent).
+  const inMailInbox = await waitFor(async () => {
+    const found = await inboxRowsAbout(token2, subject);
+    return found.rows.length > 0 ? found : undefined;
+  }, 30_000, 500) ?? await inboxRowsAbout(token2, subject);
+  journey.check('the message is in the mail inbox once, labelled not screened', 'GET /api/channels/inbox?provider=email',
+    `rows naming it ${inMailInbox.rows.length} ${short(inMailInbox.rows, 400)}; answer ${short(inMailInbox.text, 600)}`,
+    inMailInbox.rows.length === 1 && String(inMailInbox.rows[0]!.subject ?? inMailInbox.rows[0]!.subjectPreview ?? '').startsWith(`[Not screened] ${subject}`));
+
   // Nothing more arrives: nothing more is announced.
   await Bun.sleep(8_000);
   journey.check('nothing more is announced while nothing more arrives', 'wait; the owner\'s channel',
@@ -136,10 +153,19 @@ try {
   daemon = await startDaemon(s.home, [], env);
   const caughtUp = await waitFor(() => noticesAbout(downSubject).length > 0 ? true : undefined, 60_000, 500);
   await Bun.sleep(5_000);
+  const token3 = operatorToken(s.home);
+  const downInInbox = await waitFor(async () => {
+    const found = await inboxRowsAbout(token3, downSubject);
+    return found.rows.length > 0 ? found : undefined;
+  }, 30_000, 500) ?? await inboxRowsAbout(token3, downSubject);
+  const oldInInbox = await inboxRowsAbout(token3, subject);
   journey.check('after a restart the old message is not announced again; one that arrived while it was down is, once',
     `restart the daemon; deliver "${downSubject}" while it is down`,
-    `old notices ${noticesAbout(subject).length}, records ${recordsAbout(subject)}; new notices ${noticesAbout(downSubject).length}, records ${recordsAbout(downSubject)}, recorded notice ${noticeStatusOf(downSubject)}`,
-    caughtUp === true && noticesAbout(subject).length === 1 && recordsAbout(subject) === 1 && noticesAbout(downSubject).length === 1 && recordsAbout(downSubject) === 1);
+    `old notices ${noticesAbout(subject).length}, records ${recordsAbout(subject)}, mail inbox rows ${oldInInbox.rows.length}; new notices ${noticesAbout(downSubject).length}, records ${recordsAbout(downSubject)}, recorded notice ${noticeStatusOf(downSubject)}, mail inbox rows ${downInInbox.rows.length}`,
+    caughtUp === true && noticesAbout(subject).length === 1 && recordsAbout(subject) === 1 && noticesAbout(downSubject).length === 1 && recordsAbout(downSubject) === 1
+      // The scripted mailbox dates every message 27 July 2026, older than the mail inbox keeps (30 days), so the
+      // start-up sweep may age the old row out; it is never added twice.
+      && oldInInbox.rows.length <= 1 && downInInbox.rows.length === 1);
 } catch (error) {
   journey.check('journey ran to the end', 'j12', error instanceof Error ? error.stack ?? error.message : String(error), false);
 } finally {

@@ -8,8 +8,7 @@ import { atInboxBuildStage, type InboxBuildStage } from './inbox-admission-refus
 import { realpath } from 'node:fs/promises';
 import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader, mailboxReaderKey } from '@goodvibes-jev/engine/platform/platform/email';
 import { createEmailInboxOwner, acquireAccountInboxIdentity, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
-  type EmailInboxAccount, type EmailInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes-jev/engine/platform/platform/intake';
-import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
+  type EmailInboxAccount, type EmailInboxOwner, type EmailInboxScreening, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes-jev/engine/platform/platform/intake';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 
@@ -19,7 +18,8 @@ export interface EmailDaemonInboxOptions {
   readonly triageTagging?: DaemonTriageTaggingActivation;
   /** Expected TLS endpoint/account/mailbox established by the trusted host. */
   readonly account: EmailInboxAccount;
-  readonly screening: ProtectedSourceOwnerOptions;
+  /** The privacy screening route, or `unscreened` when there is none: the mail is kept and each row says it was not screened. */
+  readonly screening: EmailInboxScreening;
   /**
    * The selected account's lifetime: aborted by the selector's setting and
    * credential subscriptions. With it, that is the only currentness check.

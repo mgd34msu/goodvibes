@@ -1,6 +1,8 @@
 /** Native account selectors remain independent of permission to screen message text. */
+import { randomUUID } from 'node:crypto';
 import { configReaderWithOrigins, createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/platform/platform/email';
-import { triageAuthorityFromScreening, type EmailInboxAccount, type SlackInboxAccount, type OwnedInboxSource, type OwnedInboxRead, type ProviderStatus } from '@goodvibes-jev/engine/platform/platform/intake';
+import { triageAuthorityFromScreening, type EmailInboxAccount, type EmailInboxScreening, type SlackInboxAccount, type OwnedInboxSource, type OwnedInboxRead, type ProviderStatus } from '@goodvibes-jev/engine/platform/platform/intake';
+import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/platform/platform/security';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
@@ -88,11 +90,14 @@ export function selectConfiguredEmailInboxAccount(context: Context, controls: Co
     const mail = createSurfaceEmailInboxConfigReader(configReaderWithOrigins(context.configManager));
     const host = mail('email.imapHost'), username = mail('email.username'), mailbox = mail('email.mailbox');
     const port = mail('email.imapPort');
+    // A plaintext mailbox is accepted on loopback only, the rule the mailbox reader this inbox consumes follows.
+    const security = mail('email.imapSecurity') === 'tls' ? 'tls' as const
+      : mail('email.imapSecurity') === 'plaintext' && typeof host === 'string' && isLoopbackHost(host) ? 'plaintext' as const : undefined;
     if (!boundedName(host) || !boundedName(username) || !boundedName(mailbox)
-      || mail('email.imapSecurity') !== 'tls' || typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new InboxAdmissionRefusal('account-incomplete', 'Email inbox requires its expected TLS host, account, port and mailbox');
+      || security === undefined || typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new InboxAdmissionRefusal('account-incomplete', 'Email inbox requires its expected TLS host (or a loopback mail server), account, port and mailbox');
     }
-    return Object.freeze({ host, username, mailbox, port, security: 'tls' });
+    return Object.freeze({ host, username, mailbox, port, security });
   });
 }
 
@@ -130,25 +135,37 @@ export function createConfiguredHostedInboxSourceFactory(provider: 'slack' | 'em
       return closing;
     };
     try {
-      acquisition = await controls.acquireHostedScreening(provider === 'slack' ? 'slack-inbox'
-        : provider === 'email' ? 'email-inbox' : 'discord-bot-dms', selection.operation);
+      let screening: ProtectedSourceOwnerOptions | undefined;
+      try {
+        acquisition = await controls.acquireHostedScreening(provider === 'slack' ? 'slack-inbox'
+          : provider === 'email' ? 'email-inbox' : 'discord-bot-dms', selection.operation);
+        screening = acquisition.options;
+      } catch (error) {
+        // Mail is not held back for want of a screening route: without the consent or its credentials the
+        // mailbox is still kept, checked by code only, each row labelled not screened. Chat providers wait for it.
+        const reason = inboxAdmissionRefusalOf(error)?.reason;
+        if (provider !== 'email' || (reason !== 'consent-missing' && reason !== 'credential-unavailable')) throw error;
+      }
       selection.operation.assertCurrent();
-      const screening: ProtectedSourceOwnerOptions = acquisition.options;
-      // Triage asks on the same model route screening was admitted on, and stops with it.
-      const triageAuthority = triageAuthorityFromScreening(provider, undefined, screening);
       const operation = selection.operation;
+      // Triage asks on the same model route screening was admitted on, and stops with it; unscreened mail has none.
+      const triageAuthority = screening === undefined ? undefined : triageAuthorityFromScreening(provider, undefined, screening);
       // Label write-back: the daemon's tagging owner keeps each account's label
       // writer for channels.inbox.applyLabels (owned-inbox-mail.ts), and every
       // write checks the owner's surfaces.<provider>.inboxTagging switch.
-      const triageTagging = controls.createTriageTagging && controls.onAccountInvalidation
+      const plaintextMailbox = 'security' in selection.account && selection.account.security === 'plaintext';
+      const triageTagging = triageAuthority !== undefined && !plaintextMailbox && controls.createTriageTagging && controls.onAccountInvalidation
         ? { triageTagging: { onReady: () => { /* held by the tagging owner since construction */ } } } : {};
-      if (provider === 'slack' && 'workspaceId' in selection.account) {
-        source = await createSlackDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority, operation, ...triageTagging }, factories.slack)(context, routing, controls);
+      if (provider === 'slack' && 'workspaceId' in selection.account && screening !== undefined) {
+        source = await createSlackDaemonInboxSourceFactory({ account: selection.account, screening, ...(triageAuthority ? { triageAuthority } : {}), operation, ...triageTagging }, factories.slack)(context, routing, controls);
       } else if (provider === 'email' && 'host' in selection.account) {
-        source = await createEmailDaemonInboxSourceFactory({ account: selection.account, screening, triageAuthority, operation, ...triageTagging }, factories.email)(context, routing, controls);
-      } else if (provider === 'discord' && 'channelIds' in selection.account) {
+        const mailScreening: EmailInboxScreening = screening ?? { kind: 'unscreened',
+          authority: { ownerId: `daemon-inbox-email-unscreened-${randomUUID()}`, revision: randomUUID(), signal: operation.signal, assertCurrent: operation.assertCurrent } };
+        source = await createEmailDaemonInboxSourceFactory({ account: selection.account, screening: mailScreening,
+          ...(triageAuthority ? { triageAuthority } : {}), operation, ...triageTagging }, factories.email)(context, routing, controls);
+      } else if (provider === 'discord' && 'channelIds' in selection.account && screening !== undefined) {
         source = await createConfiguredDiscordDaemonInboxSourceFactory(screening, factories.discord,
-          { account: selection.account, operation, triageAuthority, ...triageTagging })(context, routing, controls);
+          { account: selection.account, operation, ...(triageAuthority ? { triageAuthority } : {}), ...triageTagging })(context, routing, controls);
       } else throw new Error('Configured inbox account family changed');
       selection.operation.assertCurrent();
       return { ...source, close, unregister() { void close().catch(() => {}); } };

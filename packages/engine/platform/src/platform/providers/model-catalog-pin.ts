@@ -6,8 +6,13 @@
  * cached catalog is kept.
  *
  * `bun packages/engine/scripts/model-catalog-pin.ts` writes both values from
- * the repository's current development head. While no pin is set the catalog
- * reads that moving head, unverified, and says so in its log.
+ * the repository's current development head; it is run when a release is cut,
+ * and the pin moves only then. Between releases a build keeps its snapshot: the
+ * archive at a commit never changes, so once it is cached no catalog request is
+ * made at all, and models released upstream since show as unpriced until the
+ * next release moves the pin (their live provider listings still show them).
+ * While no pin is set the catalog reads the moving head, unverified, checked
+ * daily with a conditional request, and says so in its log.
  */
 export interface ModelCatalogPin {
   /** Full 40-character commit id in anomalyco/models.dev. */

@@ -1,6 +1,6 @@
 import { dirname } from 'node:path';
 import { logger } from '../utils/logger.js';
-import { fetchCatalogFeed, getProviderAccessPath, transformModelsDevResponse, type CatalogFeed } from './model-catalog-cache.js';
+import { fetchCatalogFeedIfChanged, getProviderAccessPath, transformModelsDevResponse, type CatalogFeed } from './model-catalog-cache.js';
 import { summarizeError } from '../utils/error-display.js';
 import { ProviderAccessReadings } from '../routing/catalog-access.js';
 import {
@@ -75,26 +75,36 @@ export function refreshProviderCatalog(ctx: CatalogLifecycleContext): Promise<vo
 const refreshesInFlight = new Map<string, Promise<void>>();
 
 /**
- * The catalog is published at once with every provider access already known
- * (remembered readings and local addresses); providers not yet read are read
- * after, and the catalog is published again only when a reading changed a
- * provider's access. A failed reading leaves the published catalog standing
- * and is asked again on the next refresh.
+ * An unchanged catalog (a 304, or the pinned snapshot already cached) changes
+ * nothing. A changed one is published at once with every provider access
+ * already known (remembered readings and local addresses); providers not yet
+ * read are read after, and the catalog is published again only when a reading
+ * changed a provider's access. A failed reading leaves the published catalog
+ * standing; the cache is then kept without its ETag, so the next daily check
+ * reads the archive in full and asks the reading again.
  */
 async function applyCatalogRefresh(ctx: CatalogLifecycleContext): Promise<void> {
   const previous = [...ctx.getCatalogModels()];
   const { cachePath, tmpPath } = ctx.getCatalogCachePaths();
-  const feed = await fetchCatalogFeed();
+  const feed = await fetchCatalogFeedIfChanged(cachePath);
+  if (!feed) {
+    logger.debug('[model-catalog] Catalog unchanged since the last check');
+    return;
+  }
+  const archive: CatalogArchive = { etag: feed.etag, source: feed.source };
+  let saved = archive;
   const readings = new ProviderAccessReadings({ path: getProviderAccessPath(dirname(cachePath)) });
   const known = readings.known(feed.providers);
-  publishCatalog(ctx, feed, known, cachePath, tmpPath);
+  publishCatalog(ctx, feed, known, cachePath, tmpPath, archive);
   try {
     await readings.readMissing(feed.providers);
   } catch (error) {
     logger.warn('[model-catalog] Some provider access readings did not complete; their models keep the paid tier until the next refresh', { error: summarizeError(error) });
+    saved = { etag: undefined, source: feed.source };
   }
   const read = readings.known(feed.providers);
-  if ([...read].some(([id, access]) => known.get(id) !== access)) publishCatalog(ctx, feed, read, cachePath, tmpPath);
+  if ([...read].some(([id, access]) => known.get(id) !== access)) publishCatalog(ctx, feed, read, cachePath, tmpPath, saved);
+  else if (saved !== archive) saveCatalogCache([...ctx.getCatalogModels()], cachePath, tmpPath, saved);
   const favorites = await ctx.favoritesStore.load();
   notifyCatalogChanges(
     previous,
@@ -104,13 +114,19 @@ async function applyCatalogRefresh(ctx: CatalogLifecycleContext): Promise<void> 
   );
 }
 
-function publishCatalog(ctx: CatalogLifecycleContext, feed: CatalogFeed, access: Parameters<typeof transformModelsDevResponse>[1], cachePath: string, tmpPath: string): void {
+/** The archive a cached catalog came from: its ETag (absent when the next check must read it in full) and snapshot id. */
+interface CatalogArchive {
+  readonly etag: string | undefined;
+  readonly source: string | undefined;
+}
+
+function publishCatalog(ctx: CatalogLifecycleContext, feed: CatalogFeed, access: Parameters<typeof transformModelsDevResponse>[1], cachePath: string, tmpPath: string, archive: CatalogArchive): void {
   const models = transformModelsDevResponse(feed.json, access);
   if (models.length === 0) {
     // Not a success: the caller asked for a refresh and nothing was refreshed.
     throw new Error('The model catalog feed returned no models, so the existing catalog was kept unchanged.');
   }
-  saveCatalogCache(models, cachePath, tmpPath);
+  saveCatalogCache(models, cachePath, tmpPath, archive);
   ctx.updateCatalogState(models);
   ctx.afterCatalogApplied();
   logger.debug('[model-catalog] Catalog updated', { count: models.length });

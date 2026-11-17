@@ -327,10 +327,8 @@ function isCatalogCacheStale(cache: CatalogCacheFile): boolean {
   return cache.ttlMs <= 0 || isTtlCacheStale(cache);
 }
 
-/** Restamp a cache the daily check found unchanged (a 304), so it is fresh for another day. */
-function touchCatalogCache(cachePath: string): void {
-  const cache = loadCatalogCache(cachePath);
-  if (!cache) return;
+/** Restamp a cache the daily check found unchanged, so it is fresh for another day. */
+function touchCatalogCache(cache: CatalogCacheFile, cachePath: string): void {
   saveCatalogCache(cache.models, cachePath, undefined, { etag: cache.etag, source: cache.source });
 }
 
@@ -357,16 +355,25 @@ export async function fetchCatalogFeed(): Promise<CatalogFeed> {
 }
 
 /**
- * The daily check: a conditional read with the cached copy's ETag. Null when
- * the archive is unchanged; the cache is then restamped fresh for another day.
- * A cache from another snapshot than the pinned one is read unconditionally.
+ * The daily check. Null when the catalog is unchanged; the cache is then
+ * restamped fresh for another day. The archive at a pinned commit never
+ * changes, so a complete cached copy of the pinned snapshot needs no request
+ * at all; the development head is read conditionally with the cached copy's
+ * ETag (a 304 costs one small request). A cache from another snapshot, or one
+ * saved without its ETag (its provider readings did not all complete), is
+ * read in full.
  */
 export async function fetchCatalogFeedIfChanged(cachePath: string): Promise<CatalogFeed | null> {
   const cached = loadCatalogCache(cachePath);
-  const sameSource = cached?.source !== undefined && cached.source === modelCatalogSource().id;
-  const read = await readModelCatalogArchive(sameSource && cached?.etag ? { etag: cached.etag } : {});
+  const source = modelCatalogSource();
+  const sameSource = cached !== null && cached.source !== undefined && cached.source === source.id;
+  if (sameSource && cached.etag && source.sha256) {
+    touchCatalogCache(cached, cachePath);
+    return null;
+  }
+  const read = await readModelCatalogArchive(sameSource && cached.etag ? { etag: cached.etag } : {});
   if (read.status === 'not-modified') {
-    touchCatalogCache(cachePath);
+    if (cached) touchCatalogCache(cached, cachePath);
     return null;
   }
   return feedOf(read);

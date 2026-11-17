@@ -48,7 +48,9 @@ describe('redactAtRestLine', () => {
     const { port, requests } = fakePort(() => noulAnswer(0.01));
     installJudgmentPort(port);
     const secrets = [API_KEY, GITHUB_TOKEN, BEARER, 'sk-proj-4fQ9xT2mLk8vRw7ZbN3cYp1JhG6sDe0A', 'key-3ax6xnjp29jd6fds4gc373sgvjxteol0',
-      'sk-or-v1-7c1e2b9a04d38f6e5a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d', 'AKIAABCDEFGHIJKLMNOP', 'xoxb-123456789012-123456789012-abcdefghij'];
+      'sk-or-v1-7c1e2b9a04d38f6e5a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d', 'AKIAABCDEFGHIJKLMNOP', 'xoxb-123456789012-123456789012-abcdefghij',
+      // A signed JSON web token with no `Bearer` in front of it.
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJvd25lciJ9.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk'];
     const line = JSON.stringify({ body: `${ORDINARY} token ${API_KEY} Authorization: Bearer ${BEARER} also ${secrets.slice(3).join(' ')}`, gh: GITHUB_TOKEN });
     const out = redactAtRestLine(line);
     for (const secret of secrets) expect(out).not.toContain(secret);

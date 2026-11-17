@@ -46,11 +46,15 @@ export function containsIssuerCredential(text: string): boolean {
  * is decided from its characters alone ({@link isReadableCredentialCandidate}),
  * and no span is sent anywhere to be judged. The Bearer shape matches the
  * token alone, so a marker replaces the token and keeps the word `Bearer`.
+ * A signed JSON web token (three base64url parts, the first two encoding a
+ * JSON object, so each starting `eyJ`) is a bearer credential with or without
+ * the word in front of it.
  */
 const CREDENTIAL_CANDIDATE_SHAPES: ReadonlyArray<{ pattern: RegExp; marker: string }> = [
   { pattern: /\bsk-[A-Za-z0-9_-]{20,}/g, marker: '[REDACTED_API_KEY]' },
   { pattern: /\bkey-[A-Za-z0-9_-]{16,}/g, marker: '[REDACTED_API_KEY]' },
   { pattern: /(?<=Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, marker: '[REDACTED_TOKEN]' },
+  { pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, marker: '[REDACTED_TOKEN]' },
 ];
 
 /** A span of text in a credential candidate shape, and the marker that replaces it when masked. */

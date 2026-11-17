@@ -177,7 +177,7 @@ function credentialOf(principal: AuthenticatedPrincipal): CredentialKind | null 
  * it (an inbox answer given in the TUI says tui). A label only: it grants
  * nothing, and anything else, or nothing, reads as the web.
  */
-export const CLIENT_SURFACE_HEADER = 'x-goodvibes-client';
+const CLIENT_SURFACE_HEADER = 'x-goodvibes-client';
 const NAMED_CLIENT_SURFACES: ReadonlySet<string> = new Set(['tui', 'agent']);
 
 function readClientSurface(req: Request): string {

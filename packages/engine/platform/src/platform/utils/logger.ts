@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, existsSync, statSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
-import { redactDiagnosticText, redactDiagnosticValue } from './redaction.js';
+import { redactActivityLogValue, redactDiagnosticText } from './redaction.js';
 import { redactCardShapes } from '../security/card-shapes.js';
 
 /** Maximum buffered entries before a flush is triggered. */
@@ -372,7 +372,7 @@ export class ActivityLogger {
     // log is the owner's own.
     let entry = `[${timestamp}] [${level}] ${redactDiagnosticText(redactCardShapes(message), { anonymize: false })}\n`;
     if (data) {
-      entry += '```json\n' + redactCardShapes(JSON.stringify(redactDiagnosticValue(data), null, 2)) + '\n```\n';
+      entry += '```json\n' + redactCardShapes(JSON.stringify(redactActivityLogValue(data), null, 2)) + '\n```\n';
     }
     this.buffer.push(entry);
     this.enforceBufferCap();

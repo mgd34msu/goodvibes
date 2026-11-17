@@ -725,8 +725,14 @@ export function redactDiagnosticText(text: string, options: { readonly anonymize
  * boolean under a name with no declared role becomes `[REDACTED]`;
  * identifiers, models, statuses and counts under their declared names keep
  * their values.
+ *
+ * `unknownText` is for the activity log: declared content and fact fields stay
+ * readable, but text under a name with no declared role (`value`, `input`,
+ * `answer`, `args`, ...), directly or in an array under it, becomes
+ * `[REDACTED]`. An object under such a name is still shown, each of its own
+ * fields judged by its own name.
  */
-function maskStructuredValue(value: unknown, secrets: readonly string[], anonymize: boolean, strictNames = false): unknown {
+function maskStructuredValue(value: unknown, secrets: readonly string[], anonymize: boolean, strictNames = false, unknownText = false): unknown {
   const seen = new WeakSet<object>();
   const text = (entry: string) => entry.length === 0 ? entry : redactClassicText(entry, secrets, anonymize);
   const field = (key: string, descriptor: PropertyDescriptor): unknown => {
@@ -741,10 +747,10 @@ function maskStructuredValue(value: unknown, secrets: readonly string[], anonymi
     }
     // The input screen's own credential and card field rules, for a name this table does not declare.
     if (typeof child === 'string' && child.length > 0 && judgmentInputProblem({ [key]: child }) !== undefined) return '[REDACTED]';
-    return visit(child);
+    return visit(child, unknownText && kind === undefined);
   };
-  const visit = (entry: unknown): unknown => {
-    if (typeof entry === 'string') return text(entry);
+  const visit = (entry: unknown, withholdText = false): unknown => {
+    if (typeof entry === 'string') return withholdText && entry.length > 0 ? '[REDACTED]' : text(entry);
     if (typeof entry === 'bigint') return entry.toString();
     if (typeof entry === 'function' || typeof entry === 'symbol') return undefined;
     if (entry === null || typeof entry !== 'object') return entry;
@@ -758,7 +764,7 @@ function maskStructuredValue(value: unknown, secrets: readonly string[], anonymi
         const items: unknown[] = [];
         for (let index = 0; index < entry.length; index++) {
           const descriptor = descriptors[String(index)];
-          items.push(descriptor === undefined ? undefined : !('value' in descriptor) ? '[REDACTED]' : visit(descriptor.value));
+          items.push(descriptor === undefined ? undefined : !('value' in descriptor) ? '[REDACTED]' : visit(descriptor.value, withholdText));
         }
         return items;
       }
@@ -780,11 +786,21 @@ function maskStructuredValue(value: unknown, secrets: readonly string[], anonymi
 }
 
 /**
- * {@link maskStructuredValue} for a record kept on this machine (the activity
- * log): text keeps its paths and the user name.
+ * {@link maskStructuredValue} for a value shown on this machine: text keeps its
+ * paths and the user name.
  */
 export function redactDiagnosticValue(value: unknown): unknown {
   try { return maskStructuredValue(value, [], false); } catch { return '[REDACTED]'; }
+}
+
+/**
+ * {@link redactDiagnosticValue} for the activity log's structured data: declared
+ * content and fact fields stay readable (paths and the user name kept), and text
+ * under a field name with no declared role is withheld, so prompt text, tool
+ * output or a secret carried under an undeclared name never reaches the file.
+ */
+export function redactActivityLogValue(value: unknown): unknown {
+  try { return maskStructuredValue(value, [], false, false, true); } catch { return '[REDACTED]'; }
 }
 
 function redactClassicStructure(value: unknown, options: StructuredRedactionOptions): unknown {

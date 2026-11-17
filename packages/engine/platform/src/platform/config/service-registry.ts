@@ -2,9 +2,16 @@ import { assertSecurityReadSource, captureSecurityReadBindings, captureSecurityR
 /**
  * ServiceRegistry, named service credential resolution.
  *
- * Reads service configs from the configured services.json path.
+ * Reads service configs from the user's own `~/.goodvibes/<surface>/services.json`.
  * Each service entry declares its authType and the SecretsManager key
  * that holds the credential.
+ *
+ * A project's `.goodvibes/<surface>/services.json` is repository content, so
+ * an entry from it is used only when every credential it names is a key in the
+ * user's store: no secret reference of any kind (a reference can run a command
+ * or read a file) and no `oauth` block (it would replace a provider's sign-in
+ * endpoints). Such an entry is skipped with a warning, and an entry of the
+ * user's own file always wins over a project entry of the same name.
  *
  * Example services.json:
  * {
@@ -22,6 +29,7 @@ import {
   resolveSecretRef,
   type SecretRefInput,
 } from './secret-refs.js';
+import { looksLikeSecretRef } from './secret-ref-refusal.js';
 import type { OAuthProviderConfig } from './subscriptions.js';
 import { SubscriptionManager, captureSubscriptionReadSource } from './subscriptions.js';
 import { logger } from '../utils/logger.js';
@@ -73,6 +81,8 @@ export interface ServiceConfig {
   providerId?: string | undefined;
   /** OAuth metadata for subscription-backed services. */
   oauth?: OAuthProviderConfig | undefined;
+  /** Path under `baseUrl` a connection test requests, for a service whose root does not answer; default the root. */
+  testPath?: string | undefined;
 }
 
 export type ServiceSecretField =
@@ -97,9 +107,24 @@ export interface ServiceInspection {
 
 export interface ServiceConnectionTestResult {
   readonly ok: boolean;
+  /**
+   * `connected`: the service answered below 400 with the credential.
+   * `credential-refused`: it answered 401 or 403. `reached`: it answered with
+   * another status. `unreachable`: no answer. `not-tested`: nothing was sent.
+   */
+  readonly outcome: 'connected' | 'credential-refused' | 'reached' | 'unreachable' | 'not-tested';
   readonly status: number | null;
   readonly testedUrl: string | null;
   readonly error?: string | undefined;
+}
+
+/**
+ * Where the registry reads from: the user's own file, and optionally a
+ * project's file whose entries are admitted only when they name store keys.
+ */
+export interface ServiceRegistryFiles {
+  readonly user: string;
+  readonly project?: string | undefined;
 }
 
 export interface ServiceRegistryOptions {
@@ -113,6 +138,26 @@ interface ServicesFileRead {
   readonly services: Record<string, ServiceConfig>;
   /** Why the file could not be used, or null when it is absent or readable. */
   readonly problem: string | null;
+}
+
+const REFERENCE_FIELDS = ['tokenRef', 'passwordRef', 'authTokenRef', 'webhookUrlRef', 'signingSecretRef', 'publicKeyRef', 'appTokenRef'] as const;
+const KEY_FIELDS = ['tokenKey', 'passwordKey', 'authTokenKey', 'webhookUrlKey', 'signingSecretKey', 'publicKeyKey', 'appTokenKey'] as const;
+
+/**
+ * Why a project file's entry cannot be used, or null when every credential it
+ * names is a plain key in the user's store and it carries no `oauth` block.
+ */
+function projectEntryRefusal(entry: unknown): string | null {
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return 'is not an object';
+  const record = entry as Record<string, unknown>;
+  if (record.oauth !== undefined) return 'carries an oauth block, which only your own services file may set';
+  if (REFERENCE_FIELDS.some((field) => record[field] !== undefined)) return 'names a secret reference, which only your own services file may use';
+  for (const field of KEY_FIELDS) {
+    const value = record[field];
+    if (value === undefined) continue;
+    if (typeof value !== 'string' || isSecretRefInput(value) || looksLikeSecretRef(value)) return `${field} is not a plain key name in your secret store`;
+  }
+  return null;
 }
 
 function readServicesFile(filePath: string): ServicesFileRead {
@@ -160,18 +205,26 @@ export class ServiceRegistry {
     return captureServiceReadSource(this);
   }
   private readonly servicesFilePath: string;
+  private readonly projectServicesFilePath: string | undefined;
   private readonly secretsManager: SecretsManager;
   private readonly subscriptionManager: SubscriptionManager;
   private readonly diagnosticMode: 'default' | 'structural';
+  private readonly reportedProjectRefusals = new Set<string>();
 
-  constructor(servicesFilePath: string, options: ServiceRegistryOptions) {
-    this.servicesFilePath = servicesFilePath;
+  /**
+   * `files.user` is the user's own services file. A bare path is read as a
+   * project file: only its entries that name store keys are used.
+   */
+  constructor(files: ServiceRegistryFiles | string, options: ServiceRegistryOptions) {
+    const resolved: ServiceRegistryFiles = typeof files === 'string' ? { user: '', project: files } : files;
+    this.servicesFilePath = resolved.user;
+    this.projectServicesFilePath = resolved.project;
     this.secretsManager = options.secretsManager;
     this.subscriptionManager = options.subscriptionManager;
     this.diagnosticMode = options.diagnosticMode ?? 'default';
     setServiceReadSources(this, () => {
       const binding = captureSecurityReadBindings(this, ['servicesFilePath', 'secretsManager', 'subscriptionManager', 'diagnosticMode', 'getAll', 'get', 'inspect', 'resolveSecret', 'resolveConfiguredSecret', 'captureReadSource']);
-      const filesCurrent = captureSecurityReadFiles([this.servicesFilePath]);
+      const filesCurrent = captureSecurityReadFiles([this.servicesFilePath, this.projectServicesFilePath].filter((path): path is string => Boolean(path)));
       const secretsCurrent = captureSecretsReadSource(this.secretsManager), subscriptionsCurrent = captureSubscriptionReadSource(this.subscriptionManager);
       return () => { binding(); filesCurrent(); secretsCurrent(); subscriptionsCurrent(); binding(); };
     });
@@ -181,7 +234,22 @@ export class ServiceRegistry {
    * Return all registered service configs.
    */
   getAll(): Record<string, ServiceConfig> {
-    return readServicesFile(this.servicesFilePath).services;
+    const own = this.servicesFilePath ? readServicesFile(this.servicesFilePath).services : {};
+    if (!this.projectServicesFilePath) return own;
+    const merged: Record<string, ServiceConfig> = {};
+    for (const [name, entry] of Object.entries(readServicesFile(this.projectServicesFilePath).services)) {
+      const refusal = projectEntryRefusal(entry);
+      if (refusal === null) { merged[name] = entry; continue; }
+      const id = `${name}\0${refusal}`;
+      if (!this.reportedProjectRefusals.has(id)) {
+        this.reportedProjectRefusals.add(id);
+        logger.warn('ServiceRegistry: skipped a service from the project services file', {
+          serviceName: name, path: this.projectServicesFilePath, reason: refusal,
+          next: 'add the service to your own services file to use it',
+        });
+      }
+    }
+    return Object.assign(merged, own);
   }
 
   /**
@@ -190,8 +258,17 @@ export class ServiceRegistry {
    * an unknown service; this is how a status surface tells them apart.
    */
   unreadableReason(): string | null {
-    const { problem } = readServicesFile(this.servicesFilePath);
-    return problem === null ? null : `${this.servicesFilePath} ${problem}`;
+    for (const path of [this.servicesFilePath, this.projectServicesFilePath]) {
+      if (!path) continue;
+      const { problem } = readServicesFile(path);
+      if (problem !== null) return `${path} ${problem}`;
+    }
+    return null;
+  }
+
+  /** The user's own services file, where a service is added. */
+  get userServicesFilePath(): string {
+    return this.servicesFilePath;
   }
 
   /**
@@ -380,67 +457,59 @@ export class ServiceRegistry {
     };
   }
 
+  /**
+   * Ask the service itself, with the credential: one request to `baseUrl` (or
+   * `baseUrl` + `testPath`). Below 400 is connected; 401 and 403 mean the
+   * credential was refused; any other status says the service was reached and
+   * what it answered.
+   */
   async testConnection(serviceName: string): Promise<ServiceConnectionTestResult> {
     const config = this.get(serviceName);
     if (!config) {
       const unreadable = this.unreadableReason();
       return {
         ok: false,
+        outcome: 'not-tested',
         status: null,
         testedUrl: null,
-        error: unreadable ? `Service list unusable: ${unreadable}` : 'Unknown service',
+        error: unreadable ? `Service list unusable: ${unreadable}` : `Unknown service ${serviceName}; add it to ${this.servicesFilePath || 'your services file'}`,
       };
     }
 
-    const baseUrl = config.baseUrl?.trim() ?? '';
+    const baseUrl = config.baseUrl?.trim().replace(/\/$/, '') ?? '';
     if (!baseUrl) {
-      return { ok: false, status: null, testedUrl: null, error: 'No baseUrl configured' };
+      return { ok: false, outcome: 'not-tested', status: null, testedUrl: null, error: `No baseUrl configured for ${serviceName}; nothing was sent` };
     }
 
     const headers = await this.resolveAuth(serviceName);
     if (!headers) {
-      // A public /health answering 200 says nothing about the credential, and
-      // "connected" is the claim this result makes.
       return {
         ok: false,
+        outcome: 'not-tested',
         status: null,
         testedUrl: null,
-        error: `No ${config.authType} credential could be resolved for ${serviceName}; nothing was sent`,
+        error: `No ${config.authType} credential could be resolved for ${serviceName}; nothing was sent. Store ${config.tokenKey} with /secrets set`,
       };
     }
-    const reqHeaders: Record<string, string> = {
-      Accept: 'application/json',
-      ...headers,
-    };
-    const candidates = [
-      `${baseUrl.replace(/\/$/, '')}/health`,
-      baseUrl.replace(/\/$/, ''),
-    ];
-
-    for (const url of candidates) {
-      try {
-        const response = await instrumentedFetch(url, {
-          method: 'GET',
-          headers: reqHeaders,
-          signal: AbortSignal.timeout(5000),
-        });
-        return {
-          ok: response.ok,
-          status: response.status,
-          testedUrl: url,
-          ...(response.ok ? {} : { error: `HTTP ${response.status}` }),
-        };
-      } catch (error) {
-        const message = summarizeError(error);
-        logger.debug('ServiceRegistry: service test failed', { serviceName, url, error: message });
+    const testPath = config.testPath?.trim();
+    const url = testPath ? `${baseUrl}${testPath.startsWith('/') ? '' : '/'}${testPath}` : baseUrl;
+    try {
+      const response = await instrumentedFetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...headers },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.status < 400) return { ok: true, outcome: 'connected', status: response.status, testedUrl: url };
+      if (response.status === 401 || response.status === 403) {
+        return { ok: false, outcome: 'credential-refused', status: response.status, testedUrl: url,
+          error: `${serviceName} refused the credential (HTTP ${response.status}); check ${config.tokenKey}` };
       }
+      return { ok: false, outcome: 'reached', status: response.status, testedUrl: url,
+        error: `${serviceName} was reached and answered HTTP ${response.status}${testPath ? '' : '; if its root does not answer, set testPath on the service'}` };
+    } catch (error) {
+      const message = summarizeError(error);
+      logger.debug('ServiceRegistry: service test failed', { serviceName, url, error: message });
+      return { ok: false, outcome: 'unreachable', status: null, testedUrl: url, error: `${serviceName} could not be reached: ${message}` };
     }
-
-    return {
-      ok: false,
-      status: null,
-      testedUrl: candidates[candidates.length - 1] ?? null,
-      error: 'Connection failed',
-    };
   }
 }

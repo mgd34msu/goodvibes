@@ -33,9 +33,9 @@ Settings sit next to several other stores that follow the same global-versus-pro
 
 | Path | What it holds |
 | --- | --- |
-| `~/.goodvibes/tui/secrets.enc` and project/ancestor `.goodvibes/tui/secrets.enc` | Secure encrypted secrets |
-| `~/.goodvibes/goodvibes.secrets.json` and project/ancestor `.goodvibes/goodvibes.secrets.json` | Plaintext compatibility secrets |
-| `.goodvibes/tui/services.json` | The service registry, backing auth/account surfaces in the TUI and daemon |
+| `~/.goodvibes/tui/secrets.enc` and the project's `.goodvibes/tui/secrets.enc` | Secure encrypted secrets; a key in the project's store is used once you stored it there or confirmed it with `/secrets trust <KEY> --yes` |
+| `~/.goodvibes/goodvibes.secrets.json` and the project's `.goodvibes/goodvibes.secrets.json` | Plaintext compatibility secrets, with the same confirmation rule for the project's file |
+| `~/.goodvibes/tui/services.json` | The service registry, backing auth/account surfaces in the TUI and daemon; a project's `.goodvibes/tui/services.json` adds only services whose credentials are keys in your store |
 | `~/.goodvibes/tui/providers/*.json` | Custom provider JSON |
 | `~/.goodvibes/tui/keybindings.json` | Keybinding overrides |
 | `.goodvibes/tui/repl-history.json` | REPL history |

@@ -86,7 +86,7 @@ export async function exportSetupSupportBundle(targetDirArg: string, snapshot: S
   writeFileSync(join(targetDir, 'startup-review.json'), JSON.stringify(maskLiteralSecrets(snapshot, masked), null, 2) + '\n', 'utf-8');
   writeFileSync(join(targetDir, 'platform-review.json'), JSON.stringify(maskLiteralSecrets(platformReview, masked, 'platform-review.json'), null, 2) + '\n', 'utf-8');
   const copies: ReadonlyArray<readonly [string, string]> = [
-    [shellPaths.resolveProjectPath('tui', 'services.json'), 'services.json'],
+    [shellPaths.resolveUserPath('tui', 'services.json'), 'services.json'],
     [shellPaths.resolveProjectPath('hooks.managed.json'), 'hooks.managed.json'],
   ];
   for (const [source, name] of copies) {

@@ -177,7 +177,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     fenceBrowserJudgment = () => browserClosing ??= browserJudgment.close();
     if (options.createBrowserJudgment) disposalScope.registry.add('browser judgment transport', fenceBrowserJudgment);
     const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths), { legacyPath: shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'subscriptions.json') });
-    const serviceRegistry = new ServiceRegistry(shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'services.json'), {
+    const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'services.json'), project: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'services.json') }, {
       secretsManager,
       subscriptionManager,
     });

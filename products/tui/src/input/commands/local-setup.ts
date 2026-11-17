@@ -251,7 +251,7 @@ export function registerLocalSetupCommands(registry: CommandRegistry): void {
             const replacedFiles = setupTransferReplacedFiles(bundle);
             applySetupTransferChanges(ctx.platform.configManager, changes);
             const fileWrites: Array<{ path: string; body: unknown }> = [];
-            if (bundle.services) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'services.json'), body: bundle.services });
+            if (bundle.services) fileWrites.push({ path: getShellPaths().resolveUserPath('tui', 'services.json'), body: bundle.services });
             if (bundle.ecosystem?.plugins) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'ecosystem', 'plugins.json'), body: bundle.ecosystem.plugins });
             if (bundle.ecosystem?.skills) fileWrites.push({ path: getShellPaths().resolveProjectPath('tui', 'ecosystem', 'skills.json'), body: bundle.ecosystem.skills });
             // Remember each file's previous contents so a failed write can put every replaced file back, not only the settings.

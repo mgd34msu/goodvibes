@@ -142,7 +142,7 @@ Shell execution with background processes, retry, progress tracking, and file op
 HTTP client with extraction modes, service registry auth, and batch operations.
 
 - Extraction modes include `raw`, `text`, `json`, `markdown`, `readable` (strips nav/sidebar/footer), `code_blocks`, `links`, `tables`, `metadata` (og-tags), `structured` (CSS selectors), and `pdf`
-- Named service registry: configure API credentials once in `.goodvibes/tui/services.json`, reference by name in fetch calls
+- Named service registry: configure API credentials once in `~/.goodvibes/tui/services.json`, reference by name in fetch calls (a project's `.goodvibes/tui/services.json` adds services only when they name keys in your secret store; references and `oauth` blocks are used only from your own file)
 - Inline auth: `bearer`, `basic`, `api-key` per request
 - Batch parallel fetches in a single tool call
 

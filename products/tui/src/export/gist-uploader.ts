@@ -141,7 +141,7 @@ export class GistUploadTarget implements UploadTarget {
 export const NO_TOKEN_GUIDANCE = [
   'No GitHub token found for --upload.',
   'To enable Gist upload, configure a GitHub service entry with bearer auth:',
-  '  /services import .goodvibes/tui/services.json  (if already configured)',
+  '  add it to ~/.goodvibes/tui/services.json, or /services import <path>',
   'A github entry is used only when it sends `Authorization: Bearer <token>` (or `token <token>`);',
   'any other header is not taken as the token. Change the entry or',
   'set the GITHUB_TOKEN environment variable to a PAT with the `gist` scope.',

@@ -75,7 +75,7 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
         const result = await svcRegistry.testConnection(name);
         ctx.print([
           `Service test ${name}`,
-          `  ok: ${result.ok ? 'yes' : 'no'}`,
+          `  ok: ${result.ok ? 'yes' : 'no'} (${result.outcome})`,
           `  status: ${result.status ?? 'n/a'}`,
           `  url: ${result.testedUrl ?? 'n/a'}`,
           `  error: ${result.error ?? 'none'}`,
@@ -171,7 +171,7 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
             return;
           }
           const incoming = parsed as Record<string, unknown>;
-          const targetPath = shellPaths.resolveProjectPath('tui', 'services.json');
+          const targetPath = shellPaths.resolveUserPath('tui', 'services.json');
           let backup: string | undefined;
           if (existsSync(targetPath)) {
             backup = `${targetPath}.bak`;
@@ -195,7 +195,7 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
       if (ctx.openSelection) {
         const testAction = new Map<string, SelectionAction>([['t', 'select' as const]]);
         const items: SelectionItem[] = keys.length === 0
-          ? [{ id: '_empty', label: 'No services configured', detail: '.goodvibes/tui/services.json' }]
+          ? [{ id: '_empty', label: 'No services configured', detail: '~/.goodvibes/tui/services.json' }]
           : keys.map((key) => ({ id: key, label: all[key].name ?? key, detail: `${all[key].authType}  ${all[key].baseUrl ?? '(no url)'}`, actions: '[Ctrl+T] test' }));
         ctx.openSelection('Services', items, { allowSearch: true, customActions: testAction }, (result) => {
           if (!result || result.item.id === '_empty') return;
@@ -205,7 +205,7 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
             void svcRegistry.testConnection(result.item.id).then((testResult) => {
               ctx.print([
                 `Service test ${result.item.id}`,
-                `  ok: ${testResult.ok ? 'yes' : 'no'}`,
+                `  ok: ${testResult.ok ? 'yes' : 'no'} (${testResult.outcome})`,
                 `  status: ${testResult.status ?? 'n/a'}`,
                 `  url: ${testResult.testedUrl ?? 'n/a'}`,
                 `  error: ${testResult.error ?? 'none'}`,
@@ -222,7 +222,7 @@ export function registerServicesRuntimeCommands(registry: CommandRegistry): void
         return;
       }
       if (keys.length === 0) {
-        ctx.print('[services] No services configured. Add entries to .goodvibes/tui/services.json');
+        ctx.print('[services] No services configured. Add entries to ~/.goodvibes/tui/services.json or /services import <path>');
         return;
       }
       ctx.print(['Services:', '', ...keys.map((key) => `  ${key.padEnd(20)} ${all[key].authType.padEnd(10)} ${all[key].baseUrl ?? '(no url)'}`)].join('\n'));

@@ -108,7 +108,7 @@ secret gist with the same content. The local export is kept either way.
 
 The uploader looks for a GitHub PAT in this order:
 
-1. Service registry `github` entry (configured via `/services` or `.goodvibes/tui/services.json`
+1. Service registry `github` entry (configured via `/services` or `~/.goodvibes/tui/services.json`
    with `tokenKey: GITHUB_TOKEN` and `authType: bearer`).
 2. `GITHUB_TOKEN` environment variable.
 

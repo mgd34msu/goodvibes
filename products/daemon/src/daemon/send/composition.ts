@@ -16,7 +16,7 @@ export function createSendStack(configuration: DaemonCliConfiguration): { readon
     projectRoot: workingDirectory, globalHome: homeDirectory,
     daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural',
   });
-  const serviceRegistry = new ServiceRegistry(shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'services.json'), {
+  const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'services.json'), project: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'services.json') }, {
     secretsManager, diagnosticMode: 'structural',
     // Secret resolution does not consult subscriptions. One-shot send must not
     // trigger an unrelated legacy subscription migration while acquiring them.

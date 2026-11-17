@@ -58,7 +58,7 @@ export async function withProviderServices<T>(
   const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths), {
     legacyPath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'subscriptions.json'),
   });
-  const serviceRegistry = new ServiceRegistry(shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'services.json'), {
+  const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'services.json'), project: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'services.json') }, {
     secretsManager,
     subscriptionManager,
   });

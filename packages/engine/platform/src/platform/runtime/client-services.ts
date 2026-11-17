@@ -495,7 +495,7 @@ function composeClientRuntimeServices(
   const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths), {
     legacyPath: shellPaths.resolveUserPath(surfaceRoot, 'subscriptions.json'),
   });
-  const serviceRegistry = new ServiceRegistry(shellPaths.resolveProjectPath(surfaceRoot, 'services.json'), {
+  const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(surfaceRoot, 'services.json'), project: shellPaths.resolveProjectPath(surfaceRoot, 'services.json') }, {
     secretsManager,
     subscriptionManager,
   });

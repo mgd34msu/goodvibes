@@ -119,7 +119,7 @@ export function listAvailableSubscriptionProviders(
       oauth: service.oauth,
       tokenKey: service.tokenKey,
       providerId: provider,
-      notes: ['Configured through the host service registry services.json file'],
+      notes: ['Configured in your own services.json; a project services file cannot carry an oauth block'],
     });
   }
 

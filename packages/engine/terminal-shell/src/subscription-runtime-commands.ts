@@ -217,7 +217,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             print(
               [
                 `OAuth is not configured for ${provider}.`,
-                `Add an oauth block to .goodvibes/${policy.surfaceRoot}/services.json for that provider, for example:`,
+                `Add an oauth block to ~/.goodvibes/${policy.surfaceRoot}/services.json (your own services file; a project's file cannot carry one) for that provider, for example:`,
                 `  { "name": "${provider}", "authType": "oauth", "tokenKey": "${provider.toUpperCase()}_API_KEY", "providerId": "${provider}", "oauth": { "authUrl": "...", "tokenUrl": "...", "clientId": "...", "redirectUri": "http://127.0.0.1/callback", "scopes": ["..."] } }`,
               ].join('\n'),
             );

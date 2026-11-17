@@ -170,9 +170,24 @@ const BEDROCK_GEO_PREFIX = /^(?:global|us-gov|us|eu|apac|ap|jp|au|ca)\./;
  * not a Bedrock Anthropic id is returned unchanged.
  */
 export function bedrockModelName(id: string): string {
+  const dated = bedrockDatedModelName(id);
+  return dated === id ? id : dated.replace(/-\d{8}$/, '');
+}
+
+/**
+ * The catalog name with the release date kept: `anthropic.claude-3-5-sonnet-20241022-v2:0`
+ * names `claude-3-5-sonnet-20241022`. Used when an account lists two releases
+ * under one name, so each stays choosable.
+ */
+function bedrockDatedModelName(id: string): string {
   const bare = id.replace(BEDROCK_GEO_PREFIX, '');
   if (!bare.startsWith('anthropic.')) return id;
-  return bare.slice('anthropic.'.length).replace(/-v\d+(?::\d+)?$/, '').replace(/-\d{8}$/, '');
+  return bare.slice('anthropic.'.length).replace(/-v\d+(?::\d+)?$/, '');
+}
+
+function bedrockReleaseDate(id: string): string | undefined {
+  const dated = bedrockDatedModelName(id);
+  return dated === id ? undefined : dated.match(/-(\d{8})$/)?.[1];
 }
 
 /** Which listed id a name is sent as: a global profile, then this region's geography, then the foundation id. */
@@ -252,17 +267,42 @@ export class BedrockFamilyProvider extends AnthropicMessagesProvider {
     return this.invocableIds.get(model) ?? model;
   }
 
-  /** Adopt listed ids: shown by catalog name, sent as the best-ranked listed id. */
+  /**
+   * Adopt listed ids: shown by catalog name, sent as the best-ranked listed id.
+   * When the account lists two releases under one name (a 2024-06 and a
+   * 2024-10 `claude-3-5-sonnet`), each dated release is shown under its dated
+   * name so either can be chosen, and the bare name is kept as an alias for
+   * the newest release.
+   */
   private adopt(listed: readonly string[]): string[] {
     const region = readAwsCredentials(this.bearerToken).region;
     this.invocableIds.clear();
-    const names: string[] = [];
+    // Catalog name -> its listed release dates and the newest of them.
+    const releases = new Map<string, { dates: Set<string>; newest: string }>();
     for (const id of listed) {
+      const date = bedrockReleaseDate(id);
+      if (date === undefined) continue;
       const name = bedrockModelName(id);
-      if (!names.includes(name)) names.push(name);
-      if (name === id) continue;
+      const entry = releases.get(name) ?? { dates: new Set<string>(), newest: date };
+      entry.dates.add(date);
+      if (date > entry.newest) entry.newest = date;
+      releases.set(name, entry);
+    }
+    const sendAs = (name: string, id: string): void => {
       const current = this.invocableIds.get(name);
       if (current === undefined || invocationRank(id, region) < invocationRank(current, region)) this.invocableIds.set(name, id);
+    };
+    const names: string[] = [];
+    for (const id of listed) {
+      const undated = bedrockModelName(id);
+      const release = releases.get(undated);
+      const date = bedrockReleaseDate(id);
+      const several = release !== undefined && release.dates.size > 1;
+      const name = several && date !== undefined ? bedrockDatedModelName(id) : undated;
+      if (!names.includes(name)) names.push(name);
+      if (name === id) continue;
+      sendAs(name, id);
+      if (several && date === release?.newest) sendAs(undated, id);
     }
     return names;
   }

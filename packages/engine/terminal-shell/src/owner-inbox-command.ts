@@ -142,6 +142,9 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
     description: 'What waits on you: permission asks, questions agents left, claims, purchase windows; answer one',
     usage: '[all] | show <id> | answer <id> <choice|text> [note]',
     argsHint: '[all|show|answer]',
+    // Reading the inbox is open to a model; answering is the owner's (the handler checks).
+    effect: 'mixed',
+    readVerbs: ['', 'all', 'list', 'show'],
     async handler(args, context) {
       // Read before the first await: a model running this command must not answer for the owner.
       const owner = policy.isOwner(context, 'questions');
@@ -223,6 +226,7 @@ export function createOwnerInboxCommands<Context extends OwnerInboxCommandContex
     name: 'decisions',
     description: 'What was decided on your inbox: the answer, who gave it and from where',
     usage: '[<count>]',
+    effect: 'read-only',
     async handler(args, context) {
       const inbox = port(context);
       if (!inbox) return;

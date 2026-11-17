@@ -54,7 +54,9 @@ import { registerCalendarRuntimeCommands } from './commands/calendar-runtime.ts'
 import { registerGoogleRuntimeCommands } from './commands/google-runtime.ts';
 import { registerUpdateCommand } from './commands/update-runtime.ts';
 import { registerPaymentCardCommands } from './commands/payment-card-intake.ts';
-import { declareCommandVerbs, SHARED_COMMAND_VERBS } from './commands/command-verbs.ts';
+import { commandVerbPolicy, declareCommandVerbs, SHARED_COMMAND_VERBS } from './commands/command-verbs.ts';
+import { registerPermissionsRuntimeCommands } from './commands/permissions-runtime.ts';
+import type { RememberedRuleStore } from '@goodvibes-jev/engine/platform/platform/gate/policy';
 
 function registerAgentMemoryCommand(registry: CommandRegistry): void {
   registry.register({
@@ -73,9 +75,13 @@ function registerAgentMemoryCommand(registry: CommandRegistry): void {
 
 /**
  * registerBuiltinCommands - Register all built-in slash commands into the registry.
- * Call once during application startup.
+ * Call once during application startup. `rememberedRules` returns the
+ * remembered-approval store `/permissions` lists and revokes from.
  */
-export function registerBuiltinCommands(registry: CommandRegistry): void {
+export function registerBuiltinCommands(
+  registry: CommandRegistry,
+  options: { readonly rememberedRules?: (() => RememberedRuleStore | undefined) | undefined } = {},
+): void {
   registerShellCoreCommands(registry);
   registerTriggerCommands(registry);
   registerAgentWorkspaceRuntimeCommands(registry);
@@ -139,5 +145,15 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
   for (const [name, verbs] of Object.entries(SHARED_COMMAND_VERBS)) {
     const command = registry.get(name);
     if (command) declareCommandVerbs(command, verbs);
+  }
+
+  registerPermissionsRuntimeCommands(registry, options.rememberedRules ?? (() => undefined));
+
+  // The model's command runner admits a run from what the command declares, so
+  // a command that declares nothing is a start-up error here rather than a
+  // refusal the model meets later. One pass over the registered commands.
+  const undeclared = registry.getAll().filter((command) => command.effect === undefined && commandVerbPolicy(command, []) === undefined);
+  if (undeclared.length > 0) {
+    throw new Error(`Commands without a declared effect: ${undeclared.map((command) => `/${command.name}`).join(', ')}. Declare \`effect\` (and \`readVerbs\` for a command whose verbs differ) on each definition.`);
   }
 }

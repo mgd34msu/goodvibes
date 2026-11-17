@@ -14,7 +14,7 @@ import type { AgentPromptContextReceiptStore } from '@goodvibes-jev/engine/termi
 import { CommandRegistry } from '../input/command-registry.ts';
 import { registerBuiltinCommands } from '../input/commands.ts';
 import { InputHistory } from '../input/input-history.ts';
-import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
+import { UserPermissionRuleStore, type PermissionRequestHandler } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { ActivityFeed } from '../core/activity-feed.ts';
 import { hydrateConversationUsage } from '../core/conversation-usage.ts';
 import { createSystemMessageRouter, type SystemMessageRouter } from '../core/system-message-router.ts';
@@ -140,7 +140,12 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   orchestrator.setSystemMessageRouter(systemMessageRouter);
 
   const commandRegistry = new CommandRegistry();
-  registerBuiltinCommands(commandRegistry);
+  // /permissions lists and revokes the approvals this process remembered; with
+  // only add/read access to them here, it says it cannot list them.
+  const rememberedRules = services.userPermissionRuleStore;
+  registerBuiltinCommands(commandRegistry, {
+    rememberedRules: () => rememberedRules instanceof UserPermissionRuleStore ? rememberedRules : undefined,
+  });
   // No opsControlPlane: the Agent's product boundary keeps connected-host
   // tasks read-only (see /tasks: every mutation subcommand is blocked and
   // routed to /workplan or /delegate), so the opsApi intervention verbs

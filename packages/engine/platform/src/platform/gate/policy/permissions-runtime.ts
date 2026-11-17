@@ -56,6 +56,9 @@ export const PERMISSIONS_COMMAND = {
   usage: '[rules | revoke <rule-id>]',
   argsHint: '[rules|revoke]',
   subcommands: { rules: '', revoke: '<rule-id>' },
+  // Showing the settings and the remembered rules reads; revoking one changes what runs unasked.
+  effect: 'mixed',
+  readVerbs: ['', 'rules'],
 } as const;
 
 /** One remembered-rule row: what it does, and how/when it was remembered. */

@@ -18,7 +18,7 @@ import { resolveHostBinding } from './host-resolver.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { AddressRateLimiter } from '@goodvibes-jev/engine/daemon-api';
 import { resolveClientAddress } from './client-address.js';
-import { handleOperatorLogin, SIGN_IN_ATTEMPTS_PER_MINUTE } from './operator-login.js';
+import { handleOperatorLogin, handleOperatorLogout, SIGN_IN_ATTEMPTS_PER_MINUTE } from './operator-login.js';
 import { parseDaemonJsonBody } from './http/router-request-body.js';
 import { authenticationRequiredResponse } from './http/error-response.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -98,7 +98,7 @@ function readCorsAllowedOrigins(configManager: ConfigManager): string[] {
 
 const WEBHOOK_HOOK_PHASES: ReadonlySet<string> = new Set(['Pre', 'Post', 'Fail', 'Change', 'Lifecycle']);
 /** The paths this listener answers; anything else is one `unmatched` metric label. */
-const LISTENER_ROUTES: ReadonlySet<string> = new Set(['/login', '/webhook', '/health']);
+const LISTENER_ROUTES: ReadonlySet<string> = new Set(['/login', '/logout', '/webhook', '/health']);
 
 /**
  * HttpListener, webhook listener, disabled by default.
@@ -435,6 +435,14 @@ export class HttpListener {
         userAuth: this.userAuth,
         limiter: this.loginRateLimiter,
         runtimeBus: this.config.runtimeBus,
+        source: 'http-listener',
+        trustProxy: this.tlsState?.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy')),
+      });
+    }
+    // A sign-in session may end itself here as on the daemon.
+    if (url.pathname === '/logout' && req.method === 'POST') {
+      return handleOperatorLogout(req, {
+        userAuth: this.userAuth,
         source: 'http-listener',
         trustProxy: this.tlsState?.trustProxy ?? Boolean(this.configManager.get('httpListener.trustProxy')),
       });

@@ -57,7 +57,7 @@ import { emitCompanionMessageReceived } from '../../runtime/emitters/session.js'
 import { createAuthFailureAudit, type AuthFailureAudit } from '../auth-failure-audit.js';
 import { emitCompanionPairRequested, emitCompanionPairVerified } from '../../runtime/emitters/security.js';
 import { clientAddressOf, resolveClientAddress } from '../client-address.js';
-import { handleOperatorLogin, SIGN_IN_ATTEMPTS_PER_MINUTE } from '../operator-login.js';
+import { handleOperatorLogin, handleOperatorLogout, SIGN_IN_ATTEMPTS_PER_MINUTE } from '../operator-login.js';
 import { correlationCtx } from '../../runtime/correlation.js';
 import { TelemetryApiService } from '../../runtime/telemetry/api.js';
 import { inspectInboundTls, inspectOutboundTls } from '../../runtime/network/index.js';
@@ -453,6 +453,14 @@ export class DaemonHttpRouter {
 
     if (url.pathname === '/login' && req.method === 'POST') {
       return this.handleLogin(req);
+    }
+    // A session may end itself even when it no longer passes the gate's other checks.
+    if (url.pathname === '/logout' && req.method === 'POST') {
+      return handleOperatorLogout(req, {
+        userAuth: this.context.userAuth,
+        source: 'control-plane-router',
+        trustProxy: Boolean(this.context.configManager.get('controlPlane.trustProxy')),
+      });
     }
 
     // The peer endpoints, matched by the method and path the published peer contract states.

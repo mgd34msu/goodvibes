@@ -148,10 +148,12 @@ async function exchangeServiceLogin(
 }
 
 /**
- * Ends a service session: the daemon revokes it (its local-auth session route,
- * authorised by the session itself), and the token is removed from secure
- * storage either way. The listener has no revoke route, so its session can
- * only be forgotten here and lapses at its expiry.
+ * Ends a service session: the daemon or listener ends it through its
+ * `POST /logout` route, which needs no role (a session may always end itself)
+ * and takes the token only in the Authorization header, never in the path, so
+ * no request log or proxy in front of a remote daemon records it. The token is
+ * removed from this terminal either way. An older build without the route
+ * answers 404; its session lapses at its expiry or an admin revokes it.
  */
 async function endServiceSession(
   ctx: CommandContext,
@@ -166,23 +168,22 @@ async function endServiceSession(
     return;
   }
   let revoked: string;
-  if (input.target === 'listener') {
-    revoked = 'The listener has no sign-out route, so the session lapses at its expiry.';
-  } else {
-    try {
-      const response = await fetch(buildUrl(input.baseUrl.href, `/api/local-auth/sessions/${encodeURIComponent(token)}`), {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(AUTH_LOGIN_TIMEOUT_MS),
-      });
-      revoked = response.ok
-        ? 'The daemon revoked the session.'
-        : response.status === 401 || response.status === 404
-          ? 'The daemon no longer knows the session (it expired or was revoked already).'
-          : `The daemon did not revoke the session (HTTP ${response.status}${response.status === 403 ? ': only an admin may revoke sessions there' : ''}); it lapses at its expiry, or an admin revokes it with /local-auth revoke-session.`;
-    } catch (error) {
-      revoked = `The daemon could not be reached (${error instanceof Error ? error.message : String(error)}); the session lapses at its expiry.`;
-    }
+  try {
+    const response = await fetch(buildUrl(input.baseUrl.href, '/logout'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(AUTH_LOGIN_TIMEOUT_MS),
+    });
+    revoked = response.ok
+      ? `The ${input.target} ended the session.`
+      : response.status === 401
+        ? `The ${input.target} no longer knows the session (it expired or was revoked already).`
+        : response.status === 404 || response.status === 405
+          ? `The ${input.target} is an older build without a sign-out route, so the session lapses at its expiry${input.target === 'daemon' ? ', or an admin revokes it with /local-auth revoke-session' : ''}.`
+          : `The ${input.target} did not end the session (HTTP ${response.status}); it lapses at its expiry${input.target === 'daemon' ? ', or an admin revokes it with /local-auth revoke-session' : ''}.`;
+  } catch (error) {
+    revoked = `The ${input.target} could not be reached (${error instanceof Error ? error.message : String(error)}); the session lapses at its expiry.`;
   }
   if (input.target === 'daemon') {
     writeDaemonSessionToken(homeDirectory, input.baseUrl.origin, null);

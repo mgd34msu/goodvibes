@@ -41,6 +41,10 @@ export const CONTROL_AUTH_LOGIN_RESPONSE_SCHEMA = objectSchema({
   expiresAt: NUMBER_SCHEMA,
 }, ['authenticated', 'token', 'username', 'expiresAt']);
 
+export const CONTROL_AUTH_LOGOUT_RESPONSE_SCHEMA = objectSchema({
+  revoked: BOOLEAN_SCHEMA,
+}, ['revoked']);
+
 export const CONTROL_PLANE_CLIENT_DESCRIPTOR_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   surface: STRING_SCHEMA,

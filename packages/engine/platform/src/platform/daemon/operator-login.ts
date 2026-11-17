@@ -13,7 +13,7 @@ import { logger } from '../utils/logger.js';
 import { authFailureTotal, authSuccessTotal } from '../runtime/metrics.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitAuthFailed, emitAuthSucceeded } from '../runtime/emitters/security.js';
-import { buildOperatorSessionCookie } from '../security/http-auth.js';
+import { buildExpiredOperatorSessionCookie, buildOperatorSessionCookie, extractOperatorAuthToken } from '../security/http-auth.js';
 import type { UserAuthManager } from '../security/user-auth.js';
 import { parseDaemonJsonBody } from './http/router-request-body.js';
 import { jsonErrorResponse } from './http/error-response.js';
@@ -146,6 +146,40 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
       'Set-Cookie': buildOperatorSessionCookie(session.token, { req, expiresAt: session.expiresAt, trustProxy: deps.trustProxy }),
     },
   });
+}
+
+export interface OperatorLogoutDeps {
+  readonly userAuth: Pick<UserAuthManager, 'validateSession' | 'revokeSession'>;
+  /** Which listener answered, on the log line. */
+  readonly source: string;
+  /** Whether a forwarded `https` marks the expired cookie Secure. */
+  readonly trustProxy: boolean;
+}
+
+/**
+ * `POST /logout`: ends the sign-in session the request presents (its bearer,
+ * or the session cookie) and expires the cookie. It needs no role: a session
+ * may always end itself, and the credential travels in the header or cookie,
+ * never in the path, so no access log or proxy records it. A cross-site page
+ * cannot use it to sign the owner out: the cookie is SameSite=Lax, which a
+ * cross-site POST does not carry, and it cannot set the Authorization header.
+ */
+export function handleOperatorLogout(req: Request, deps: OperatorLogoutDeps): Response {
+  const token = extractOperatorAuthToken(req);
+  const session = token ? deps.userAuth.validateSession(token) : null;
+  const expiredCookie = buildExpiredOperatorSessionCookie(req, deps.trustProxy);
+  if (!session) {
+    const refused = jsonErrorResponse({
+      error: 'No sign-in session', code: 'SESSION_UNKNOWN',
+      state: token ? 'the presented credential is not a live sign-in session (it expired, was revoked, or is a token rather than a sign-in)' : 'no credential was presented',
+      next: ['Nothing to sign out of; sign in again with POST /login when needed'],
+    }, { status: 401 });
+    refused.headers.set('Set-Cookie', expiredCookie);
+    return refused;
+  }
+  deps.userAuth.revokeSession(token);
+  logger.info('AUTH_SIGNED_OUT', { type: 'AUTH_SIGNED_OUT', username: session.username, sessionId: session.id, source: deps.source });
+  return Response.json({ revoked: true }, { headers: { 'Set-Cookie': expiredCookie } });
 }
 
 function isJsonMediaType(contentType: string | null): boolean {

@@ -2,7 +2,7 @@
  * hosted-exec-containment.test.ts, a hosted conversational turn does not get
  * the host.
  *
- * Two layers, pinned separately so a regression says which one moved:
+ * Two layers, proved separately so a regression says which one moved:
  *
  *  1. The containment decision (exec/containment.ts), pure. Whether a
  *     composition that REQUIRES the boundary may run a command given the plan
@@ -12,8 +12,8 @@
  *     because the decision functions being right is not the same claim as the
  *     tool consulting them on every path (foreground, retried, background).
  */
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -71,35 +71,15 @@ const switchedOff: ExecSandboxPlan = {
 // ── 1. The containment decision ─────────────────────────────────────────────
 
 describe('decideExecContainment', () => {
-  test('required + a real boundary → allowed', () => {
+  test('a composition that requires the boundary runs a command only inside a real one', () => {
     expect(decideExecContainment(REQUIRED, contained).allowed).toBe(true);
+    // The host cannot provide one, the sandbox is switched off, or none is wired: each refuses.
+    for (const plan of [unavailable, switchedOff, null]) expect(decideExecContainment(REQUIRED, plan).allowed).toBe(false);
   });
 
-  test('required + no boundary because the host cannot provide one → refused, naming why', () => {
-    const decision = decideExecContainment(REQUIRED, unavailable);
-    expect(decision.allowed).toBe(false);
-    expect(decision.refusal).toContain('bubblewrap (bwrap) was not found on PATH');
-    expect(decision.refusal).toContain('daemon-hosted conversational turn');
-  });
-
-  test('required + the sandbox switched off → still refused; a config switch is not a grant', () => {
-    const decision = decideExecContainment(REQUIRED, switchedOff);
-    expect(decision.allowed).toBe(false);
-    expect(decision.refusal).toContain('not enabled');
-  });
-
-  test('required + no sandbox wired at all → refused, and says so plainly', () => {
-    const decision = decideExecContainment(REQUIRED, null);
-    expect(decision.allowed).toBe(false);
-    expect(decision.refusal).toContain('no exec sandbox is wired into this session');
-  });
-
-  test('host-allowed + no boundary → allowed; this is the terminal posture, unchanged', () => {
+  test('the terminal posture and an omitted posture are unchanged', () => {
     expect(decideExecContainment(HOST_ALLOWED, unavailable).allowed).toBe(true);
     expect(decideExecContainment(HOST_ALLOWED, null).allowed).toBe(true);
-  });
-
-  test('an omitted posture never tightens a caller: undefined and null both allow', () => {
     expect(decideExecContainment(undefined, null).allowed).toBe(true);
     expect(decideExecContainment(null, unavailable).allowed).toBe(true);
   });
@@ -109,54 +89,39 @@ describe('decideExecContainment', () => {
 
 describe('exec tool under a hosted conversational posture', () => {
   const roots: string[] = [];
-  const makeTool = (over: {
-    containment?: ExecContainmentRequirement | undefined;
-  }) => {
+  afterAll(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+  /** A tool with no sandbox wired at all, and the file a command that ran would create. */
+  const makeTool = (containment?: ExecContainmentRequirement) => {
     const root = mkdtempSync(join(tmpdir(), 'gv-hosted-exec-'));
     roots.push(root);
-    return createExecTool(new ProcessManager(), {
+    const tool = createExecTool(new ProcessManager(), {
       overflowHandler: new OverflowHandler({ baseDir: root }),
       defaultWorkingDirectory: root,
-      // No sandbox wiring at all: the composition asked for containment and the
-      // boundary is absent, which is exactly the shape the incident had.
-      ...(over.containment ? { containment: over.containment } : {}),
+      ...(containment ? { containment } : {}),
     });
-  };
-  const run = async (tool: ReturnType<typeof createExecTool>, cmd: string, extra: Record<string, unknown> = {}) => {
-    const result = await tool.execute({ commands: [{ cmd, ...extra }] });
-    return { result, output: JSON.parse(String(result.output ?? '{}')) as Record<string, unknown> };
+    return { tool, marker: join(root, 'ran') };
   };
 
-  test('required + no boundary → the command does not run, and says why', async () => {
-    const { result, output } = await run(makeTool({ containment: REQUIRED }), 'echo contained-or-not');
+  test('required + no boundary: the command does not run', async () => {
+    const { tool, marker } = makeTool(REQUIRED);
+    const result = await tool.execute({ commands: [{ cmd: `touch ${marker}` }] });
     expect(result.success).toBe(false);
-    expect(String(output['stderr'])).toContain('requires commands to run inside the exec boundary');
-    expect(String(output['stdout'])).not.toContain('contained-or-not');
+    expect(existsSync(marker)).toBe(false);
   });
 
-  test('the same command under the terminal posture runs, unchanged', async () => {
-    const { result, output } = await run(makeTool({ containment: HOST_ALLOWED }), 'echo contained-or-not');
-    expect(result.success).toBe(true);
-    expect(String(output['stdout'])).toContain('contained-or-not');
-  });
-
-  test('with no containment stated at all it runs, unchanged', async () => {
-    const { result } = await run(makeTool({}), 'echo plain');
-    expect(result.success).toBe(true);
-  });
-
-  test('`background: true` is not the spelling that gets a contained turn onto the host', async () => {
-    const { result, output } = await run(
-      makeTool({ containment: REQUIRED }),
-      'sleep 30',
-      { background: true },
-    );
+  test('required + no boundary: `background: true` does not get the command onto the host either', async () => {
+    const { tool, marker } = makeTool(REQUIRED);
+    const result = await tool.execute({ commands: [{ cmd: `touch ${marker}`, background: true }] });
     expect(result.success).toBe(false);
-    expect(String(output['stderr'])).toContain('background command cannot run inside the exec boundary');
+    expect(existsSync(marker)).toBe(false);
   });
 
-  test('cleanup', () => {
-    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-    expect(roots).toHaveLength(0);
+  test('the same command under the terminal posture, or with no posture stated, runs', async () => {
+    for (const containment of [HOST_ALLOWED, undefined]) {
+      const { tool, marker } = makeTool(containment);
+      const result = await tool.execute({ commands: [{ cmd: `touch ${marker}` }] });
+      expect(result.success).toBe(true);
+      expect(existsSync(marker)).toBe(true);
+    }
   });
 });

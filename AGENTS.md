@@ -54,6 +54,7 @@ The other names are `judgment`, `judgment-tests`, `type-tests` and `integration-
 | `packages/engine/platform/src/platform` | `bun run platform-console:check` | Use the platform logger, not `console.*`. |
 | Engine code, docs or JSON (planning ids such as `W1.2`, `WO-12`, `DEBT-3`; `TODO`/`FIXME`/`XXX`/`HACK` comments) | `bun run internal-id:check` | Remove the id or marker. |
 | A Jev decision (`define*Decision`, `askAs`, a judgment registry or fixture) | `bun run judgment:lint` | Register the decision and give every answer a fixture. |
+| A runtime event in `packages/engine/platform/src/events/*.ts` | `bun run events:check` | `bun run events:generate`, then commit `events/contracts/event-rules.generated.ts`. |
 | An exported symbol of the engine entry points or any `package.json` subpath | `bun run build` then `bun run api:check` | Intended change: `bun run api:extract` and `bun run api:subpath`, then commit `packages/engine/etc/`. |
 | A new directory with `index.ts` under `packages/engine/platform/src/platform` | `bun run exports:check` | Add it to the `exports` map in `packages/engine/package.json`, or list it as internal in `INTENTIONALLY_INTERNAL` in `packages/engine/scripts/engine-package-lists.ts` with a reason. |
 | Operator or peer methods, their schemas, or anything feeding the contract | `bun run contracts:check` | `bun run refresh:contracts`, then commit the regenerated files. |

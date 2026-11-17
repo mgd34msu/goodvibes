@@ -30,6 +30,9 @@ const STEPS: readonly Step[] = [
   // engine source asks Jev only through registered decisions. Source and
   // fixtures only, no model call and no build.
   script('judgment:lint'),
+  // The event validator's rules are generated from the event unions; source
+  // only, no build. Fails when a field's type or an enum's values moved.
+  script('events:check'),
   script('version:check'),
   // Source-only: fails when a flag's graduation state blocks a release. It once ran
   // only by hand through release:verify, so CI never judged it.

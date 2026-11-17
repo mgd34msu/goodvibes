@@ -37,7 +37,11 @@ export type FieldKind =
   | 'enum[]'
   | 'object'
   | 'object[]'
-  | 'string|null';
+  | 'string|null'
+  /** Any array (elements of mixed or unchecked shapes). */
+  | 'array'
+  /** Not checked: a field whose declared type is a mix (`string | { ... }`) or `unknown`. */
+  | 'unknown';
 
 export interface FieldSpec {
   readonly key: string;
@@ -48,6 +52,8 @@ export interface FieldSpec {
   readonly fields?: readonly FieldSpec[] | undefined;
   /** When true, an absent (undefined) value passes; a present value is still checked. */
   readonly optional?: boolean | undefined;
+  /** When true, the key is required but its declared type admits undefined (`x: T | undefined`), so undefined passes. */
+  readonly allowUndefined?: boolean | undefined;
 }
 
 function isAllowed(value: unknown, values: readonly string[] | undefined): boolean {
@@ -59,7 +65,7 @@ function checkFields(v: Record<string, unknown>, fields: readonly FieldSpec[], p
   for (const field of fields) {
     const name = `${path}${field.key}`;
     const value = v[field.key];
-    if (value === undefined && field.optional === true) continue;
+    if (value === undefined && (field.optional === true || field.allowUndefined === true)) continue;
     switch (field.kind) {
       case 'string':
         if (!isString(value)) violations.push(`${name} must be a string`);
@@ -99,6 +105,11 @@ function checkFields(v: Record<string, unknown>, fields: readonly FieldSpec[], p
         break;
       case 'string|null':
         if (value !== null && !isString(value)) violations.push(`${name} must be a string or null`);
+        break;
+      case 'array':
+        if (!Array.isArray(value)) violations.push(`${name} must be an array`);
+        break;
+      case 'unknown':
         break;
     }
   }

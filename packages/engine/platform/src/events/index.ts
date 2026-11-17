@@ -3,9 +3,9 @@
  *
  * Validation helpers:
  * - `isRuntimeEventDomain(value)`, typeguard for the 28 domain names.
- * - `isKnownEventType(value)`, typeguard for the event types that have a registered validator (a subset of the full event union).
- * - `registeredEventTypes()`, enumerates the event-type strings that have a registered validator.
- * - `validateKnownEvent(event)`, validates an event payload (the object with its `type`, not the envelope around it) against the rules for its type; the rules are compile-checked against the event unions in this directory.
+ * - `isKnownEventType(value)`, typeguard for the runtime event types (every member of the event union).
+ * - `registeredEventTypes()`, enumerates every runtime event type string.
+ * - `validateKnownEvent(event)`, validates an event payload (the object with its `type`, not the envelope around it) against the rules for its type; the rules are generated from the event unions in this directory and compile-checked against them, and the runtime event bus runs every emitted event through it in test runs.
  */
 export type { SessionEvent, SessionEventType } from './session.js';
 export type { TurnEvent, TurnEventType, TurnInputOrigin, TurnStopReason, PartialToolCall } from './turn.js';

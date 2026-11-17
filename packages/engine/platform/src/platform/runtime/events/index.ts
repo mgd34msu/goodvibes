@@ -13,6 +13,7 @@ import type { AnyRuntimeEvent, RuntimeEventDomain, DomainEventMap } from '../../
 import { summarizeError } from '../../utils/error-display.js';
 import type { OpsEvent } from '../../../events/ops.js';
 import { listenerErrorsTotal } from '../metrics.js';
+import { validateKnownEvent } from '../../../events/contracts.js';
 
 export type { RuntimeEventEnvelope, EnvelopeContext } from './envelope.js';
 export { createEventEnvelope } from './envelope.js';
@@ -135,6 +136,21 @@ export function runtimeEventBusOptionsFrom(
   return typeof configured === 'number' && Number.isFinite(configured) && configured > 0
     ? { maxListeners: Math.floor(configured) }
     : {};
+}
+
+/**
+ * Under the engine's test runner every emitted event is checked against the
+ * rules generated from its event union, so an emitter that drifts from its
+ * event fails the test that drives it. Never in a product run: no per-event
+ * cost where nothing reads the answer.
+ */
+const VALIDATE_EMITTED_EVENTS = typeof process !== 'undefined' && process.env?.['GOODVIBES_ENGINE_TEST_RUNNER'] === '1';
+
+/** Throws when an emitted event does not match its event's rules (test runs only). */
+function assertEmittedEventMatches(domain: RuntimeEventDomain, envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>): void {
+  const result = validateKnownEvent(envelope.payload);
+  if (result.valid) return;
+  throw new TypeError(`[RuntimeEventBus] ${domain} event ${String(envelope.type)} does not match its event type: ${result.violations.join('; ')}`);
 }
 
 /** Extract a plain string error message from an unknown thrown value. */
@@ -279,6 +295,7 @@ export class RuntimeEventBus {
     domain: RuntimeEventDomain,
     envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>
   ): void {
+    if (VALIDATE_EMITTED_EVENTS) assertEmittedEventMatches(domain, envelope);
     // Snapshot both sets before iterating so subscribe/unsubscribe calls
     // triggered by a handler do not mutate the live Set mid-iteration.
     const typeSet = this._listeners.get(envelope.type);

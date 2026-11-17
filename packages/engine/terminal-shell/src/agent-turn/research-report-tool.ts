@@ -488,11 +488,20 @@ function hasGivenSources(value: unknown): boolean {
 export function withStoredReportSources(args: Record<string, unknown>, paths: ResearchLedgerPaths | undefined): Record<string, unknown> {
   const runId = readString(args.runId) || readString(args.id);
   const ids = readList(args.sourceIds);
-  // Typed sources are cited as given; sourceIds beside them name the stored sources to mark used.
-  if (hasGivenSources(args.sources)) return args;
+  // Typed sources are cited as given; sourceIds beside them name the stored
+  // sources to mark used, and are written to the report only as ids the store holds.
+  if (hasGivenSources(args.sources) && ids.length === 0) return args;
   if (!runId && ids.length === 0) return args;
-  if (!paths) throw new ToolInputProjectionError('unconfigured', 'The research source store is not available in this session; give the sources in `sources`.');
+  if (!paths) {
+    throw new ToolInputProjectionError('unconfigured', hasGivenSources(args.sources)
+      ? 'The research source store is not available in this session, so sourceIds cannot be checked; leave sourceIds out.'
+      : 'The research source store is not available in this session; give the sources in `sources`.');
+  }
   const store = AgentResearchSourceRegistry.fromShellPaths(paths);
+  if (hasGivenSources(args.sources)) {
+    if (ids.some(id => !store.get(id))) throw new ToolInputProjectionError('invalid', 'A source id in sourceIds is not in the research source store. List sources with research action:"sources", or leave sourceIds out.');
+    return args;
+  }
   let records: AgentResearchSourceRecord[];
   if (ids.length > 0) {
     records = ids.map(id => store.get(id) ?? (() => { throw new ToolInputProjectionError('invalid', 'A source id in sourceIds is not in the research source store. List sources with research action:"sources".'); })());

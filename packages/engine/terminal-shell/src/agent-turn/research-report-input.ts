@@ -103,6 +103,11 @@ function omittedSourceReferences(values: readonly unknown[]): RegExp | undefined
 }
 
 /** Also contain URL aliases in names, notes and URL-derived fallback titles. */
+/** An ISO-8601 date or date-time (`2026-08-01`, `2026-08`, `2026-08-01T14:00:00Z`) that names a real time. */
+function isSourceDate(text: string): boolean {
+  return /^\d{4}(-\d{2}(-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?)?)?$/.test(text) && !Number.isNaN(Date.parse(text.replace(' ', 'T')));
+}
+
 function sourceText(value: unknown, omittedReferences?: RegExp): string {
   if (typeof value !== 'string') return '';
   const text = omittedReferences ? value.trim().replace(omittedReferences, WITHHELD_URL) : value.trim();
@@ -148,6 +153,9 @@ function source(value: unknown, omittedReferences?: RegExp): AgentResearchReport
   const metadata: Record<string, string> = {};
   for (const key of ['publisher', 'publishedAt', 'accessedAt', 'note']) {
     const text = sourceText(record[key], omittedReferences);
+    // A date field holds a date or nothing: it is not screened as free text,
+    // so text in it that is not a date is not written to the report.
+    if (text && (key === 'publishedAt' || key === 'accessedAt') && !isSourceDate(text)) continue;
     if (text) metadata[key] = text;
   }
   return Object.freeze({

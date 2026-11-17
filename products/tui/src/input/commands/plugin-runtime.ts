@@ -1,5 +1,3 @@
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 import type { PluginStatus } from '@goodvibes-jev/engine/platform/platform/plugins';
 import { getPluginDirectories, getUserPluginDirectory } from '@goodvibes-jev/engine/platform/platform/plugins';
 import type { CommandRegistry } from '../command-registry.ts';
@@ -16,13 +14,7 @@ import {
 } from '@/runtime/index.ts';
 import { openModalCommand, requireEcosystemCatalogPaths, requirePluginPathOptions } from './runtime-services.ts';
 import { parseScope } from './marketplace-runtime.ts';
-
-/** What each trust tier lets a plugin do; the loader enforces it at every start. */
-const TIER_EFFECT: Readonly<Record<'untrusted' | 'limited' | 'trusted', string>> = {
-  untrusted: 'panels and reading files only; its tool, provider and event-hook registrations are refused',
-  limited: 'the tools, providers and event hooks its manifest declares; high-risk capabilities stay withheld',
-  trusted: 'everything its manifest declares, including shell, file-write and network capabilities',
-};
+import { pluginTrustConfirmation, runPluginTrustSubcommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
 
 export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -37,16 +29,8 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
       update: '<id> [project|user]', uninstall: '<id> [project|user]', enable: '<name>', disable: '<name>', reload: '',
     },
     confirm(args, ctx) {
-      // Recording 'trusted' for a plugin whose signature does not verify vouches for code nobody signed: asked once.
-      if (args[0] === 'trust' && args[1] && args[2] === 'trusted') {
-        const verification = ctx.extensions.pluginManager?.verify(args[1]);
-        if (!verification || verification.valid || (!verification.ok && verification.reason?.includes('not found'))) return undefined;
-        return {
-          title: `Mark plugin ${args[1]} trusted although its signature does not verify?`,
-          detail: `The manifest signature check failed: ${verification.reason ?? 'unknown reason'}. The override and that reason are kept in the plugin's trust note. /plugin trust ${args[1]} untrusted takes it back.`,
-          confirmLabel: 'Trust',
-        };
-      }
+      const trustQuestion = pluginTrustConfirmation(ctx.extensions.pluginManager, args);
+      if (trustQuestion) return trustQuestion;
       // A scope word that is not project or user is refused by the handler; nothing would change.
       if (args[0] !== 'uninstall' || !args[1] || (args[2] !== undefined && args[2] !== 'project' && args[2] !== 'user')) return undefined;
       return {
@@ -333,101 +317,8 @@ export function registerPluginRuntimeCommands(registry: CommandRegistry): void {
         ctx.print(lines.join('\n'));
         return;
       }
-      if (sub === 'trust') {
-        const name = args[1];
-        const rawTier = args[2];
-        if (!name || !rawTier) {
-          ctx.print('Usage: /plugin trust <name> <untrusted|limited|trusted> [note]');
-          return;
-        }
-        if (rawTier !== 'untrusted' && rawTier !== 'limited' && rawTier !== 'trusted') {
-          ctx.print(`Error: Invalid trust tier '${rawTier}'. Must be: untrusted, limited, or trusted.`);
-          return;
-        }
-        const tier = rawTier as 'untrusted' | 'limited' | 'trusted';
-        // `--override` was the old retyped answer; the registry now asks once when the signature fails.
-        const userNote = args.slice(3).filter((word) => word !== '--override').join(' ');
-        let note = userNote || undefined;
-        const effect = TIER_EFFECT[tier];
-        const restartLine = async (restarting: Promise<{ ok: boolean; error?: string }> | undefined): Promise<string> => {
-          if (!restarting) return 'It applies when the plugin next starts.';
-          const restarted = await restarting;
-          return restarted.ok ? 'The running plugin was started again at the new tier.' : `The running plugin was not restarted: ${restarted.error}`;
-        };
-        if (tier === 'trusted') {
-          const sigResult = pluginManager.trustSigned(name);
-          if (sigResult.ok) {
-            ctx.print(`Plugin '${name}' elevated to 'trusted' via signed manifest${sigResult.fingerprint ? ` (fingerprint: ${sigResult.fingerprint})` : ''}: ${effect}\n${await restartLine(sigResult.restarting)}`);
-            return;
-          }
-          note = `owner override after failed signature check (${sigResult.error})${userNote ? `; ${userNote}` : ''}`;
-        }
-        const result = pluginManager.trust(name, tier, note);
-        ctx.print(result.ok
-          ? `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(result.restarting)}`
-          : `Error: ${result.error}`);
-        return;
-      }
-      if (sub === 'trust-key') {
-        const name = args[1];
-        const keyPath = args[2];
-        if (!name || !keyPath) { ctx.print('Usage: /plugin trust-key <name> <publisher-public-key.pem>'); return; }
-        let pem: string;
-        try { pem = readFileSync(resolve(keyPath), 'utf-8'); } catch (error) {
-          ctx.print(`Error: could not read ${keyPath}: ${error instanceof Error ? error.message : String(error)}. Give the path of the publisher's Ed25519 public key file.`);
-          return;
-        }
-        const saved = pluginManager.setPublisherKey(name, pem);
-        if (!saved.ok) { ctx.print(`Error: ${saved.error}`); return; }
-        const check = pluginManager.verify(name);
-        ctx.print(`Publisher key saved for '${name}'. ${check.valid
-          ? `Its manifest signature verifies with it; /plugin trust ${name} trusted now records the signed grant.`
-          : `Its manifest signature does not verify with it (${check.reason ?? 'unknown reason'}); the tier is unchanged.`}`);
-        return;
-      }
-      if (sub === 'verify') {
-        const name = args[1];
-        if (!name) { ctx.print('Usage: /plugin verify <name>'); return; }
-        const result = pluginManager.verify(name);
-        if (!result.ok && result.reason?.includes('not found')) {
-          ctx.print(`Error: ${result.reason}`);
-          return;
-        }
-        ctx.print(result.valid
-          ? `Plugin '${name}' manifest signature is VALID.${result.fingerprint ? `\nFingerprint: ${result.fingerprint}` : ''}`
-          : `Plugin '${name}' manifest signature is INVALID.\nReason: ${result.reason ?? 'Unknown'}`);
-        return;
-      }
-      if (sub === 'capabilities') {
-        const name = args[1];
-        if (!name) { ctx.print('Usage: /plugin capabilities <name>'); return; }
-        const info = pluginManager.capabilities(name);
-        if (!info) {
-          ctx.print(`Error: Plugin '${name}' not found.`);
-          return;
-        }
-        const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${TIER_EFFECT[info.tier]})`, '', `Declared capabilities (${info.requested.length}):`];
-        if (info.requested.length === 0) lines.push('  (none: it may register commands and gateway methods only)');
-        else {
-          for (const cap of info.requested) {
-            const tag = info.blocked.includes(cap)
-              ? (info.highRisk.includes(cap) ? '[withheld: needs trusted]' : '[withheld: needs limited]')
-              : info.highRisk.includes(cap) ? '[granted, high-risk]' : '[granted]';
-            lines.push(`  ${cap.padEnd(32)} ${tag}`);
-          }
-        }
-        const withheldHighRisk = info.blocked.filter((cap) => info.highRisk.includes(cap));
-        if (withheldHighRisk.length > 0) {
-          lines.push('');
-          lines.push(`It declares ${withheldHighRisk.join(', ')}, which needs the trusted tier, so it does not start.`);
-          lines.push(`Use /plugin trust ${name} trusted to allow it, or remove the capability from its manifest.`);
-        } else if (info.blocked.length > 0) {
-          lines.push('');
-          lines.push(`Its registrations of ${info.blocked.join(', ')} are refused at this tier; /plugin trust ${name} limited allows them.`);
-        }
-        ctx.print(lines.join('\n'));
-        return;
-      }
+      // trust, trust-key, verify, capabilities: the same lines the agent app's /plugin runs.
+      if (await runPluginTrustSubcommand(pluginManager, args, (text) => ctx.print(text))) return;
       if (sub === 'quarantine') {
         const name = args[1];
         const action = args[2] ?? 'add';

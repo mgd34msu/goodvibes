@@ -1,5 +1,5 @@
 import { createPublicKey } from 'node:crypto';
-import { captureFileIdentities, captureRevisionReadSource } from '../security/read-source.js';
+import { captureFileIdentities, captureRevisionReadSource, fileIdentity } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { resolve, sep } from 'node:path';
@@ -93,11 +93,33 @@ export interface PluginManagerObserver {
   getQuarantineRecord(name: string): Readonly<QuarantineRecord> | undefined;
 }
 
+const TRUST_TIERS: ReadonlySet<string> = new Set(['untrusted', 'limited', 'trusted']);
+
+/** The shared trust file's records; an entry that is not a trust record is dropped (that plugin is untrusted). */
+function readTrustRecords(raw: unknown): Record<string, PluginTrustRecord> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('plugin trust file is not a JSON object');
+  const records: Record<string, PluginTrustRecord> = {};
+  for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue;
+    const record = value as Partial<PluginTrustRecord>;
+    if (record.pluginName !== name || typeof record.tier !== 'string' || !TRUST_TIERS.has(record.tier) || typeof record.updatedAt !== 'number') continue;
+    records[name] = record as PluginTrustRecord;
+  }
+  return records;
+}
+
 const DEFAULT_STATE: PluginState = { enabled: {}, enabledDirs: {}, config: {}, trust: {}, quarantine: {}, publisherKeys: {} };
 
 export interface PluginManagerOptions {
   readonly pathOptions: PluginPathOptions;
   readonly stateFilePath?: string | undefined;
+  /**
+   * Where trust tiers live when every app on this machine shares them
+   * (`~/.goodvibes/plugin-trust.json`): a tier set in one app applies in the
+   * others the next time they start the plugin. Without it, tiers are kept in
+   * this manager's own state file.
+   */
+  readonly trustFilePath?: string | undefined;
   /**
    * Receives the plugin lifecycle events (loading, loaded, active, error,
    * unloading, disabled) that the runtime store, automation triggers and
@@ -170,7 +192,9 @@ export class PluginManager {
 
   captureReadSource(): () => void {
     const revision = captureRevisionReadSource('plugin list', () => this.readRevision, () => !this.closed && this.operations.size === 0);
-    const files = captureFileIdentities('plugin list', [...getPluginDirectories(this.pathOptions), this.stateFilePath]);
+    const files = captureFileIdentities('plugin list', [
+      ...getPluginDirectories(this.pathOptions), this.stateFilePath, ...(this.trustFilePath ? [this.trustFilePath] : []),
+    ]);
     return () => { revision(); files(); };
   }
   private plugins = new Map<string, LoadedPlugin>();
@@ -190,8 +214,11 @@ export class PluginManager {
   /** Counts calls into loaded plugins so a reload can drain them first. */
   private inFlight = new PluginInFlightTracker();
 
-  /** Trust store, manages tier records for all plugins. */
-  private readonly trustStore = new PluginTrustStore();
+  /** Trust store, manages tier records for all plugins. Replaced when the shared trust file changes. */
+  private trustStore = new PluginTrustStore();
+  private readonly trustFilePath: string | undefined;
+  /** Identity of the shared trust file when it was last read; a different one means another app changed it. */
+  private trustFileIdentity: string | undefined;
   private readonly subscribers = new Set<() => void>();
   private readonly pathOptions: PluginPathOptions;
   private readonly stateFilePath: string;
@@ -206,6 +233,7 @@ export class PluginManager {
       throw new Error('PluginManager requires an explicit stateFilePath.');
     }
     this.stateFilePath = options.stateFilePath;
+    this.trustFilePath = options.trustFilePath;
   }
 
   /**
@@ -215,8 +243,8 @@ export class PluginManager {
   init(deps: PluginLoaderDeps): Promise<void> {
     return this.ownOperation(async () => {
       if (deps.inFlight) this.inFlight = deps.inFlight;
-      // Each start reads the plugin's tier from this manager's trust store.
-      this.deps = { ...deps, inFlight: this.inFlight, trustTier: (pluginName) => this.trustStore.getTier(pluginName) };
+      // Each start reads the plugin's current tier, including one another app set since.
+      this.deps = { ...deps, inFlight: this.inFlight, trustTier: (pluginName) => this.currentTrust().getTier(pluginName) };
       this.loadState();
       await this.loadEnabledPlugins();
     });
@@ -225,6 +253,7 @@ export class PluginManager {
   /** Returns status for all discovered plugins (enabled or not). */
   list(): PluginStatus[] {
     const discovered = this.discoverPlugins();
+    const trust = this.currentTrust();
     return discovered.map((d) => {
       const loaded = this.plugins.get(d.manifest.name);
       return {
@@ -234,7 +263,7 @@ export class PluginManager {
         author: d.manifest.author,
         enabled: this.isEnabled(d.manifest.name),
         active: loaded?.active ?? false,
-        trustTier: this.trustStore.getTier(d.manifest.name),
+        trustTier: trust.getTier(d.manifest.name),
         quarantined: this.isQuarantined(d.manifest.name),
       };
     });
@@ -247,7 +276,7 @@ export class PluginManager {
   }
 
   getTrustRecord(name: string): Readonly<PluginTrustRecord> | undefined {
-    return this.trustStore.getRecord(name);
+    return this.currentTrust().getRecord(name);
   }
 
   getQuarantineRecord(name: string): Readonly<QuarantineRecord> | undefined {
@@ -289,7 +318,7 @@ export class PluginManager {
     // Build the record off to the side and publish it only once it is on disk,
     // so a refused write leaves the live tier as it was.
     const record = new PluginTrustStore().setTier(name, tier, { note });
-    const failure = this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
+    const failure = this.saveTrustRecord(name, record);
     if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
     this.trustStore.importRecords({ [name]: record });
     logger.info(`[plugins] ${name}: trust tier set to '${tier}'`);
@@ -323,7 +352,7 @@ export class PluginManager {
       return { ok: false, error: result.reason };
     }
 
-    const failure = this.commitState(() => { this.state.trust[name] = result.record; }, this.undoTrust(name));
+    const failure = this.saveTrustRecord(name, result.record);
     if (failure) return { ok: false, error: `Trust tier for '${name}' was not saved, ${failure}` };
     this.trustStore.importRecords({ [name]: result.record });
     this.notifySubscribers();
@@ -398,7 +427,7 @@ export class PluginManager {
     }
 
     const requested = declaredPluginCapabilities(discovered.manifest) as PluginCapability[];
-    const tier = this.trustStore.getTier(name);
+    const tier = this.currentTrust().getTier(name);
     const highRisk = requested.filter((c) => isHighRiskCapability(c));
     const safe = requested.filter((c) => !isHighRiskCapability(c));
     const grant = resolvePluginGrant(name, discovered.manifest, tier);
@@ -936,13 +965,84 @@ export class PluginManager {
         this.state.trust = parsed.trust ?? {};
         this.state.quarantine = readQuarantineRecords(parsed.quarantine);
         this.state.publisherKeys = parsed.publisherKeys ?? {};
-        if (Object.keys(this.state.trust).length > 0) {
-          this.trustStore.importRecords(this.state.trust);
-        }
       }
     } catch (err) {
       logger.warn(`[plugins] Could not load state: ${summarizeError(err)}`);
     }
+    this.loadTrust();
+  }
+
+  /**
+   * Loads the trust tiers. With a shared trust file, a tier this app saved in
+   * its own state file before the shared file existed is carried into the
+   * shared file once (the newer decision wins) and dropped from this app's file.
+   */
+  private loadTrust(): void {
+    const own = this.state.trust;
+    const path = this.trustFilePath;
+    if (!path) {
+      if (Object.keys(own).length > 0) this.trustStore.importRecords(own);
+      return;
+    }
+    this.refreshSharedTrust();
+    if (Object.keys(own).length === 0) return;
+    const carried = Object.fromEntries(Object.entries(own)
+      .filter(([name, record]) => (this.trustStore.getRecord(name)?.updatedAt ?? Number.NEGATIVE_INFINITY) < record.updatedAt));
+    if (Object.keys(carried).length > 0) {
+      try {
+        writeJsonFileAtomic(path, { ...this.trustStore.exportRecords(), ...carried }, { trailingNewline: false });
+      } catch (err) {
+        // The shared file could not take them: use them in this app for now and keep them in its file.
+        logger.warn(`[plugins] Could not move trust tiers into ${path}: ${summarizeError(err)}`);
+        this.trustStore.importRecords(carried);
+        return;
+      }
+      this.trustFileIdentity = undefined;
+      this.refreshSharedTrust();
+    }
+    this.state.trust = {};
+    this.saveState();
+  }
+
+  /** The trust tiers as they stand now: the shared file is read again only when it changed (one stat). */
+  private currentTrust(): PluginTrustStore {
+    this.refreshSharedTrust();
+    return this.trustStore;
+  }
+
+  private refreshSharedTrust(): void {
+    const path = this.trustFilePath;
+    if (!path) return;
+    const identity = fileIdentity(path);
+    if (identity === this.trustFileIdentity) return;
+    this.trustFileIdentity = identity;
+    this.readRevision++;
+    const store = new PluginTrustStore();
+    try {
+      const records = readJsonFileOrQuarantine<Record<string, PluginTrustRecord>>(path, {
+        label: 'plugins/trust',
+        recovery: 'Every plugin returns to the untrusted tier until its trust is set again with /plugin trust.',
+        validate: readTrustRecords,
+      });
+      if (records) store.importRecords(records);
+    } catch (err) {
+      logger.warn(`[plugins] Could not read trust tiers from ${path}: ${summarizeError(err)}; every plugin is treated as untrusted`);
+    }
+    this.trustStore = store;
+  }
+
+  /** Saves one trust decision where tiers live; returns the reason when it could not be saved. */
+  private saveTrustRecord(name: string, record: PluginTrustRecord): string | undefined {
+    const path = this.trustFilePath;
+    if (!path) return this.commitState(() => { this.state.trust[name] = record; }, this.undoTrust(name));
+    this.refreshSharedTrust();
+    try {
+      writeJsonFileAtomic(path, { ...this.trustStore.exportRecords(), [name]: record }, { trailingNewline: false });
+    } catch (err) {
+      return summarizeError(err);
+    }
+    this.trustFileIdentity = fileIdentity(path);
+    return undefined;
   }
 
   /** Writes the state file; returns the reason when it could not be written. */

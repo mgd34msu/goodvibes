@@ -576,6 +576,8 @@ function composeClientRuntimeServices(
   const pluginManager = new PluginManager({
     pathOptions: { cwd: shellPaths.workingDirectory, homeDir: shellPaths.homeDirectory },
     stateFilePath: shellPaths.resolveUserPath(surfaceRoot, 'plugins.json'),
+    // One trust decision per plugin for every app on this machine.
+    trustFilePath: shellPaths.resolveUserPath('plugin-trust.json'),
     runtimeBus: options.runtimeBus,
     featureFlags,
   });

@@ -7,9 +7,11 @@
  *
  * The tier decides what a plugin may do, and the plugin loader enforces it
  * at every start (plugins/loader.ts, plugins/api.ts):
- *   - untrusted, panels and reading files only: its registrations of tools,
- *                providers and event hooks are refused
- *   - limited  , also the tools, providers and hooks its manifest declares
+ *   - untrusted, panels, commands and reading files only: its registrations
+ *                of tools, providers, event hooks, gateway methods, channels
+ *                and delivery strategies are refused
+ *   - limited  , also the tools, providers and hooks its manifest declares,
+ *                and gateway methods, channels and delivery strategies
  *   - trusted  , also the high-risk capabilities it declares (shell.exec,
  *                filesystem.write, network.outbound); a plugin that declares
  *                one is not started below this tier, because code running in
@@ -30,10 +32,12 @@ import { isHighRiskCapability } from './manifest.js';
  * The three trust tiers available to a plugin.
  *
  * - `untrusted`, Default for newly discovered plugins: may add panels and
- *   read files; it may not put tools before the model, receive prompts as a
- *   provider, or subscribe to runtime events.
+ *   commands and read files; it may not put tools before the model, receive
+ *   prompts as a provider, subscribe to runtime events, answer gateway calls,
+ *   or receive or deliver channel messages.
  * - `limited`  , Owner-reviewed plugin: the tools, providers and hooks its
- *   manifest declares. High-risk capabilities stay withheld.
+ *   manifest declares, and gateway methods, channels and delivery strategies.
+ *   High-risk capabilities stay withheld.
  * - `trusted`  , Everything it declares, high-risk included. Set by a verified
  *   signature or by the owner after one confirmation.
  */

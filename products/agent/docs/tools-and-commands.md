@@ -441,6 +441,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/payments` | Enter the payment card (masked input: number, expiry, CVV, cardholder name) and the billing/shipping addresses the daemon uses for purchases. Card material is stored at daemon scope and never rendered back; `/payments card remove <id> confirm` deletes a card from the daemon (`/payments status` shows each card's id); budgets, windows and CVV handling live in Settings > Payments. |
 | `/personas` | Manage Agent-local personas. |
 | `/pin` | Pin a model to the favorites list. |
+| `/plugin` | List plugins with their trust tier, and set what each one may register: `/plugin trust <name> <untrusted\|limited\|trusted>`, `/plugin capabilities <name>`, `/plugin verify <name>`, `/plugin trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. |
 | `/prev-error` | Jump to the previous error message in the conversation. |
 | `/principals` | Manage the connected host's cross-channel principal identity registry; unmapped senders show as "unknown principal" in session attribution. |
 | `/provider` | Switch provider or manage custom providers. |

@@ -80,8 +80,12 @@ capabilities its `manifest.json` declares (a plain list, or a bundle manifest's
 `capabilities.runtime`) are resolved against the plugin's current tier, a tool,
 provider or hook registration outside that grant fails the start, and a
 declared high-risk capability the tier withholds keeps the plugin from starting.
-An untrusted plugin gets `register.panel` and `filesystem.read`; `limited` adds
-the tools, providers and hooks it declares; `trusted` adds the high-risk ones.
+An untrusted plugin gets `register.panel` and `filesystem.read` (and may add
+commands); `limited` adds the tools, providers and hooks it declares, and lets
+it register gateway methods, channels and delivery strategies; `trusted` adds
+the high-risk ones. The tier is one decision per plugin shared by every app on
+the machine (`PluginManagerOptions.trustFilePath`, `~/.goodvibes/plugin-trust.json`):
+an app reads it again at each plugin start when the file changed.
 
 ```ts
 const guard = createBundleCapabilityGuard(manifest);

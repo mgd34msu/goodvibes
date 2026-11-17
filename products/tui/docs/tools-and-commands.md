@@ -675,17 +675,17 @@ Place plugin folders in `~/.goodvibes/plugins/` (global) or `.goodvibes/plugins/
 }
 ```
 
-`capabilities` declares what the plugin needs: `register.tool`, `register.provider`, `register.hook`, `register.panel`, `filesystem.read`, and the high-risk `filesystem.write`, `network.outbound`, `shell.exec`. A tool, provider or event-hook registration the manifest does not declare is refused and the plugin does not start, with the reason. Commands, gateway methods and channels need no declaration.
+`capabilities` declares what the plugin needs: `register.tool`, `register.provider`, `register.hook`, `register.panel`, `filesystem.read`, and the high-risk `filesystem.write`, `network.outbound`, `shell.exec`. A tool, provider or event-hook registration the manifest does not declare is refused and the plugin does not start, with the reason. Commands, gateway methods, channels and delivery strategies need no declaration, but an untrusted plugin may only register commands: a gateway method, channel or delivery strategy reaches the web UI, other devices or outside recipients, so it needs `limited`.
 
 The plugin's trust tier decides what of its declaration it gets, checked at every start:
 
 | Tier | Gets |
 | --- | --- |
-| `untrusted` (default) | panels and reading files; its tool, provider and hook registrations are refused |
-| `limited` | also the tools, providers and hooks it declares |
+| `untrusted` (default) | panels, commands and reading files; its tool, provider, hook, gateway-method, channel and delivery registrations are refused |
+| `limited` | also the tools, providers and hooks it declares, and gateway methods, channels and delivery strategies |
 | `trusted` | also the high-risk capabilities it declares |
 
-A plugin that declares a high-risk capability does not start below `trusted`: it runs inside this process, so a capability it was refused can only be withheld by not running it. `/plugin trust <name> <tier>` sets the tier and starts a running plugin again at once; `trusted` is set by a verified signature, or by your confirmation when the signature does not verify. The signature is checked against the publisher's Ed25519 public key, which you save once with `/plugin trust-key <name> <key.pem>`.
+A plugin that declares a high-risk capability does not start below `trusted`: it runs inside this process, so a capability it was refused can only be withheld by not running it. The tier is one decision per plugin for every GoodVibes app on this machine (kept in `~/.goodvibes/plugin-trust.json`): `/plugin trust <name> <tier>` sets it and starts a running plugin again at once, and the other apps (the agent app, the daemon) apply it the next time they start the plugin; `trusted` is set by a verified signature, or by your confirmation when the signature does not verify. The signature is checked against the publisher's Ed25519 public key, which you save once with `/plugin trust-key <name> <key.pem>`.
 
 ### Plugin API
 

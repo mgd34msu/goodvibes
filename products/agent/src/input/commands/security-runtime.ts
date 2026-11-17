@@ -1,4 +1,5 @@
 import { createSecurityCommand } from '@goodvibes-jev/engine/terminal-shell/security-command';
+import { createPluginTrustCommand } from '@goodvibes-jev/engine/terminal-shell/plugin-trust-command';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import { requireReadModels, requireSubscriptionManager, requireTokenAuditor } from './runtime-services.ts';
 
@@ -28,4 +29,6 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
       },
     ),
   );
+  // Plugins load here as in the terminal app, so their trust tier is set here too.
+  registry.register(createPluginTrustCommand<CommandContext>((ctx) => ctx.extensions.pluginManager));
 }

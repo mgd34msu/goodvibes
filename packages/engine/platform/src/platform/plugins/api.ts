@@ -204,8 +204,10 @@ export interface PluginAPIContext {
   bundleGuard?: BundleCapabilityGuard | undefined;
   /**
    * What this plugin's trust tier grants of what its manifest declares. A tool,
-   * provider or event-hook registration needs its capability in `granted`; one
-   * outside it fails the start with the reason and the command that changes it.
+   * provider or event-hook registration needs its capability in `granted`, and
+   * a gateway method, channel or delivery strategy needs a tier above
+   * `untrusted`; one outside it fails the start with the reason and the
+   * command that changes it.
    * Absent only for an embedding that loads a plugin without a trust owner.
    */
   grant?: PluginGrant | undefined;
@@ -226,6 +228,17 @@ function grantRefusal(pluginName: string, grant: PluginGrant, capability: 'regis
     : `plugin '${pluginName}' registered ${what} without declaring '${capability}' in its manifest; `
       + `add "${capability}" to "capabilities" in its manifest.json`);
 }
+
+/**
+ * Registrations that need no manifest declaration but reach past this app:
+ * an untrusted plugin may not make them, since each would put its code on a
+ * path other people or devices use.
+ */
+const OUTWARD_REGISTRATION: Readonly<Record<'gateway' | 'channel' | 'delivery', string>> = {
+  gateway: 'a gateway method: it would answer operator calls from the web UI and other devices',
+  channel: 'a channel: it would receive messages from outside',
+  delivery: 'a delivery strategy: it would carry replies out to their recipients',
+};
 
 /** The refusal shown when a plugin command was refused or threw. */
 function commandFailure(pluginName: string, cmdName: string, err: unknown): Refusal {
@@ -294,6 +307,11 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
     if (!surface) return;
     const declared = surface.kind === 'tool' ? guard.mayRegisterTool : guard.maySubscribeHook;
     if (!surface.names.some((name) => declared(name))) enforceBundleCapability(guard, surface.kind, surface.names[0]);
+  };
+  const permitOutward = (kind: keyof typeof OUTWARD_REGISTRATION): void => {
+    if (grant?.tier !== 'untrusted') return;
+    throw new Error(`plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and its trust tier is 'untrusted'. `
+      + `Run /plugin trust ${ctx.pluginName} limited, then enable or reload it`);
   };
   return {
     registerCommand(name, description, handler) {
@@ -446,6 +464,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerGatewayMethod(descriptor, handler) {
       return register(() => {
+        permitOutward('gateway');
         const methodId = descriptor.id.startsWith(`plugin.${ctx.pluginName}.`)
           ? descriptor.id
           : `plugin.${ctx.pluginName}.${descriptor.id}`;
@@ -471,6 +490,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerChannelPlugin(plugin) {
       return register(() => {
+        permitOutward('channel');
         if (guard) enforceBundleCapability(guard, 'channel', plugin.id);
         const registry = ctx.channelRegistry;
         const registered = owned.channel(plugin);
@@ -484,6 +504,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
 
     registerDeliveryStrategy(strategy, options = {}) {
       return register(() => {
+        permitOutward('delivery');
         if (guard) enforceBundleCapability(guard, 'channel', strategy.id);
         const router = ctx.channelDeliveryRouter;
         const registered = owned.delivery(strategy);

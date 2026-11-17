@@ -4,6 +4,7 @@ import { createDisposalScope } from './disposal-wiring.js';
 import { createRuntimeBaseServices } from './service-graph.js';
 import { createDaemonHandlerComposition } from './daemon-handler-composition.js';
 import { resumeContracts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { bridgeHeldForOwnerToInbox, processHeldForOwner } from '@goodvibes-jev/engine/platform/platform/permissions';
 import { createDaemonBootController, type DaemonBootController } from './boot-tasks.js';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
@@ -45,6 +46,8 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     observeNativeStartupPhase('handler-surfaces');
     const daemonHandlers = await createDaemonHandlerComposition({ ...handlerOptions, distributedRuntimeReady, ownerInbox: services.ownerInbox });
     scope.registry.add('daemon handler surfaces', daemonHandlers.close);
+    // Calls just-vibes holds in a hosted session wait in the owner inbox, answerable from every surface.
+    if (services.ownerInbox) scope.registry.add('held calls in the owner inbox', bridgeHeldForOwnerToInbox(processHeldForOwner(), services.ownerInbox));
     // Peers must be loaded before the device recovery sweep decides which
     // grants belong to a departed node, and a failed load must stop the boot
     // rather than leave every paired device looking gone.

@@ -75,7 +75,7 @@ import {
 import { parseNativeReaderCapabilities } from '../runtime/native-reader-compatibility.js';
 import { PeriodicUpdateLoop, type PeriodicCheckOutcome } from '../runtime/update-schedule.js';
 import { formatReceiptTime, type DaemonReceiptStore } from './receipts.js';
-import { CLIENT_COMPATIBILITY_FLOOR } from '../control-plane/client-compatibility.js';
+import { clientCompatibilityFloorFor } from '../control-plane/build-compatibility.js';
 import type { ServiceHandoverOutcome } from './service-handover.js';
 import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
 import { assertStagedClientReaderCompatible } from '../runtime/client-reader-update.js';
@@ -768,14 +768,15 @@ export class DaemonAutoUpdater {
     // One update, one receipt. A suite swap replaces installed files, while
     // every terminal UI and agent process already attached keeps running the
     // build it started with until restarted. Report those distinct outcomes.
-    // Clients below CLIENT_COMPATIBILITY_FLOOR additionally stop
-    // taking shared-session work (control-plane/client-compatibility.ts)
-    // rather than only being asked to restart.
+    // Once the new daemon answers, clients below ITS floor (derived from the
+    // version installed, not this running build) additionally stop taking
+    // shared-session work (control-plane/client-compatibility.ts) rather than
+    // only being asked to restart.
     this.recordReceipt(
       `updated from ${from} to ${to} at ${formatReceiptTime(now())}`
       + (suiteResult ? `; installed suite: ${suiteResult.programs.join(', ')}, browser/WebUI directories: ${suiteResult.directoryPaths.join(', ')};` + (suiteResult.preservedPaths.length ? ` retained earlier backups: ${suiteResult.preservedPaths.join(', ')};` : '') : '')
       + ` on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted;`
-      + ` anything older than ${CLIENT_COMPATIBILITY_FLOOR} has stopped taking shared-session work`,
+      + ` once the new daemon answers, any client older than ${clientCompatibilityFloorFor(to)} stops taking shared-session work until it is restarted`,
     );
 
     if (this.handoverCancelled) {

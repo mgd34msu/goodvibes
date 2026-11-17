@@ -228,6 +228,8 @@ export class DaemonServer {
   private processTaskAdapterUnsub: (() => void) | null = null;
   private tlsState: ResolvedInboundTlsContext | null = null;
   private approvalBrokerUnsubscribe: (() => void) | null = null;
+  /** Stops the surface registry publishing surface changes on the runtime bus; cleared on stop(). */
+  private surfaceEventsDetach: (() => void) | null = null;
   /** Unsubscribe from controlPlane config key watchers; cleared on stop(). */
   private _configWatchUnsub: (() => void) | null = null;
   /**
@@ -650,6 +652,8 @@ export class DaemonServer {
       runtimeStore: this.runtimeStore,
     });
     this.surfaceRegistry.attachRuntime(this.runtimeStore);
+    // Surface switches and capability changes are published, so a client of surfaces.list stays current without polling.
+    this.surfaceEventsDetach ??= this.surfaceRegistry.attachRuntimeBus(this.runtimeBus);
     this.deliveryManager.attachRuntime({
       runtimeBus: this.runtimeBus,
       runtimeStore: this.runtimeStore,
@@ -814,6 +818,8 @@ export class DaemonServer {
       }
       this.approvalBrokerUnsubscribe?.();
       this.approvalBrokerUnsubscribe = null;
+      this.surfaceEventsDetach?.();
+      this.surfaceEventsDetach = null;
       this.surfaceActionHelper.closeDelegatedTelegram();
       this.relayReachability?.stop();
       this.relayReachability = null;
@@ -1202,6 +1208,8 @@ export class DaemonServer {
     this.surfaceDeliveryHelper.abandonPendingSurfaceReplies('the daemon stopped before the reply was delivered');
     this.approvalBrokerUnsubscribe?.();
     this.approvalBrokerUnsubscribe = null;
+    this.surfaceEventsDetach?.();
+    this.surfaceEventsDetach = null;
     this.relayReachability?.stop();
     this.relayReachability = null;
     this.httpRouter.dispose();

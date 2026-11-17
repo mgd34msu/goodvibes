@@ -58,6 +58,8 @@ export function buildDaemonChannelHealthWatcher(
   const deliveryRouter = runtime.deliveryManager.getDeliveryRouter();
   const watcher = new ChannelHealthWatcher({
     listStatus: () => runtime.channelPlugins.listStatus(),
+    // A surface that starts working or failing is published, so a client of surfaces.list hears it without polling.
+    runtimeBus: runtime.runtimeBus,
     announce: async (alert, signal) => {
       const candidates = (await runtime.channelPlugins.listStatus()).filter((entry) =>
         entry.surface !== alert.surface

@@ -2377,6 +2377,11 @@
       "types": "./terminal-shell/dist/session-resume.d.ts",
       "import": "./terminal-shell/dist/session-resume.js"
     },
+    "./terminal-shell/session-crash-recovery": {
+      "bun": "./terminal-shell/src/session-crash-recovery.ts",
+      "types": "./terminal-shell/dist/session-crash-recovery.d.ts",
+      "import": "./terminal-shell/dist/session-crash-recovery.js"
+    },
     "./terminal-shell/runtime-context": {
       "bun": "./terminal-shell/src/runtime-context.ts",
       "types": "./terminal-shell/dist/runtime-context.d.ts",

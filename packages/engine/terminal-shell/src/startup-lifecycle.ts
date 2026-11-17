@@ -1,5 +1,7 @@
-import { readLastSessionPointer, writeLastSessionPointer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { confirmRecoveryRestore, readLastSessionPointer, writeLastSessionPointer } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { resumeSessionCore, type SessionResumeDeps } from './session-resume.js';
+import { whenCrashSnapshotFound } from './session-crash-offer.js';
+import { restoreCrashSnapshot, type CrashRecoveryReport } from './session-crash-recovery.js';
 
 /** Fatal diagnostics are independent: failure of one sink cannot suppress another or the exit. */
 export function reportStartupFailure(
@@ -61,24 +63,56 @@ export function resumeSessionAndRender<Context>(
 
 /** Headless startup must restore the selected transcript before submitting a new
  * prompt. A missing requested conversation is an error, never a fresh retry.
+ *
+ * A resumed session with a crash snapshot newer than its saved copy (a run or
+ * terminal killed inside a turn) is restored from the snapshot before the first
+ * request, without asking: the run's own `--resume` / `--continue` / `--session`
+ * is the ask, and nobody is there to answer another. The report says what came
+ * back and what did not. A run without one of those flags restores nothing.
  */
 export async function restoreHeadlessSession(
   flags: { readonly continueLast?: boolean | undefined; readonly resume?: string | undefined; readonly session?: string | undefined },
   ports: SessionResumeDeps & { readonly surface: NonNullable<SessionResumeDeps['surface']> },
   signal: AbortSignal,
-): Promise<void> {
+): Promise<CrashRecoveryReport | undefined> {
   signal.throwIfAborted();
   const named = flags.session ?? (flags.resume !== 'latest' ? flags.resume : undefined);
   const requested = named !== undefined || flags.continueLast === true || flags.resume === 'latest';
-  if (!requested) return;
+  if (!requested) return undefined;
   const target = named ?? readLastSessionPointer({ surface: ports.surface });
   if (!target) throw new Error('No saved conversation is available to resume. Inspect sessions before submitting a new request.');
   signal.throwIfAborted();
-  // Interactive resume handlers present errors and may return after a declined
-  // modal. Headless callers require the actual restore to succeed before work.
-  await resumeSessionCore(target, { ...ports,
-    canResume: () => !signal.aborted && ports.canResume?.() !== false,
+  // Filled by the resume routine when the session has a newer crash snapshot.
+  const recovery: { report?: CrashRecoveryReport } = {};
+  const stopRecovering = whenCrashSnapshotFound(ports.conversation, ({ info }) => {
+    const report = restoreCrashSnapshot({
+      surface: ports.surface,
+      info,
+      sessionManager: ports.sessionManager,
+      runtime: ports.runtime,
+      conversation: ports.conversation,
+      // The run was started to resume this session; that flag is the answer.
+      confirmation: confirmRecoveryRestore(true)!,
+      hydrateSessionUsage: ports.hydrateSessionUsage,
+    });
+    recovery.report = report;
+    return report.applied ? 'applied' : 'declined';
   });
+  try {
+    // Interactive resume handlers present errors and may return after a declined
+    // modal. Headless callers require the actual restore to succeed before work.
+    await resumeSessionCore(target, { ...ports,
+      canResume: () => !signal.aborted && ports.canResume?.() !== false,
+    });
+  } catch (error) {
+    // A session whose only copy was the snapshot fails to open when the snapshot does not apply; say why.
+    const report = recovery.report;
+    if (report && !report.applied && error instanceof Error) error.message = `${error.message} ${report.lost.join(' ')}`;
+    throw error;
+  } finally {
+    stopRecovering();
+  }
   signal.throwIfAborted();
   writeLastSessionPointer(target, { surface: ports.surface });
+  return recovery.report;
 }

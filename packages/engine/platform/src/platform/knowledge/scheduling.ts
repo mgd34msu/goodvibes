@@ -8,7 +8,7 @@ import { emitKnowledgeJobCompleted, emitKnowledgeJobFailed, emitKnowledgeJobQueu
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { isPidAlive } from '../runtime/session-liveness-marker.js';
+import { pidIsAlive } from '../power/child-hygiene.js';
 import { tryAcquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 
 /** The refusal for a job id the scheduler does not know; the daemon answers it 404. */
@@ -478,7 +478,7 @@ export class KnowledgeScheduleService {
       if (owner?.instanceId === this.owner.instanceId) continue;
       const age = now - Math.max(run.requestedAt, run.startedAt ?? 0);
       if (owner) {
-        if ((owner.pid === process.pid || isPidAlive(owner.pid)) && age < INTERRUPTED_RUN_MIN_AGE_MS) continue;
+        if ((owner.pid === process.pid || pidIsAlive(owner.pid)) && age < INTERRUPTED_RUN_MIN_AGE_MS) continue;
       } else {
         if (run.requestedAt >= this.startedAt) continue;
         if (age < INTERRUPTED_RUN_MIN_AGE_MS) continue;

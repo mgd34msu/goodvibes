@@ -28,6 +28,29 @@ export interface NativeHeadlessTurnResult {
     /** Set on failures: `outcome-unknown` means the host may have acted, `unavailable` that nothing was sent. */
     readonly kind?: 'outcome-unknown' | 'unavailable' | undefined;
     readonly cause?: NativeHeadlessFailureCause | undefined;
+    /** Set when the resumed session was restored from a crash snapshot before the first request. */
+    readonly recovery?: HeadlessSessionRecovery | undefined;
+}
+/** What a resumed headless run restored from its session's crash snapshot, as the final frame and the `SESSION_RECOVERED` frame carry it. */
+export interface HeadlessSessionRecovery {
+    readonly sessionId: string;
+    readonly applied: boolean;
+    /** Why nothing was applied: `no-snapshot`, `unusable-snapshot` or `apply-failed`. */
+    readonly refusal?: string | undefined;
+    /** When the snapshot was written, ISO 8601. */
+    readonly snapshotAt: string;
+    /** True while the snapshot file is still on disk. */
+    readonly snapshotKept: boolean;
+    readonly messages: number;
+    readonly turns: number;
+    /** The turn the process stopped inside: its prompt (masked, bounded), tool results it had, tool calls recorded as interrupted. */
+    readonly interruptedTurn?: {
+        readonly prompt: string;
+        readonly toolResults: number;
+        readonly interruptedToolCalls: readonly { readonly callId: string; readonly tool: string }[];
+    } | undefined;
+    /** What could not be brought back, one line each. */
+    readonly lost: readonly string[];
 }
 export type NativeHeadlessFailureCause = NativeIntakeFailureCause;
 export function nativeHeadlessFailureCause(error: unknown): NativeHeadlessFailureCause {

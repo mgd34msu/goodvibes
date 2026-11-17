@@ -12,6 +12,8 @@ import { createAgentNativeHostSelection } from '../runtime/agent-native-host-sel
 import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
+import { announceHeadlessRecovery } from '@goodvibes-jev/engine/terminal-shell/headless-command';
+import { keepHeadlessSessionRecoverable } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 
 /**
  * A run that could not start (for example `--resume` named a session that is not
@@ -55,9 +57,29 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
         async runTurn(state, signal) {
           if (signal.aborted) return { exitCode: 130, response: '', stopReason: 'cancelled' };
           const ctx = await bootstrapRuntime(process.stderr, { configManager, workingDir: workingDirectory, homeDirectory });
+          const sessionSnapshot = (): SessionSnapshot => {
+            const messages = ctx.conversation.getMessageSnapshot();
+            return {
+              messages: conversationMessagesAsSessionRecords(messages),
+              timestamp: Date.now(),
+              title: ctx.conversation.title,
+              ...buildPersistedSessionContextFromFacts(messages, ctx.conversation.getTitleSource(), {
+                pendingApprovals: ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
+              }),
+            };
+          };
+          // The crash snapshot at each turn moment, as the Agent writes it, so a killed run can be resumed.
+          const recoverable = keepHeadlessSessionRecoverable({
+            bus: ctx.runtimeBus,
+            surface: ctx.services.surface,
+            runtime: ctx.runtime,
+            snapshot: sessionSnapshot,
+            title: () => ctx.conversation.title ?? '',
+            writeSessionPointer: (sessionId) => ctx._writeLastSessionPointer(sessionId),
+          });
           let sessionReady = false;
           return settleHeadlessTurn(async () => {
-            await restoreHeadlessSession(cli.flags, {
+            const recovered = await restoreHeadlessSession(cli.flags, {
               surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
               conversation: ctx.conversation, runtime: ctx.runtime,
               // Called as a method: the provider API's selectModel reads `this`.
@@ -68,20 +90,18 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
               },
               canResume: () => !ctx.commandContext.isGenerating?.(),
             }, signal);
+            const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
             sessionReady = true;
-            return executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, limits);
+            const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, limits);
+            return recovery ? { ...result, recovery } : result;
           }, {
-            shutdown: () => {
-              const messages = ctx.conversation.getMessageSnapshot();
-              const snapshot: SessionSnapshot = {
-                messages: conversationMessagesAsSessionRecords(messages),
-                timestamp: Date.now(),
-                title: ctx.conversation.title,
-                ...buildPersistedSessionContextFromFacts(messages, ctx.conversation.getTitleSource(), {
-                  pendingApprovals: ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
-                }),
-              };
-              return ctx.shutdown(snapshot);
+            shutdown: async () => {
+              try {
+                await ctx.shutdown(sessionSnapshot());
+                recoverable.saved();
+              } finally {
+                recoverable.dispose();
+              }
             },
             sessionReady: () => sessionReady,
             discardUnusedSession: () => {

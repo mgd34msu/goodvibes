@@ -16,12 +16,18 @@
  *     silent auto-restore path here, and this module never loads a snapshot
  *     just to look at it, `checkRecoveryFile` reports, and only an explicit
  *     yes reaches the code that opens the file.
- *   - The platform's `applyRecoverySnapshot` is what runs on that yes, and it will
+ *   - The shared restore (terminal-shell session-crash-recovery.ts, over the
+ *     platform's `applyRecoverySnapshot`) is what runs on that yes, and it will
  *     not run without the confirmation token this flow hands it. It reads,
  *     retires and applies in one operation, load-then-delete: the file is
  *     retired only after a successful load, so a failed read can never destroy
  *     state that was never actually recovered, and a successful load can
- *     never leave a restored snapshot behind to be offered again.
+ *     never leave a restored snapshot behind to be offered again. A turn the
+ *     snapshot ends inside is recorded as interrupted, never re-run.
+ *   - The same flow runs at start-up (the newest snapshot) and whenever a
+ *     session is opened later by any path (`/load`, `/sessions`, the picker,
+ *     `/session resume`, `--continue`, `--resume`): the resume routine finds a
+ *     snapshot newer than that session's saved copy and this flow offers it.
  *   - Every fact shown is one we actually have (session id, snapshot age,
  *     title when the snapshot carries one, byte size when the file is where
  *     we can stat it). Nothing is estimated to fill the sentence out.
@@ -50,7 +56,7 @@
  */
 import { statSync } from 'node:fs';
 import { checkRecoveryFile, checkRecoveryForSession, removeRecoveryPoint } from '@/runtime/index.ts';
-import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import type { RecoveryFileInfo, SessionSurface } from '@/runtime/index.ts';
 import type { SelectionItem, SelectionResult } from '../input/selection-modal.ts';
 
@@ -79,13 +85,13 @@ export interface RecoveryPromptDeps {
    * what happened. Supplied by the startup wiring so this module never reaches
    * into conversation state itself.
    *
-   * It takes a session id, not a loaded snapshot: reading the snapshot and
-   * retiring it are one operation in the platform's `applyRecoverySnapshot`, so this
+   * It takes the offered snapshot's facts, not a loaded snapshot: reading the
+   * snapshot and retiring it are one operation in the shared restore, so this
    * flow cannot load one and then leave it behind. That is why "could not read
    * it" arrives here as a refusal in the result rather than as a separate
    * consume step this module runs first.
    */
-  readonly applySnapshot: (payload: { readonly sessionId: string }) => ApplyRecoverySnapshotResult;
+  readonly applySnapshot: (info: RecoveryFileInfo) => CrashRecoveryReport;
   /** One-line honest receipt into the transcript. */
   readonly receipt: (line: string) => void;
   readonly render: () => void;
@@ -240,9 +246,13 @@ function defaultSnapshotBytes(surface: SessionSurface, sessionId: string): numbe
  */
 const answeredThisRun = new Set<string>();
 
+/** Snapshots on screen right now; the start-up offer and a resume can find the same one, and it is asked once. */
+const offeringNow = new Set<string>();
+
 /** Test seam: a fresh process has no answered offers. */
 export function resetAnsweredRecoveryOffersForTest(): void {
   answeredThisRun.clear();
+  offeringNow.clear();
 }
 
 /** The snapshot to ask about: the targeted session's, or the newest one no running terminal holds. */
@@ -259,15 +269,20 @@ function findOfferableSnapshot(deps: RecoveryPromptDeps): RecoveryFileInfo | nul
  */
 export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<RecoveryPromptOutcome> {
   let shown = false;
+  let claimed: string | undefined;
   try {
     const info = findOfferableSnapshot(deps);
     if (!info) return 'none';
     // Already answered about this snapshot earlier in this same run (the
-    // targeted --continue offer and the general startup offer can both find
-    // it). The earlier answer stands; don't ask twice.
+    // start-up offer and a resume of its session can both find it). The
+    // earlier answer stands; don't ask twice.
     if (answeredThisRun.has(info.sessionId)) return 'kept';
+    // Already on screen: the question being asked covers this one.
+    if (offeringNow.has(info.sessionId)) return 'none';
     const open = deps.openSelection;
     if (!open) return 'none';
+    claimed = info.sessionId;
+    offeringNow.add(claimed);
 
     const nowMs = deps.now?.() ?? Date.now();
     const bytes = deps.snapshotBytes ? deps.snapshotBytes(info.sessionId) : defaultSnapshotBytes(deps.surface, info.sessionId);
@@ -278,7 +293,7 @@ export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<R
     const answer = await ask(open, RECOVERY_OFFER_TITLE, buildRecoveryOfferItems(facts));
 
     if (answer === 'resume') {
-      const result = deps.applySnapshot({ sessionId: info.sessionId });
+      const result = deps.applySnapshot(info);
       if (!result.applied) {
         // Each refusal is a different fact and gets its own sentence, because
         // "left on disk, try again next launch" and "the file was damaged and
@@ -293,7 +308,7 @@ export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<R
         deps.render();
         return 'resume-failed';
       }
-      deps.receipt(`Recovery snapshot restored: ${result.messageCount} message(s) from session ${info.sessionId}. The recovery point has been retired.`);
+      deps.receipt(describeCrashRecovery(result));
       deps.render();
       return 'resumed';
     }
@@ -324,6 +339,7 @@ export async function offerRecoverySnapshot(deps: RecoveryPromptDeps): Promise<R
     // snapshot untouched and the boot unharmed.
     return 'none';
   } finally {
+    if (claimed !== undefined) offeringNow.delete(claimed);
     if (shown) deps.typeahead?.onFlowSettled();
   }
 }

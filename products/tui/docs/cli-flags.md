@@ -329,6 +329,20 @@ goodvibes auth rotate-password alice --password-stdin
 
 `goodvibes run` (alias `exec`, or `--prompt`/`--print` with no command) runs one turn without the terminal UI and exits.
 
+### Crash recovery
+
+Every `run` writes its session's crash snapshot at the same moments the TUI does: when the prompt is accepted and after each batch of tool calls. That is one atomic write (temp file and rename) of the whole conversation each time, the size of the session's messages as JSON lines; the first one also records the session as the last one, so `--continue` reaches a run that was killed. When the run's session is saved at the end, the snapshot is removed. While the run has its session open it holds the session's lock, the same one an open terminal holds; the operating system releases it if the run is killed.
+
+`run --continue`, `run --resume [id]` or `run --session <id>` on a session with a crash snapshot newer than its saved copy restores the snapshot before the first request, without asking (the flag is the ask). The new prompt then continues from the recovered conversation; the interrupted turn is not run again:
+
+- its prompt is kept and marked cancelled, as Esc marks a cancelled prompt;
+- the tool results it had already obtained are kept as they were;
+- a tool call the model had made whose result never reached disk gets a result that says it was interrupted and that its effect is unknown (outcome `cancelled`), never a success.
+
+A session killed before its first save has only the snapshot, and resuming it restores that. If the snapshot cannot be applied, the run continues from the saved copy and says why (a session with no saved copy fails with that reason instead). A snapshot whose session another running terminal has open is that terminal's live state and is left alone. A run without one of these flags restores nothing and offers nothing; a snapshot nobody resumes is removed by the retention sweep after `atRest.retentionMaxAgeDays` (30 days by default), with the other crash snapshots.
+
+The run says what it recovered: in text mode one `[Recovery]` line on stderr before the answer, in `stream-json` a `SESSION_RECOVERED` frame before the first model frame, and in both JSON formats the final frame's `recovery` field. Exit codes do not change.
+
 ### Exit codes
 
 All programs in one table: [Exit codes](../../../docs/exit-codes.md).
@@ -361,6 +375,7 @@ The GitHub Action passes `--timeout 30m --max-turns 50` to a prompt run unless i
 | `kind` | no | On failures: `outcome-unknown` (the host may have acted) or `unavailable` (nothing was sent). |
 | `cause` | no | With `kind`, a non-secret reason code: `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed`, `unknown`. |
 | `native` | no | The native intake state: `status`, `message`, `request`, `result`, `execution`. |
+| `recovery` | no | Present when the run restored its session from a crash snapshot: `sessionId`, `applied`, `refusal` (when not applied: `no-snapshot`, `unusable-snapshot`, `apply-failed`), `snapshotAt` (ISO time the snapshot was written), `snapshotKept` (still on disk), `messages`, `turns` (prompts), `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults` already obtained, `interruptedToolCalls` as `{ callId, tool }`), `lost` (what could not be brought back, one sentence each). |
 
 ### Stream frames
 
@@ -384,6 +399,7 @@ Every `stream-json` line carries `schemaVersion` and `type`. Consumers should ig
 | `CONTRACT_ESCALATED` | `contractId`, `escalationId`, `scope`, `targetId`, `reason`, `question` | The contract is waiting on its owner. |
 | `CONTRACT_PASSED`, `CONTRACT_FAILED`, `CONTRACT_CANCELLED` | `contractId`; `criteriaMet`, `criteriaJudged`, or `reason` and `failureKind` | It ended. |
 | `USAGE` | `turnId`, `provider`, `model`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `costUsdCents` | Each model response. |
+| `SESSION_RECOVERED` | the `recovery` fields of the final frame | The resumed session was restored from a crash snapshot, before the first request. |
 
 Tool arguments are never included, and neither are agent task text, agent output or the contract's ask. Fields shown that are optional are omitted when unknown.
 

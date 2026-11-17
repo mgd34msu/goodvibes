@@ -32,8 +32,8 @@ import {
   buildCrashRecord,
   buildPersistedSessionContextFromFacts,
   CRASH_LOG_FILENAME,
+  closeSessionHere,
   crashRecordLine,
-  removeLivenessMarker,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
@@ -420,7 +420,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
     // daemon at the deadline does not mean the session was lost.
     if (!shutdownOk && ctx.sessionSaved?.()) shutdownOk = true;
     // Recovery is removed only after the durable save confirms success.
-    // Each finalizer is independent: a recovery or marker failure cannot skip
+    // Each finalizer is independent: a recovery or session-lock failure cannot skip
     // the log flush or process exit, and a logging failure cannot stop exit.
     if (shutdownOk) {
       bestEffort('recovery removal', () => deleteRecoveryFile({ surface: ctx.services.surface }, ctx.runtime.sessionId));
@@ -432,7 +432,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
           : 'exit before save completed: no recovery snapshot had been written yet\n');
       });
     }
-    bestEffort('liveness marker removal', () => removeLivenessMarker(ctx.services.surface, ctx.runtime.sessionId));
+    bestEffort('session lock release', () => closeSessionHere(ctx.services.surface, ctx.runtime.sessionId));
     bestEffort('activity log flush', flushActivityLogSync);
     process.exit(0);
   };

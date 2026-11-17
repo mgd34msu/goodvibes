@@ -11,6 +11,8 @@ import type { NativeHeadlessMode } from './native-headless-options.ts';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
+import { announceHeadlessRecovery } from '@goodvibes-jev/engine/terminal-shell/headless-command';
+import { keepHeadlessSessionRecoverable } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit', limits: HeadlessRunFlags = {}): Promise<number> {
   const credentialObservation = new OwnedSelectionObservation();
@@ -40,9 +42,23 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           homeDirectory,
           daemonHomeDirectory: resolveGoodVibesDaemonHome(homeDirectory),
         });
+        const sessionSnapshot = () => headlessSessionSnapshot(
+          ctx.conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> },
+          ctx.conversation.getTitleSource(),
+          ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
+        );
+        // The crash snapshot at each turn moment, as the TUI writes it, so a killed run can be resumed.
+        const recoverable = keepHeadlessSessionRecoverable({
+          bus: ctx.runtimeBus,
+          surface: ctx.services.surface,
+          runtime: ctx.runtime,
+          snapshot: sessionSnapshot,
+          title: () => ctx.conversation.title ?? '',
+          writeSessionPointer: (sessionId) => ctx._writeLastSessionPointer(sessionId),
+        });
         let sessionReady = false;
         return settleHeadlessTurn(async () => {
-          await restoreHeadlessSession(cli.flags, {
+          const recovered = await restoreHeadlessSession(cli.flags, {
             surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
             conversation: ctx.conversation, runtime: ctx.runtime,
             // Called as a method: the provider API's selectModel reads `this`.
@@ -53,16 +69,18 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
             },
             canResume: () => !ctx.commandContext.isGenerating?.(),
           }, signal);
+          const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
           sessionReady = true;
-          return executeHeadlessTurn(ctx, input, signal, cli.flags.outputFormat, limits);
+          const result = await executeHeadlessTurn(ctx, input, signal, cli.flags.outputFormat, limits);
+          return recovery ? { ...result, recovery } : result;
         }, {
-          shutdown: () => {
-            const snapshot = ctx.conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> };
-            return ctx.shutdown(headlessSessionSnapshot(
-              snapshot,
-              ctx.conversation.getTitleSource(),
-              ctx.uiServices.readModels.session.getSnapshot().pendingApproval ? 1 : 0,
-            ) as Parameters<typeof ctx.shutdown>[0]);
+          shutdown: async () => {
+            try {
+              await ctx.shutdown(sessionSnapshot() as Parameters<typeof ctx.shutdown>[0]);
+              recoverable.saved();
+            } finally {
+              recoverable.dispose();
+            }
           },
           sessionReady: () => sessionReady,
           discardUnusedSession: () => {

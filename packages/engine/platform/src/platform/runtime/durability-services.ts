@@ -20,9 +20,9 @@
  *    logDir, telemetryDir), omitting logDir/telemetryDir/home would silently
  *    skip the activity-log, telemetry-ledger, and recovery-snapshot stores.
  *  - Durability housekeeping: the crash-residue reclaim the retention janitor
- *    above does NOT cover, stale liveness markers, orphaned transcript
- *    journals, `.unrecognized` quarantine files, and anchor sidecars whose
- *    session is gone (see durability-housekeeping.ts). It runs at startup AND
+ *    above does NOT cover, lock files of sessions a crashed process left,
+ *    `.unrecognized` quarantine files, and anchor sidecars whose session is
+ *    gone (see durability-housekeeping.ts). It runs at startup AND
  *    on a repeating unref'd timer, because a long-lived process that only
  *    sweeps at boot never sweeps; the returned disposer stops that timer.
  *  - Live config-file watch: external edits to the settings file apply through
@@ -63,24 +63,12 @@ export interface DurabilityServicesInput {
   /** Where this product writes its telemetry ledger; default `<home>/.goodvibes/telemetry`. */
   readonly telemetryDir?: string | undefined;
   /**
-   * The session id this process is currently using, read at each sweep. When
-   * omitted the crash-residue reap still protects live artefacts through its
-   * age and liveness rules, this is the explicit belt-and-braces guard.
-   */
-  /**
    * Resolves the live session id, read fresh on every crash-residue sweep so
-   * the running session's own liveness marker and anchor sidecar are exempt
-   * from reaping.
+   * the running session's anchor sidecar is exempt from reaping (its session
+   * lock is held by this process, so the lock sweep cannot take it anyway).
    *
    * A getter, not a value: the id is reassigned in place when a recovery
    * snapshot is accepted, and this sweep repeats for the life of the process.
-   *
-   * Omitting it is not merely untidy. The journal reaper's other guard is the
-   * liveness marker, and that marker goes stale after 150 seconds, so a host
-   * that passes nothing here is trusting a heartbeat that a single long
-   * blocking turn can outrun, and an in-process sweep landing in that window
-   * would delete the journal of the session currently writing it. Passing this
-   * makes the exemption unconditional instead of timing-dependent.
    */
   readonly currentSessionId?: () => string | null;
 }
@@ -160,7 +148,7 @@ export function createDurabilityServices(input: DurabilityServicesInput): Durabi
     configGet: appendOnlyRetentionConfigGet,
   });
   appendOnlyRetentionScheduler.start();
-  // Crash-residue reclaim the sweep above does not cover (liveness markers,
+  // Crash-residue reclaim the sweep above does not cover (session lock files,
   // .unrecognized quarantine files, anchor
   // sidecars whose session file is gone). Runs once now and every few hours
   // after that; the timer is unref'd and the disposer stops it.

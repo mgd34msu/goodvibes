@@ -213,16 +213,23 @@ export function restoreCrashSnapshot(input: CrashRecoveryInput): CrashRecoveryRe
   // without them back in memory the next save rewrites the session without them.
   const branches = carriedBranches();
   const readable = branches ? readSavedBranches(sessionId, branches) : undefined;
+  let settledInMemory = true;
   if (settled.interrupted || readable) {
-    conversation.fromJSON({
-      messages: settled.messages,
-      title: conversation.title,
-      titleSource: conversation.getTitleSource(),
-      ...(readable && branches ? { branches: readable.branches, currentBranch: branches.currentBranch } : {}),
-    });
-    conversation.rebuildHistory();
+    try {
+      conversation.fromJSON({
+        messages: settled.messages,
+        title: conversation.title,
+        titleSource: conversation.getTitleSource(),
+        ...(readable && branches ? { branches: readable.branches, currentBranch: branches.currentBranch } : {}),
+      });
+      conversation.rebuildHistory();
+    } catch (error) {
+      settledInMemory = false;
+      logger.warn('[Recovery] Recording the interrupted turn or the side branches failed', { sessionId, error: summarizeError(error) });
+      lost.push('The interrupted turn and the side branches could not be added to the restored conversation; it holds the snapshot as it was.');
+    }
   }
-  if (readable) lost.push(...describeLeftOutBranches(readable.leftOut));
+  if (readable && settledInMemory) lost.push(...describeLeftOutBranches(readable.leftOut));
   if (settled.interrupted) {
     lost.push(`Anything after ${new Date(info.timestamp).toISOString()} was not on disk: model output still arriving then, and tool calls started after it, are not recovered.`);
   }
@@ -250,7 +257,7 @@ export function restoreCrashSnapshot(input: CrashRecoveryInput): CrashRecoveryRe
     snapshotAt: info.timestamp,
     messageCount: messages.length,
     turns: messages.filter((message) => message.role === 'user').length,
-    ...(settled.interrupted ? { interruptedTurn: settled.interrupted } : {}),
+    ...(settled.interrupted && settledInMemory ? { interruptedTurn: settled.interrupted } : {}),
     lost,
   };
 }

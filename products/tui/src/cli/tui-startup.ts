@@ -5,13 +5,9 @@ import type { SelectionItem } from '../input/selection-modal.ts';
 import type { WorkspaceRegistrationManager } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { hasResumableWizardProgress, readOnboardingCheckMarker, readWizardProgress } from '../runtime/onboarding/index.ts';
 import { startOnboardingFastPath } from '../runtime/onboarding/fast-path.ts';
-import { checkRecoveryForSession, readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
+import { readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { writeFatalLine } from '@goodvibes-jev/engine/platform/platform/daemon';
-import { offerRecoverySnapshot, type RecoveryTypeaheadHooks } from '../runtime/recovery-prompt.ts';
-import { buildRecoveryOfferWiring, type RecoveryOfferWiringInput } from '../runtime/recovery-offer-wiring.ts';
-import type { ConversationManager } from '../core/conversation.ts';
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { GoodVibesCliParseResult } from '@goodvibes-jev/engine/terminal-shell';
 import { openDeepLink, parseDeepLink } from '../input/commands/deep-link.ts';
 
@@ -21,107 +17,6 @@ export type TuiStartupShellPaths = Parameters<typeof readOnboardingCheckMarker>[
 };
 
 export type FirstOpenTrustLevel = 'trusted' | 'restricted';
-
-/**
- * What `resumeNamedSessionWithRecoveryCheck` needs to actually APPLY an
- * accepted crash-recovery snapshot, the same shape `buildRecoveryOfferWiring`
- * (runtime/recovery-offer-wiring.ts) takes, minus `surface` and
- * `commandContext` which this module already has in scope. Optional: a caller
- * that omits it (or a snapshot-free boot) gets exactly today's behavior,
- * straight resume from the durable store, no modal.
- */
-export interface TuiStartupRecoveryDeps {
-  readonly sessionManager: Pick<SessionManager, 'save'>;
-  readonly runtime: { sessionId: string; model: string; provider: string };
-  readonly conversation: ConversationManager;
-  readonly writeLastSessionPointer: (sessionId: string) => void;
-  readonly sessionSpine?: RecoveryOfferWiringInput['sessionSpine'];
-  readonly project?: string;
-  readonly receipt: (line: string) => void;
-  /** Holds typeahead out of the offer modal (see RecoveryPromptDeps.typeahead). */
-  readonly typeahead?: RecoveryTypeaheadHooks;
-}
-
-/**
- * resumeNamedSessionWithRecoveryCheck, the pre-resume guard for `--continue`
- * and the bare `--resume` (pointer) path.
- *
- * Resuming a named session straight from its durable store is exactly the
- * post-crash reflex that silently drops an autosave tail: if that session
- * also has a crash-recovery snapshot NEWER than its store, the snapshot (not
- * the shorter store copy) is the live state. `checkRecoveryForSession` is the
- * read-only probe for that; when it finds one, this routes through the same
- * ask-then-retire modal flow the general boot offer uses
- * (runtime/recovery-prompt.ts), scoped to this one session via
- * `targetSessionId`, never auto-applied.
- *
- *   - No live snapshot (or `recovery` deps not wired): straight resume, same
- *     as before this check existed.
- *   - Resume chosen: the snapshot is applied (via `buildRecoveryOfferWiring`'s
- *     `applySnapshot`, which rebinds the runtime session id and replays any
- *     journal tail) and the plain store resume is skipped, the snapshot IS
- *     the more complete copy.
- *   - "Not now" (or a dismissal, or a failed load): falls through to the
- *     plain store resume, after the follow-up Keep/Remove question the
- *     established flow always asks on decline.
- *
- * The modal opens synchronously, before the shell's first frame, like the
- * general boot offer (startRecoveryOffer in runtime/recovery-prompt.ts): the
- * first frame already carries the question, so the composer is never live
- * underneath it, and keys typed before it was painted are held out of it by
- * the typeahead gate (recovery.typeahead). This runs before the general
- * offer, so it still asks first.
- */
-async function resumeNamedSessionWithRecoveryCheck(options: {
-  readonly sessionId: string;
-  readonly surface: SessionSurface;
-  readonly commandRegistry: CommandRegistry;
-  readonly commandContext: CommandContext;
-  readonly render: () => void;
-  readonly recovery: TuiStartupRecoveryDeps | undefined;
-}): Promise<void> {
-  const { sessionId, surface, commandRegistry, commandContext, render, recovery } = options;
-  const plainResume = (): Promise<void> => commandRegistry.execute('session', ['resume', sessionId], commandContext).then(() => render());
-
-  if (!recovery) {
-    await plainResume();
-    return;
-  }
-
-  const info = checkRecoveryForSession(surface, sessionId);
-  if (!info) {
-    await plainResume();
-    return;
-  }
-
-  try {
-    const deps = buildRecoveryOfferWiring({
-      surface,
-      sessionManager: recovery.sessionManager,
-      runtime: recovery.runtime,
-      conversation: recovery.conversation,
-      commandContext,
-      writeLastSessionPointer: recovery.writeLastSessionPointer,
-      ...(recovery.sessionSpine ? { sessionSpine: recovery.sessionSpine } : {}),
-      ...(recovery.project !== undefined ? { project: recovery.project } : {}),
-      receipt: recovery.receipt,
-      render,
-      ...(recovery.typeahead ? { typeahead: recovery.typeahead } : {}),
-    });
-    const outcome = await offerRecoverySnapshot({ ...deps, targetSessionId: sessionId });
-    if (outcome !== 'resumed') {
-      await plainResume();
-    }
-  } catch {
-    // Best-effort by construction (mirrors offerRecoverySnapshot's own
-    // guarantee): a failure here must fall back to the plain resume rather
-    // than leave the boot with nothing resumed at all.
-    await plainResume().catch(() => {
-      // A failing plain resume here is no worse than the pre-existing
-      // behavior when session resume itself fails.
-    });
-  }
-}
 
 /**
  * decodeFirstOpenChoice, pure mapping from a chosen selection-item id (or
@@ -205,16 +100,8 @@ export function applyInitialTuiCliState(options: {
    */
   readonly surface: SessionSurface;
   readonly render: () => void;
-  /**
-   * Enables the crash-recovery check ahead of `--continue` / bare `--resume`
-   * (see `resumeNamedSessionWithRecoveryCheck` above). Omitted, the two flags
-   * resume straight from the durable store exactly as before this check
-   * existed, main.ts always wires this; only tests that don't care about
-   * recovery snapshots leave it out.
-   */
-  readonly continueRecovery?: TuiStartupRecoveryDeps;
 }): Promise<void> | undefined {
-  const { cli, input, commandRegistry, commandContext, shellPaths, surface, render, continueRecovery } = options;
+  const { cli, input, commandRegistry, commandContext, shellPaths, surface, render } = options;
   const globalOnboardingMarker = readOnboardingCheckMarker(shellPaths, 'user');
 
   // Registration self-records on every launch of an already-trusted
@@ -284,19 +171,12 @@ export function applyInitialTuiCliState(options: {
       return resumeSessionAndRender(commandRegistry, target, commandContext, render);
     }
   } else if (cli.flags.continueLast) {
-    // --continue: resume the last session tracked by the pointer file. Checked
-    // for a live crash-recovery snapshot first, see
-    // resumeNamedSessionWithRecoveryCheck's doc comment.
+    // --continue: resume the last session tracked by the pointer file. A crash
+    // snapshot newer than its saved copy is offered by the resume routine, as
+    // for every other way of opening a session.
     const lastId = readLastSessionPointer({ surface });
     if (lastId) {
-      return resumeNamedSessionWithRecoveryCheck({
-        sessionId: lastId,
-        surface,
-        commandRegistry,
-        commandContext,
-        render,
-        recovery: continueRecovery,
-      });
+      return resumeSessionAndRender(commandRegistry, lastId, commandContext, render);
     }
     nothingToContinue();
   } else if (cli.flags.resume !== undefined) {
@@ -306,14 +186,7 @@ export function applyInitialTuiCliState(options: {
     } else {
       const lastId = readLastSessionPointer({ surface });
       if (lastId) {
-        return resumeNamedSessionWithRecoveryCheck({
-          sessionId: lastId,
-          surface,
-          commandRegistry,
-          commandContext,
-          render,
-          recovery: continueRecovery,
-        });
+        return resumeSessionAndRender(commandRegistry, lastId, commandContext, render);
       }
       nothingToContinue();
     }

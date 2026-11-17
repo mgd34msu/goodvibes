@@ -21,6 +21,7 @@ goodvibes-agent exec --output stream-json --omit-accumulated --timeout 10m "chec
 | `--intake-retry` | Request admission again for the same saved input. |
 | `--intake-resume` | Explicit recovery of an input the host reports as processing. |
 | `--intake-cancel` | Cancel the saved input, or the work admitted from it, on the host. |
+| `--continue`, `--resume [id]`, `--session <id>` | Continue the last session, or the named one, instead of a new one; fails when there is none. A crash snapshot newer than its saved copy is restored first (see below). |
 
 The `--intake-*` flags take no value and no prompt (recovery reuses the exact saved input); use one at a time. `--timeout`, `--max-turns`, `--omit-accumulated` and `--answer-permissions` apply only to `run`. Status messages that would name a workspace slash command (`/work intake-status`) name these flags instead.
 
@@ -31,6 +32,20 @@ Parser limits to know about:
 - The `secrets` and `cluster` helpers read the word after any `--flag` as its value, so put flags after the positional arguments.
 - After `run`, `status`, `help`, `completion` and the other commands that take only these global flags, an option the parser does not know (`--max-turn`, `--timout=5m`) is refused with exit `2` instead of being ignored. Commands with options of their own (`secrets`, `auth`, `sessions` and the like) read those options themselves.
 - A lone first word one or two letters away from a command (`goodvibes-agent staus`) is refused as a mistyped command and the error names the command it is close to. To start with that word as the first prompt, put `--` before it: `goodvibes-agent -- staus`.
+
+## Crash recovery
+
+Every `run` writes its session's crash snapshot at the same moments the workspace does: when the prompt is accepted and after each batch of tool calls. That is one atomic write (temp file and rename) of the whole conversation each time, the size of the session's messages as JSON lines; the first one also records the session as the last one, so `--continue` reaches a run that was killed. When the run's session is saved at the end, the snapshot is removed. While the run has its session open it holds the session's lock, the same one an open workspace holds; the operating system releases it if the run is killed.
+
+`run --continue`, `--resume [id]` or `--session <id>` on a session with a crash snapshot newer than its saved copy restores the snapshot before the first request, without asking (the flag is the ask). The new prompt then continues from the recovered conversation; the interrupted turn is not run again:
+
+- its prompt is kept and marked cancelled, as Esc marks a cancelled prompt;
+- the tool results it had already obtained are kept as they were;
+- a tool call the model had made whose result never reached disk gets a result that says it was interrupted and that its effect is unknown (outcome `cancelled`), never a success.
+
+A session killed before its first save has only the snapshot, and resuming it restores that. If the snapshot cannot be applied, the run continues from the saved copy and says why (a session with no saved copy fails with that reason instead). A snapshot whose session another running workspace has open is that workspace's live state and is left alone. A run without one of these flags restores nothing and offers nothing; a snapshot nobody resumes is removed by the retention sweep after `atRest.retentionMaxAgeDays` (30 days by default), with the other crash snapshots.
+
+The run says what it recovered: in text mode one `[Recovery]` line on stderr before the answer, in `stream-json` a `SESSION_RECOVERED` frame before the first model frame, and in both JSON formats the final frame's `recovery` field. Exit codes do not change.
 
 ## Output
 
@@ -51,6 +66,7 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | `kind` | no | On failures: `outcome-unknown` (the host may have acted) or `unavailable` (nothing was sent). |
 | `cause` | no | With `kind`: `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed` or `unknown`. |
 | `native` | no | The intake state: `status`, `message`, `request`, `result`, `execution`. |
+| `recovery` | no | Present when the run restored its session from a crash snapshot: `sessionId`, `applied`, `refusal` (when not applied), `snapshotAt`, `snapshotKept`, `messages`, `turns`, `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults`, `interruptedToolCalls` as `{ callId, tool }`), `lost`. |
 
 ### Stream frames
 
@@ -69,6 +85,7 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | `CONTRACT_ESCALATED` | `contractId`, `escalationId`, `scope`, `targetId`, `reason`, `question` (the contract is waiting on its owner) |
 | `CONTRACT_PASSED`, `CONTRACT_FAILED`, `CONTRACT_CANCELLED` | `contractId`; plus `criteriaMet`, `criteriaJudged`, or `reason` and `failureKind` |
 | `USAGE` | `turnId`, `provider`, `model`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `costUsdCents` |
+| `SESSION_RECOVERED` | the `recovery` fields of the final frame (written before the first request) |
 
 Tool arguments are never included, and neither are agent task text, agent output or the contract's ask: those can hold file contents or credentials.
 

@@ -16,7 +16,8 @@ import {
 } from '@/runtime/index.ts';
 import { requireProviderApi, requireSessionManager, requireShellPaths, requireSurface } from './runtime-services.ts';
 import { resumeSessionCore } from '../../core/session-resume-core.ts';
-import { checkSessionLiveness } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { isSessionOpenElsewhere } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { moveLiveSessionArtifacts } from '../../core/session-resume-core.ts';
 import { redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { clearTurnAnchors, getTurnAnchors, persistTurnAnchors, recordTurnAnchor } from '@goodvibes-jev/engine/platform/platform/rewind';
 import { saveWorkTreeFolds } from '../../core/work-tree-fold-store.ts';
@@ -156,6 +157,8 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
   copySidecars: (ctx, _source, destination) => copySessionSidecars(ctx, destination),
   beforeSwitch: (ctx, operation, source, destination) => {
     if (operation === 'fork' || source !== destination) ctx.cancelPendingRecovery?.();
+    // The session lock follows the live session to its new id at once.
+    moveLiveSessionArtifacts(requireSurface(ctx), source, destination);
   },
   afterSwitch: () => {},
   saved: (name, sanitized, path) =>
@@ -188,16 +191,14 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         return true;
       }
 
-      // Multi-instance safety: warn (and require --force) when this session
-      // looks open in another still-running terminal right now, resuming it
-      // here would fork its live state out from under that other instance.
-      // Best-effort: a missing/stale marker (or this process's OWN marker,
-      // e.g. re-resuming the session already active here) never blocks anything.
-      const liveness = checkSessionLiveness(requireSurface(ctx), found.name);
-      if (liveness.live && liveness.pid !== process.pid && !force) {
+      // Multi-instance safety: refuse (and require --force) when another
+      // running terminal holds this session open right now; resuming it here
+      // would fork its live state out from under that terminal. This process's
+      // own hold (re-resuming the session already active here) never blocks.
+      if (!force && isSessionOpenElsewhere(requireSurface(ctx), found.name)) {
         ctx.print(
-          `Session appears open in another terminal (pid ${liveness.pid}): resuming will fork its live state.\n` +
-            `Re-run \`/session resume ${found.name} --force\` to proceed anyway.`,
+          `Session is open in another running terminal: resuming will fork its live state.\n` +
+            `Close it there, or re-run \`/session resume ${found.name} --force\` to proceed anyway.`,
         );
         return true;
       }

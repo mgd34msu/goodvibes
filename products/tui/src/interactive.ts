@@ -72,7 +72,8 @@ import { readLastSessionPointer } from '@/runtime/index.ts';
 import { startRecoveryAutosave } from './runtime/recovery-autosave.ts';
 import { startRecoveryOffer } from './runtime/recovery-prompt.ts';
 import { createStartupTypeaheadGate } from './runtime/startup-typeahead-gate.ts';
-import { buildRecoveryOfferWiring } from './runtime/recovery-offer-wiring.ts';
+import { buildRecoveryOfferWiring, offerCrashSnapshotOnOpen } from './runtime/recovery-offer-wiring.ts';
+import { whenCrashSnapshotFound } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
 import {
   actionHint,
@@ -1448,7 +1449,6 @@ async function main() {
     },
   });
 
-  // continueRecovery lets --continue/bare --resume check the target session for a live crash snapshot newer than its store before resuming (see tui-startup.ts).
   const typeaheadHooks = {
     onModalShown: () => typeahead.arm(),
     onFlowSettled: () => {
@@ -1456,6 +1456,23 @@ async function main() {
       if (held.length > 0) routeInput(held);
     },
   };
+  // The crash-recovery offer: at start-up for the newest snapshot (below), and
+  // whenever a session is opened (--continue, --resume, /load, /sessions, the
+  // picker, /session resume) with a crash snapshot newer than its saved copy.
+  const recoveryOffer = buildRecoveryOfferWiring({
+    surface: ctx.services.surface,
+    sessionManager: ctx.services.sessionManager,
+    runtime,
+    conversation,
+    commandContext,
+    writeLastSessionPointer,
+    sessionSpine: ctx._sessionSpine,
+    project: workingDir,
+    receipt: (line) => systemMessageRouter.userReceipt(line),
+    render,
+    typeahead: typeaheadHooks,
+  });
+  unsubs.push(whenCrashSnapshotFound(conversation, offerCrashSnapshotOnOpen(recoveryOffer)));
   applyInitialTuiCliState({
     cli,
     input,
@@ -1464,16 +1481,6 @@ async function main() {
     shellPaths: ctx.services.shellPaths,
     surface: ctx.services.surface,
     render,
-    continueRecovery: {
-      sessionManager: ctx.services.sessionManager,
-      runtime,
-      conversation,
-      writeLastSessionPointer,
-      sessionSpine: ctx._sessionSpine,
-      project: workingDir,
-      receipt: (line) => systemMessageRouter.userReceipt(line),
-      typeahead: typeaheadHooks,
-    },
   });
 
   const dispatchInput = (data: string): void => {
@@ -1537,26 +1544,12 @@ async function main() {
 
   // Crash-recovery snapshot: asked, never assumed, and opened before the first frame so the composer is never live under it;
   // keys typed before it was painted are held and replayed into the composer once it is answered (startup-typeahead-gate.ts).
-  void startRecoveryOffer(
-    buildRecoveryOfferWiring({
-      surface: ctx.services.surface,
-      sessionManager: ctx.services.sessionManager,
-      runtime,
-      conversation,
-      commandContext,
-      writeLastSessionPointer,
-      sessionSpine: ctx._sessionSpine,
-      project: workingDir,
-      receipt: (line) => systemMessageRouter.userReceipt(line),
-      render,
-      typeahead: typeaheadHooks,
-    }),
-  );
+  void startRecoveryOffer(recoveryOffer);
   conversation.rebuildHistory();
   render(); // initial render
 
-  // Auto-save to recovery file every 60s + multi-instance liveness-marker
-  // refresh, see runtime/recovery-autosave.ts.
+  // Snapshot for changes made outside a turn every 60s, and the session lock
+  // taken at once (no refresh), see runtime/recovery-autosave.ts.
   recoveryInterval = startRecoveryAutosave({ conversation, runtime, surface: ctx.services.surface, buildSessionContinuityHints });
 }
 

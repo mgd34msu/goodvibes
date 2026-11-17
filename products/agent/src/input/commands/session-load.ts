@@ -21,7 +21,7 @@ export interface LoadedSavedSession {
 
 /**
  * `/session resume`, `/load`, the `/sessions` list and the session picker: the
- * one resume routine (turn check, liveness marker move, `force`, journal replay,
+ * one resume routine (turn check, session lock move, `force`, the crash snapshot offer,
  * the saved model re-resolved through the provider registry, rewind anchors,
  * footer usage), plus the Agent's hosted-session and last-session bookkeeping
  * and the session-resumed announcement (hooks), so every way of opening a

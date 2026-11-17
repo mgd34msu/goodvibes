@@ -56,6 +56,8 @@ import './tools/agent-harness-setup-model-helpers.ts';
 import { removeRecoveryPoint } from '@/runtime/index.ts';
 import type { SessionSnapshot } from '@/runtime/index.ts';
 import { buildAgentRecoveryApply } from './shell/recovery-apply.ts';
+import { announceRecoveryOffer } from './shell/startup-wiring.ts';
+import { whenCrashSnapshotFound } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
 import { createWorkspaceRegistrationQuestion } from './shell/workspace-registration-question.ts';
 import { createDaemonRepairQuestion } from './shell/daemon-repair-prompt.ts';
@@ -389,7 +391,6 @@ async function main() {
     thinkingClock.noteReconnect(event.attempt, event.maxAttempts);
     render();
   }));
-  let recoveryInterval: ReturnType<typeof setInterval> | null = null;
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
   // sessionId of the offered recovery snapshot, or null when none is pending.
   let recoveryPending: string | null = null,
@@ -463,10 +464,6 @@ async function main() {
       // Scoped to this session only, a keyless call would clear every snapshot in the recovery dir.
       removeRecoveryPoint: () => removeRecoveryPoint(ctx.services.surface, runtime.sessionId),
       detach: () => {
-        if (recoveryInterval !== null) {
-          clearInterval(recoveryInterval);
-          recoveryInterval = null;
-        }
         stdin.removeAllListeners('data');
         stdout.removeListener('resize', resizeHandler);
         process.removeListener('SIGINT', sigintHandler);
@@ -1263,6 +1260,14 @@ async function main() {
     forwardInput: (b) => routeInput(b),
   });
 
+  // A session opened later (`sessions resume`, --resume, /load, /sessions, the
+  // picker) with a crash snapshot newer than its saved copy gets the start-up
+  // offer: the same lines, the same Ctrl+R / Esc.
+  unsubs.push(whenCrashSnapshotFound(conversation, ({ info }) => {
+    if (recoveryPending !== info.sessionId) announceRecoveryOffer(info, systemMessageRouter, render);
+    recoveryPending = info.sessionId;
+    return 'offered';
+  }));
   applyInitialTuiCliState({
     cli,
     input,
@@ -1297,7 +1302,6 @@ async function main() {
         runtime,
         conversation,
         hydrateSessionUsage: commandContext.session?.hydrateSessionUsage,
-        notify: (line) => systemMessageRouter.high(line),
       }),
       removeRecoveryPoint: () => {
         removeRecoveryPoint(ctx.services.surface, recoveryPending ?? undefined);
@@ -1325,7 +1329,7 @@ async function main() {
 
   conversation.rebuildHistory();
   render();
-  ({ recoveryInterval, recoveryPending, daemonRepairPrompt } = startFirstRenderFollowups({
+  const followups = startFirstRenderFollowups({
     shellPaths: ctx.services.shellPaths,
     providerRegistry,
     commandContext,
@@ -1347,7 +1351,10 @@ async function main() {
     onStreamSpeedUpdate: (speed) => {
       streamTokenSpeed = speed;
     },
-  }));
+  });
+  // A resume at start-up may already have offered its session's snapshot.
+  recoveryPending = followups.recoveryPending ?? recoveryPending;
+  daemonRepairPrompt = followups.daemonRepairPrompt;
   render();
 }
 main().catch(async (err: unknown) => {

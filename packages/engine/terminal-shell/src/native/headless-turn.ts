@@ -4,10 +4,12 @@ import type { PermissionRequestHandler } from '@goodvibes-jev/engine/platform/pl
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
-import { createHeadlessPermissionInput, observeHeadlessTurn, type HeadlessTurnObserverOptions } from './headless-turn-events.js';
+import { redactDiagnosticText } from '@goodvibes-jev/engine/platform/platform/utils';
+import { HEADLESS_SCHEMA_VERSION, createHeadlessPermissionInput, observeHeadlessTurn, type HeadlessTurnObserverOptions } from './headless-turn-events.js';
 import { dispatchNativeConversationTurn } from './native-conversation-ingress.js';
 import type { NativeConversationIntakeState } from './native-conversation-intake.js';
-import type { NativeHeadlessTurnResult } from './native-headless.js';
+import type { HeadlessSessionRecovery, NativeHeadlessTurnResult } from './native-headless.js';
+import { describeCrashRecovery, type CrashRecoveryReport } from '../session-crash-recovery.js';
 
 /** The parts of a bootstrapped terminal runtime one headless turn drives. */
 export interface HeadlessTurnContext {
@@ -210,4 +212,43 @@ export function headlessSessionSnapshot<T extends { readonly messages: readonly 
   pendingApprovals: number,
 ) {
   return { ...snapshot, ...buildPersistedSessionContextFromFacts(snapshot.messages, titleSource, { pendingApprovals }) };
+}
+
+const MAX_RECOVERED_PROMPT_CHARS = 1000;
+
+/**
+ * Say what a resumed run restored from its session's crash snapshot, before the
+ * first request: a `SESSION_RECOVERED` frame in `stream-json`, one line on
+ * stderr in text mode (stdout stays the answer), nothing yet in `json`. The
+ * returned object is the final frame's `recovery` field in both JSON formats.
+ * The recovered prompt is masked and bounded like other free text in frames.
+ */
+export function announceHeadlessRecovery(
+  report: CrashRecoveryReport,
+  format: string,
+  write: { readonly stdout: (line: string) => void; readonly stderr: (line: string) => void } = {
+    stdout: (line) => { process.stdout.write(`${line}\n`); },
+    stderr: (line) => { process.stderr.write(`${line}\n`); },
+  },
+): HeadlessSessionRecovery {
+  const turn = report.interruptedTurn;
+  const masked = turn ? redactDiagnosticText(turn.prompt) : '';
+  const recovery: HeadlessSessionRecovery = {
+    sessionId: report.sessionId,
+    applied: report.applied,
+    ...(report.refusal ? { refusal: report.refusal } : {}),
+    snapshotAt: new Date(report.snapshotAt).toISOString(),
+    snapshotKept: !report.retired,
+    messages: report.messageCount,
+    turns: report.turns,
+    ...(turn ? { interruptedTurn: {
+      prompt: masked.length > MAX_RECOVERED_PROMPT_CHARS ? `${masked.slice(0, MAX_RECOVERED_PROMPT_CHARS)}...` : masked,
+      toolResults: turn.toolResults,
+      interruptedToolCalls: turn.interruptedToolCalls,
+    } } : {}),
+    lost: report.lost,
+  };
+  if (format === 'stream-json') write.stdout(JSON.stringify({ schemaVersion: HEADLESS_SCHEMA_VERSION, type: 'SESSION_RECOVERED', ...recovery }));
+  else if (format !== 'json') write.stderr(describeCrashRecovery(report));
+  return recovery;
 }

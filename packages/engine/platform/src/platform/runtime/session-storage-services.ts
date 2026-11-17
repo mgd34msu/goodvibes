@@ -4,7 +4,7 @@
  *
  * Every path a product uses for session state (the sessions directory, the
  * last-session pointer, crash-recovery snapshots, the checkpoint store, the
- * multi-instance liveness markers) derives from ONE
+ * session lock) derives from ONE
  * `SessionSurface`, built here, once, at composition time.
  *
  * The reason it is one object rather than a scope argument repeated at each

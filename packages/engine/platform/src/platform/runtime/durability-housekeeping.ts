@@ -8,18 +8,20 @@
  * path; none of them reclaimed what a SIGKILL left behind. Three stores, three
  * kinds of residue:
  *
- *   - liveness markers      `<home>/.goodvibes/<root>/liveness/<id>.json`
- *                           removed only on a clean exit, so a crash leaks one
- *                           file per session id ever opened.
+ *   - session locks         `<home>/.goodvibes/shared/owner-askers/session-*.writer.sqlite`
+ *                           (session-open-lock.ts) removed on a clean close, so a
+ *                           crash leaves one empty file behind; the kernel has
+ *                           already released its lock, so it reads as closed.
  *   - quarantine files      `<path>.unrecognized`, written so a human can
  *                           inspect a corrupt file, never removed afterwards.
  *   - anchor sidecars       `<sessionsDir>/<id>.anchors.json`, outlives the
  *                           session JSONL that owns it.
  *
- * Every reap here is bounded by BOTH an age window and a count cap, decides
- * what to keep by reading content rather than by a file merely existing, never
- * touches the current session, tolerates a competing sweeper deleting the same
- * file first, and reports what it removed. `startDurabilityHousekeeping` runs
+ * The quarantine and anchor reaps are bounded by an age window and a count
+ * cap and decide what to keep by reading content; the session-lock reap
+ * removes only files no process holds, taken without waiting. None touches the
+ * current session, each tolerates a competing sweeper deleting the same file
+ * first, and each reports what it removed. `startDurabilityHousekeeping` runs
  * the sweep at startup and then on a repeating timer, because a long-lived
  * process that only sweeps at boot never sweeps.
  *
@@ -31,7 +33,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { reapQuarantinedFiles } from '../config/read-versioned.js';
 import { reapOrphanedAnchorSidecars } from '../rewind/turn-anchors.js';
-import { reapStaleLivenessMarkers } from './session-liveness-marker.js';
+import { sweepClosedSessionLocks } from './session-open-lock.js';
 import type { SessionSurface } from './session-surface.js';
 
 /**
@@ -47,8 +49,8 @@ export interface DurabilityHousekeepingInput {
   /**
    * The session this process is using right now, read at sweep time rather
    * than captured once, a resume or fork can repoint it between sweeps.
-   * Returning null means "not known yet", which is safe: the age and liveness
-   * rules independently protect an actively written artefact.
+   * Returning null means "not known yet", which is safe: the age rule and the
+   * session lock independently protect an actively written artefact.
    */
   readonly currentSessionId?: () => string | null;
   /** Extra directories to scan for `.unrecognized` quarantine files. */
@@ -56,7 +58,8 @@ export interface DurabilityHousekeepingInput {
 }
 
 export interface DurabilityHousekeepingOutcome {
-  readonly livenessMarkers: number;
+  /** Lock files of sessions no process had open (crash residue). */
+  readonly sessionLocks: number;
   readonly quarantineFiles: number;
   readonly anchorSidecars: number;
   /** Sum of the three counts above, zero means nothing was reclaimed. */
@@ -73,10 +76,8 @@ export function runDurabilityHousekeeping(input: DurabilityHousekeepingInput): D
   const { surface } = input;
   const currentSessionId = safely('current session id', () => input.currentSessionId?.() ?? null, null);
 
-  const livenessMarkers = safely('liveness markers', () =>
-    reapStaleLivenessMarkers(surface, {
-      keepSessionIds: currentSessionId ? [currentSessionId] : [],
-    }).reaped, 0);
+  // The current session's lock is held by this process, so the sweep cannot take it.
+  const sessionLocks = safely('session locks', () => sweepClosedSessionLocks(surface).removed, 0);
 
   const quarantineFiles = safely('quarantine files', () =>
     reapQuarantinedFiles(quarantineDirsFor(input)).reaped, 0);
@@ -85,10 +86,10 @@ export function runDurabilityHousekeeping(input: DurabilityHousekeepingInput): D
     reapOrphanedAnchorSidecars(surface, { currentSessionId }).reaped, 0);
 
   const outcome: DurabilityHousekeepingOutcome = {
-    livenessMarkers,
+    sessionLocks,
     quarantineFiles,
     anchorSidecars,
-    total: livenessMarkers + quarantineFiles + anchorSidecars,
+    total: sessionLocks + quarantineFiles + anchorSidecars,
   };
   discloseHousekeeping(outcome);
   return outcome;
@@ -132,7 +133,7 @@ export function startDurabilityHousekeeping(
 function discloseHousekeeping(outcome: DurabilityHousekeepingOutcome): void {
   if (outcome.total === 0) return;
   logger.info('durability housekeeping reclaimed crash residue', {
-    livenessMarkers: outcome.livenessMarkers,
+    sessionLocks: outcome.sessionLocks,
     quarantineFiles: outcome.quarantineFiles,
     anchorSidecars: outcome.anchorSidecars,
     total: outcome.total,

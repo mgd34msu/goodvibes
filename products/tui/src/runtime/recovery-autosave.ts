@@ -3,24 +3,25 @@ import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/pla
  * recovery-autosave.ts, the minute timer behind crash recovery, extracted out
  * of main.ts to keep it under the architecture line-count gate.
  *
+ * At start the live session's lock is taken (runtime/session-open-lock.ts): a
+ * second terminal reads it to tell "this session is open in another terminal
+ * right now" from "this is an orphaned crash snapshot", and the kernel lets it
+ * go if this process dies. Nothing refreshes it.
+ *
  * Each tick:
- *   1. Refreshes the liveness marker (see session-liveness-marker.ts), written
- *      at once and then on the interval (default 60s), that lets a second
- *      instance tell "this session is open in another terminal right now" from
- *      "this is an orphaned crash snapshot".
- *   2. Writes the crash-recovery snapshot (writeRecoveryFile) for a change made
+ *   1. Writes the crash-recovery snapshot (writeRecoveryFile) for a change made
  *      outside a turn (/undo, /title, a branch switch), only when the
  *      conversation's revision moved since it was last written (core/turn-event-wiring.ts
  *      writes it at turn moments and the store save at turn end deletes it), so
  *      an idle session writes nothing.
- *   3. Follows a change of the live session id that did not go through a
- *      resume (a fork, `/session save <name>`, a recovery restore): the marker
- *      moves to the new id, and the conversation counts as saved under the new
- *      id, which every one of those paths has just done.
+ *   2. Follows a change of the live session id the switching path did not
+ *      already follow: the conversation counts as saved under the new id, which
+ *      every switching path (a fork, `/session save <name>`, a recovery restore)
+ *      has just done, and the lock moves if it has not moved yet.
  */
 import { writeRecoveryFile } from '@/runtime/index.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
-import { writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { openSessionHere } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
 import {
@@ -34,7 +35,7 @@ export interface StartRecoveryAutosaveOptions {
   readonly runtime: { readonly sessionId: string };
   /**
    * The app's declare-once session-storage handle. Both the snapshot and the
-   * liveness marker resolve off it, so the startup recovery offer, which
+   * session lock resolve off it, so the startup recovery offer, which
    * reads through the same handle, looks in the directory this writer used.
    */
   readonly surface: SessionSurface;
@@ -73,7 +74,7 @@ export function writeCrashSnapshotIfChanged(input: {
 
 export function startRecoveryAutosave(options: StartRecoveryAutosaveOptions): ReturnType<typeof setInterval> {
   const { conversation, runtime, surface, buildSessionContinuityHints, intervalMs = 60_000 } = options;
-  writeLivenessMarker(surface, runtime.sessionId);
+  openSessionHere(surface, runtime.sessionId);
   let liveSessionId = runtime.sessionId;
   // The boot conversation needs no snapshot: it is either empty or what the
   // resume that produced it just read from the store (which recorded it).
@@ -95,11 +96,6 @@ export function startRecoveryAutosave(options: StartRecoveryAutosaveOptions): Re
       writeCrashSnapshotIfChanged({ conversation, sessionId, surface, buildSessionContinuityHints });
     } catch (error) {
       logger.warn('[Recovery] Autosave snapshot failed', { error: summarizeError(error) });
-    }
-    try {
-      writeLivenessMarker(surface, sessionId);
-    } catch (error) {
-      logger.warn('[Recovery] Liveness marker refresh failed', { error: summarizeError(error) });
     }
   }, intervalMs);
 }

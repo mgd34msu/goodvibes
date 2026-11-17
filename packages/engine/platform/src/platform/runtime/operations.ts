@@ -161,22 +161,14 @@ export type {
 } from './recovery-snapshot-apply.js';
 
 export {
-  checkSessionLiveness,
-  isPidAlive,
-  LIVENESS_MARKER_MAX_FILES,
-  LIVENESS_STALE_AFTER_MS,
-  livenessMarkerDirFor,
-  livenessMarkerPathFor,
-  reapStaleLivenessMarkers,
-  removeLivenessMarker,
-  writeLivenessMarker,
-} from './session-liveness-marker.js';
-export type {
-  LivenessMarker,
-  LivenessReapOptions,
-  LivenessReapResult,
-  SessionLivenessCheck,
-} from './session-liveness-marker.js';
+  closeSessionHere,
+  isSessionOpenElsewhere,
+  moveSessionHere,
+  openSessionHere,
+  sessionOpenLockPath,
+  sweepClosedSessionLocks,
+} from './session-open-lock.js';
+export type { SessionLockSweepResult } from './session-open-lock.js';
 
 export {
   DURABILITY_HOUSEKEEPING_INTERVAL_MS,

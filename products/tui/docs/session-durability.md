@@ -30,15 +30,47 @@ since its last write:
 The turn-time writes live in `src/core/turn-event-wiring.ts` and follow the rule both terminal apps
 share (`writeCrashSnapshotAtTurnMoments`). It is deleted when the save at the end of a turn
 succeeds and when a quit's save succeeds, so a snapshot on disk always holds something the saved
-session does not. When the session id moves on (a resume, a fork, `/session save <name>`, a
-recovery restore), the liveness marker moves with it. An idle
-session writes nothing; the one-minute tick then only refreshes the liveness marker that records
-this session as open in this terminal.
+session does not. An idle session writes nothing.
+
+## Which session is open where
+
+A terminal that has a session open holds that session's lock: an empty file under
+`~/.goodvibes/shared/owner-askers/`, locked with an operating-system lock that is released when the
+process ends, however it ends. It is taken when the session becomes the live one and moves when the
+session id moves (a resume, a fork, `/session save <name>`, a recovery restore); a clean close
+removes the file while still holding it. Nothing refreshes it and no process id or age is compared,
+so a crashed terminal never reads as open and a crash relaunched at once is offered at once. The
+owner inbox reads the same lock to tell whether the session that asked a question is open now.
+
+Two things read it: `/session resume`, `/load`, `/sessions` and the session browser refuse (or, in
+the browser, ask before resuming) a session another running terminal has open, and the recovery
+offer skips a snapshot whose session another running terminal has open, since it is that
+terminal's live state. Reading it costs one `stat` and, when the file exists, one lock attempt
+that never waits. The start-up housekeeping removes lock files a crashed process left.
+
+## Recovering a crash snapshot
 
 On the next start the TUI offers the newest snapshot that is not older than its session's own
-saved file, unless the liveness marker shows that session is still open in another terminal, in
-which case the snapshot is that terminal's live state and the next one is considered instead.
-A crash relaunched at once is offered at once. Choosing Remove deletes that one snapshot; a later crash of the same session is offered again.
+saved file, skipping one whose session another running terminal has open. The same offer is made
+whenever a session is opened later by any path (`--continue`, `--resume`, `sessions resume`,
+`/session resume`, `/load`, `/sessions`, the session browser) and that session has a snapshot newer
+than its saved file: the saved copy is opened, and the snapshot is offered on top of it. A session
+that crashed before its first save has only the snapshot; opening it says so and offers the
+snapshot. Choosing Remove deletes that one snapshot; a later crash of the same session is offered
+again.
+
+Restoring a snapshot that ends inside a turn records that turn as interrupted; it is never run
+again on its own:
+
+- the prompt of that turn is kept and marked cancelled, as Esc marks a cancelled prompt;
+- the tool results the turn had already obtained are kept as they were;
+- a tool call the model had made whose result never reached disk gets a result that says it was
+  interrupted and that its effect is unknown (outcome `cancelled`), never a success;
+- the next prompt you send continues from there.
+
+The receipt line says what came back (messages, prompts, the interrupted prompt and its tool
+results, the tool calls recorded as interrupted) and what could not: model output still arriving
+after the snapshot was written, and tool calls started after it.
 
 A kill at any moment loses at most the streaming text of the turn in flight and any tool calls of
 that turn that had not finished. A completed turn is never lost.

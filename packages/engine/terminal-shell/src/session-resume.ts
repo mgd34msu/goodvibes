@@ -16,6 +16,12 @@
  * was closed) is handed to it at the end of the routine, through the listener
  * the app registered for its conversation with {@link whenSessionOpens}, so a
  * headless run has it before its first request.
+ *
+ * A session that left a crash snapshot newer than its saved copy is handed,
+ * once it is open, to what the app registered with `whenCrashSnapshotFound`
+ * (session-crash-offer.ts): the interactive apps offer the restore, a headless
+ * resume applies it. A session that crashed before its first save has only
+ * the snapshot; opening it is restoring it.
  */
 import type { SessionBranches, SessionManager, SessionMeta } from '@goodvibes-jev/engine/platform/platform/sessions';
 import type { SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
@@ -24,10 +30,12 @@ import { restoreTurnAnchors } from '@goodvibes-jev/engine/platform/platform/rewi
 import { restoreWorkTreeFolds } from './work-tree-wiring.js';
 import { logger, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import {
-  checkSessionLiveness,
-  removeLivenessMarker,
-  writeLivenessMarker,
+  findSessionCrashSnapshot,
+  isSessionOpenElsewhere,
+  moveSessionHere,
+  type SessionCrashSnapshot,
 } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { crashSnapshotHandlerFor, type CrashSnapshotHandler, type CrashSnapshotHandling } from './session-crash-offer.js';
 /** Runs when a saved session becomes the live one in `conversation`; awaited by the resume routine. */
 export type SessionOpenedListener = (sessionId: string) => Promise<unknown>;
 
@@ -110,6 +118,8 @@ export interface SessionResumeOutcome {
   readonly warnings?: readonly string[] | undefined;
   /** Lines for the person about what the resume left out (a damaged side branch); empty when nothing was. */
   readonly notices: readonly string[];
+  /** Set when the session had a crash snapshot newer than its saved copy: what the app did with it. */
+  readonly crashSnapshot?: CrashSnapshotHandling | undefined;
 }
 /**
  * The canonical resume sequence: load, reset + restore the conversation,
@@ -118,6 +128,10 @@ export interface SessionResumeOutcome {
  */
 export async function resumeSessionCore(sessionId: string, deps: SessionResumeDeps): Promise<SessionResumeOutcome> {
   if (deps.canResume?.() === false) throw new Error('A turn is still running. Wait before resuming a session.');
+  const handleCrash = crashSnapshotHandlerFor(deps.conversation);
+  // Looked for only when the app has someone to tell: one `stat` when the session left no snapshot.
+  const crash = handleCrash && deps.surface ? findSessionCrashSnapshot(deps.surface, sessionId) : null;
+  if (crash && handleCrash && !crash.hasSavedCopy) return openCrashSnapshotOnly(sessionId, crash, handleCrash, deps);
   const { meta, messages, branches, agentRecords } = deps.sessionManager.load(sessionId);
   // Nothing below yields until the transcript and its identity are committed,
   // so no turn or other resume can slip in between the check and the commit.
@@ -169,16 +183,12 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
   // Hydrate the footer's token counters from the resumed history now, before
   // the caller renders.
   attempt('restoring footer usage', () => deps.hydrateSessionUsage?.(), () => undefined);
-  // What waited for this session while it was closed goes into its conversation
-  // now, before the next request; a failure leaves it waiting for the next open.
-  const opened = sessionOpenedListeners.get(deps.conversation);
-  if (opened && deps.runtime.sessionId === sessionId) {
-    try {
-      await opened(sessionId);
-    } catch (error) {
-      logger.warn('session resume: handing over what waited for the session failed', { sessionId, error: summarizeError(error) });
-    }
-  }
+  // The saved copy is open; a crash snapshot newer than it holds what the
+  // saved copy does not, so the app offers it (or, headless, applies it) now.
+  const crashSnapshot = crash && handleCrash && deps.runtime.sessionId === sessionId
+    ? attempt<CrashSnapshotHandling | undefined>('offering the crash snapshot', () => handleCrash(crash), () => undefined)
+    : undefined;
+  await handOverWhatWaited(sessionId, deps);
   return {
     meta,
     savedMessageCount: messages.length,
@@ -188,6 +198,62 @@ export async function resumeSessionCore(sessionId: string, deps: SessionResumeDe
     restoredAnchorCount,
     ...(warnings.length ? { warnings } : {}),
     notices: describeLeftOutBranches(leftOut),
+    ...(crashSnapshot !== undefined ? { crashSnapshot } : {}),
+  };
+}
+
+/** What waited for this session while it was closed goes into its conversation now, before the next request; a failure leaves it waiting for the next open. */
+async function handOverWhatWaited(sessionId: string, deps: SessionResumeDeps): Promise<void> {
+  const opened = sessionOpenedListeners.get(deps.conversation);
+  if (!opened || deps.runtime.sessionId !== sessionId) return;
+  try {
+    await opened(sessionId);
+  } catch (error) {
+    logger.warn('session resume: handing over what waited for the session failed', { sessionId, error: summarizeError(error) });
+  }
+}
+
+/**
+ * Open a session that crashed before its first save: the crash snapshot is its
+ * only copy, so opening it is restoring it. A headless resume applies it here;
+ * an interactive app offers it and the open stops with the reason, since there
+ * is nothing else to load until the person answers.
+ */
+async function openCrashSnapshotOnly(
+  sessionId: string,
+  crash: SessionCrashSnapshot,
+  handleCrash: CrashSnapshotHandler,
+  deps: SessionResumeDeps,
+): Promise<SessionResumeOutcome> {
+  deps.beforeRestore?.();
+  const handling = handleCrash(crash);
+  if (handling !== 'applied' || deps.runtime.sessionId !== sessionId) {
+    throw new Error(handling === 'offered'
+      ? `Session ${sessionId} was never saved: its only copy is a crash snapshot, which is offered for restore now. Restore it there; nothing else was loaded.`
+      : `Session ${sessionId} was never saved and its crash snapshot was not restored, so there is nothing to open. The snapshot is still on disk.`);
+  }
+  try {
+    deps.hydrateSessionUsage?.();
+  } catch (error) {
+    logger.warn('session resume: restoring footer usage failed', { sessionId, error: summarizeError(error) });
+  }
+  await handOverWhatWaited(sessionId, deps);
+  const meta: SessionMeta = {
+    title: deps.conversation.title || crash.info.title,
+    model: deps.runtime.model,
+    provider: deps.runtime.provider,
+    timestamp: crash.info.timestamp,
+    titleSource: deps.conversation.getTitleSource(),
+  };
+  return {
+    meta,
+    savedMessageCount: 0,
+    agentRecords: [],
+    agentRecordsRestored: 0,
+    resumedMessageCount: deps.conversation.getMessageCount(),
+    restoredAnchorCount: 0,
+    notices: [],
+    crashSnapshot: handling,
   };
 }
 import { rmSync } from 'node:fs';
@@ -321,11 +387,11 @@ export function conversationChangedSinceDurable(conversation: RevisionedConversa
 }
 
 /**
- * The session-keyed liveness marker follows a change of the live session id (a
- * resume, a fork, `/session save <name>`, a recovery restore, `--continue`):
- * `to` is marked open here and `from`'s marker goes, so a second terminal
- * neither takes `from` for open nor `to` for closed. When another terminal has
- * taken `from` over, its marker is that terminal's and is left alone.
+ * The session lock follows a change of the live session id (a resume, a fork,
+ * `/session save <name>`, a recovery restore, `--continue`): `to` is held here
+ * before `from` is let go, so a second terminal neither takes `from` for open
+ * nor `to` for closed. Only this process's own hold on `from` is given up; a
+ * terminal that took `from` over keeps its own.
  *
  * `from`'s crash snapshot is not touched: the writers delete it at every
  * successful save, so one still on disk holds something `from`'s store does
@@ -333,11 +399,7 @@ export function conversationChangedSinceDurable(conversation: RevisionedConversa
  * next launch like any other unsaved work.
  */
 export function moveLiveSessionArtifacts(surface: SessionSurface, from: string, to: string): void {
-  if (from === to) return;
-  writeLivenessMarker(surface, to);
-  const holder = checkSessionLiveness(surface, from);
-  if (holder.live && holder.pid !== process.pid) return;
-  removeLivenessMarker(surface, from);
+  moveSessionHere(surface, from, to);
 }
 
 /** What `loadSavedSessionIntoLive` needs from the shell that runs it. */
@@ -369,17 +431,17 @@ export interface LoadedSavedSession extends SessionResumeOutcome {
 
 /** Options of {@link loadSavedSessionIntoLive}. */
 export interface LoadSavedSessionOptions {
-  /** Take over a session another running terminal has marked open (`/session resume <id> --force`). */
+  /** Take over a session another running terminal has open (`/session resume <id> --force`). */
   readonly force?: boolean | undefined;
 }
 
 /**
  * `resumeSessionCore` behind the refusals a command needs (`/session resume`, `/load`,
  * the `/sessions` list, the session picker). It refuses while a turn runs and refuses a
- * session another running terminal has marked open (`/session resume <name> --force` is
+ * session another running terminal has open (`/session resume <name> --force` is
  * the explicit way to take it over); the routine then reads and validates the saved
  * messages before touching the live conversation and switches the session identity, so
- * later autosaves go to the loaded session. The liveness marker moves with the identity
+ * later autosaves go to the loaded session. The session lock moves with the identity
  * (moveLiveSessionArtifacts) so a second terminal sees the new session as open right away.
  * Throws with the reason when the load does not happen; the live conversation is
  * untouched then.
@@ -394,15 +456,12 @@ export async function loadSavedSessionIntoLive(
     throw new Error('A turn is still running. Stop it with Esc or let it finish, then load the session.');
   }
   const surface = deps.surface;
-  // Two terminals saving one session overwrite each other's turns; one small marker read per load.
-  if (surface && !options.force) {
-    const liveness = checkSessionLiveness(surface, name);
-    if (liveness.live && liveness.pid !== process.pid) {
-      throw new Error(
-        `Session ${name} appears open in another terminal (pid ${liveness.pid}): loading it here would fork its live state. `
-          + `Run \`/session resume ${name} --force\` to take it over anyway.`,
-      );
-    }
+  // Two terminals saving one session overwrite each other's turns; one stat and one lock attempt per load.
+  if (surface && !options.force && isSessionOpenElsewhere(surface, name)) {
+    throw new Error(
+      `Session ${name} is open in another running terminal: loading it here would fork its live state. `
+        + `Close it there, or run \`/session resume ${name} --force\` to take it over anyway.`,
+    );
   }
   let outcome: SessionResumeOutcome;
   try {

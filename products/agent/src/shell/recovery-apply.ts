@@ -1,21 +1,20 @@
 /**
  * recovery-apply.ts, what accepting a crash-recovery snapshot does in the agent.
  *
- * Loading, applying and forgetting a snapshot is a sequence that goes wrong in
- * the middle: a snapshot deleted before the conversation accepted it is lost
- * with the failure. The platform's `applyRecoverySnapshot` keeps the file until
- * the conversation accepted it and the session store holds it, and never
- * throws. This module binds it to the agent's live objects and finishes
- * the restore: the runtime moves to the snapshot's session, the restored
- * conversation is persisted so `sessions resume` can reach it, and the
- * last-session pointer names it.
+ * The Ctrl+R handler calls this with the OFFERED snapshot's session id, whether
+ * it was offered at start-up or when a session opened later turned out to have
+ * one. It runs the shared restore every terminal app and the headless resume
+ * run (terminal-shell session-crash-recovery.ts): the conversation is rebuilt
+ * from the snapshot, a turn it ends inside is recorded as interrupted (never
+ * re-run), the runtime and the session lock move to the snapshot's session,
+ * the result is saved so `sessions resume` can reach it, and the last-session
+ * pointer names it. It never throws; the report says what happened.
  */
-import { applyRecoverySnapshot, confirmRecoveryRestore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
-import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { checkRecoveryForSession, confirmRecoveryRestore } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { restoreCrashSnapshot, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import { writeLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
-import type { SessionBranches, SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
-import type { ConversationManager, ConversationMessageSnapshot } from '../core/conversation.ts';
-import { describeLeftOutBranches, readSavedBranches } from '../core/session-resume-core.ts';
+import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import type { ConversationManager } from '../core/conversation.ts';
 
 export interface AgentRecoveryApplyInput {
   readonly surface: SessionSurface;
@@ -23,67 +22,28 @@ export interface AgentRecoveryApplyInput {
   readonly runtime: { sessionId: string; model: string; provider: string };
   readonly conversation: ConversationManager;
   readonly hydrateSessionUsage?: (() => void) | undefined;
-  /** Shows the person a line about the restore (a side branch left out). */
-  readonly notify?: ((line: string) => void) | undefined;
 }
 
 /**
  * The function the Ctrl+R handler calls with the OFFERED snapshot's session id.
  * Only the owner's key press reaches it, which is what the confirmation stands for.
  */
-export function buildAgentRecoveryApply(input: AgentRecoveryApplyInput): (sessionId: string) => ApplyRecoverySnapshotResult {
+export function buildAgentRecoveryApply(input: AgentRecoveryApplyInput): (sessionId: string) => CrashRecoveryReport {
   return (sessionId) => {
-    // Saving over a session replaces the whole file, so side branches made with
-    // /branch are carried across: the live conversation's, or else the saved ones.
-    const carriedBranches = (): SessionBranches | undefined => {
-      const live = input.conversation.branchState?.();
-      if (live && (Object.keys(live.branches).length > 0 || live.currentBranch !== 'main')) return live;
-      try {
-        return input.sessionManager.load?.(sessionId).branches;
-      } catch {
-        return undefined;
-      }
-    };
-    const persist = (messages: ConversationMessageSnapshot[]): void => {
-      input.sessionManager.save(sessionId, messages as never[], {
-        title: input.conversation.title || '',
-        model: input.runtime.model,
-        provider: input.runtime.provider,
-        timestamp: Date.now(),
-        // The owner chose to recover this session; a retention sweep must not expire it.
-        saveSource: 'user',
-      }, undefined, undefined, carriedBranches());
-    };
-    const result = applyRecoverySnapshot({
-      sessionId,
-      conversation: input.conversation,
-      surface: input.surface,
-      persistSnapshot: persist,
-      confirmation: confirmRecoveryRestore(true)!,
-    });
-    if (!result.applied) return result;
-    // Every later snapshot keys off runtime.sessionId,
-    // so it moves only once the restore really happened.
-    input.runtime.sessionId = sessionId;
-    // The restore reset the live conversation, which dropped the side branches;
-    // without them back in memory the next turn's autosave rewrites the session without them.
-    const branches = carriedBranches();
-    if (branches) {
-      const saved = readSavedBranches(sessionId, branches);
-      input.conversation.fromJSON({
-        messages: input.conversation.getMessageSnapshot(),
-        title: input.conversation.title,
-        titleSource: input.conversation.getTitleSource(),
-        branches: saved.branches,
-        currentBranch: branches.currentBranch,
-      });
-      for (const line of describeLeftOutBranches(saved.leftOut)) input.notify?.(`[Recovery] ${line}`);
+    const info = checkRecoveryForSession(input.surface, sessionId);
+    if (!info) {
+      // Saved since it was offered, or another terminal opened that session: nothing here to restore.
+      return { sessionId, applied: false, refusal: 'no-snapshot', retired: false, snapshotAt: 0, messageCount: 0, turns: 0, lost: [] };
     }
-    // The snapshot file is gone now; until this lands the recovered conversation
-    // exists only in memory.
-    persist(input.conversation.getMessageSnapshot() as ConversationMessageSnapshot[]);
-    writeLastSessionPointer(sessionId, { surface: input.surface });
-    input.hydrateSessionUsage?.();
-    return result;
+    return restoreCrashSnapshot({
+      surface: input.surface,
+      info,
+      sessionManager: input.sessionManager,
+      runtime: input.runtime,
+      conversation: input.conversation,
+      confirmation: confirmRecoveryRestore(true)!,
+      writeLastSessionPointer: (id) => writeLastSessionPointer(id, { surface: input.surface }),
+      hydrateSessionUsage: input.hydrateSessionUsage,
+    });
   };
 }

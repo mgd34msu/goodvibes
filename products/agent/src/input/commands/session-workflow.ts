@@ -13,7 +13,7 @@ import { requireProviderApi, requireSessionManager } from './runtime-services.ts
 import { logger, redactSensitiveDataAsync, summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import './confirmation.ts';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
-import { copySessionSidecars } from '../../core/session-resume-core.ts';
+import { copySessionSidecars, moveLiveSessionArtifacts } from '../../core/session-resume-core.ts';
 import { loadSavedSessionIntoLive } from './session-load.ts';
 import { commandRefusal } from './confirmation.ts';
 
@@ -113,7 +113,10 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
   }),
   copySidecars: (ctx, source, destination) =>
     copySessionSidecars(source, destination, ctx.session.conversationManager, ctx.session.surface),
-  beforeSwitch: () => {},
+  // The session lock follows the live session to its new id at once.
+  beforeSwitch: (ctx, _operation, source, destination) => {
+    if (ctx.session.surface) moveLiveSessionArtifacts(ctx.session.surface, source, destination);
+  },
   afterSwitch: (ctx, operation, destination) => {
     if (operation === 'fork') ctx.session.writeLastSessionPointer?.(destination);
   },
@@ -141,8 +144,8 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
       }
       try {
         // The one load: refuses while a turn runs or while another terminal holds the
-        // session (unless --force), moves the liveness marker and the last-session pointer,
-        // replays the journal, re-resolves the model and announces the resume.
+        // session (unless --force), moves the session lock and the last-session pointer,
+        // re-resolves the model, offers a newer crash snapshot and announces the resume.
         const loaded = await loadSavedSessionIntoLive(ctx, sm, found.name, { force });
         const { meta } = loaded;
         const restoredAnchorCount = loaded.restoredAnchorCount;

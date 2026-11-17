@@ -1,6 +1,6 @@
 import { handleSimplePermissionInput, routeCardInput } from '@goodvibes-jev/engine/terminal-shell/blocking-permission-input';
 import type { PermissionRequest } from '@goodvibes-jev/engine/platform/platform/permissions';
-import type { ApplyRecoverySnapshotResult } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { describeCrashRecovery, type CrashRecoveryReport } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 
 export type PendingPermissionState = PermissionRequest & {
@@ -33,7 +33,7 @@ export type BlockingInputHandlerOptions = {
    * snapshot file until the conversation accepted it, replays the journal tail,
    * persists the restored session and moves the runtime onto it.
    */
-  applyRecovery: (sessionId: string) => ApplyRecoverySnapshotResult;
+  applyRecovery: (sessionId: string) => CrashRecoveryReport;
   /** The prompted "no, and remove it" primitive (platform removeRecoveryPoint): clears the recovery snapshot without loading it. The caller keys this to the offered snapshot's sessionId. */
   removeRecoveryPoint: () => void;
 };
@@ -112,7 +112,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     if (data === '\x12') {
       const result = applyRecovery(recoveryPending);
       if (result.applied) {
-        systemMessageRouter.high(`[Recovery] Session restored (${result.messageCount} messages).`, 'success');
+        systemMessageRouter.high(describeCrashRecovery(result), 'success');
       } else if (result.refusal === 'apply-failed') {
         systemMessageRouter.high('[Recovery] The saved session could not be restored. The saved copy is still on disk and will be offered again at the next launch.', 'error');
       } else if (result.refusal === 'unusable-snapshot') {

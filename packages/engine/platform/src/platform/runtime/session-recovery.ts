@@ -27,11 +27,12 @@
  * exit, so on disk a snapshot means "not cleanly closed".
  *
  * LIVENESS, is anything still holding it?
- * A snapshot whose session another running process has marked open
- * (session-liveness-marker.ts) is that process's working state, not a crash, and
- * neither check here reports it. Every terminal that writes a snapshot marks
- * its session open from start to exit, so a crash relaunched at once is offered
- * at once.
+ * A snapshot whose session another running process has open (the session lock,
+ * session-open-lock.ts) is that process's working state, not a crash, and
+ * neither check here reports it. Every process that writes a snapshot holds
+ * its session's lock from the moment the session is live until it closes; the
+ * kernel releases it when the process dies, so a crash relaunched at once is
+ * offered at once.
  */
 
 import {
@@ -44,7 +45,7 @@ import { join } from 'path';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { publishRecoveryPath, readRecoveryHeaderObservation, recoveryPathResolver, RECOVERY_HEADER_LIMIT } from './recovery-path.js';
-import { checkSessionLiveness } from './session-liveness-marker.js';
+import { isSessionOpenElsewhere } from './session-open-lock.js';
 
 import { logger } from '../utils/logger.js';
 import { loadedReturnContext, type SessionReturnContextSummary } from './session-return-context.js';
@@ -240,13 +241,12 @@ function sessionStoreMtimeNs(sessionsDir: string, sessionId: string): bigint | n
 
 /**
  * True when another running process has this session open, so its snapshot is
- * that process's working state. This process's own marker does not count: a
+ * that process's working state. This process's own hold does not count: a
  * process asking about its own session is asking about its own crash residue.
  */
 function isOpenInAnotherProcess(surface: SessionSurface | undefined, sessionId: string): boolean {
   if (!surface || !sessionId.trim()) return false;
-  const liveness = checkSessionLiveness(surface, sessionId);
-  return liveness.live && liveness.pid !== process.pid;
+  return isSessionOpenElsewhere(surface, sessionId);
 }
 
 /**
@@ -298,14 +298,35 @@ export function checkRecoveryFile(options?: SessionPersistenceOptions): Recovery
  * shorter copy.
  */
 export function checkRecoveryForSession(surface: SessionSurface, sessionId: string): RecoveryFileInfo | null {
+  return findSessionCrashSnapshot(surface, sessionId)?.info ?? null;
+}
+
+/** A session's crash snapshot that is newer than everything its store holds. */
+export interface SessionCrashSnapshot {
+  readonly info: RecoveryFileInfo;
+  /** False when the session has no store file at all: the snapshot is its only copy. */
+  readonly hasSavedCopy: boolean;
+}
+
+/**
+ * {@link checkRecoveryForSession} with whether the session has a saved copy at
+ * all. A session that crashed before its first save has none; opening it means
+ * restoring the snapshot, there is nothing else to load. One `stat` when the
+ * session has no snapshot (the common case), otherwise the snapshot's first
+ * line, the store's `stat` and the session lock probe.
+ */
+export function findSessionCrashSnapshot(surface: SessionSurface, sessionId: string): SessionCrashSnapshot | null {
   const options: SessionPersistenceOptions = { surface };
   try {
     const path = pickRecoverySnapshotPath(options, sessionId);
     if (!path) return null;
     const { info, mtimeNs } = readRecoveryMetaObservation(path);
     if (info.sessionId !== sessionId) return null;
-    if (isSupersededByOwnStore(resolveSessionsDirPath(options), sessionId, mtimeNs)) return null;
-    return isOpenInAnotherProcess(surface, sessionId) ? null : info;
+    const storeMtimeNs = sessionStoreMtimeNs(resolveSessionsDirPath(options), sessionId);
+    // Equal times count as superseded (see isSupersededByOwnStore).
+    if (storeMtimeNs !== null && mtimeNs <= storeMtimeNs) return null;
+    if (isOpenInAnotherProcess(surface, sessionId)) return null;
+    return { info, hasSavedCopy: storeMtimeNs !== null };
   } catch (error) {
     logger.warn('[Recovery] Per-session check failed', { error: summarizeError(error) });
     return null;

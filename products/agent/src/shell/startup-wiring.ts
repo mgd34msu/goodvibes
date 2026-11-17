@@ -9,8 +9,8 @@ import {
   persistConversation,
   writeRecoveryFile,
 } from '@/runtime/index.ts';
-import type { SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
-import { removeLivenessMarker, writeCrashSnapshotAtTurnMoments, writeLivenessMarker } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import type { RecoveryFileInfo, SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
+import { closeSessionHere, openSessionHere, writeCrashSnapshotAtTurnMoments } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { moveLiveSessionArtifacts } from '../core/session-resume-core.ts';
 import {
   readOnboardingCheckMarker,
@@ -78,8 +78,6 @@ export interface SessionPersistenceAndRecoveryDeps {
 }
 
 export interface SessionPersistenceAndRecoveryResult {
-  /** Interval handle for the liveness-marker refresh; clear it on exit. The crash snapshot itself is written at turn moments and deleted by the turn-end save. */
-  recoveryInterval: ReturnType<typeof setInterval>;
   /**
    * The sessionId of the offered recovery snapshot when an unsaved session
    * was found and the user prompt was shown; null otherwise. Threading the
@@ -99,8 +97,25 @@ export interface SessionPersistenceAndRecoveryResult {
 }
 
 /**
+ * Tell the person a crash snapshot can be restored: Ctrl+R restores it, Esc
+ * discards it, typing leaves it for the next launch. The same lines at start-up
+ * and when a session opened later turns out to have one.
+ */
+export function announceRecoveryOffer(
+  info: Pick<RecoveryFileInfo, 'timestamp' | 'title' | 'returnContext'>,
+  systemMessageRouter: { high(message: string, level?: NoticeLevel): void; low(message: string): void },
+  render: () => void,
+): void {
+  systemMessageRouter.high(`[Recovery] Found unsaved session from ${new Date(info.timestamp).toLocaleString()}. Title: "${info.title}". Press Ctrl+R to restore it or Esc to discard it. Typing leaves it saved for the next launch.`);
+  for (const line of formatReturnContextForDisplay(info.returnContext)) {
+    systemMessageRouter.low(`[Recovery] ${line}`);
+  }
+  render();
+}
+
+/**
  * Wires streaming-speed event subscriptions, auto-save on turn completion,
- * and the post-first-render recovery-file check + periodic writer.
+ * the session lock, and the post-first-render recovery-file check.
  *
  * Call AFTER the first render() so that:
  * - announceAwayDigest has already run
@@ -131,11 +146,38 @@ export function wireSessionPersistenceAndRecovery(
   let streamStartTime = 0;
   let streamDeltaCount = 0;
 
+  // The session lock tells a second terminal this session is open here, so it
+  // neither offers this terminal's live recovery snapshot nor forks the
+  // session; the kernel lets it go if this process dies, so nothing refreshes
+  // it. Every path that moves the live session id moves it (resume, fork,
+  // `/session save <name>`, a recovery restore); the turn moment below is the
+  // backstop, one string compare.
+  let liveSessionId = runtime.sessionId;
+  openSessionHere(surface, liveSessionId);
+  const followLiveSession = (): void => {
+    const sessionId = runtime.sessionId;
+    if (sessionId === liveSessionId) return;
+    try {
+      moveLiveSessionArtifacts(surface, liveSessionId, sessionId);
+    } catch (error) {
+      logger.warn('[Recovery] Moving the session lock to the new session id failed', { error: summarizeError(error) });
+    }
+    liveSessionId = sessionId;
+  };
+  unsubs.push(() => {
+    try {
+      closeSessionHere(surface, runtime.sessionId);
+    } catch (error) {
+      logger.warn('[Recovery] Releasing the session lock failed', { error: summarizeError(error) });
+    }
+  });
+
   // The crash snapshot: written when a prompt is accepted and after each tool
   // batch (shared rule, runtime/session-persistence.ts), so a crash mid-turn
   // keeps the turn's work; the session save below is the copy after that and
   // deletes it, so a snapshot on disk always holds something the store does not.
   const writeCrashSnapshot = (): void => {
+    followLiveSession();
     writeRecoveryFile(buildCurrentSessionSnapshot(), runtime.sessionId, conversation.title ?? '', { surface });
   };
   const hostedTurn = (event: { readonly turnId?: string } | undefined): boolean =>
@@ -201,47 +243,12 @@ export function wireSessionPersistenceAndRecovery(
   let recoveryPending: string | null = null;
   const recoveryInfo = checkRecoveryFile({ surface });
   if (recoveryInfo) {
-    systemMessageRouter.high(`[Recovery] Found unsaved session from ${new Date(recoveryInfo.timestamp).toLocaleString()}. Title: "${recoveryInfo.title}". Press Ctrl+R to restore it or Esc to discard it. Typing leaves it saved for the next launch.`);
-    for (const line of formatReturnContextForDisplay(recoveryInfo.returnContext)) {
-      systemMessageRouter.low(`[Recovery] ${line}`);
-    }
-    render();
+    announceRecoveryOffer(recoveryInfo, systemMessageRouter, render);
     // Carry the OFFERED snapshot's sessionId (not just a boolean) so the
     // Ctrl+R/Esc handlers in blocking-input.ts consume/remove exactly this
     // snapshot, never a different one that happens to exist on disk.
     recoveryPending = recoveryInfo.sessionId;
   }
-
-  // The marker tells a second terminal this session is open here, so it neither
-  // offers this terminal's live recovery snapshot nor forks the session. Written
-  // now rather than on the first tick so a terminal started within the minute sees it.
-  // A session id that moved without a resume (a fork, `/session save <name>`, a
-  // recovery restore) takes its marker along (moveLiveSessionArtifacts).
-  let liveSessionId = runtime.sessionId;
-  const refreshLivenessMarker = (): void => {
-    try {
-      const sessionId = runtime.sessionId;
-      if (sessionId !== liveSessionId) {
-        moveLiveSessionArtifacts(surface, liveSessionId, sessionId);
-        liveSessionId = sessionId;
-      } else {
-        writeLivenessMarker(surface, sessionId);
-      }
-    } catch (error) {
-      logger.warn('[Recovery] Liveness marker refresh failed', { error: summarizeError(error) });
-    }
-  };
-  refreshLivenessMarker();
-  unsubs.push(() => {
-    try {
-      removeLivenessMarker(surface, runtime.sessionId);
-    } catch (error) {
-      logger.warn('[Recovery] Liveness marker removal failed', { error: summarizeError(error) });
-    }
-  });
-  // The marker says this terminal is alive; it is refreshed on a timer. The
-  // conversation itself is written at turn moments above, not on this timer.
-  const recoveryInterval = setInterval(refreshLivenessMarker, 60_000);
 
   // First-start registration prompt (owner-approved design): only when this
   // directory resolves to unknown (not covered, not declined) AND it isn't a
@@ -308,7 +315,7 @@ export function wireSessionPersistenceAndRecovery(
     }
   }
 
-  return { recoveryInterval, recoveryPending, workspaceRegistrationAsked, daemonRepairPrompt };
+  return { recoveryPending, workspaceRegistrationAsked, daemonRepairPrompt };
 }
 
 /**

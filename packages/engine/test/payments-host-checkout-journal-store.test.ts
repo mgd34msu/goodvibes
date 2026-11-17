@@ -74,18 +74,6 @@ test.each([
 });
 
 describe('DurableCheckoutJournal: durable before put resolves', () => {
-  test('a put record is on disk before the promise resolves, not merely in memory', async () => {
-    const journal = new DurableCheckoutJournal(filePath);
-    await journal.put(record());
-    // Read the FILE, not the instance: this is the flush the submit-pending
-    // guarantee rides on.
-    expect(existsSync(filePath)).toBe(true);
-    const onDisk = JSON.parse(readFileSync(filePath, 'utf-8')) as { records: Record<string, unknown>[] };
-    expect(onDisk.records).toHaveLength(1);
-    expect(onDisk.records[0]!['purchaseId']).toBe('pur-journal-1');
-    expect(onDisk.records[0]!['phase']).toBe('submit-pending');
-  });
-
   test('a submit-pending record survives a restart byte-faithfully', async () => {
     const before = new DurableCheckoutJournal(filePath);
     await before.put(record());

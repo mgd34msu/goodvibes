@@ -53,6 +53,9 @@ async function openAgent(env: MeasureEnv): Promise<AgentFloor> {
   const root = env.workspace;
   mkdirSync(join(root, '.goodvibes', 'agent'), { recursive: true });
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: env.home });
+  // A decision model is set, as on a machine that uses one; its requests go to the counting port below.
+  // With none set the composition runs every decision without one and the route plan is held unread.
+  configManager.set('judgment.model', 'jev-latest', { daemonNotRunning: true });
   const services = await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: env.home, modelDiscovery: 'skip' });
   // As runtime/bootstrap-core.ts composes the main conversation's registry.
   const composed = composeAgentToolRegistry({

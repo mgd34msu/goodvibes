@@ -359,7 +359,7 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const researchRunSnapshot = buildAgentWorkspaceResearchRunSnapshot(context, readFailures);
   const reviewPacket = buildAgentWorkspaceReviewPacketPart(context, readFailures);
   const { artifactListSnapshot, recentReviewerHandoffs, reviewPacketDefaults, reviewerBadge, reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
-  const setupSmokeHistory = buildSetupSmokeHistory(artifactListSnapshot.items, artifactListSnapshot.available);
+  const setupSmokeHistory = buildSetupSmokeHistory(context);
   const discoveredBehavior = summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths);
   const profileBaseHome = inferRuntimeProfileBaseHome(context.workspace?.shellPaths?.homeDirectory ?? '');
   const { runtimeProfiles, runtimeStarterTemplates, selectedRuntimeProfile, runtimeProfileRoot } = buildAgentWorkspaceRuntimeProfilesSnapshot(profileBaseHome);

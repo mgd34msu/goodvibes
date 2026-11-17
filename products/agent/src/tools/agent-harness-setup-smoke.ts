@@ -7,6 +7,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { clearSetupWizardCheckpoint, readSetupWizardCheckpoint, saveSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
+import { listSetupSmokeEvidence, recordSetupSmokeEvidence, type SetupSmokeEvidenceList } from '../agent/setup-smoke-evidence.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import { previewHarnessText } from '@goodvibes-jev/engine/terminal-shell/agent-turn/preview-text';
 import { homeRelativePath } from '@goodvibes-jev/engine/terminal-shell/agent-turn/home-path';
@@ -371,6 +372,14 @@ export async function saveSetupSmokeArtifact(input: {
       evidenceFields: input.evidenceFields.map((field) => field.id),
     };
   }
+  const shellPaths = input.context.workspace?.shellPaths;
+  if (!shellPaths || typeof shellPaths.resolveUserPath !== 'function') {
+    return {
+      status: 'unavailable',
+      reason: 'Agent shell paths are unavailable, so a saved smoke run could not be recorded as setup evidence.',
+      evidenceFields: input.evidenceFields.map((field) => field.id),
+    };
+  }
   const descriptor = await input.ownership.createArtifact({
     kind: 'document',
     mimeType: 'text/markdown',
@@ -390,6 +399,8 @@ export async function saveSetupSmokeArtifact(input: {
       redaction: 'token, secret, password, credential, authorization, and api-key-like values redacted before storage',
     },
   });
+  // The record, not the artifact's metadata, is what makes it setup smoke evidence.
+  recordSetupSmokeEvidence(shellPaths, descriptor.id);
   input.ownership.assertCurrent();
   return {
     status: 'saved',
@@ -416,18 +427,11 @@ export function readArtifactMetadataStringArray(artifact: ArtifactDescriptor, ke
   return Array.isArray(value) ? value.map((entry) => readString(entry)).filter(Boolean) : [];
 }
 
-export type SetupSmokeEvidenceList = { readonly status: 'available'; readonly artifacts: readonly ArtifactDescriptor[] } | { readonly status: 'unavailable'; readonly reason: string };
+export type { SetupSmokeEvidenceList };
 
-/** The saved smoke evidence, newest first: one purpose-filtered listing, read once per setup call. */
+/** The saved smoke evidence, newest first: only the artifacts this tool recorded as its own runs, read once per setup call. */
 export function setupSmokeEvidenceArtifacts(context: CommandContext): SetupSmokeEvidenceList {
-  const artifactStore = setupSmokeArtifactStore(context);
-  if (!artifactStore?.listByPurpose) {
-    return {
-      status: 'unavailable',
-      reason: 'Artifact list support is unavailable in this runtime.',
-    };
-  }
-  return { status: 'available', artifacts: artifactStore.listByPurpose('agent-setup-smoke-evidence') };
+  return listSetupSmokeEvidence(context.workspace?.shellPaths, setupSmokeArtifactStore(context));
 }
 
 /** The result a saved smoke artifact proves, including ones saved before `passed` existed. */

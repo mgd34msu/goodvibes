@@ -1,14 +1,11 @@
 import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { CommandContext } from './command-registry.ts';
 import { readSetupWizardCheckpoint } from '../agent/setup-wizard-checkpoint.ts';
+import { listSetupSmokeEvidence } from '../agent/setup-smoke-evidence.ts';
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_CLEAR_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_INSPECT_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_MARK_CHECKPOINT_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE, buildAgentSetupWizard, emptyAgentSetupSmokeHistory, emptyAgentSetupWizardCheckpoint, type AgentSetupWizard, type AgentSetupWizardBlockedCheckFrequency, type AgentSetupWizardCheckpoint, type AgentSetupWizardDurableReceipt, type AgentSetupWizardSmokeHistory, type AgentSetupWizardSourceItem } from '../agent/setup-wizard.ts';
 import type { AgentWorkspaceSetupChecklistItem } from './agent-workspace-setup.ts';
 import { readArtifactMetadataString, readArtifactMetadataStringList } from './agent-workspace-artifact-metadata.ts';
-
-function isSetupSmokeEvidenceArtifact(artifact: ArtifactDescriptor): boolean {
-  return readArtifactMetadataString(artifact.metadata, 'purpose') === 'agent-setup-smoke-evidence';
-}
 
 function setupSmokeEvidenceScore(artifact: ArtifactDescriptor): number {
   const result = readArtifactMetadataString(artifact.metadata, 'result');
@@ -51,16 +48,16 @@ function setupSmokeBlockedCheckFrequency(artifacts: readonly ArtifactDescriptor[
     .map(([checkId, count]) => ({ checkId, count }));
 }
 
-export function buildSetupSmokeHistory(artifacts: readonly ArtifactDescriptor[], artifactListAvailable: boolean): AgentSetupWizardSmokeHistory {
-  if (!artifactListAvailable) {
+/** Only the runs the setup smoke tool recorded count; an artifact's own metadata never makes it smoke evidence. */
+export function buildSetupSmokeHistory(context: CommandContext): AgentSetupWizardSmokeHistory {
+  const listed = listSetupSmokeEvidence(context.workspace?.shellPaths, context.platform?.artifactStore);
+  if (listed.status === 'unavailable') {
     return {
-      ...emptyAgentSetupSmokeHistory('Artifact list support is unavailable in this runtime.'),
+      ...emptyAgentSetupSmokeHistory(listed.reason),
       status: 'unavailable',
     };
   }
-  const setupSmokeArtifacts = artifacts
-    .filter(isSetupSmokeEvidenceArtifact)
-    .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0));
+  const setupSmokeArtifacts = listed.artifacts;
   if (setupSmokeArtifacts.length === 0) return emptyAgentSetupSmokeHistory();
   const resultCounts = setupSmokeArtifacts.reduce<Record<string, number>>((counts, artifact) => {
     const result = readArtifactMetadataString(artifact.metadata, 'result') || 'unknown';

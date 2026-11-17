@@ -361,9 +361,11 @@ export class CalendarOAuthService {
       return this.connectDeviceCode(provider, hooks);
     }
     try {
+      // Best-effort, as in connectLoopback: the listener is up and the link
+      // can still be opened by hand.
+      try { hooks.openUrl?.(begun.start.authorizationUrl); } catch { /* the waiter below still times out and closes */ }
       let code: string;
       try {
-        hooks.openUrl?.(begun.start.authorizationUrl);
         code = (await begun.waiter.waitForCode()).code;
       } catch (error) {
         return { ok: false, stage: 'authorize', error: `The browser sign-in did not complete: ${describe(error)}` };

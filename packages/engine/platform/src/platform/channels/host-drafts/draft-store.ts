@@ -4,7 +4,7 @@ import type { AtRestCipher } from '../../config/daemon-credential-store.js';
 import { HandlerSqliteStore } from '../../state/daemon-handler-sqlite-store.js';
 import type { MutationPublication } from '../../utils/file-mutation.js';
 import { HandlerError } from '../../control-plane/host-handlers.js';
-import { channelDraftWireReference, createChannelDraftWireReference, isHistoricalDraftWireReference, matchesHistoricalDraftWireReference } from './wire-reference.js';
+import { channelDraftWireReference, createChannelDraftWireReference, isHistoricalDraftWireReference } from './wire-reference.js';
 
 // ---------------------------------------------------------------------------
 // Channel drafts, the store of record.
@@ -144,6 +144,7 @@ const SCHEMA: string[] = [
    )`,
   'CREATE INDEX IF NOT EXISTS idx_drafts_status ON drafts (status)',
   'CREATE INDEX IF NOT EXISTS idx_drafts_updatedAt ON drafts (updatedAt)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_drafts_wireReference ON drafts (wireReference)',
 ];
 
 interface DraftRow {
@@ -232,22 +233,7 @@ export class DraftSyncStore {
     if (this.closed) return Promise.reject(new Error('DraftSyncStore is closed'));
     if (this.initialized) return Promise.resolve();
     if (this.initializing) return this.initializing;
-    const pending = Promise.resolve().then(() => this.store.init()).then(async () => {
-      // Existing stores contain an unused plaintext body digest. Remove the
-      // column without decrypting or rewriting the authenticated ciphertext.
-      if (this.store.all<{ name: string }>('PRAGMA table_info(drafts)').some(column => column.name === 'messageDigest')) {
-        this.store.run('ALTER TABLE drafts DROP COLUMN messageDigest');
-      }
-      // Old explicit INSERT/UPDATE statements leave this additive column intact.
-      // Allocate a private-safe label once, never a digest of new caller metadata.
-      const columns = this.store.all<{ name: string }>('PRAGMA table_info(drafts)');
-      if (!columns.some(column => column.name === 'legacyWireReference')) this.store.run('ALTER TABLE drafts ADD COLUMN legacyWireReference INTEGER NOT NULL DEFAULT 1');
-      if (!columns.some(column => column.name === 'wireReference')) this.store.run('ALTER TABLE drafts ADD COLUMN wireReference TEXT');
-      for (const row of this.store.all<{ id: string; wireReference: string | null }>('SELECT id, wireReference FROM drafts')) {
-        if (row.wireReference === null) this.store.run('UPDATE drafts SET wireReference = ? WHERE id = ? AND wireReference IS NULL', [createChannelDraftWireReference(row.id), row.id]);
-        else channelDraftWireReference(row.id, row.wireReference);
-      }
-      this.store.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_drafts_wireReference ON drafts (wireReference)');
+    const pending = Promise.resolve().then(() => this.store.init()).then(() => {
       if (!this.closed) this.initialized = true;
     });
     this.initializing = pending;
@@ -460,8 +446,8 @@ export class DraftSyncStore {
   resolveReferenceId(reference: string): string | undefined {
     this.requireInit();
     const matching: string[] = [];
-    for (const { id, wireReference, legacyWireReference } of this.store.all<{ id: string; wireReference: string | null; legacyWireReference: number }>('SELECT id, wireReference, legacyWireReference FROM drafts')) {
-      if (id === reference || wireReference === reference || legacyWireReference === 1 && matchesHistoricalDraftWireReference(id, reference)) matching.push(id);
+    for (const { id, wireReference } of this.store.all<{ id: string; wireReference: string | null }>('SELECT id, wireReference FROM drafts')) {
+      if (id === reference || wireReference === reference) matching.push(id);
     }
     if (matching.length > 1) throw new HandlerError('Native draft reference is ambiguous', 'NATIVE_DRAFT_REFERENCE_UNAVAILABLE', 409);
     return matching[0];

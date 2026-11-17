@@ -1,7 +1,7 @@
 import type { McpApi, McpConfigScope, McpReloadResult, McpServerConfig } from '@goodvibes-jev/engine/platform/platform/mcp';
 import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
-import { requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag, type CommandConfirmationContext } from './command-confirmation.js';
 import { maskLaunchArgs } from './renderer/mcp-form-rows.js';
 import { quoteSlashCommandArg } from './slash-command-parser.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
@@ -260,27 +260,25 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       argsHint: present('[servers|review|tools|config|add --yes|remove --yes]'),
       async handler(args, ctx) {
         const print = (message: string) => ctx.print(present(message));
+        /** A line that did not do what was asked: thrown, so the terminal and a model caller both see it refused. */
+        const refuse: (message: string, next?: string) => never = (message, next) => { throw commandRefusal(present(message), next); };
         const mcpApi = requireMcpApi(ctx);
         const listServerSecurity = () => mcpApi.listServerSecurity();
         /** The configured or connected server a change names; an unknown name is refused before anything is asked or changed. */
         const knownServer = (name: string, change: string): McpSecurityServer | undefined => {
           const server = listServerSecurity().find((entry) => entry.name === name);
-          if (!server) print(`No MCP server named ${name}, so its ${change} was not changed. Run /mcp servers to list configured servers.`);
+          if (!server) refuse(`No MCP server named ${name}, so its ${change} was not changed.`, 'Run /mcp servers to list configured servers.');
           return server;
         };
         /** Return a server to its configured trust mode or role and say which value applies now. */
         const clearSessionPolicy = (serverName: string, field: 'trustMode' | 'role'): void => {
           const what = field === 'trustMode' ? 'trust mode' : 'role';
-          if (!mcpApi.clearServerSessionPolicy) {
-            print(`MCP ${what} not changed: this runtime cannot clear a session ${what}. Restart to return to the configured value.`);
-            return;
-          }
+          if (!mcpApi.clearServerSessionPolicy) refuse(`MCP ${what} not changed: this runtime cannot clear a session ${what}.`, 'Restart to return to the configured value.');
           let cleared: boolean;
           try {
             cleared = mcpApi.clearServerSessionPolicy(serverName, field);
           } catch (error) {
-            print(`MCP ${what} not changed: ${summarizeError(error)}`);
-            return;
+            refuse(`MCP ${what} not changed: ${summarizeError(error)}`);
           }
           const now = listServerSecurity().find((server) => server.name === serverName);
           const value = now ? (field === 'trustMode' ? formatMcpTrustMode(now.trustMode) : formatMcpRole(now.role)) : 'its configured value';
@@ -342,8 +340,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           try {
             allTools = await mcpApi.listAllTools();
           } catch (e) {
-            print(`Error listing tools: ${summarizeError(e)}`);
-            return;
+            refuse(`Listing MCP tools failed: ${summarizeError(e)}`);
           }
           const tools = filterServer ? allTools.filter((t) => t.serverName === filterServer) : allTools;
           if (tools.length === 0) {
@@ -391,7 +388,8 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             ? servers.find((server) => server.name === serverName)
             : servers.find((server) => !server.connected || server.schemaFreshness === 'quarantined');
           if (!selected) {
-            print(serverName ? `Unknown MCP server ${serverName}` : 'MCP Repair\n  No MCP server currently needs repair.');
+            if (serverName) refuse(`Unknown MCP server ${serverName}.`, 'Run /mcp servers to list configured servers.');
+            print('MCP Repair\n  No MCP server currently needs repair.');
             return;
           }
           const nextSteps = [
@@ -431,16 +429,13 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           }
           if (serverName && requestedMode) {
             if (!isMcpTrustMode(requestedMode)) {
-              print(
-                `Invalid MCP trust mode "${requestedMode}". Expected constrained, ask-on-risk, blocked, config (back to the configured mode), or allow-all.\nUsage: ${MCP_TRUST_COMMAND_USAGE}\nUse /settings -> MCP to explicitly enable allow-all.`,
-              );
-              return;
+              refuse(`Invalid MCP trust mode "${requestedMode}". Expected constrained, ask-on-risk, blocked, config (back to the configured mode), or allow-all.`,
+                `Usage: ${MCP_TRUST_COMMAND_USAGE}. Use /settings -> MCP to explicitly enable allow-all.`);
             }
             const mode = requestedMode;
             if (mode === 'allow-all') {
-              print(`Use /settings → MCP to explicitly enable allow-all for ${serverName}. Direct command escalation is blocked.`);
               ctx.openSettingsModal?.();
-              return;
+              refuse(`The trust mode of ${serverName} was not changed: allow-all is not set by a command.`, `Use /settings → MCP to explicitly enable allow-all for ${serverName}.`);
             }
             if (!knownServer(serverName, 'trust mode')) return;
             if (!confirmation.yes) {
@@ -450,19 +445,12 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             try {
               mcpApi.setServerTrustMode(serverName, mode);
             } catch (error) {
-              print(`MCP trust mode not changed: ${summarizeError(error)}`);
-              return;
+              refuse(`MCP trust mode not changed: ${summarizeError(error)}`);
             }
             print(`Updated MCP trust mode for ${serverName} to ${formatMcpTrustMode(mode)} for this session only: it stays through reconnects and config reloads until \`/mcp trust ${serverName} config --yes\` or a restart. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
-          if (serverName || requestedMode) {
-            print(`Usage: ${MCP_TRUST_COMMAND_USAGE}\nUse /settings -> MCP to explicitly enable allow-all.`);
-            return;
-          } else {
-            print(`Usage: ${MCP_TRUST_COMMAND_USAGE}\nUse /settings -> MCP to explicitly enable allow-all.`);
-            return;
-          }
+          refuse(`Usage: ${MCP_TRUST_COMMAND_USAGE}`, 'Use /settings -> MCP to explicitly enable allow-all.');
         }
         if (subcommand === 'role') {
           const serverName = commandArgs[1];
@@ -478,8 +466,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           }
           if (serverName && requestedRole) {
             if (!isMcpRole(requestedRole)) {
-              print(`Invalid MCP role "${requestedRole}". Expected one of ${MCP_ROLES.join(', ')}, or config (back to the configured role).\nUsage: ${MCP_ROLE_COMMAND_USAGE}`);
-              return;
+              refuse(`Invalid MCP role "${requestedRole}". Expected one of ${MCP_ROLES.join(', ')}, or config (back to the configured role).`, `Usage: ${MCP_ROLE_COMMAND_USAGE}`);
             }
             const role = requestedRole;
             if (!knownServer(serverName, 'role')) return;
@@ -490,19 +477,12 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             try {
               mcpApi.setServerRole(serverName, role);
             } catch (error) {
-              print(`MCP role not changed: ${summarizeError(error)}`);
-              return;
+              refuse(`MCP role not changed: ${summarizeError(error)}`);
             }
             print(`Updated MCP role for ${serverName} to ${formatMcpRole(role)} for this session only: it stays through reconnects and config reloads until \`/mcp role ${serverName} config --yes\` or a restart. Edit the server in /mcp to keep it after a restart.`);
             return;
           }
-          if (serverName || requestedRole) {
-            print(`Usage: ${MCP_ROLE_COMMAND_USAGE}`);
-            return;
-          } else {
-            print(`Usage: ${MCP_ROLE_COMMAND_USAGE}`);
-            return;
-          }
+          refuse(`Usage: ${MCP_ROLE_COMMAND_USAGE}`);
         }
         if (subcommand === 'add') {
           if (!confirmation.yes) {
@@ -513,8 +493,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
           try {
             parsedAdd = parseAddServerArgs(commandArgs);
           } catch (error) {
-            print(summarizeError(error));
-            return;
+            refuse(summarizeError(error), `Usage: ${MCP_ADD_COMMAND_USAGE}`);
           }
           const shellPaths = requireShellPaths(ctx);
           try {
@@ -532,16 +511,13 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               ].join('\n'),
             );
           } catch (error) {
-            print(`MCP add failed ${summarizeError(error)}`);
+            refuse(`MCP add failed: ${summarizeError(error)}`);
           }
           return;
         }
         if (subcommand === 'remove') {
           const serverName = commandArgs[1]?.trim();
-          if (!serverName) {
-            print('Usage: /mcp remove <server> [--scope project|global] --yes');
-            return;
-          }
+          if (!serverName) refuse('Usage: /mcp remove <server> [--scope project|global] --yes');
           if (!confirmation.yes) {
             requireYesFlag(ctx, `remove MCP server ${serverName}`, '/mcp remove <server> [--scope project|global] --yes');
             return;
@@ -551,17 +527,13 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
             for (let index = 2; index < commandArgs.length; index += 1) {
               if (commandArgs[index] === '--scope') {
                 const value = readFlagValue(commandArgs, index, '--scope');
-                if (!isMcpScope(value)) {
-                  print(`Invalid MCP scope "${value}". Expected project or global.`);
-                  return;
-                }
+                if (!isMcpScope(value)) refuse(`Invalid MCP scope "${value}". Expected project or global.`);
                 scope = value;
                 index += 1;
               }
             }
           } catch (error) {
-            print(summarizeError(error));
-            return;
+            refuse(summarizeError(error));
           }
           const shellPaths = requireShellPaths(ctx);
           try {
@@ -572,7 +544,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
                 : `No ${scope} MCP server named "${serverName}" exists in ${result.path}.\nIf it still appears, it is coming from another config scope or external MCP config.`,
             );
           } catch (error) {
-            print(`MCP remove failed ${summarizeError(error)}`);
+            refuse(`MCP remove failed: ${summarizeError(error)}`);
           }
           return;
         }
@@ -588,7 +560,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               `Reloaded MCP runtime from config. ${servers.filter((server) => server.connected).length}/${servers.length} server(s) connected. Result +${result.added} ~${result.changed} -${result.removed}, unchanged ${result.unchanged}.`,
             );
           } catch (error) {
-            print(`MCP reload failed ${summarizeError(error)}`);
+            refuse(`MCP reload failed: ${summarizeError(error)}`);
           }
           return;
         }
@@ -618,24 +590,18 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
               ].join('\n'),
             );
           } catch (error) {
-            print(`MCP config read failed ${summarizeError(error)}`);
+            refuse(`MCP config read failed: ${summarizeError(error)}`);
           }
           return;
         }
         if (subcommand === 'quarantine') {
           const serverName = commandArgs[1];
           const action = commandArgs[2];
-          if (!serverName) {
-            print('Usage: /mcp quarantine <server> [detail] --yes\n       /mcp quarantine <server> approve [operatorId] --yes');
-            return;
-          }
+          if (!serverName) refuse('Usage: /mcp quarantine <server> [detail] --yes | /mcp quarantine <server> approve [operatorId] --yes');
           const target = knownServer(serverName, action === 'approve' ? 'quarantine override' : 'quarantine');
           if (!target) return;
           if (action === 'approve') {
-            if (target.schemaFreshness !== 'quarantined') {
-              print(`MCP server ${serverName} is not quarantined (status ${formatMcpFreshness(target.schemaFreshness)}). Nothing was approved.`);
-              return;
-            }
+            if (target.schemaFreshness !== 'quarantined') refuse(`MCP server ${serverName} is not quarantined (status ${formatMcpFreshness(target.schemaFreshness)}). Nothing was approved.`);
             if (!confirmation.yes) {
               requireYesFlag(
                 ctx,

@@ -2,6 +2,7 @@ import { findSessionCandidates } from '@goodvibes-jev/engine/platform/platform/s
 import { exportToMarkdown, type ExportMessage, type ExportMetadata } from '@goodvibes-jev/engine/platform/platform/export';
 import type { ContentPart } from '@goodvibes-jev/engine/platform/platform/providers';
 import type { ToolCall } from '@goodvibes-jev/engine/platform/platform/types';
+import { commandRefusal } from './command-confirmation.js';
 
 /** The two transcript forms every export command writes. */
 export type TranscriptFormat = 'markdown' | 'text';
@@ -54,24 +55,20 @@ export function exportMessageFromRecord(message: Readonly<Record<string, unknown
   };
 }
 
-const SESSION_EXPORT_USAGE = 'Usage: /session export <session-id> [markdown|text]\nUse /session export . to export the current session.';
+const SESSION_EXPORT_USAGE = 'Usage: /session export <session-id> [markdown|text]';
+const SESSION_EXPORT_NEXT = 'Use /session export . to export the current session.';
 
 export function resolveSessionExportRequest<Session extends { readonly name: string; readonly title: string }>(
   args: readonly string[],
   currentId: string,
   list: () => readonly Session[],
-  print: (text: string) => void,
 ) {
   const target = args[1];
-  if (!target) {
-    print(SESSION_EXPORT_USAGE);
-    return undefined;
-  }
+  if (!target) throw commandRefusal(SESSION_EXPORT_USAGE, SESSION_EXPORT_NEXT);
   const formatWord = args[2] ?? 'markdown';
   const format = parseTranscriptFormat(formatWord);
   if (format === undefined || args.length > 3) {
-    print(`Nothing was exported: ${args.length > 3 ? `"${args.slice(3).join(' ')}" is not part of the command` : `"${formatWord}" is not a format (markdown or text)`}.\n${SESSION_EXPORT_USAGE}`);
-    return undefined;
+    throw commandRefusal(`Nothing was exported: ${args.length > 3 ? `"${args.slice(3).join(' ')}" is not part of the command` : `"${formatWord}" is not a format (markdown or text)`}.`, SESSION_EXPORT_USAGE);
   }
   const sessionId = target === '.' ? currentId : target;
   // The current session is matched by its exact id only: a prefix or title
@@ -79,8 +76,7 @@ export function resolveSessionExportRequest<Session extends { readonly name: str
   const sessions = list();
   const candidates = target === '.' ? sessions.filter((session) => session.name === sessionId) : findSessionCandidates(sessions, sessionId);
   if (candidates.length > 1) {
-    print(`Ambiguous session: ${sessionId}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-    return undefined;
+    throw commandRefusal(`Ambiguous session: ${sessionId}.`, `Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
   }
   const found = candidates[0];
   return { target, format, sessionId, found };

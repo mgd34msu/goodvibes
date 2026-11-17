@@ -134,13 +134,11 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
       // An exact id reads one meta line; only a title or prefix lists the directory.
       const candidates = resolveSessionTarget(sm, target);
       if (candidates.length > 1) {
-        ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-        return true;
+        throw commandRefusal(`Ambiguous session: ${target}.`, `Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
       }
       const found = candidates[0];
       if (!found) {
-        ctx.print(`Session not found ${target}\nUse /session list to see available sessions.`);
-        return true;
+        throw commandRefusal(`Session not found ${target}`, 'Use /session list to see available sessions.');
       }
       try {
         // The one load: refuses while a turn runs or while another terminal holds the
@@ -195,7 +193,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
           }
         }
       } catch (e) {
-        ctx.print(formatSessionFailure('resume session', e));
+        throw commandRefusal(formatSessionFailure('resume session', e));
       }
       return true;
     }
@@ -205,26 +203,23 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         args,
         ctx.session.runtime.sessionId,
         () => sm.list(),
-        (text) => ctx.print(text),
       );
-      if (!request) return true;
       const { target, format, sessionId, found } = request;
       const loadName = found ? found.name : sessionId;
       let loaded: ReturnType<typeof sm.load>;
       try {
         loaded = sm.load(loadName);
       } catch (error) {
-        ctx.print(found || target === '.' ? formatSessionFailure('export session', error) : `Session not found ${sessionId}\nUse /session list to see available sessions.`);
-        return true;
+        if (found || target === '.') throw commandRefusal(formatSessionFailure('export session', error));
+        throw commandRefusal(`Session not found ${sessionId}`, 'Use /session list to see available sessions.');
       }
       try {
         await printSessionExport(ctx, loadName, loaded.meta.title, readConversationMessageSnapshots(loaded.messages), format, target === '.');
       } catch (error) {
         if (ctx.judgmentReadingOptions?.signal?.aborted) {
-          ctx.print(`Export of session ${loadName} was cancelled; nothing was printed.`);
-          return true;
+          throw commandRefusal(`Export of session ${loadName} was cancelled; nothing was printed.`);
         }
-        ctx.print(formatSessionFailure('export session', error));
+        throw commandRefusal(formatSessionFailure('export session', error));
       }
       return true;
     }

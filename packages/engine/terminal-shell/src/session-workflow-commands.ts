@@ -10,7 +10,7 @@ import {
 } from './transcript-reading.js';
 import { describeUnknownTranscriptKind, readTranscriptKind } from './transcript-kinds.js';
 import { createTranscriptReviewFormatter, readTranscriptReviewArguments } from './transcript-review.js';
-import { requireYesFlag, stripYesFlag } from './command-confirmation.js';
+import { commandRefusal, requireYesFlag, stripYesFlag } from './command-confirmation.js';
 export interface SessionWorkflowContext extends TranscriptCommandContext<TerminalConversationManager> {
   readonly session: {
     readonly sessionManager?: unknown;
@@ -51,8 +51,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     const sm = requireSessionManager(ctx);
     const sub = args[0];
     if (['resume', 'save', 'fork'].includes(sub ?? '') && ctx.isGenerating?.()) {
-      ctx.print('A turn is still running. Stop it with Esc or let it finish before changing sessions.');
-      return true;
+      throw commandRefusal('A turn is still running, so the session was not changed.', 'Stop it with Esc or let it finish, then run the command again.');
     }
 
     if (!sub) {
@@ -105,8 +104,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     if (sub === 'rename') {
       const newName = args.slice(1).join(' ').trim();
       if (!newName) {
-        ctx.print('Usage: /session rename <new-name>');
-        return true;
+        throw commandRefusal('Usage: /session rename <new-name>');
       }
       try {
         const sessionId = ctx.session.runtime.sessionId;
@@ -128,7 +126,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         ctx.print(policy.renamed(newName));
         ctx.renderRequest();
       } catch (e) {
-        ctx.print(policy.failed('rename', e));
+        throw commandRefusal(policy.failed('rename', e));
       }
       return true;
     }
@@ -169,7 +167,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
           ctx.print(policy.forked(destination, name, source, currentTitle, snapshot.messages.length));
         } else ctx.print(policy.saved(name, result.sanitizedName, result.filePath));
       } catch (error) {
-        ctx.print(policy.failed(operation, error));
+        throw commandRefusal(policy.failed(operation, error));
       }
       return true;
     }
@@ -178,13 +176,11 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       const target = args[1] || ctx.session.runtime.sessionId;
       const candidates = resolveSessionTarget(sm, target);
       if (candidates.length > 1) {
-        ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-        return true;
+        throw commandRefusal(`Ambiguous session: ${target}.`, `Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
       }
       const found = candidates[0];
       if (!found) {
-        ctx.print(`Session not found${policy.detailSeparator}${target}`);
-        return true;
+        throw commandRefusal(`Session not found${policy.detailSeparator}${target}`, 'Use /session list to see saved sessions.');
       }
       const date = new Date(found.timestamp).toLocaleString();
       ctx.print(
@@ -205,8 +201,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     if (sub === 'search') {
       const query = args.slice(1).join(' ').trim();
       if (!query) {
-        ctx.print('Usage: /session search <keyword>');
-        return true;
+        throw commandRefusal('Usage: /session search <keyword>');
       }
       const results = sm.search(query);
       if (results.length === 0) {
@@ -232,19 +227,12 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
 
     if (sub === 'events' || sub === 'groups' || sub === 'hotspots') {
       const parsed = readTranscriptReviewArguments(args.slice(1));
-      if ('refusal' in parsed) {
-        ctx.print(parsed.refusal);
-        return true;
-      }
+      if ('refusal' in parsed) throw commandRefusal(parsed.refusal);
       if (sub === 'hotspots' && (parsed.page.start !== undefined || parsed.page.size !== undefined)) {
-        ctx.print('Not shown: hotspots counts the whole transcript and takes only a kind. Usage: /session hotspots [kind]');
-        return true;
+        throw commandRefusal('Not shown: hotspots counts the whole transcript and takes only a kind.', 'Usage: /session hotspots [kind]');
       }
       const kind = readTranscriptKind(parsed.kindWord);
-      if (kind === undefined) {
-        ctx.print(describeUnknownTranscriptKind(parsed.kindWord ?? ''));
-        return true;
-      }
+      if (kind === undefined) throw commandRefusal(describeUnknownTranscriptKind(parsed.kindWord ?? ''));
       const source = captureTranscriptSource(ctx);
       try {
         const lines = await buildTranscriptReviewLines(ctx, kind, sub, source, parsed.page);
@@ -256,7 +244,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         } catch {
           return true;
         }
-        if (!transcriptReadingCanceled(error)) ctx.print(describeTranscriptReadFailure(error));
+        if (!transcriptReadingCanceled(error)) throw commandRefusal(describeTranscriptReadFailure(error));
       }
       return true;
     }
@@ -265,23 +253,19 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       const parsed = policy.confirmDelete ? stripYesFlag(args) : { rest: args, yes: true };
       const target = parsed.rest[1];
       if (!target) {
-        ctx.print('Usage: /session delete <session-id>' + (policy.confirmDelete ? ' --yes' : ''));
-        return true;
+        throw commandRefusal('Usage: /session delete <session-id>' + (policy.confirmDelete ? ' --yes' : ''));
       }
       // Resolve first, so the confirmation names the session that would be removed.
       const candidates = resolveSessionTarget(sm, target);
       if (candidates.length > 1) {
-        ctx.print(`Ambiguous session: ${target}. Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
-        return true;
+        throw commandRefusal(`Ambiguous session: ${target}.`, `Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
       }
       const found = candidates[0];
       if (!found) {
-        ctx.print(`Session not found${policy.detailSeparator}${target}`);
-        return true;
+        throw commandRefusal(`Session not found${policy.detailSeparator}${target}`, 'Use /session list to see saved sessions.');
       }
       if (found.name === ctx.session.runtime.sessionId) {
-        ctx.print(`Cannot delete the active session (${found.name}).\nSwitch to another session first with /session resume <id>.`);
-        return true;
+        throw commandRefusal(`Cannot delete the active session (${found.name}).`, 'Switch to another session first with /session resume <id>.');
       }
       if (!parsed.yes) {
         const described = `${found.name}${found.title ? ` ("${found.title}")` : ''}, ${found.messageCount} message${found.messageCount === 1 ? '' : 's'}`;
@@ -292,7 +276,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         sm.delete(found.name);
         ctx.print(policy.deleted(found.name, found.title));
       } catch (e) {
-        ctx.print(policy.failed('delete', e));
+        throw commandRefusal(policy.failed('delete', e));
       }
       return true;
     }

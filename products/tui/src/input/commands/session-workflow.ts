@@ -1,6 +1,7 @@
 import { exportMessageFromRecord, formatTranscript, resolveSessionExportRequest, type TranscriptFormat } from '@goodvibes-jev/engine/terminal-shell/session-export-format';
 import { createSessionWorkflowCommands } from '@goodvibes-jev/engine/terminal-shell/session-workflow-commands';
 import { resolveSessionTarget } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { commandRefusal } from '@goodvibes-jev/engine/terminal-shell/command-confirmation';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -176,19 +177,16 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         .join(' ')
         .trim();
       if (!target) {
-        ctx.print('Usage: /session resume <session-id-or-name> [--force]');
-        return true;
+        throw commandRefusal('Usage: /session resume <session-id-or-name> [--force]');
       }
       // An exact id reads one meta line; only a title or prefix lists the directory.
       const candidates = resolveSessionTarget(sm, target);
       if (candidates.length > 1) {
-        ctx.print(`Ambiguous session: ${target}\nUse an exact session ID: ${candidates.map((session) => session.name).join(', ')}`);
-        return true;
+        throw commandRefusal(`Ambiguous session: ${target}`, `Use an exact session ID: ${candidates.map((session) => session.name).join(', ')}`);
       }
       const found = candidates[0];
       if (!found) {
-        ctx.print(`Session not found: ${target}\nUse /session list to see available sessions.`);
-        return true;
+        throw commandRefusal(`Session not found: ${target}`, 'Use /session list to see available sessions.');
       }
 
       // Multi-instance safety: refuse (and require --force) when another
@@ -266,37 +264,31 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
           }
         }
       } catch (e) {
-        ctx.print(`Failed to resume session: ${summarizeError(e)}`);
+        throw commandRefusal(`Failed to resume session: ${summarizeError(e)}`);
       }
       return true;
     }
 
     if (sub === 'export') {
       const output = readExportOutput(args);
-      if (typeof output === 'string') {
-        ctx.print(output);
-        return true;
-      }
+      if (typeof output === 'string') throw commandRefusal(output);
       const request = resolveSessionExportRequest(
         output.rest,
         ctx.session.runtime.sessionId,
         () => sm.list(),
-        (text) => ctx.print(text),
       );
-      if (!request) return true;
       const { target, format, sessionId, found } = request;
       if (!found && target !== '.') {
         let loaded: ReturnType<typeof sm.load>;
         try {
           loaded = sm.load(sessionId);
         } catch {
-          ctx.print(`Session not found: ${sessionId}`);
-          return true;
+          throw commandRefusal(`Session not found: ${sessionId}`, 'Use /session list to see available sessions.');
         }
         try {
           await exportSessionTranscript(ctx, sessionId, loaded.meta.title, loaded.messages as Array<Record<string, unknown>>, format, output);
         } catch (e) {
-          ctx.print(`Failed to export session: ${summarizeError(e)}`);
+          throw commandRefusal(`Failed to export session: ${summarizeError(e)}`);
         }
         return true;
       }
@@ -305,7 +297,7 @@ export const { handleSessionWorkflowCommand } = createSessionWorkflowCommands<Co
         const { meta, messages } = sm.load(loadName);
         await exportSessionTranscript(ctx, loadName, meta.title, messages as Array<Record<string, unknown>>, format, output);
       } catch (e) {
-        ctx.print(`Failed to export session: ${summarizeError(e)}`);
+        throw commandRefusal(`Failed to export session: ${summarizeError(e)}`);
       }
       return true;
     }

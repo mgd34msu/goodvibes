@@ -342,7 +342,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     disposalScope.registry.add('native hosted conversation binding', removeHostedOwner);
     const nativeWork = createDaemonNativeWorkExecutionActivation({
       nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(),
-      runtimeBus: options.runtimeBus, configManager, providerRegistry, runtimeStore: options.runtimeStore,
+      runtimeBus: options.runtimeBus, configManager, providerRegistry,
       projectRoot: workingDirectory, projectId: projectPlanningProjectId,
       sessionId: `native-work:${projectPlanningProjectId}`, acpHost, knowledgeStore,
       nativeScopes, continuationGrants: pairingTokens,

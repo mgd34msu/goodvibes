@@ -78,7 +78,8 @@ export function installOccasionsNudging(deps: OccasionsBootDeps): OccasionsNudge
   const surface = createOccasionsNudgeSurface({
     invoke: createOccasionsGatewayInvoke({
       gatewayMethods: deps.gatewayMethods,
-      remote: connectedHostFamilyRemote({ configManager: deps.configManager, homeDirectory: deps.homeDirectory }),
+      // Reads for the owner's own screen: the Agent's ordinary credential.
+      remote: connectedHostFamilyRemote({ configManager: deps.configManager, homeDirectory: deps.homeDirectory, actor: 'owner' }),
     }),
     conversation: deps.conversation,
     requestRender: deps.requestRender,

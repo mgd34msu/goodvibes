@@ -8,8 +8,8 @@
  *
  * Mail runs on the native connector of the process the turn runs in. Calendar
  * actions run on the daemon's `calendar.events.*` methods when one is
- * reachable (`calendarHost`: the Agent's adopted daemon, or the daemon's own
- * catalog in a hosted turn), so every surface reaches the same calendar
+ * reachable (`calendarHost`: the Agent's adopted daemon, or, in a hosted turn,
+ * the daemon through its own request path), so every surface reaches the same calendar
  * backend; otherwise they run on the connector too.
  */
 

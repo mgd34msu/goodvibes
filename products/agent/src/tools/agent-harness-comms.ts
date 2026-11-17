@@ -8,7 +8,7 @@ import { captureAgentExportPath } from '@goodvibes-jev/engine/terminal-shell/age
 import { harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { resolveChannelDraftNativeReference } from './agent-channel-draft-reference.ts';
 import { captureOperatorConnection } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { delegatedOperatorConnection, forgetDelegatedCredential } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentCallConnection, forgetDelegatedCredential } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { evaluateOutwardEffect, getSessionUntrustedContentLedger, labelUntrustedContent } from '../trust/untrusted-content.ts';
 import { screenOutboundForCardMaterial, CardMaterialRefusedError } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
@@ -150,12 +150,13 @@ function guardedCommsInvoke(context: CommandContext, args: Record<string, unknow
     assertCurrent();
     if (!decision.allowed) throw new Error([decision.reason ?? 'Outward channel synchronization held.', decision.fix].filter(Boolean).join(' '));
     const { explicitUserRequest: _userRequest, ...restrictions } = supplied;
-    // Sent with this Agent's delegated credential: the host judges the call as the Agent acting for the owner.
-    const delegated = await delegatedOperatorConnection(connection, paths.homeDirectory, options?.signal);
-    const result = await createDaemonOperatorInvoke(() => delegated)(method, nativeInput, { ...restrictions, signal: options?.signal,
+    // A draft or routing write the Agent makes for the owner: the one rule (agent-call-credential.ts)
+    // sends it with this Agent's delegated credential, and the host judges it as the Agent acting for the owner.
+    const { connection: sending, delegated } = await agentCallConnection(connection, method, 'agent', paths.homeDirectory, options?.signal);
+    const result = await createDaemonOperatorInvoke(() => sending)(method, nativeInput, { ...restrictions, signal: options?.signal,
       assertCurrent: () => { supplied.assertCurrent?.(); assertCurrent(); } });
     // A delegated credential the host no longer accepts is forgotten; the next call makes a new one.
-    if (!result.ok && result.refusal?.code === 'auth_rejected') await forgetDelegatedCredential(delegated).catch(() => {});
+    if (!result.ok && result.refusal?.code === 'auth_rejected' && delegated) await forgetDelegatedCredential(delegated).catch(() => {});
     return result;
   };
 }

@@ -8,8 +8,8 @@ import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/r
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { assertOperatorEffect, captureOperatorConnection } from './operator-connection-owner.js';
-import { delegatedOperatorConnection, forgetDelegatedCredential } from './agent-delegation-credential.js';
-import { isOperatorAutomationTargetMethod } from './operator-automation-target.js';
+import { forgetDelegatedCredential } from './agent-delegation-credential.js';
+import { agentCallConnection } from './agent-call-credential.js';
 import { publishOperatorMethodReceipt } from './operator-method-receipt.js';
 import { appendOperatorQuery, operatorMethodIsReadOnly, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './operator-input-projector.js';
@@ -63,14 +63,8 @@ type WatcherMethodId =
 const AGENT_PURCHASE_METHOD_IDS = new Set(['payments.checkout.begin', 'payments.purchase.cancel']);
 // The profile tool owns these reads and its disclosure rules; the generic path has none of them.
 const PROFILE_TOOL_ONLY_METHOD_IDS = new Set(['profile.read', 'profile.person', 'profile.get', 'profile.provenance']);
-// This Agent acts for the owner on these: they are sent with its delegated
-// credential, and the host judges each call as the Agent's. Profile writes
-// also state their provenance (`authority: "autonomous"`, no quote).
-const AUTONOMOUS_NATIVE_STATE_METHOD_IDS = new Set([
-  'channels.drafts.save', 'channels.drafts.delete', 'channels.routing.assign', 'channels.routing.delete',
-  'occasions.answer', 'occasions.acknowledge', 'occasions.interview.answer',
-  'occasions.interview.record', 'occasions.conflict.resolve', 'occasions.sweep',
-]);
+// Profile writes state their provenance (`authority: "autonomous"`, no quote).
+// Which credential every call here presents is agent-call-credential.ts's rule.
 const AUTONOMOUS_PROFILE_METHOD_IDS = new Set([
   'profile.set', 'profile.append', 'profile.forget', 'profile.undo',
   'occasions.confirm', 'occasions.plans.confirm', 'occasions.remove',
@@ -452,9 +446,8 @@ export function createAgentOperatorMethodTool(
           ? { ...retainedPayload, authority: 'autonomous',
             ...(PROFILE_QUOTE_METHOD_IDS.has(methodSnapshot.id) ? { said: '' } : {}) }
           : methodSnapshot.id === 'payments.purchase.cancel' ? { ...retainedPayload, confirm: true } : retainedPayload;
-        const actsForOwner = AUTONOMOUS_PROFILE_METHOD_IDS.has(methodSnapshot.id) || AUTONOMOUS_NATIVE_STATE_METHOD_IDS.has(methodSnapshot.id)
-          || isOperatorAutomationTargetMethod(methodSnapshot.id);
-        const delegated = actsForOwner ? await delegatedOperatorConnection(connection, shellPaths.homeDirectory, options?.signal) : undefined;
+        // The Agent's call: its delegated credential for a write it makes for the owner, its ordinary one otherwise.
+        const { delegated } = await agentCallConnection(connection, methodSnapshot.id, 'agent', shellPaths.homeDirectory, options?.signal);
         const bearer = delegated?.token ?? connection.token;
         const ownerRequest = AGENT_PURCHASE_METHOD_IDS.has(methodSnapshot.id);
         // A read-only HTTP method carries its input in the query, so the query is built from the

@@ -233,7 +233,6 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         homeDirectory: services.homeDirectory,
         memoryRegistry: services.memoryRegistry,
         memoryAccess: services.memorySpine,
-        gatewayMethods: services.gatewayMethods,
         artifactStore: services.artifactStore,
         notificationConfig: services.configManager,
         webhookNotifier: services.webhookNotifier,
@@ -245,7 +244,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         settings: services.configManager,
         // The daemon's own browser and Google account: `browser` drives the
         // engine the `browser.*` verbs serve; `google` reads the daemon's
-        // settings and credential stores and its own `calendar.events.*`.
+        // settings and credential stores, and calls its own `calendar.events.*`
+        // through the request path with the Agent's ordinary credential.
         ...(services.browserGateway ? { browser: services.browserGateway } : {}),
         configManager: services.configManager,
         secretsManager: services.secretsManager,

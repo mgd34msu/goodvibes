@@ -2,10 +2,7 @@ import { assertDecisionModelsEnabled } from '@goodvibes-jev/engine/errors';
 import type { ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
 import type { ArtifactStore } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platform/control-plane';
-import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { writePersonalOpsEffectReceipt, type PersonalOpsEffectReceiptStatus } from './personal-ops-effect-receipt.js';
-import { agentInProcessAdmission } from './family-gateway.js';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 import { createConnectedHost, isHostFailure, resolveConnectedHost, type ConnectedHostSelection } from './connected-host-client.js';
 /**
@@ -13,8 +10,8 @@ import { createConnectedHost, isHostFailure, resolveConnectedHost, type Connecte
  *
  * Calendar reads and writes go to the daemon's `calendar.events.*` methods
  * when there is one to reach (the Agent's adopted daemon over its connected
- * host, or, in a session the daemon hosts for the Agent, the daemon's own
- * catalog in-process), so every surface uses one backend (the configured
+ * host, or, in a session the daemon hosts for the Agent, the daemon through
+ * its own request path), so every surface uses one backend (the configured
  * CalDAV server or Google account), one confirmation rule and one set of
  * refusals. With no daemon, they run here on the in-process Google connector.
  * Mail and the connect actions always run here, on the connector that holds
@@ -127,7 +124,7 @@ export interface GoogleCalendarHostFailure {
 
 /**
  * The daemon's `calendar.events.*` methods, as the `google` tool calls them:
- * over the Agent's connected host, or in-process on the daemon's own catalog.
+ * over the Agent's connected host (in a turn the daemon hosts, that daemon).
  */
 export interface GoogleCalendarHost {
   listEvents(input: CalendarListInput, signal?: AbortSignal): Promise<CalendarListOutput>;
@@ -137,45 +134,15 @@ export interface GoogleCalendarHost {
 }
 
 /**
- * The daemon's own `calendar.events.*` handlers, called in-process for a turn
- * the daemon hosts for the Agent. Each call is admitted as the paired Agent's
- * call over the wire is (`agentInProcessAdmission`: the Agent pairing's grant,
- * held at the start and on every scope the handler asks for) and is judged as
- * the Agent's (`credentialKind: 'agent'`). Null while the catalog serves no
- * calendar, so calendar work then runs on the in-process Google connector, as
- * in an Agent with no daemon.
- */
-export function inProcessGoogleCalendarHost(catalog: GatewayMethodCatalog): () => GoogleCalendarHost | null {
-  const call = async (methodId: 'calendar.events.list' | 'calendar.events.create', body: unknown, signal: AbortSignal | undefined): Promise<unknown> => {
-    const admission = agentInProcessAdmission(catalog, methodId);
-    // Refused before the handler runs, as dispatch answers the paired Agent: nothing was applied.
-    if (admission.refused) throw Object.assign(new Error(admission.refused), { status: 403 });
-    return await catalog.invoke(methodId, {
-      body,
-      ...(signal ? { signal } : {}),
-      isAuthorized: (requiredScopes) => { signal?.throwIfAborted(); return admission.isAuthorized(requiredScopes); },
-      context: { clientKind: 'goodvibes-agent', ...admission.context },
-    });
-  };
-  const host: GoogleCalendarHost = {
-    listEvents: async (input, signal) => await call('calendar.events.list', input, signal) as CalendarListOutput,
-    createEvent: async (input) => await call('calendar.events.create', input, undefined) as CalendarCreateOutput,
-    failureOf(error) {
-      // A refusal carries an HTTP status: a 4xx was refused before the backend
-      // was touched; anything else may have reached it.
-      const status = (error as { readonly status?: unknown } | null)?.status;
-      const refused = typeof status === 'number' && status >= 400 && status < 500;
-      return { message: summarizeError(error), applied: refused ? 'no' : 'unknown' };
-    },
-  };
-  return () => catalog.hasHandler('calendar.events.list') && catalog.hasHandler('calendar.events.create') ? host : null;
-}
-
-/**
- * The Agent's adopted daemon over its connected host, for calendar calls, or
- * null while calendar work stays in this process (`daemon.enabled` off, or no
- * usable connected-host credential). One config read and one credential
- * lookup per call.
+ * The daemon's `calendar.events.*` methods over the Agent's connected host, for
+ * calendar calls: the Agent's adopted daemon, or, in a turn the daemon hosts
+ * (`selection.inProcess`), that daemon through its own request path. Both
+ * calls are the Agent's own (a read, and an event the owner asked for), so
+ * they present the Agent's ordinary credential for the host
+ * (agent-call-credential.ts), and the daemon admits and identifies them as
+ * the paired Agent's. Null while calendar work stays in this process
+ * (`daemon.enabled` off in the Agent's own process, or no usable credential).
+ * One config read and one credential lookup per call.
  */
 export function connectedHostGoogleCalendar(selection: ConnectedHostSelection): () => GoogleCalendarHost | null {
   const remote = createConnectedHost(selection);
@@ -185,7 +152,8 @@ export function connectedHostGoogleCalendar(selection: ConnectedHostSelection): 
     failureOf: (error) => isHostFailure(error) ? { message: error.message, applied: error.applied } : undefined,
   };
   return () => {
-    if (selection.configManager.get('daemon.enabled') !== true) return null;
+    // In a turn the daemon hosts, the daemon is the host: there is no daemon to adopt.
+    if (!selection.inProcess && selection.configManager.get('daemon.enabled') !== true) return null;
     return resolveConnectedHost(selection).unavailable === undefined ? host : null;
   };
 }

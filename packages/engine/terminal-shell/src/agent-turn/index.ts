@@ -183,6 +183,7 @@ export * from './connected-host-client.js';
 export * from './operator-connection-owner.js';
 export * from './daemon-operator-client.js';
 export * from './agent-delegation-credential.js';
+export * from './agent-call-credential.js';
 export * from './in-process-host.js';
 export * from './service-lifecycle.js';
 export * from './operator-actions.js';

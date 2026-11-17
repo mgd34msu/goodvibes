@@ -1,0 +1,76 @@
+/**
+ * agent-call-credential.ts, which credential an Agent call to its host
+ * presents. One rule for every Agent tool, in the Agent's own process and in a
+ * turn the daemon hosts for it, so the host identifies and admits a call the
+ * same way from either place:
+ *
+ * - A write the Agent makes for the owner to the owner's own state (profile
+ *   and occasions writes, channel drafts and routing, the schedules and jobs
+ *   it creates or changes) presents the Agent's delegated credential
+ *   (agent-delegation-credential.ts). The host reports it as credential kind
+ *   `agent` and judges the call as the Agent acting for the owner.
+ * - Every other call, every read included, presents the Agent's ordinary
+ *   credential for that host, resolved with the Agent's one precedence
+ *   (connected-host-client.ts `resolveConnectedHost`): its pairing with the
+ *   host (credential kind `device-token`), else the operator credential
+ *   (credential kind `local` from the host's own machine). In a turn the
+ *   daemon hosts, the same precedence runs against the daemon itself
+ *   (in-process-host.ts).
+ * - A call the owner makes himself (his `profile` command) or a surface makes
+ *   to show him something presents the ordinary credential, whatever the method.
+ *
+ * Which credential, and so which credential kind, a call presents is decided
+ * here and nowhere else.
+ */
+import { delegatedOperatorConnection, type DelegatedOperatorConnection } from './agent-delegation-credential.js';
+import { isOperatorAutomationTargetMethod } from './operator-automation-target.js';
+import type { CapturedOperatorConnection } from './operator-connection-owner.js';
+
+/** Who makes a call: the Agent (a tool its model called), or the owner (his own command, or a view shown to him). */
+export type AgentCallActor = 'agent' | 'owner';
+
+/** The credential a call presents: the Agent's ordinary one for the host, or its delegated one. */
+export type AgentCallCredential = 'ordinary' | 'delegated';
+
+/**
+ * The writes to the owner's own state the Agent makes on his behalf, besides
+ * the automation jobs and schedules (operator-automation-target.ts). Profile
+ * writes also state their provenance (`authority: "autonomous"`).
+ */
+const OWNER_STATE_WRITE_METHOD_IDS: ReadonlySet<string> = new Set([
+  'profile.set', 'profile.append', 'profile.forget', 'profile.undo',
+  'occasions.confirm', 'occasions.plans.confirm', 'occasions.remove',
+  'occasions.answer', 'occasions.acknowledge', 'occasions.interview.answer',
+  'occasions.interview.record', 'occasions.conflict.resolve', 'occasions.sweep',
+  'channels.drafts.save', 'channels.drafts.delete', 'channels.routing.assign', 'channels.routing.delete',
+]);
+
+/** Which credential a call to `methodId` made by `actor` presents. A set lookup. */
+export function agentCallCredential(methodId: string, actor: AgentCallActor): AgentCallCredential {
+  return actor === 'agent' && (OWNER_STATE_WRITE_METHOD_IDS.has(methodId) || isOperatorAutomationTargetMethod(methodId))
+    ? 'delegated'
+    : 'ordinary';
+}
+
+/** The connection one call presents, under that rule. */
+export interface AgentCallConnection {
+  /** The host, transport and credential the call is sent with. */
+  readonly connection: CapturedOperatorConnection;
+  /** Present when the call presents the delegated credential; forget it (`forgetDelegatedCredential`) when the host rejects it. */
+  readonly delegated?: DelegatedOperatorConnection | undefined;
+}
+
+/**
+ * The connection a call presents: `ordinary` as resolved for it, or, for a
+ * write the Agent makes for the owner, the Agent's delegated credential on the
+ * same host and transport. An ordinary call costs nothing more; a delegated
+ * one costs one read of the delegation store, and the first one per host one
+ * mint request. Throws, naming the state and the next step, when the delegated
+ * credential cannot be had; nothing is sent then.
+ */
+export async function agentCallConnection(ordinary: CapturedOperatorConnection, methodId: string, actor: AgentCallActor,
+  homeDirectory: string, signal?: AbortSignal): Promise<AgentCallConnection> {
+  if (agentCallCredential(methodId, actor) === 'ordinary') return { connection: ordinary };
+  const delegated = await delegatedOperatorConnection(ordinary, homeDirectory, signal);
+  return { connection: delegated, delegated };
+}

@@ -143,7 +143,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   // hosts for the Agent registers (agent-turn's registerAgentTurnTools).
   registerAgentTurnTools(toolRegistry, {
     gatewayMethods: services.gatewayMethods,
-    remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory }),
+    // The Agent's own calls: a write it makes for the owner presents its delegated credential.
+    remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory, actor: 'agent' }),
     shellPaths: services.shellPaths,
     artifactStore: services.artifactStore,
     notificationConfig: configManager,

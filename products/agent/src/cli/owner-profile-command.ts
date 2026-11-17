@@ -91,7 +91,8 @@ function gatewayFor(runtime: CliCommandRuntime): ProfileGatewayInvoke {
   // The CLI process composes no gateway catalog of its own, so every call goes
   // to the connected host that owns the file.
   return createProfileGatewayInvoke({
-    remote: connectedHostFamilyRemote({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory }),
+    // The owner's own command: his writes present the ordinary credential, not the Agent's delegated one.
+    remote: connectedHostFamilyRemote({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, actor: 'owner' }),
   });
 }
 

@@ -68,7 +68,7 @@ import type { HostedDaemonRequestPath } from '@goodvibes-jev/engine/platform/pla
 import { registerAgentChannelSendTool } from './channel-send-tool.js';
 import { registerAgentBrowserTool, type AgentBrowserToolOptions, type BrowserToolBackend } from './browser-tool.js';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './google-wiring.js';
-import { inProcessGoogleCalendarHost } from './google-tool.js';
+import { connectedHostGoogleCalendar } from './google-tool.js';
 import { AGENT_PLATFORM_TOOL_ADMISSION, installAgentToolPolicy } from './read-modes.js';
 import { connectedHostFamilyRemote } from './family-remote.js';
 import { registerAgentLocalRegistryTool } from './local-registry-tool.js';
@@ -80,12 +80,18 @@ import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/r
 
 /** What the Agent turn tools are built from, in either process. */
 export interface AgentTurnToolDeps {
-  /** This process's gateway catalog; the daemon's carries the `profile.*` and `occasions.*` handlers. */
+  /**
+   * This process's gateway catalog, called in process for a `profile.*` or
+   * `occasions.*` verb only when it carries that handler itself. A turn the
+   * daemon hosts passes none: its calls go through the daemon's request path.
+   */
   readonly gatewayMethods?: GatewayMethodCatalog | undefined;
-  /** The Agent process's connected-host route for those verbs; the daemon passes none. */
+  /**
+   * The connected-host route for those verbs (family-remote.ts): the Agent's
+   * connected host, or the daemon itself in a turn it hosts, presenting the
+   * credential agent-call-credential.ts names for each call.
+   */
   readonly remote?: FamilyGatewayRemote | undefined;
-  /** The credential in-process verb calls are judged under: `agent` in a turn the daemon hosts. */
-  readonly inProcessCredentialKind?: 'agent' | undefined;
   /** The owner's message for the current turn; a person lookup is refused unless it names the person. */
   readonly currentOwnerMessage?: (() => string | null | undefined) | undefined;
   /** The turn's workspace and home: the Agent's project and user stores are resolved against it. */
@@ -147,7 +153,6 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   const family = {
     ...(deps.gatewayMethods ? { gatewayMethods: deps.gatewayMethods } : {}),
     ...(deps.remote ? { remote: deps.remote } : {}),
-    ...(deps.inProcessCredentialKind ? { credentialKind: deps.inProcessCredentialKind } : {}),
   };
   registerAgentProfileTool(registry, {
     invoke: createProfileGatewayInvoke(family),
@@ -245,8 +250,6 @@ export interface AgentHostedTurnDeps {
   /** The home's one memory store, and the daemon's access to it (its memory spine). */
   readonly memoryRegistry: MemoryRegistry;
   readonly memoryAccess: MemoryAccess;
-  /** The daemon's gateway catalog, which serves the `profile.*` and `occasions.*` verbs in-process. */
-  readonly gatewayMethods: GatewayMethodCatalog;
   /** The home's artifact store. */
   readonly artifactStore: ArtifactStore;
   /** The daemon's settings, read for notification targets. */
@@ -306,8 +309,6 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
     inProcess = { requests, host };
     return host;
   };
-  // Calendar calls go to the daemon's own `calendar.events.*` handlers, admitted as the paired Agent's.
-  const calendarHost = inProcessGoogleCalendarHost(deps.gatewayMethods);
   const browser = deps.browser;
   return {
     // read and goodvibes_settings are built with the Agent's admission, as in the Agent's own registries.
@@ -323,16 +324,17 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         });
       }
       const operatorHost = inProcessHostFor(daemonRequests);
+      // Every call that reaches this daemon goes through the connected-host client
+      // the Agent's own calls use, with the credential the one rule names for it
+      // (agent-call-credential.ts): this daemon's own request path when it serves
+      // one, otherwise its address over the network, exactly as the Agent dials it.
+      const connectedHost = { configManager: deps.settings, homeDirectory: deps.homeDirectory, inProcess: operatorHost };
       registerAgentTurnTools(registry, {
         ...(ownProject ? { workPlan: deps.workPlan } : {}),
-        // Profile and occasions calls reach this daemon through its own request path
-        // with the Agent's credentials, the route the Agent's own calls take: a call
-        // for the owner presents the Agent's delegated credential, so the daemon gives
-        // it that pairing's scopes and native authority. Without a request path the
-        // catalog is called in process, admitted on the Agent pairing's grant.
-        ...(operatorHost
-          ? { remote: connectedHostFamilyRemote({ configManager: deps.settings, homeDirectory: deps.homeDirectory, inProcess: operatorHost }) }
-          : { gatewayMethods: deps.gatewayMethods, inProcessCredentialKind: 'agent' as const }),
+        // Profile and occasions: a read presents the Agent's ordinary credential, a
+        // write the Agent makes for the owner its delegated one, which the daemon
+        // gives that pairing's scopes and native authority.
+        remote: connectedHostFamilyRemote({ ...connectedHost, actor: 'agent' }),
         memoryRegistry: deps.memoryRegistry,
         memoryAccess: deps.memoryAccess,
         shellPaths: createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: deps.homeDirectory }),
@@ -376,7 +378,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
           secretsManager: deps.secretsManager,
           homeDirectory: deps.homeDirectory,
           artifactStore: deps.artifactStore,
-          calendarHost,
+          // Calendar calls are the Agent's own: its ordinary credential, through this daemon's request path.
+          calendarHost: connectedHostGoogleCalendar(connectedHost),
         },
       });
       if (!browser) {

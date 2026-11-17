@@ -4,21 +4,23 @@
  * does not serve them: the Agent process's connected host, or, in a turn the
  * daemon hosts, the daemon itself through its own request path
  * (in-process-host.ts). One route for both, so a hosted call presents the
- * credentials the Agent's call presents:
- * - an ordinary call carries the Agent's ordinary credential for the host;
- * - a call made on the owner's behalf (`lifetime.delegation`) carries the
- *   Agent's delegated credential (agent-delegation-credential.ts). The daemon
- *   authenticates it as the Agent's pairing (credential kind `agent`), grants
- *   that pairing's scopes and gives the handler that pairing's native
- *   authority, so a profile or occasions write the Agent makes for the owner
- *   is admitted, judged and recorded exactly as the paired Agent's is.
+ * credentials the Agent's call presents, by the one rule
+ * (agent-call-credential.ts):
+ * - a read, and anything the owner does himself, carries the Agent's ordinary
+ *   credential for the host;
+ * - a profile or occasions write the Agent makes for the owner carries the
+ *   Agent's delegated credential. The daemon authenticates it as the Agent's
+ *   pairing (credential kind `agent`), grants that pairing's scopes and gives
+ *   the handler that pairing's native authority, so the write is admitted,
+ *   judged and recorded exactly as the paired Agent's is.
  *
  * The credential is resolved once per call into a value and verified there;
  * the caller's check runs once more immediately before the request leaves.
  * A write is never retried.
  */
 import type { OperatorMethodId } from '@goodvibes-jev/engine/platform/contracts';
-import { delegatedOperatorConnection, forgetDelegatedCredential, type DelegatedOperatorConnection } from './agent-delegation-credential.js';
+import { forgetDelegatedCredential } from './agent-delegation-credential.js';
+import { agentCallConnection, type AgentCallActor, type AgentCallConnection } from './agent-call-credential.js';
 import { createConnectedHost, isHostFailure, type ConnectedHostConfigReader } from './connected-host-client.js';
 import { operatorRouteLabel, type FamilyGatewayRemote, type FamilyGatewayResult } from './family-gateway.js';
 import type { AgentInProcessHost } from './in-process-host.js';
@@ -30,6 +32,8 @@ export interface ConnectedHostFamilyRemoteOptions {
   readonly configManager: ConnectedHostConfigReader;
   /** The home whose Agent credential stores the call uses. */
   readonly homeDirectory: string;
+  /** Who makes the calls on this route: `agent` for the Agent's tools, `owner` for his own command or a view shown to him. */
+  readonly actor: AgentCallActor;
   /** The daemon hosting this turn, reached through its own request path; absent in the Agent's own process. */
   readonly inProcess?: AgentInProcessHost | undefined;
 }
@@ -47,15 +51,13 @@ function failureText(methodId: OperatorMethodId, kind: string, route: string, ba
 export function connectedHostFamilyRemote(options: ConnectedHostFamilyRemoteOptions): FamilyGatewayRemote {
   return async (methodId, body, lifetime, assertCurrent) => {
     const ordinary = captureOperatorConnection(options, options.configManager, assertCurrent, options.inProcess);
-    let delegated: DelegatedOperatorConnection | undefined;
-    if (lifetime.delegation) {
-      try { delegated = await delegatedOperatorConnection(ordinary, options.homeDirectory, lifetime.signal); }
-      catch (error) {
-        lifetime.signal?.throwIfAborted();
-        return { ok: false, data: null, error: summarizeError(error), route: 'connected-host' };
-      }
+    let call: AgentCallConnection;
+    try { call = await agentCallConnection(ordinary, methodId, options.actor, options.homeDirectory, lifetime.signal); }
+    catch (error) {
+      lifetime.signal?.throwIfAborted();
+      return { ok: false, data: null, error: summarizeError(error), route: 'connected-host' };
     }
-    const connection = delegated ?? ordinary;
+    const { connection, delegated } = call;
     lifetime.signal?.throwIfAborted();
     connection.assertCurrent();
     const host = createConnectedHost(() => ({

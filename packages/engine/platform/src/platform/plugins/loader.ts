@@ -202,9 +202,9 @@ export interface PluginLoaderDeps {
   /** Returns whether a plugin is enabled in persistent state. */
   isEnabled(name: string): boolean;
   /**
-   * In-flight accounting for calls into loaded plugins. Required for a reload
-   * to drain a plugin before unloading it (runHotReload refuses to reload a
-   * plugin whose calls are not counted). PluginManager.init supplies one.
+   * In-flight accounting for calls into loaded plugins. A reload drains a
+   * plugin through it before unloading it, and leaves loaded a plugin whose
+   * calls are still running. PluginManager.init supplies one.
    */
   inFlight?: PluginInFlightTracker | undefined;
   /**

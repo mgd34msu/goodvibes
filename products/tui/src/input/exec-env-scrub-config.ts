@@ -13,9 +13,8 @@
  *
  * The key has no CONFIG_SCHEMA row (it is a product-owned leaf the config
  * manager admits), so the modal lists it as a synthetic entry, like
- * worktree.setup.*. It is stored as a JSON array of strings and edited as a
- * comma-separated list in the single-line editor, parsed back into an array on
- * commit (settings-modal-commit.ts). The key and the reader are the engine's,
+ * worktree.setup.*. It is stored as a JSON array of strings and edited through
+ * the shared list codec (settings-modal-lists.ts). The key and the reader are the engine's,
  * so the modal shows exactly the list commands get.
  */
 import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
@@ -24,7 +23,7 @@ import type { SettingEntry, SettingsCategory } from './settings-modal-types.ts';
 
 export const EXEC_ENV_SCRUB_ALLOWLIST_CONFIG_KEY: ConfigKey = EXEC_ENV_SCRUB_ALLOWLIST_KEY;
 
-/** True for the exec env-scrub allowlist key, whose stored value is a string array edited as a comma-separated list. */
+/** True for the exec env-scrub allowlist key, whose stored value is a string array edited through the list codec. */
 export function isExecEnvScrubAllowlistConfigKey(key: ConfigKey): boolean {
   return key === EXEC_ENV_SCRUB_ALLOWLIST_CONFIG_KEY;
 }
@@ -32,11 +31,6 @@ export function isExecEnvScrubAllowlistConfigKey(key: ConfigKey): boolean {
 /** Read the allowlist as a string array (non-array/malformed/unset degrades to empty), the same reading a spawn applies. */
 export function readExecEnvScrubAllowlist(configManager: Pick<ConfigManager, 'get'>): string[] {
   return [...(configuredCredentialEnvScrub(configManager).allowlist ?? [])];
-}
-
-/** Parse a comma-separated edit-buffer submission back into a string array (trimmed, empties dropped). Same convention as worktree.setup.* / sandbox.egressAllowlist. */
-export function parseExecEnvScrubAllowlistInput(text: string): string[] {
-  return text.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
 export const EXEC_ENV_SCRUB_ALLOWLIST_SYNTHETIC_SETTING: ConfigSetting = {

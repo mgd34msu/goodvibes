@@ -31,6 +31,15 @@ function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
+/** A worktree setup list: the list itself, or `{ mode: 'auto' | 'none' }` (runtime/worktree/setup.ts). */
+function worktreeSetupList(value: unknown): boolean {
+  if (stringList(value)) return true;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  const mode = (value as { readonly mode?: unknown }).mode;
+  return keys.length === 1 && (mode === 'auto' || mode === 'none');
+}
+
 export const listConfigSettings: readonly ListConfigSetting[] = [
   {
     key: 'cluster.peers',
@@ -76,16 +85,16 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     key: 'worktree.setup.commands',
     type: 'object',
     default: [...runtimeConfigDefaults.worktree.setup.commands],
-    description: 'Commands run in a new worktree before an isolated agent starts in it, for example installing dependencies',
-    validate: stringList,
-    validationHint: 'list of shell commands',
+    description: 'Commands run in a new worktree before an isolated agent starts in it. auto (the default, an empty list) runs the install command each lockfile in the repository names (bun install, npm ci, pnpm, yarn, uv sync, cargo fetch, go mod download; pip install -r requirements.txt only inside an active virtual environment). none runs nothing. A list runs exactly those commands, in order; one that exits non-zero marks the worktree setup failed',
+    validate: worktreeSetupList,
+    validationHint: 'a list of shell commands, [] for auto, or {"mode":"none"}',
   },
   {
     key: 'worktree.setup.carryOverGlobs',
     type: 'object',
     default: [...runtimeConfigDefaults.worktree.setup.carryOverGlobs],
-    description: 'Untracked files copied from the main checkout into a new worktree (for example .env files), as glob patterns',
-    validate: stringList,
-    validationHint: 'list of glob patterns, for example [".env", "config/*.local.json"]',
+    description: 'Untracked files copied from the main checkout into a new worktree, as glob patterns. auto (the default, an empty list) copies .env and .env.* when the repository root has them. none copies nothing. A list copies exactly the files those patterns match. Copies stay in the worktree until it is removed',
+    validate: worktreeSetupList,
+    validationHint: 'a list of glob patterns such as [".env", "config/*.local.json"], [] for auto, or {"mode":"none"}',
   },
 ];

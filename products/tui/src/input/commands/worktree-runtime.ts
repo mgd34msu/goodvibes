@@ -113,7 +113,7 @@ export function registerWorktreeRuntimeCommands(registry: CommandRegistry): void
         try {
           const { setup } = await rpc.platformClient.operator.invoke('worktrees.setup.run', { path });
           if (setup.state === 'skipped') {
-            ctx.print('[worktree setup] skipped: no setup commands or carry-over globs are configured.');
+            ctx.print('[worktree setup] skipped: worktree.setup.commands and worktree.setup.carryOverGlobs are none, or auto found nothing to run or copy in this repository. Change them in /settings (Orchestration).');
           } else if (setup.state === 'succeeded') {
             ctx.print(`[worktree setup] succeeded (${setup.steps.length} step(s)).`);
           } else {

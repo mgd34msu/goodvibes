@@ -22,10 +22,9 @@
  * sandbox reads the same `sandbox` config category at tool-registration time.
  *
  * Both keys hold a JSON array of strings on disk. The settings modal's inline
- * editor is a single-line text field, so, matching worktree.setup.* and
- * controlPlane.cors.allowedOrigins, they are displayed and edited as a
- * comma-separated list and parsed back into an array on commit (see
- * isSandboxExecListConfigKey's use in settings-modal.ts#commitEdit).
+ * editor is a single-line text field, so they are edited through the shared
+ * list codec (settings-modal-lists.ts): comma separated, or a JSON list when an
+ * entry holds a comma.
  */
 import type { ConfigKey, ConfigManager, ConfigSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SettingEntry, SettingsCategory } from './settings-modal-types.ts';
@@ -38,7 +37,7 @@ const SANDBOX_EXEC_LIST_CONFIG_KEYS: ReadonlySet<ConfigKey> = new Set([
   SANDBOX_WORKSPACE_WRITABLE_CONFIG_KEY,
 ]);
 
-/** True for the two sandbox exec-boundary list keys, whose stored value is a string array edited as a comma-separated list. */
+/** True for the two sandbox exec-boundary list keys, whose stored value is a string array edited through the list codec. */
 export function isSandboxExecListConfigKey(key: ConfigKey): boolean {
   return SANDBOX_EXEC_LIST_CONFIG_KEYS.has(key);
 }
@@ -48,11 +47,6 @@ export function readSandboxExecList(configManager: Pick<ConfigManager, 'get'>, k
   const raw = configManager.get(key);
   if (!Array.isArray(raw)) return [];
   return raw.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
-}
-
-/** Parse a comma-separated edit-buffer submission back into a string array (trimmed, empties dropped). Shared with worktree.setup.*, same convention. */
-export function parseSandboxExecListInput(text: string): string[] {
-  return text.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
 export const SANDBOX_EGRESS_ALLOWLIST_SYNTHETIC_SETTING: ConfigSetting = {

@@ -22,8 +22,10 @@ import {
   WORKTREE_SETUP_COMMANDS_CONFIG_KEY,
   buildWorktreeSetupCarryOverGlobsSyntheticEntry,
   buildWorktreeSetupCommandsSyntheticEntry,
+  formatWorktreeSetupEditText,
   isWorktreeSetupListConfigKey,
-  readWorktreeSetupList,
+  readWorktreeSetupSetting,
+  worktreeSetupSettingValue,
 } from './worktree-setup-config.ts';
 import { BUDGET_ALERT_USD_CONFIG_KEY, BUDGET_ALERT_USD_DEFAULT, readBudgetAlertUsd } from '@goodvibes-jev/engine/platform/platform/providers';
 import { MEMORY_PROJECTION_DIR_CONFIG_KEY, buildMemoryProjectionDirSyntheticEntry } from './commands/recall-files-config.ts';
@@ -208,7 +210,7 @@ export function buildSettingGroups(
   // Keep that recovery out of this read pass when pure host metadata is
   // unavailable; otherwise opening settings could erase the policy failure.
   for (const setting of configManager.getSchema()) {
-    // These lists keep their own one-entry-per-line editor rows, added below.
+    // These lists keep their own one-line list editor rows, added below.
     if (isSandboxExecListConfigKey(setting.key) || isWorktreeSetupListConfigKey(setting.key)) continue;
     const rawCat = setting.key.split('.')[0] as string;
     const cat = rawCat as SettingsCategory;
@@ -327,8 +329,8 @@ export function buildSettingGroups(
   // Inject the worktree.setup.commands / worktree.setup.carryOverGlobs
   // synthetic entries into the orchestration category (worktree isolation is
   // an orchestration-engine concern, see WorkstreamIsolation 'worktree').
-  // They are settings rows of the platform schema; this screen gives them a
-  // one-entry-per-line list editor instead of the JSON editor of other object rows.
+  // They are settings rows of the platform schema; this screen edits them as
+  // auto, none or a list on one line, instead of the JSON editor of other object rows.
   const orchestrationEntries = groups.get('orchestration');
   if (orchestrationEntries) {
     if (!orchestrationEntries.some((e) => e.setting.key === WORKTREE_SETUP_COMMANDS_CONFIG_KEY)) {
@@ -699,9 +701,10 @@ function rebuildTuiLocalSyntheticEntry(entry: BuiltinSettingEntry, configManager
 function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: ConfigManager): void {
   const key: string = entry.setting.key;
   if (isWorktreeSetupListConfigKey(entry.setting.key)) {
-    const value = readWorktreeSetupList(configManager, entry.setting.key);
-    entry.currentValue = value;
-    entry.isDefault = value.length === 0;
+    // The row shows its mode as edit text: auto, none, or the list.
+    const choice = readWorktreeSetupSetting(configManager, entry.setting.key);
+    entry.currentValue = formatWorktreeSetupEditText(worktreeSetupSettingValue(choice));
+    entry.isDefault = choice.mode === 'auto';
     return;
   }
   if (isSandboxExecListConfigKey(entry.setting.key)) {

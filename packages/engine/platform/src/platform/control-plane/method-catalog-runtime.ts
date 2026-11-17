@@ -429,7 +429,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'worktrees.setup.run',
     title: 'Re-run Worktree Setup',
-    description: 'Re-run cold-start setup (configured commands + untracked-file carry-over) on a live worktree by path, recording the honest outcome onto the worktree record. Returns the setup result: state skipped (nothing configured), succeeded, or failed with the failing step and error. A failed setup is a visible worktree state, never silent.',
+    description: 'Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over from worktree.setup.carryOverGlobs; each is auto, none or a list, and auto derives from the repository) on a live worktree by path, recording the honest outcome onto the worktree record. Returns the setup result: state skipped (nothing to run or copy), succeeded, or failed with the failing step and error, which names a derived step as derived. A failed setup is a visible worktree state, never silent.',
     category: 'worktrees',
     scopes: ['write:worktrees'],
     transport: ['ws'],

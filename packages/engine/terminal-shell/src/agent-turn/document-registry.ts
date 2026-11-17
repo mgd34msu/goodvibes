@@ -466,8 +466,8 @@ export class AgentDocumentRegistry {
       const tags = normalizeList(input.tags);
       const summary = input.summary?.trim() || 'Initial draft.';
       assertDocumentContentSafe([title, body, summary, ...tags]);
-      const duplicate = this.find(title);
-      if (duplicate) throw new Error(`Document already exists ${duplicate.document.id}`);
+      const duplicate = this.titleHolder(title);
+      if (duplicate) throw new Error(`Document already exists ${duplicate}`);
       const timestamp = nowIso();
       const version: AgentDocumentVersion = {
         id: 'v1',
@@ -504,8 +504,8 @@ export class AgentDocumentRegistry {
       const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
       const summary = input.summary?.trim() || 'Updated draft.';
       assertDocumentContentSafe([title, body, summary, ...tags]);
-      const duplicate = this.find(title);
-      if (duplicate && duplicate.document.id !== existing.id) throw new Error(`Document already exists ${duplicate.document.id}`);
+      const duplicate = this.titleHolder(title, existing.id);
+      if (duplicate) throw new Error(`Document already exists ${duplicate}`);
       const timestamp = nowIso();
       // A version records content; a change of status or artifact alone adds none,
       // so marking a document reviewed does not push its history out of the window.
@@ -750,6 +750,18 @@ export class AgentDocumentRegistry {
       .get(lookup) as { record: string; revision: number } | null;
     const document = row ? parseRow(row.record) : null;
     return row && document ? { document, revision: row.revision } : null;
+  }
+
+  /**
+   * The id of the document other than `exceptId` that has this title, or null.
+   * Titles only: a document's id (kept from its first title) never blocks a title.
+   */
+  private titleHolder(title: string, exceptId?: string): string | null {
+    const key = title.trim().toLowerCase();
+    if (!key) return null;
+    const row = this.store.db.query('SELECT id FROM documents WHERE title_key = ?1 AND id <> ?2 LIMIT 1')
+      .get(key, exceptId ?? '') as { id: string } | null;
+    return row?.id ?? null;
   }
 
   private require(idOrTitle: string, options: AgentDocumentWriteOptions = {}): { readonly document: AgentDocumentRecord; readonly revision: number } {

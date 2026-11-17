@@ -11,7 +11,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { controlPlaneStorePath } from '../control-plane-store-paths.js';
 
 export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCatalog, deps: Pick<GatewayVerbGroupDeps,
-  'channelDeliveryRouter' | 'providerRegistry' | 'automationManager' | 'sessionLister' | 'configManager' | 'shellPaths' | 'surfaceRoot' | 'disposal' | 'ownerInbox'>): void {
+  'channelDeliveryRouter' | 'providerRegistry' | 'automationManager' | 'sessionLister' | 'configManager' | 'shellPaths' | 'surfaceRoot' | 'disposal' | 'ownerInbox' | 'listContracts'>): void {
   if (deps.channelDeliveryRouter && deps.providerRegistry && deps.automationManager && deps.sessionLister && deps.configManager.onDidInvalidate) {
     const channelDeliveryRouter = deps.channelDeliveryRouter;
     const automation = deps.automationManager;
@@ -28,10 +28,13 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
       set: (key: string, value: string | boolean): void => configManager.set(key as ConfigKey, value as never),
     };
     const ownerInbox = deps.ownerInbox;
+    const listContracts = deps.listContracts;
     const stateReader = createRuntimeCheckinStateReader({
       listSessions: () => sessionLister.listSessions(500),
       listRuns: () => automation.listRuns(),
       ...(ownerInbox ? { listOwnerItems: () => ownerInbox.listNow({ status: 'open' }) } : {}),
+      // A contract escalation waits in the contract, not the owner inbox.
+      ...(listContracts ? { listContracts } : {}),
     });
     const checkinService = new CheckinService({
       config: checkinConfig,

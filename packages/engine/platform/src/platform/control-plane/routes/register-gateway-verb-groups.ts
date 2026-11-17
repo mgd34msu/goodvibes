@@ -62,6 +62,7 @@ import {
 import type { ChannelPolicyManager } from '../../channels/policy-manager.js';
 import { registerComposedCheckinGatewayMethods } from './checkin-composition.js';
 import type { CheckinSessionView } from '../../checkin/index.js';
+import type { CheckinContractView } from '../../checkin/state-reader.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
 import type { AutomationManager } from '../../automation/index.js';
 import type { ChannelDeliveryRouter } from '../../channels/delivery-router.js';
@@ -352,6 +353,12 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * the same approval broker. Absent → inbox.* stay cataloged-but-unhandled.
    */
   readonly ownerInbox?: OwnerInboxGatewayService | undefined;
+  /**
+   * The contracts this daemon runs (open ones), read by the check-in for a
+   * contract waiting on the owner's decision. Absent → the check-in reads none
+   * and its quiet answer does not claim it did.
+   */
+  readonly listContracts?: (() => readonly CheckinContractView[]) | undefined;
 }
 
 /** Adapt a fleet event payload down to the structural notice the push source needs. */

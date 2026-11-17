@@ -838,6 +838,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       pairingTokens: pairingTokens(), acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup,
       credentialWrites: { config: configManager, secrets: secretsManager }, approvalRaise: approvalBroker, approvalList: approvalBroker, disposal: scope.registry,
       personalCapture, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; },
+      listContracts: () => contractRunner.list({ includeInputSnapshot: false }),
     });
     scope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: externalPermissionHost }));
   }

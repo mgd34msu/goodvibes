@@ -61,6 +61,12 @@ export interface CheckinRuntimeReaders {
 export interface RuntimeCheckinStateReader extends CheckinStateReader {
   /** Owner-needed lines in the last snapshot; null before the first. */
   ownerNeeded(): number | null;
+  /**
+   * What the owner-needed count was read from, each as the clause a quiet
+   * check-in states ("no contract waiting for a decision"). A source the host
+   * does not run is absent, so a quiet answer never claims what nobody read.
+   */
+  ownerSources(): readonly string[];
 }
 
 const RECENT_COMPLETION_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -95,8 +101,14 @@ export function createRuntimeCheckinStateReader(readers: CheckinRuntimeReaders):
   const now = readers.now ?? Date.now;
   let lastSnapshotAt: number | null = null;
   let ownerNeeded: number | null = null;
+  const ownerSources = [
+    ...(readers.listOwnerItems ? ['no approval or question waiting'] : []),
+    ...(readers.listContracts ? ['no contract waiting for a decision'] : []),
+    'no failed automation run',
+  ];
   return {
     ownerNeeded: () => ownerNeeded,
+    ownerSources: () => ownerSources,
     snapshot: async (): Promise<CheckinStateSnapshot> => {
       const at = now();
       const sessions = readers.listSessions();
@@ -156,7 +168,7 @@ export function createRuntimeCheckinStateReader(readers: CheckinRuntimeReaders):
 export function judgeOnlyWhenOwnerNeeded(judge: CheckinJudge, reader: RuntimeCheckinStateReader): CheckinJudge {
   const quiet: CheckinDecision = {
     contact: false,
-    reason: 'Nothing needs the owner: no approval or question waiting, no contract waiting for a decision, no failed automation run.',
+    reason: `Nothing needs the owner: ${reader.ownerSources().join(', ')}.`,
   };
   return {
     decide: (briefing, options) => reader.ownerNeeded() === 0 ? Promise.resolve(quiet) : judge.decide(briefing, options),

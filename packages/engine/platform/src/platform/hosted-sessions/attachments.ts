@@ -80,13 +80,6 @@ export class HostedSessionAttachments {
     return expiresAt;
   }
 
-  /** Records `principalId` as an owner of the session without an attachment (the creator, with no client). True when it was not one yet. */
-  addOwner(principalId: string): boolean {
-    if (this.principals.has(principalId)) return false;
-    this.principals.add(principalId);
-    return true;
-  }
-
   /** The session's identified owners, as persisted with it. */
   identifiedOwners(): string[] {
     return [...this.principals];

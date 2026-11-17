@@ -48,6 +48,7 @@ export function ingestManagerSettings(
   file: string,
   sink: IngestionNoticeSink,
   knownHostKeys?: ReadonlySet<string>,
+  daemonOwned?: ((key: string) => boolean) | undefined,
 ): Record<string, unknown> {
   const noticedKeys = new Set<string>();
   const result = ingestSettingsFile(parsed, file, {
@@ -55,12 +56,46 @@ export function ingestManagerSettings(
     onNotice: (entry) => { noticedKeys.add(entry.key); noticeTo(sink, entry); },
   });
   for (const entry of result.unknownKeys) noticedKeys.add(entry.key);
+  const config = daemonOwned ? omitDaemonOwnedLeaves(result.config, file, daemonOwned) : { layer: result.config, notices: [] };
+  for (const entry of config.notices) noticedKeys.add(entry.key);
   forgetFixedKeyReceipts(sink, file, noticedKeys);
-  for (const entry of unknownSettingNotices(file, result.unknownKeys, knownHostKeys)) {
+  for (const entry of [...unknownSettingNotices(file, result.unknownKeys, knownHostKeys), ...config.notices]) {
     announceIngestionNotice(entry);
     noticeTo(sink, entry);
   }
-  return result.config;
+  return config.layer;
+}
+
+/**
+ * A surface's or project's settings file read beside a daemon's: a key only
+ * the daemon's file sets (the domains and keys config-ownership.ts gives the
+ * daemon) is left out of this layer, so the app never shows a value the
+ * daemon does not read as in effect. One notice per key says where to set it;
+ * the file itself is left as it is.
+ */
+function omitDaemonOwnedLeaves(
+  layer: Record<string, unknown>,
+  file: string,
+  daemonOwned: (key: string) => boolean,
+): { readonly layer: Record<string, unknown>; readonly notices: readonly SettingsIngestionNotice[] } {
+  const notices: SettingsIngestionNotice[] = [];
+  const visit = (node: Record<string, unknown>, prefix: string): Record<string, unknown> => {
+    const kept: Record<string, unknown> = {};
+    for (const [name, value] of Object.entries(node)) {
+      const key = prefix ? `${prefix}.${name}` : name;
+      if (daemonOwned(key)) {
+        notices.push({
+          file, key, action: 'skipped',
+          reason: "only the daemon's settings file sets this, so the value here is not used",
+          remedy: `Set it with: goodvibes-daemon config set ${key} <value>, or in the settings screen`,
+        });
+        continue;
+      }
+      kept[name] = value !== null && typeof value === 'object' && !Array.isArray(value) ? visit(value as Record<string, unknown>, key) : value;
+    }
+    return kept;
+  };
+  return { layer: visit(layer, ''), notices };
 }
 
 /**

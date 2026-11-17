@@ -2022,7 +2022,10 @@ export class ConfigManager {
       ? new Map(this.hostLoadValues) : null;
     const hostSource = nextHost ? structuredClone(parsed) : null;
     const malformedHostKeys = nextHost ? this.hostSettings.overlay(nextHost, parsed, this.hostLayerOf(file)) : [];
-    const ingested = ingestManagerSettings(parsed, file, this.ingestionSink(), new Set(this.hostSettings.keys()));
+    // Beside a daemon's file, a daemon key in this app's or project's file is not in effect: left out, with a notice.
+    const besideDaemon = this.daemonTierPath !== null && !this.daemonTierOwner && file !== this.daemonTierPath
+      && (file === this.configPath || file === this.projectConfigPath);
+    const ingested = ingestManagerSettings(parsed, file, this.ingestionSink(), new Set(this.hostSettings.keys()), besideDaemon ? isDaemonOwnedConfigKey : undefined);
     if (nextHost) {
       this.hostLoadValues = nextHost;
       if (hostSource) this.hostLoadSources?.set(file, hostSource);

@@ -786,17 +786,26 @@ export class McpRegistry {
     const sessionId = this.sandboxSessionByServer.get(serverName);
     this.executionByClient.get(client)?.close();
     await client.disconnect();
-    if (this.clients.get(serverName) === client) { this.clients.delete(serverName); this.#revision++; }
-    if (sessionId) {
-      this.sandboxSessions.stop(sessionId);
-      if (this.sandboxSessionByServer.get(serverName) === sessionId) this.sandboxSessionByServer.delete(serverName);
-    }
+    this.#releaseClient(serverName, client, reason, sessionId);
     if (this.runtimeBus) {
       emitMcpDisconnected(this.runtimeBus, {
         sessionId: 'mcp-registry',
         traceId: `mcp-registry:${serverName}:disconnected`,
         source: 'mcp-registry',
       }, { serverId: serverName, reason, willRetry: reason === 'reconnect' });
+    }
+  }
+
+  /**
+   * What a client leaves behind once it is gone: its registration, its
+   * sandbox session and the `Lifecycle:mcp:disconnected` hook. Runs once per
+   * client, from a deliberate disconnect or from the server dropping it.
+   */
+  #releaseClient(serverName: string, client: McpClient, reason: string, sessionId: string | undefined): void {
+    if (this.clients.get(serverName) === client) { this.clients.delete(serverName); this.#revision++; }
+    if (sessionId) {
+      this.sandboxSessions.stop(sessionId);
+      if (this.sandboxSessionByServer.get(serverName) === sessionId) this.sandboxSessionByServer.delete(serverName);
     }
     const disconnectedEvent: HookEvent = {
       path: 'Lifecycle:mcp:disconnected',
@@ -1283,7 +1292,15 @@ export class McpRegistry {
   /** A registered client's server stopped without being asked; its calls already ended with its connection. */
   #clientDropped(name: string, client: McpClient, reason: string): void {
     if (this.clients.get(name) !== client) return;
-    this.#revision++;
+    // Retired here, once: its sandbox session stops and hook authors hear of it now, whether or
+    // not a reconnect follows, and a reconnect finds no client left to disconnect again. The
+    // lifecycle owner's MCP_DISCONNECTED is the one event this drop publishes.
+    this.executionByClient.get(client)?.close();
+    this.connectFailures.set(name, reason);
+    this.#releaseClient(name, client, reason, this.sandboxSessionByServer.get(name));
+    void client.disconnect().catch((error: unknown) => {
+      logger.debug('McpRegistry: releasing a dropped client failed', { name, error: summarizeError(error) });
+    });
     this.#lifecycle.failed(name, reason);
   }
 

@@ -132,9 +132,8 @@ async function endServiceSession(
 ): Promise<void> {
   const secrets = requireSecretsManager(ctx);
   const homeDirectory = requireShellPaths(ctx).homeDirectory;
-  // A daemon session is held per address; one kept in secure storage by an earlier version is ended too.
-  const held = input.target === 'daemon' ? readDaemonSessionToken(homeDirectory, input.baseUrl.origin) : null;
-  const token = held ?? await secrets.get(input.secretKey);
+  // A daemon session is held per address.
+  const token = input.target === 'daemon' ? readDaemonSessionToken(homeDirectory, input.baseUrl.origin) : await secrets.get(input.secretKey);
   if (!token) {
     ctx.print(`No ${input.target} session is held for ${input.baseUrl.origin}; nothing to sign out of. /auth login ${input.target} <baseUrl> <username> signs in.`);
     return;
@@ -158,7 +157,7 @@ async function endServiceSession(
       revoked = `The daemon could not be reached (${error instanceof Error ? error.message : String(error)}); the session lapses at its expiry.`;
     }
   }
-  if (held) {
+  if (input.target === 'daemon') {
     writeDaemonSessionToken(homeDirectory, input.baseUrl.origin, null);
     ctx.print(`Signed out of the daemon at ${input.baseUrl.origin}: ${revoked} This terminal calls it with its own credential again.`);
     return;

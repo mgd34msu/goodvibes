@@ -102,10 +102,9 @@ export interface PhoneNodeStorage {
   writeExecuted?(entries: readonly (readonly [string, ExecutedWorkStatus])[]): void;
 }
 
-/** A stored marker's status; markers written by older builds held a whole record. */
+/** A stored marker's status. */
 function executedStatus(value: unknown): ExecutedWorkStatus | undefined {
-  const status = value !== null && typeof value === 'object' ? (value as { status?: unknown }).status : value;
-  return status === 'completed' || status === 'failed' ? status : undefined;
+  return value === 'completed' || value === 'failed' ? value : undefined;
 }
 
 /** What a redelivered item is answered with when its result did not survive a reload. */

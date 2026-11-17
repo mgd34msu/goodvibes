@@ -54,7 +54,7 @@ export function createConfiguredFetchDeps(options: ConfiguredFetchDepsOptions): 
     defaultTrustedHosts: () => splitHostConfig(configManager.get('fetch.trustedHosts')),
     defaultBlockedHosts: () => splitHostConfig(configManager.get('fetch.blockedHosts')),
     isLocalhostAllowed: () => configManager.get('fetch.allowLocalhost'),
-    allowedPrivateHosts: () => splitHostConfig(configManager.get('fetch.allowedPrivateHosts')),
+    allowedPrivateHosts: () => splitHostConfig(configManager.get('fetch.allowedPrivateHosts')) ?? [],
     ...(approveLocalhostFetch ? { approveLocalhostFetch } : {}),
   };
 }

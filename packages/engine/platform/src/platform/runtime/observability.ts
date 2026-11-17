@@ -70,7 +70,7 @@ export type { TaskSuiteResult, DiscoveredTask, HeadlessRunExecutorOptions } from
 
 // ── Runtime state ─────────────────────────────────────────────────────────────
 export { snapshotRuntimeState, formatRuntimeStateSnapshot, STATE_SNAPSHOT_MAX_DEPTH, STATE_SNAPSHOT_MAX_NODES } from './state-snapshot.js';
-export type { RuntimeStateSnapshot } from './state-snapshot.js';
+export type { RuntimeStoreSnapshot } from './state-snapshot.js';
 
 // ── Forensics ─────────────────────────────────────────────────────────────────
 export type {

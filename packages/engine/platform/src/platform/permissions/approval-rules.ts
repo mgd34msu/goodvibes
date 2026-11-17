@@ -26,7 +26,7 @@ import {
   evaluatePathScopeRule,
   evaluatePrefixRule,
 } from '../runtime/permissions/rules/index.js';
-import { evaluatePrefixRule, execContextOf, extractCommandArgs, splitShellCommand } from '../runtime/permissions/rules/prefix.js';
+import { execContextOf, extractCommandArgs, splitShellCommand } from '../runtime/permissions/rules/prefix.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
 

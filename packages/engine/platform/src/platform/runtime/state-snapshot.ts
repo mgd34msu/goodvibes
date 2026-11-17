@@ -28,7 +28,8 @@ export const STATE_SNAPSHOT_MAX_NODES = 20_000;
 
 const TRUNCATED = '[Truncated]';
 
-export interface RuntimeStateSnapshot {
+/** One bounded read of the runtime store (the state inspector panel has its own RuntimeStateSnapshot). */
+export interface RuntimeStoreSnapshot {
   /** Epoch ms the store was read. */
   readonly capturedAt: number;
   /** The domains read, by name. */
@@ -127,7 +128,7 @@ function safeValue(value: unknown, depth: number, path: WeakSet<object>, budget:
 export function snapshotRuntimeState(
   store: { getState(): object },
   options: { readonly domains?: readonly string[] | undefined } = {},
-): RuntimeStateSnapshot {
+): RuntimeStoreSnapshot {
   const capturedAt = Date.now();
   const state = store.getState() as Record<string, unknown>;
   const available = Object.keys(state).sort();
@@ -144,7 +145,7 @@ export function snapshotRuntimeState(
 }
 
 /** A snapshot as lines a terminal prints: one JSON block per domain, then what was cut or not found. */
-export function formatRuntimeStateSnapshot(snapshot: RuntimeStateSnapshot, heading: string): string {
+export function formatRuntimeStateSnapshot(snapshot: RuntimeStoreSnapshot, heading: string): string {
   const lines = [heading];
   for (const [domain, value] of Object.entries(snapshot.domains)) {
     lines.push(`${domain}:`, ...JSON.stringify(value, null, 2).split('\n').map((line) => `  ${line}`));

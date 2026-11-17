@@ -27,7 +27,7 @@ const memoryMethods = { capturedInputAdmission: 'value', id: 'value', label: 'va
 const voiceMethods = { id: 'value', label: 'value', capabilities: 'value', billing: 'value', explicitSelectionOnly: 'value', status: 'either', listVoices: 'either', synthesize: 'async', synthesizeStream: 'either', transcribe: 'async', openRealtimeSession: 'async', resetEngineFailureState: 'sync' } satisfies Modes<VoiceProvider>;
 const mediaMethods = { id: 'value', label: 'value', capabilities: 'value', status: 'either', analyze: 'async', transform: 'async', generate: 'async' } satisfies Modes<MediaProvider>;
 const searchMethods = { id: 'value', label: 'value', capabilities: 'value', descriptor: 'sync', search: 'async' } satisfies Modes<WebSearchProvider>;
-const toolMethods = { definition: 'value', execute: 'async' } satisfies Modes<Tool>;
+const toolMethods = { definition: 'value', execute: 'async', callReadsOnly: 'sync' } satisfies Modes<Tool>;
 
 const streamFields = { providerId: 'value', mimeType: 'value', format: 'value', chunks: 'value', metadata: 'value' } satisfies Modes<VoiceSynthesisStreamResult>;
 

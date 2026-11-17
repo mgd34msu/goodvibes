@@ -46,7 +46,13 @@ export function prepareSemanticSupersession(
   guard.watch('supersession-supports', () => store.listEdges().filter((edge) => edge.toKind === 'node' && factIds.has(edge.toId)));
   return async () => {
     const plans: Array<{ node: KnowledgeNodeRecord; supportingSourceIds: string[]; primarySourceId: string | undefined; supportKey: string | undefined }> = [];
-    for (const draft of drafts) plans.push({ ...draft, primarySourceId: await draft.resolve?.() });
+    for (const draft of drafts) {
+      const outcome = draft.supportKey === undefined ? undefined : support.outcome(draft.supportKey);
+      // A fact whose remaining support did not settle is left as it is; the next pass reads it again.
+      if (outcome === 'unsettled') continue;
+      // Kept on its other sources only while they support it; otherwise it is retired.
+      plans.push({ ...draft, primarySourceId: outcome === 'supported' ? await draft.resolve?.() : undefined });
+    }
     const supersededAt = Date.now();
     const writes = plans.map(({ node, supportingSourceIds, primarySourceId, supportKey }) => {
       const input: KnowledgeNodeUpsertInput = primarySourceId

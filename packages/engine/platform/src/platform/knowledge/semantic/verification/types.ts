@@ -70,8 +70,12 @@ export interface GeneratedFactSupportPlan {
   readonly extractionId: string;
   readonly receipts: readonly GeneratedFactSupportReceipt[];
 }
+/** One input's support reading: its plan, or why the claim was left out. */
+export type GeneratedFactSupportVerdict =
+  | { readonly supported: true; readonly plan: GeneratedFactSupportPlan }
+  | { readonly supported: false; readonly claimId: string; readonly reason: 'no-support' | 'unsettled' };
 export type GeneratedFactSupportHoldReason = 'unsettled' | 'no-support' | 'unavailable' | 'malformed' | 'stale' | 'aborted' | 'budget' | 'missing-evidence' | 'foreign-space';
-/** Value-free failure: no affected pass may fall back or persist partial plans. */
+/** Value-free failure: the held pass (or, in a partial pass, the held claim) persists nothing and does not fall back. */
 export class KnowledgeGeneratedFactSupportHeldError extends Error {
   override readonly name = 'KnowledgeGeneratedFactSupportHeldError';
   constructor(readonly reason: GeneratedFactSupportHoldReason = 'unsettled') {

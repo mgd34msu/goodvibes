@@ -8,7 +8,8 @@ import type { JsonValue, JudgmentPort } from '@goodvibes-jev/judgment';
 import { GENERATED_FACT_SUPPORT_SLOTS as SLOTS, generatedFactBatchSupport as battery, generatedFactSupportState } from './batteries.js';
 import { freezeSupport, projectSupportInput, createSupportOriginalValues, originalSupportValues, releaseOriginalSupportValues, type ProjectedSupportInput } from './projection.js';
 import { GENERATED_FACT_SUPPORT_LIMITS as LIMITS, KnowledgeGeneratedFactSupportHeldError as Held,
-  type GeneratedFactSupportInput, type GeneratedFactSupportOptions, type GeneratedFactSupportPlan, type GeneratedFactSupportReceipt } from './types.js';
+  type GeneratedFactSupportInput, type GeneratedFactSupportOptions, type GeneratedFactSupportPlan, type GeneratedFactSupportReceipt,
+  type GeneratedFactSupportVerdict } from './types.js';
 export * from './types.js';
 
 /** One claim of one source, with the subjects it is attached to, as the reading sees it. */
@@ -30,6 +31,8 @@ interface BatchRequest {
   readonly count: number;
 }
 interface ClaimSettlement { readonly probability: number; readonly decisionId?: string | undefined }
+/** A slot whose claim or subject attachment read 'no', or did not settle. */
+interface ClaimRefusal { readonly refused: 'no-support' | 'unsettled' }
 function bounded(value: number | undefined, maximum: number): number {
   if (value === undefined) return maximum;
   const result = value;
@@ -82,12 +85,32 @@ function receipt(input: ProjectedSupportInput, field: 'claim' | 'subjectAttachme
 
 /**
  * Read-only, whole-pass barrier. Every supplied claim×source and every proposed
- * attachment must settle act/yes before ANY plans are returned. Claims of one
- * source are read together: one request per twelve claims, the extraction sent
- * once. It performs no storage writes; the caller must revalidate its exact
- * read-set at write time.
+ * attachment must settle act/yes before ANY plans are returned; the first claim
+ * that does not stops the pass. Claims of one source are read together: one
+ * request per twelve claims, the extraction sent once. It performs no storage
+ * writes; the caller must revalidate its exact read-set at write time.
  */
 export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFactSupportInput[], options: GeneratedFactSupportOptions = {}): Promise<readonly GeneratedFactSupportPlan[]> {
+  const verdicts = await readSupport(inputs, options, true);
+  const plans: GeneratedFactSupportPlan[] = [];
+  for (const verdict of verdicts) {
+    if (!verdict.supported) throw new Held(verdict.reason);
+    plans.push(verdict.plan);
+  }
+  return Object.freeze(plans);
+}
+
+/**
+ * The same reading, one verdict per input in input order: a claim whose
+ * reading (or a subject attachment's) is 'no' or does not settle is left out
+ * with its reason and the others keep their plans. Only a request that fails
+ * (unavailable, malformed, budget, cancelled) holds the whole pass.
+ */
+export async function readGeneratedFactSupport(inputs: readonly GeneratedFactSupportInput[], options: GeneratedFactSupportOptions = {}): Promise<readonly GeneratedFactSupportVerdict[]> {
+  return readSupport(inputs, options, false);
+}
+
+async function readSupport(inputs: readonly GeneratedFactSupportInput[], options: GeneratedFactSupportOptions, wholePass: boolean): Promise<readonly GeneratedFactSupportVerdict[]> {
   requireSemanticKnowledge();
   if (options.signal?.aborted) throw new Held('aborted');
   if (nodeTypes.isProxy(inputs)) throw new Held('malformed');
@@ -151,7 +174,7 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
   options.signal?.addEventListener('abort', onAbort, { once: true });
   const timeout = timeoutMs > 0 ? setTimeout(() => cancel(new Held('budget')), timeoutMs) : undefined;
   const assertCurrent = () => { if (cancellation) throw cancellation; if (options.signal?.aborted) throw new Held('aborted'); };
-  const settled = new Map<SourceGroup, ClaimSettlement[]>();
+  const settled = new Map<SourceGroup, Array<ClaimSettlement | ClaimRefusal>>();
   let next = 0;
   async function read(request: BatchRequest, port: JudgmentPort) {
     assertCurrent();
@@ -169,14 +192,20 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
       const run = await Promise.race([battery.run(port, state, { signal: controller.signal, site: battery.name, only: [...only] }), aborted]);
       assertCurrent();
       const readings = only.map((name) => run.readings[name]);
-      if (readings.some((reading) => !reading || reading.outcome !== 'act' || reading.verdict !== 'yes')) {
+      const refusals = readings.map((reading): ClaimRefusal | undefined => reading && reading.outcome === 'act' && reading.verdict === 'yes' ? undefined
+        : { refused: reading?.outcome === 'act' && reading.verdict === 'no' ? 'no-support' : 'unsettled' });
+      const refused = refusals.filter((refusal) => refusal !== undefined).length;
+      if (wholePass && refused > 0) {
         run.recordAction('held: a generated claim or its subject attachment is unsupported or unsettled');
-        throw new Held(readings.some((reading) => reading?.outcome === 'act' && reading.verdict === 'no') ? 'no-support' : 'unsettled');
+        throw new Held(refusals.some((refusal) => refusal?.refused === 'no-support') ? 'no-support' : 'unsettled');
       }
-      run.recordAction(`verified: ${request.count} generated claim(s) and their subject attachments; persistence remains subject to read-set validation`);
+      run.recordAction(refused === 0
+        ? `verified: ${request.count} generated claim(s) and their subject attachments; persistence remains subject to read-set validation`
+        : `verified ${request.count - refused} of ${request.count} generated claim(s); ${refused} left out as unsupported or unsettled; persistence remains subject to read-set validation`);
       const results = settled.get(request.group) ?? [];
       readings.forEach((reading, index) => {
-        results[request.offset + index] = { probability: reading!.probability, ...(run.result.decisionId === undefined ? {} : { decisionId: run.result.decisionId }) };
+        results[request.offset + index] = refusals[index]
+          ?? { probability: reading!.probability, ...(run.result.decisionId === undefined ? {} : { decisionId: run.result.decisionId }) };
       });
       settled.set(request.group, results);
     } finally { removeAbort(); }
@@ -193,12 +222,13 @@ export async function prepareGeneratedFactSupport(inputs: readonly GeneratedFact
       }
     }));
     assertCurrent();
-    return freezeSupport(projections.map((input, index) => {
+    return freezeSupport(projections.map((input, index): GeneratedFactSupportVerdict => {
       const { group, index: job } = slotsByInput[index]!;
       const result = settled.get(group)?.[job];
       if (!result) throw new Held('malformed');
-      return { claim: input.claim, claimId: input.claimId, sourceId: input.sourceId, extractionId: input.extractionId,
-        receipts: [receipt(input, 'claim', undefined, result), ...input.subjects.map((subject) => receipt(input, 'subjectAttachment', subject.originalId, result))] };
+      if ('refused' in result) return { supported: false, claimId: input.claimId, reason: result.refused };
+      return { supported: true, plan: { claim: input.claim, claimId: input.claimId, sourceId: input.sourceId, extractionId: input.extractionId,
+        receipts: [receipt(input, 'claim', undefined, result), ...input.subjects.map((subject) => receipt(input, 'subjectAttachment', subject.originalId, result))] } };
     }));
   } catch (error) { throw error instanceof Held ? error : new Held('unavailable'); }
   finally { clearTimeout(timeout); options.signal?.removeEventListener('abort', onAbort); }

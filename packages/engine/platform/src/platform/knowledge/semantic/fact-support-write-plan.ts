@@ -4,13 +4,14 @@ import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeExtractionRecord, KnowledgeNodeRecord } from '../types.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import type { SemanticWriteGuard } from './primary-source-plan.js';
-import { prepareGeneratedFactSupport } from './verification/generated-fact-support.js';
+import { prepareGeneratedFactSupport, readGeneratedFactSupport } from './verification/generated-fact-support.js';
 import {
   KnowledgeGeneratedFactSupportHeldError,
   type GeneratedFactSupportClaim,
   type GeneratedFactSupportInput,
   type GeneratedFactSupportOptions,
   type GeneratedFactSupportPlan,
+  type GeneratedFactSupportVerdict,
   type GeneratedFactSupportReceipt,
 } from './verification/types.js';
 
@@ -34,9 +35,16 @@ export function exactKnowledgeIds(values: readonly (string | undefined | null)[]
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
 }
 
-/** Gather one entire persistence pass before the first support request is sent. */
+/** How one added claim came out of its support reading. */
+export type GeneratedFactSupportOutcome = 'supported' | 'no-support' | 'unsettled';
+
+/**
+ * Gather one entire persistence pass before the first support request is sent.
+ * By default the pass is whole: one claim that is not supported holds it. With
+ * `partial`, such a claim is left out ({@link outcome}) and the rest go on.
+ */
 export function createGeneratedFactWritePlanner(
-  store: KnowledgeStore, guard: SemanticWriteGuard, options: GeneratedFactSupportOptions = {},
+  store: KnowledgeStore, guard: SemanticWriteGuard, options: GeneratedFactSupportOptions & { readonly partial?: boolean | undefined } = {},
 ) {
   const requests: GeneratedFactSupportInput[] = [];
   const slots = new Map<string, number[]>();
@@ -55,7 +63,8 @@ export function createGeneratedFactWritePlanner(
     return id;
   }
   const nativeOwners: Array<{ readonly claimId: string; readonly assertCurrent: () => void }> = [];
-  let settled: readonly GeneratedFactSupportPlan[] | undefined;
+  let settled: readonly (GeneratedFactSupportPlan | undefined)[] | undefined;
+  const outcomes = new Map<string, GeneratedFactSupportOutcome>();
   let started = false;
   function add(
     spaceId: string, claim: GeneratedFactSupportClaim, sourceIds: readonly string[],
@@ -120,29 +129,48 @@ export function createGeneratedFactWritePlanner(
       started = true;
       try {
         guard.assertCurrent();
-        const measured = await prepareGeneratedFactSupport(requests, options);
+        const { partial, ...readOptions } = options;
+        // A whole pass stops at the first claim that is not supported.
+        const verdicts: readonly GeneratedFactSupportVerdict[] = partial ? await readGeneratedFactSupport(requests, readOptions)
+          : (await prepareGeneratedFactSupport(requests, readOptions)).map((plan) => ({ supported: true as const, plan }));
         guard.assertCurrent();
-        if (measured.length !== requests.length) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
-        const proofs = measured.map((plan, index) => {
+        if (verdicts.length !== requests.length) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
+        const proofs = verdicts.map((verdict, index) => {
           const owner = nativeOwners[index];
           if (!owner) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
           owner.assertCurrent();
-          if (plan.claimId !== owner.claimId || plan.receipts.some(receipt => receipt.claimId !== owner.claimId)) {
+          const claimId = verdict.supported ? verdict.plan.claimId : verdict.claimId;
+          if (claimId !== owner.claimId || (verdict.supported && verdict.plan.receipts.some(receipt => receipt.claimId !== owner.claimId))) {
             throw new KnowledgeGeneratedFactSupportHeldError('stale');
           }
-          return { plan, proof: Object.freeze({ store, claimId: owner.claimId, receipts: plan.receipts, assertCurrent: owner.assertCurrent }) };
+          return verdict.supported
+            ? { plan: verdict.plan, proof: Object.freeze({ store, claimId: owner.claimId, receipts: verdict.plan.receipts, assertCurrent: owner.assertCurrent }) }
+            : undefined;
         });
         // No successful prefix escapes a failed whole-pass source check.
         guard.assertCurrent();
-        for (const { proof } of proofs) proof.assertCurrent();
-        for (const { plan, proof } of proofs) nativeGeneratedPlans.set(plan, proof);
-        settled = measured;
+        for (const entry of proofs) entry?.proof.assertCurrent();
+        for (const entry of proofs) if (entry) nativeGeneratedPlans.set(entry.plan, entry.proof);
+        // A claim is supported only when every source it rests on supports it.
+        for (const [key, indices] of slots) {
+          const refused = indices.flatMap((index) => { const verdict = verdicts[index]!; return verdict.supported ? [] : [verdict.reason]; });
+          outcomes.set(key, refused.length === 0 ? 'supported' : refused.includes('no-support') ? 'no-support' : 'unsettled');
+        }
+        settled = proofs.map((entry) => entry?.plan);
       } finally {
         parts.clear(); requestsByParts.clear(); requests.length = 0; nativeOwners.length = 0;
       }
     },
+    /** How the claim added under `key` came out; only a supported claim has {@link plans}. */
+    outcome(key: string): GeneratedFactSupportOutcome {
+      const outcome = settled ? outcomes.get(key) : undefined;
+      if (!outcome) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
+      return outcome;
+    },
     plans(key: string): readonly GeneratedFactSupportPlan[] {
       if (!settled || !slots.has(key)) throw new KnowledgeGeneratedFactSupportHeldError('malformed');
+      const outcome = outcomes.get(key);
+      if (outcome !== 'supported') throw new KnowledgeGeneratedFactSupportHeldError(outcome ?? 'malformed');
       return slots.get(key)!.map((index) => settled![index]!);
     },
   };

@@ -92,6 +92,8 @@ export interface PersistedSemanticExtraction {
   readonly entities: readonly KnowledgeNodeRecord[];
   readonly wikiPage?: KnowledgeNodeRecord | undefined;
   readonly gaps: readonly KnowledgeNodeRecord[];
+  /** Generated facts this pass left out: no quote in the source, a usefulness or support reading that did not settle, or a source that does not support them. */
+  readonly factsLeftOut?: { readonly unquoted: number; readonly unsettled: number; readonly unsupported: number } | undefined;
 }
 
 export async function enrichKnowledgeSource(
@@ -196,6 +198,7 @@ export async function enrichKnowledgeSource(
     factCount: persisted.facts.length,
     entityCount: persisted.entities.length,
     gapCount: persisted.gaps.length,
+    ...(persisted.factsLeftOut ? { factsLeftOut: persisted.factsLeftOut } : {}),
   }, assertPersistenceCurrent);
   assertPersistenceCurrent();
   return persisted;
@@ -377,7 +380,9 @@ async function persistSemanticExtraction(
   guard.extraction(source.id, extraction);
   guard.edges('source-edges', [`source:${source.id}`]);
   const planner = createSemanticPrimarySourcePlanner(store, guard, options.signal);
-  const support = createGeneratedFactWritePlanner(store, guard, { signal: options.signal });
+  // One claim the source does not support, or whose reading does not settle,
+  // is left out; the rest of the source's facts are kept.
+  const support = createGeneratedFactWritePlanner(store, guard, { signal: options.signal, partial: true });
   const entities: KnowledgeNodeRecord[] = [];
   const facts: KnowledgeNodeRecord[] = [];
   const gaps: KnowledgeNodeRecord[] = [];
@@ -495,9 +500,20 @@ async function persistSemanticExtraction(
   const resolveSupersession = prepareSemanticSupersession(store, source.id, spaceId, activeIds, guard, planner, support, assertQualityCurrent);
   await support.readAll();
   guard.assertCurrent(); assertQualityCurrent();
+  const supportedDrafts = factDrafts.filter((draft) => support.outcome(draft.supportKey) === 'supported');
+  const unsupportedFacts = factDrafts.filter((draft) => support.outcome(draft.supportKey) === 'no-support').length;
+  const supportUnsettled = factDrafts.length - supportedDrafts.length - unsupportedFacts;
+  if (supportedDrafts.length < factDrafts.length) {
+    // Rendering consumes only supported facts; a supplied page could still state a left-out claim.
+    const kept = new Set(supportedDrafts.map((draft) => draft.fact));
+    const { wikiPage: _droppedPage, ...withoutPage } = semantic;
+    semantic = { ...withoutPage, facts: semantic.facts.filter((fact) => kept.has(fact)) };
+    logger.info('Semantic enrichment left unsupported facts out', { sourceId: source.id, unsupported: unsupportedFacts, unsettled: supportUnsettled });
+  }
+  const leftOut = { unquoted: unquotedFacts, unsettled: usefulness.unsettled + supportUnsettled, unsupported: unsupportedFacts };
   const factPlans = [];
   const virtualSupport = new Map<string, unknown>();
-  for (const draft of factDrafts) {
+  for (const draft of supportedDrafts) {
     const supportMetadata = generatedFactSupportMetadata(support.plans(draft.supportKey),
       virtualSupport.get(draft.factId) ?? draft.existingFact?.metadata.generatedFactSupport);
     virtualSupport.set(draft.factId, supportMetadata);
@@ -576,7 +592,8 @@ async function persistSemanticExtraction(
   if (wikiPage) nodeIdentities.get(wikiPage.id)!.retain(wikiPage);
   await applySupersession();
   assertQualityCurrent();
-  const result = { source, skipped: false, extractor: semantic.extractor, facts, entities, gaps, ...(wikiPage ? { wikiPage } : {}) };
+  const result = { source, skipped: false, extractor: semantic.extractor, facts, entities, gaps, ...(wikiPage ? { wikiPage } : {}),
+    ...(leftOut.unquoted + leftOut.unsettled + leftOut.unsupported > 0 ? { factsLeftOut: leftOut } : {}) };
   semanticPersistenceGuards.set(result, assertQualityCurrent);
   return result;
 }

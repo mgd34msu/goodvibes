@@ -66,8 +66,9 @@ export const WORKSPACES_REGISTRATIONS_ADD_OUTPUT_SCHEMA = objectSchema(
   {
     workspace: REGISTERED_WORKSPACE_SCHEMA,
     alreadyRegistered: BOOLEAN_SCHEMA,
+    nativeScopeGranted: BOOLEAN_SCHEMA,
   },
-  ['workspace', 'alreadyRegistered'],
+  ['workspace', 'alreadyRegistered', 'nativeScopeGranted'],
 );
 
 // ── workspaces.registrations.remove ───────────────────────────────────────────

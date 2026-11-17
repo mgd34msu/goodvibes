@@ -60,7 +60,9 @@ function createAddHandler(service: WorkspacesGatewayService): GatewayMethodHandl
         ...(checkpointEligible !== undefined ? { checkpointEligible } : {}),
       };
       const result = await service.add(root, Object.keys(opts).length > 0 ? opts : undefined);
-      return { workspace: result.record, alreadyRegistered: result.alreadyRegistered };
+      // A re-registration that granted native scope changed something; the caller
+      // told to register again needs to see that the step worked.
+      return { workspace: result.record, alreadyRegistered: result.alreadyRegistered, nativeScopeGranted: result.nativeScopeGranted === true };
     } catch (error) {
       rethrowAsVerbError(error);
     }

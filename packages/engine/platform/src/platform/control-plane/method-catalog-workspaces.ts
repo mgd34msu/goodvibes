@@ -44,7 +44,7 @@ export const builtinGatewayWorkspacesMethodDescriptors: readonly GatewayMethodDe
     id: 'workspaces.registrations.add',
     title: 'Register a Workspace',
     description:
-      'Register a workspace root so the whole subtree beneath it is covered. Refuses an absurdly broad root (the home directory, the filesystem root, or the daemon state directory) with a 400, coverage flows down the entire subtree, so a root that broad would sweep far more than a project. Idempotent: re-registering the same normalized root returns alreadyRegistered:true. Registering a root clears any remembered decline recorded at exactly that root.',
+      'Register a workspace root so the whole subtree beneath it is covered. Refuses an absurdly broad root (the home directory, the filesystem root, or the daemon state directory) with a 400, coverage flows down the entire subtree, so a root that broad would sweep far more than a project. Idempotent: re-registering the same normalized root returns alreadyRegistered:true. A root registered before native work existed has no native scope; re-registering it grants that scope and answers nativeScopeGranted:true (false otherwise), which is the step a native-work refusal asks for. Registering a root clears any remembered decline recorded at exactly that root.',
     category: 'workspaces',
     scopes: ['write:workspaces'],
     http: { method: 'POST', path: '/api/workspaces/registrations' },

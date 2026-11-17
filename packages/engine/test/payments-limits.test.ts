@@ -87,6 +87,11 @@ test('over the daily item budget it stops and names the budget, what is left and
     exceeded: { limit: 'daily-item-budget', setting: 'payments.budget.dailyItem', availableMinorUnits: 4_000,
       neededMinorUnits: 5_000, excessMinorUnits: 1_000, unset: false },
   });
+  // A spend two hours ago is yesterday in Pago Pago; changing the zone there must not hand it back.
+  const earlier = NOW - 2 * 60 * 60_000, book = ledger();
+  book.reserve({ id: 'earlier', itemMinorUnits: 1_000, overageMinorUnits: 0, toleranceMinorUnits: 0, limits: limits(), nowMs: earlier, timezone: 'UTC', retainUntilSettled: true });
+  book.commit('earlier', earlier);
+  expect(ledger().snapshot(limits(), NOW, 'Pacific/Pago_Pago').item.spent).toBe(7_000);
 });
 
 test('the per-purchase ceiling holds the whole total, not the item price', () => {

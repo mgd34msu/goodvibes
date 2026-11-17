@@ -63,6 +63,8 @@ const LOOSENING: readonly { readonly key: string; readonly baseline?: unknown; r
   { key: 'payments.shippingAddress.line1', baseline: '1 Owner Street', value: '9 Drop Lane' },
   { key: 'payments.shippingAddress.postalCode', baseline: '10001', value: '99999' },
   { key: 'permissions.mode', baseline: 'ask-me', value: 'yolo' },
+  // Midnight in Pago Pago falls eleven hours after midnight UTC: the daily limits would restart on another clock.
+  { key: 'daemon.timezone', baseline: 'UTC', value: 'Pacific/Pago_Pago' },
 ];
 
 test('an agent write that widens the sandbox or loosens a payments key is refused and nothing is saved', () => {

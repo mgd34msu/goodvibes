@@ -8690,7 +8690,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -12425,7 +12425,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -14387,7 +14387,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -18466,7 +18466,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "x-effect": "read"
       }
@@ -19336,7 +19336,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:batch"
+          "read:transcripts"
         ],
         "x-effect": "read",
         "parameters": [
@@ -19491,7 +19491,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:batch"
+          "read:transcripts"
         ],
         "x-effect": "read",
         "parameters": [
@@ -20129,7 +20129,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -20701,7 +20701,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -20785,7 +20785,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -21876,7 +21876,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -22386,7 +22386,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -22658,7 +22658,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:browser"
+          "read:browser-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -24293,7 +24293,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -24484,7 +24484,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "x-effect": "read"
       }
@@ -24657,7 +24657,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -26607,7 +26607,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -27038,7 +27038,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -27157,7 +27157,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -27746,7 +27746,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -28111,7 +28111,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -31591,7 +31591,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:checkin"
+          "read:transcripts"
         ],
         "x-effect": "read",
         "parameters": [
@@ -63319,7 +63319,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:control-plane"
+          "read:transcripts"
         ],
         "x-effect": "read"
       }
@@ -64200,7 +64200,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:control-plane"
+          "read:transcripts"
         ],
         "x-effect": "read"
       }
@@ -65262,7 +65262,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -71016,7 +71016,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "outward",
         "requestBody": {
@@ -71502,7 +71502,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -72101,7 +72101,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -74652,7 +74652,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -75185,7 +75185,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -75483,7 +75483,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -76253,7 +76253,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -76536,7 +76536,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -78024,7 +78024,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -79983,7 +79983,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "outward",
         "requestBody": {
@@ -80404,7 +80404,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -80551,7 +80551,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -81453,7 +81453,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -81624,7 +81624,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -81773,7 +81773,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "outward",
         "requestBody": {
@@ -84234,7 +84234,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -84924,7 +84924,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -87477,7 +87477,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -88010,7 +88010,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -88223,7 +88223,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -89050,7 +89050,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -89930,7 +89930,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -90181,7 +90181,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -90538,7 +90538,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -90665,7 +90665,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -91982,7 +91982,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "requestBody": {
@@ -92201,7 +92201,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -92510,7 +92510,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -92760,7 +92760,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -92923,7 +92923,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -93516,7 +93516,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -94210,7 +94210,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -95280,7 +95280,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -96364,7 +96364,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -97332,7 +97332,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:knowledge"
+          "read:knowledge-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -118305,7 +118305,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:remote"
+          "read:control-plane"
         ],
         "x-effect": "read"
       }
@@ -133886,7 +133886,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:skills"
+          "read:skill-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -134773,7 +134773,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:tasks"
+          "read:transcripts"
         ],
         "x-effect": "read",
         "parameters": [
@@ -135359,7 +135359,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:tasks"
+          "read:transcripts"
         ],
         "x-effect": "read",
         "parameters": [

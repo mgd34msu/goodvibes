@@ -59,7 +59,8 @@ function parseDocument(source: string): DocumentNode {
 function accessFor(operation: 'query' | 'mutation'): KnowledgeGraphqlAccessProfile {
   return operation === 'mutation'
     ? { operation, requiredScopes: ['write:knowledge'], adminRequired: true }
-    : { operation, requiredScopes: ['read:knowledge'], adminRequired: false };
+    // A query returns the owner's knowledge records, read under the owner-private content scope.
+    : { operation, requiredScopes: ['read:knowledge-content'], adminRequired: false };
 }
 
 export function inspectKnowledgeGraphqlAccess(

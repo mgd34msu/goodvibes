@@ -163,10 +163,10 @@ What a stream may carry is decided once, when it opens, from the credential.
 An admin (the operator token, a paired device, an admin user) receives every
 domain. A local user without the admin role receives only the domains and
 events that carry no setting values, approvals, tool arguments or output,
-conversation text, or other people's sign-ins: `providers`, `tasks`,
-`planner`, `plugins`, `mcp`, `transport`, `compaction`, `ui`, `ops`,
-`automation`, `routes`, `deliveries`, `watchers`, `surfaces`, `knowledge`,
-`workspace` and `fleet`, plus the remote peer notices. The `ready` frame lists
+conversation text, other people's sign-ins, or the owner's records:
+`providers`, `tasks`, `planner`, `plugins`, `mcp`, `transport`, `compaction`,
+`ui`, `ops`, `automation`, `routes`, `deliveries`, `watchers`, `surfaces` and
+`workspace`. The `ready` frame lists
 the domains the stream got and any it withheld; a stream that asks only for
 withheld domains is refused with `403 EVENT_ACCESS_DENIED`. `GET /api/events`
 is the same stream under an older path, with the same ids, replay and

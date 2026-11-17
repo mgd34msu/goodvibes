@@ -117,8 +117,10 @@ const RUNTIME_DOMAIN_DESCRIPTIONS = {
  * Who may receive an event stream entry: any authenticated principal holding
  * the descriptor's scopes, or only an admin. A domain is admin-only when its
  * events carry setting values, approvals and tool arguments, conversation or
- * tool output, or other principals' credentials and connections; the rest
- * describe state a non-admin can already read through the request path.
+ * tool output, other principals' credentials and connections, or the owner's
+ * records (knowledge sources and the task a packet was built for; the fleet's
+ * agents and what they are doing); the rest describe state a non-admin can
+ * already read through the request path.
  */
 export type GatewayEventAccess = 'authenticated' | 'admin';
 
@@ -147,9 +149,9 @@ const RUNTIME_DOMAIN_ACCESS = {
   deliveries: 'authenticated',
   watchers: 'authenticated',
   surfaces: 'authenticated',
-  knowledge: 'authenticated',
+  knowledge: 'admin',
   workspace: 'authenticated',
-  fleet: 'authenticated',
+  fleet: 'admin',
   config: 'admin',
 } satisfies Record<RuntimeEventDomain, GatewayEventAccess>;
 

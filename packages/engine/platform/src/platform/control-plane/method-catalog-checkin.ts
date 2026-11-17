@@ -124,7 +124,7 @@ export const builtinGatewayCheckinMethodDescriptors: readonly GatewayMethodDescr
     title: 'List Check-in Receipts',
     description: 'Return the visible receipts of past check-in runs (newest first): each run records whether it stayed quiet, delivered a message (and what), or was skipped.',
     category: 'checkin',
-    scopes: ['read:checkin'],
+    scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/checkin/receipts' },
     inputSchema: CHECKIN_RECEIPTS_LIST_INPUT_SCHEMA,
     outputSchema: CHECKIN_RECEIPTS_LIST_OUTPUT_SCHEMA,

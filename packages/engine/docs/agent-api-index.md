@@ -8,7 +8,7 @@ Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{
 
 | Method id | Route | Scopes | Replay key | Does |
 | --- | --- | --- | --- | --- |
-| `sessions.changes.get` | invoke / WebSocket only | read:sessions |  | Return the aggregate workspace file changes a session made, joined over its sessionId-stamped checkpoints: th… |
+| `sessions.changes.get` | invoke / WebSocket only | read:checkpoints |  | Return the aggregate workspace file changes a session made, joined over its sessionId-stamped checkpoints: th… |
 | `sessions.close` | `POST /api/sessions/{sessionId}/close` | write:sessions |  | Mark a shared session as closed. |
 | `sessions.contextUsage.get` | `GET /api/sessions/{sessionId}/context-usage` | read:sessions |  | Return the live context-window usage for a session: estimatedContextTokens (the runtime's current estimate, n… |
 | `sessions.create` | `POST /api/sessions` | write:sessions |  | Create a shared session for a surface, route, or web client. |
@@ -47,10 +47,10 @@ Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{
 | --- | --- | --- | --- | --- |
 | `tasks.cancel` | `POST /api/tasks/{taskId}/cancel` | write:tasks |  | Cancel an in-flight runtime task. |
 | `tasks.create` | `POST /task` | write:tasks |  | Submit a task to the daemon or a shared session. |
-| `tasks.get` | `GET /api/tasks/{taskId}` | read:tasks |  | Return a single runtime task record. |
+| `tasks.get` | `GET /api/tasks/{taskId}` | read:transcripts |  | Return a single runtime task record. |
 | `tasks.list` | `GET /api/tasks` | read:tasks |  | Return the integration snapshot for runtime tasks. |
 | `tasks.retry` | `POST /api/tasks/{taskId}/retry` | write:tasks |  | Retry a runtime task through the task action endpoint. |
-| `tasks.status` | `GET /task/{agentId}` | read:tasks |  | Return lightweight runtime task status by agent id. |
+| `tasks.status` | `GET /task/{agentId}` | read:transcripts |  | Return lightweight runtime task status by agent id. |
 
 ## contracts
 

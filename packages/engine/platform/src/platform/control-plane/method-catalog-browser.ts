@@ -257,7 +257,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Snapshot Page',
     description: 'Return addressable element refs for the current page. Element names come from the page, so the result is untrusted content and is labelled as such.',
     category: 'browser',
-    scopes: ['read:browser'],
+    scopes: ['read:browser-content'],
     http: { method: 'POST', path: '/api/browser/snapshot' },
     inputSchema: pageInputSchema({ limit: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({
@@ -374,7 +374,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Wait For Page State',
     description: 'Wait for text to become visible, for the URL to match, or for the network to settle. The timeout bounds this call only and never ends the browser.',
     category: 'browser',
-    scopes: ['read:browser'],
+    scopes: ['read:browser-content'],
     http: { method: 'POST', path: '/api/browser/wait-for' },
     inputSchema: pageInputSchema({
       text: STRING_SCHEMA,
@@ -391,7 +391,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Read Page Text',
     description: 'Read the page as text, including open shadow roots and embedded frames, each frame origin recorded separately. Returns the text inside an untrusted-content envelope.',
     category: 'browser',
-    scopes: ['read:browser'],
+    scopes: ['read:browser-content'],
     http: { method: 'POST', path: '/api/browser/read-text' },
     inputSchema: pageInputSchema({ maxChars: NUMBER_SCHEMA, timeoutMs: NUMBER_SCHEMA }),
     outputSchema: pageResultSchema({
@@ -405,7 +405,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Extract Page Data',
     description: 'Read named fields out of elements matched by a snapshot ref or a CSS selector. The function that runs in the page is fixed and ships in the engine; there is no way to express code here. Password input values are never returned.',
     category: 'browser',
-    scopes: ['read:browser'],
+    scopes: ['read:browser-content'],
     http: { method: 'POST', path: '/api/browser/extract' },
     inputSchema: pageInputSchema({
       ref: STRING_SCHEMA,
@@ -426,7 +426,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Screenshot Page',
     description: 'Write a PNG of the visible area or the whole scrollable page and report the exact path written.',
     category: 'browser',
-    scopes: ['read:browser'],
+    scopes: ['read:browser-content'],
     http: { method: 'POST', path: '/api/browser/screenshot' },
     inputSchema: pageInputSchema({
       fullPage: BOOLEAN_SCHEMA,
@@ -444,7 +444,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'List Tabs',
     description: 'Return every open page in a session, with which one is active.',
     category: 'browser',
-    scopes: ['read:browser'],
+    scopes: ['read:browser-content'],
     http: { method: 'GET', path: '/api/browser/tabs' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }),
     outputSchema: objectSchema({

@@ -99,7 +99,7 @@ export const builtinGatewaySkillsMethodDescriptors: readonly GatewayMethodDescri
     title: 'Get Skill',
     description: 'Return one skill in full, including its Markdown body, by the name skills.list shows (case does not matter). Returns 404 when no skill with that name exists.',
     category: 'skills',
-    scopes: ['read:skills'],
+    scopes: ['read:skill-content'],
     http: { method: 'GET', path: '/api/skills/{name}' },
     inputSchema: SKILLS_GET_INPUT_SCHEMA,
     outputSchema: SKILLS_GET_OUTPUT_SCHEMA,

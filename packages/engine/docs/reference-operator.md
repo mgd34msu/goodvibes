@@ -9269,7 +9269,7 @@ Return automation jobs and recent runs. Without ?limit/?cursor returns { jobs: [
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/automation/jobs`
-- Scopes: `read:automation`
+- Scopes: `read:automation-content`
 - Emits events: `runtime.automation`
 - Dangerous: `no`
 - Invokable: `yes`
@@ -13251,7 +13251,7 @@ Return a single automation run record.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/automation/runs/{runId}`
-- Scopes: `read:automation`
+- Scopes: `read:automation-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -14338,7 +14338,7 @@ Return automation run history. Without ?limit/?cursor returns { runs: [...] } (b
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/automation/runs`
-- Scopes: `read:automation`
+- Scopes: `read:automation-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -18708,7 +18708,7 @@ Return schedule records.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/automation/schedules`
-- Scopes: `read:automation`
+- Scopes: `read:automation-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -20908,7 +20908,7 @@ One batch job with its status and, once finished, its result or error. An unknow
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/batch/jobs/{jobId}`
-- Scopes: `read:batch`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -21058,7 +21058,7 @@ Batch jobs, newest first. `limit` defaults to 100 and is capped at 1000.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/batch/jobs`
-- Scopes: `read:batch`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -25293,7 +25293,7 @@ Return a single channel account record.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/channels/accounts/{surface}/{accountId}`
-- Scopes: `read:channels`
+- Scopes: `read:channel-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -25463,7 +25463,7 @@ Return channel account lifecycle posture.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/channels/accounts`
-- Scopes: `read:channels`
+- Scopes: `read:channel-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -25634,7 +25634,7 @@ Return account posture for a single channel surface.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/channels/accounts/{surface}`
-- Scopes: `read:channels`
+- Scopes: `read:channel-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -27487,7 +27487,7 @@ Query a channel directory surface for users, groups, threads, or services.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/channels/directory/{surface}`
-- Scopes: `read:channels`
+- Scopes: `read:channel-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -27931,7 +27931,7 @@ Return one channel draft by id: the owner (admin) receives its text, so a draft 
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/channels/drafts/{draftId}`
-- Scopes: `read:channels`
+- Scopes: `read:channel-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -28024,7 +28024,7 @@ Return channel drafts for cross-device sync, metadata only: each message reads a
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/channels/drafts`
-- Scopes: `read:channels`
+- Scopes: `read:channel-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -28424,7 +28424,7 @@ Return the merged inbound message feed (Slack DMs, Discord messages, email threa
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/channels/inbox`
-- Scopes: `read:channels`
+- Scopes: `read:channel-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -28885,7 +28885,7 @@ Return channel ingress policy audit records.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/channels/policies/audit`
-- Scopes: `read:channels`
+- Scopes: `read:channel-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -32132,7 +32132,7 @@ Return the visible receipts of past check-in runs (newest first): each run recor
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/checkin/receipts`
-- Scopes: `read:checkin`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -73099,7 +73099,7 @@ Return recent surface messages published through the control plane.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/control-plane/messages`
-- Scopes: `read:control-plane`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -73806,7 +73806,7 @@ Return the current control-plane gateway snapshot.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/control-plane`
-- Scopes: `read:control-plane`
+- Scopes: `read:transcripts`
 - Emits events: `runtime.control-plane`
 - Dangerous: `no`
 - Invokable: `yes`
@@ -77443,7 +77443,7 @@ Return the session-archived process nodes (same node shape as fleet.snapshot; st
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:fleet`
+- Scopes: `read:fleet-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -77994,7 +77994,7 @@ Return the best-of-N attempt groups whose siblings ran in isolated worktrees and
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:fleet`
+- Scopes: `read:fleet-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -78698,7 +78698,7 @@ Return every work item whose integration merge CONFLICTED and is waiting on a hu
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:fleet`
+- Scopes: `read:fleet-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -78900,7 +78900,7 @@ The dependency-graph view of one workstream: nodes (id, title, state, cluster, f
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/fleet/workstreams/{workstreamId}/graph`
-- Scopes: `read:fleet`
+- Scopes: `read:fleet-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -79128,7 +79128,7 @@ Paginated, filtered (kinds/states) query over the live process registry. Cursor 
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:fleet`
+- Scopes: `read:fleet-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -79713,7 +79713,7 @@ Return a point-in-time capture of every live/completed runtime process (agents, 
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:fleet`
+- Scopes: `read:fleet-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -132113,7 +132113,7 @@ Return the distributed node/device host API contract.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/remote/node-host/contract`
-- Scopes: `read:remote`
+- Scopes: `read:control-plane`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -141679,7 +141679,7 @@ Return the aggregate workspace file changes a session made, joined over its sess
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:sessions`
+- Scopes: `read:checkpoints`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -149435,7 +149435,7 @@ Return one skill in full, including its Markdown body, by the name skills.list s
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/skills/{name}`
-- Scopes: `read:skills`
+- Scopes: `read:skill-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -150245,7 +150245,7 @@ Return a single runtime task record.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/tasks/{taskId}`
-- Scopes: `read:tasks`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -150891,7 +150891,7 @@ Return lightweight runtime task status by agent id.
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /task/{agentId}`
-- Scopes: `read:tasks`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`

@@ -375,7 +375,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     title: 'Node Host Contract',
     description: 'Return the distributed node/device host API contract.',
     category: 'remote',
-    scopes: ['read:remote'],
+    scopes: ['read:control-plane'],
     http: { method: 'GET', path: '/api/remote/node-host/contract' },
     inputSchema: EMPTY_OBJECT_SCHEMA,
     outputSchema: entityOutputSchema('contract', DISTRIBUTED_NODE_HOST_CONTRACT_SCHEMA),

@@ -251,8 +251,10 @@ function normalizeEventDescriptor(descriptor: GatewayEventDescriptor): GatewayEv
  * from its role when it authenticates. An admin (the owner's shared token, a
  * paired device, an admin user) holds every scope the catalog declares, read
  * and write; any other signed-in user holds every read scope except those over
- * the owner's private records (OWNER_PRIVATE_READ_SCOPES: mail, profile,
- * purchases, dates, memory, transcripts, paired devices) and no write scope. A
+ * the owner's content (OWNER_PRIVATE_READ_SCOPES: mail, profile, purchases,
+ * dates, memory, transcripts, paired devices and peers, calendar, approvals,
+ * named people, workspace file contents, and the records of his browser,
+ * knowledge, channels, automations, fleet and skills) and no write scope. A
  * pairing or user that stores its own scope list is granted that list, never
  * more than its role's default (daemon/control-plane.ts `principalFor`). What
  * restricts a non-admin beyond that is each method's and each event's

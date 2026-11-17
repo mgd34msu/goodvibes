@@ -50,6 +50,8 @@ function homeGraphDescriptor(input: {
   readonly inputSchema: Record<string, unknown>;
   readonly outputSchema: Record<string, unknown>;
   readonly write?: boolean | undefined;
+  /** A read of counts and state only, no records: open to a signed-in user without the admin role. */
+  readonly statusOnly?: boolean | undefined;
   readonly dangerous?: boolean | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }): GatewayMethodDescriptor {
@@ -58,7 +60,8 @@ function homeGraphDescriptor(input: {
     title: input.title,
     description: input.description,
     category: 'knowledge',
-    scopes: [input.write ? 'write:knowledge' : 'read:knowledge'],
+    // Every other read returns the owner's home records (devices, rooms, pages, answers), an owner-private scope.
+    scopes: [input.write ? 'write:knowledge' : input.statusOnly ? 'read:knowledge' : 'read:knowledge-content'],
     ...(input.write ? { access: 'admin' as const } : {}),
     ...(input.effect ? { effect: input.effect } : {}),
     http: { method: input.method, path: input.path },
@@ -85,6 +88,7 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
     path: '/api/homeassistant/home-graph/status',
     inputSchema: HOME_GRAPH_SPACE_INPUT_SCHEMA,
     outputSchema: HOME_GRAPH_STATUS_SCHEMA,
+    statusOnly: true,
   }),
   homeGraphDescriptor({
     id: 'homeassistant.homeGraph.syncHomeGraph',

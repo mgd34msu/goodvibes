@@ -9377,7 +9377,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -13356,7 +13356,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -14440,7 +14440,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -18793,7 +18793,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -20980,7 +20980,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:batch"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -21127,7 +21127,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:batch"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -25254,7 +25254,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -25421,7 +25421,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -25589,7 +25589,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -27409,7 +27409,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -27845,7 +27845,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -27935,7 +27935,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -28327,7 +28327,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -28779,7 +28779,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -31950,7 +31950,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:checkin"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -72817,7 +72817,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:control-plane"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -73515,7 +73515,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:control-plane"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -76980,7 +76980,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -77507,7 +77507,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -78196,7 +78196,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -78375,7 +78375,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "http": {
           "method": "GET",
@@ -78591,7 +78591,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -79153,7 +79153,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -130796,7 +130796,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:remote"
+          "read:control-plane"
         ],
         "http": {
           "method": "GET",
@@ -140174,7 +140174,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:checkpoints"
         ],
         "inputSchema": {
           "type": "object",
@@ -148013,7 +148013,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:skills"
+          "read:skill-content"
         ],
         "http": {
           "method": "GET",
@@ -148826,7 +148826,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:tasks"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -149463,7 +149463,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "ws"
         ],
         "scopes": [
-          "read:tasks"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",

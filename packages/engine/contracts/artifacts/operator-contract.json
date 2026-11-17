@@ -9374,7 +9374,7 @@
           "ws"
         ],
         "scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -13353,7 +13353,7 @@
           "ws"
         ],
         "scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -14437,7 +14437,7 @@
           "ws"
         ],
         "scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -18790,7 +18790,7 @@
           "ws"
         ],
         "scopes": [
-          "read:automation"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -20977,7 +20977,7 @@
           "ws"
         ],
         "scopes": [
-          "read:batch"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -21124,7 +21124,7 @@
           "ws"
         ],
         "scopes": [
-          "read:batch"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -25251,7 +25251,7 @@
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -25418,7 +25418,7 @@
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -25586,7 +25586,7 @@
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -27406,7 +27406,7 @@
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -27842,7 +27842,7 @@
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -27932,7 +27932,7 @@
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -28324,7 +28324,7 @@
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -28776,7 +28776,7 @@
           "ws"
         ],
         "scopes": [
-          "read:channels"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -31947,7 +31947,7 @@
           "ws"
         ],
         "scopes": [
-          "read:checkin"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -72814,7 +72814,7 @@
           "ws"
         ],
         "scopes": [
-          "read:control-plane"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -73512,7 +73512,7 @@
           "ws"
         ],
         "scopes": [
-          "read:control-plane"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -76977,7 +76977,7 @@
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -77504,7 +77504,7 @@
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -78193,7 +78193,7 @@
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -78372,7 +78372,7 @@
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "http": {
           "method": "GET",
@@ -78588,7 +78588,7 @@
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -79150,7 +79150,7 @@
           "ws"
         ],
         "scopes": [
-          "read:fleet"
+          "read:fleet-content"
         ],
         "inputSchema": {
           "type": "object",
@@ -130793,7 +130793,7 @@
           "ws"
         ],
         "scopes": [
-          "read:remote"
+          "read:control-plane"
         ],
         "http": {
           "method": "GET",
@@ -140171,7 +140171,7 @@
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:checkpoints"
         ],
         "inputSchema": {
           "type": "object",
@@ -148010,7 +148010,7 @@
           "ws"
         ],
         "scopes": [
-          "read:skills"
+          "read:skill-content"
         ],
         "http": {
           "method": "GET",
@@ -148823,7 +148823,7 @@
           "ws"
         ],
         "scopes": [
-          "read:tasks"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -149460,7 +149460,7 @@
           "ws"
         ],
         "scopes": [
-          "read:tasks"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",

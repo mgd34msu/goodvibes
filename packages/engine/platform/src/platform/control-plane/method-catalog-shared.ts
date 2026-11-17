@@ -354,19 +354,40 @@ function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
 }
 
 /**
- * Read scopes over the owner's private records: mail, the owner profile,
- * purchases and cards, the dates he keeps, memory, session transcripts and
- * paired devices. They are not in the default grant of a credential without
- * the admin role (method-catalog.ts `grantedGatewayScopes`); a paired device
- * whose pairing stores its own scope list holds them when the list names them.
- * `read:transcripts` covers every read that returns conversation text (shared
- * session messages and inputs, queued messages, companion chat history and its
- * stream); `read:pairing` covers the paired-device list. Session metadata
- * (`sessions.list`, `sessions.search`) stays on `read:sessions`.
+ * Read scopes over the owner's content: mail, the owner profile, purchases and
+ * cards, the dates he keeps, memory, transcripts, paired devices and peers,
+ * his calendar, approvals and the questions waiting on him, the people he
+ * named, workspace file contents, and the records of his browser, knowledge,
+ * channels, automations, fleet and skills. They are not in the default grant
+ * of a credential without the admin role (method-catalog.ts
+ * `grantedGatewayScopes`); a paired device whose pairing stores its own scope
+ * list holds them when the list names them. Such a user keeps the status of
+ * each area (counts, states, names, configuration) on its ordinary read scope.
+ *
+ * - `read:transcripts`: every read that returns conversation or message text:
+ *   shared session messages and inputs, queued messages, companion chat
+ *   history and its stream, the messages surfaces received
+ *   (`control.messages.list`, `control.snapshot`), an agent task's prompt,
+ *   progress and result (`tasks.get`, `tasks.status`), batch requests and
+ *   answers, and check-in briefings and the messages they sent.
+ * - `read:pairing`, `read:remote`: paired devices, device nodes and their
+ *   grants, remote peers, their pair requests and the work sent to them.
+ * - `read:checkpoints`: workspace file contents (checkpoint diffs and
+ *   previews, a session's changes, a rewind plan).
+ * - `read:calendar`, `read:approvals`, `read:principals`: every read in the area.
+ * - `read:browser-content`, `read:knowledge-content`, `read:channel-content`,
+ *   `read:automation-content`, `read:fleet-content`, `read:skill-content`: the
+ *   records of an area whose status stays on `read:browser`, `read:knowledge`,
+ *   `read:channels`, `read:automation`, `read:fleet` and `read:skills`.
+ *
+ * Session metadata (`sessions.list`, `sessions.search`) stays on
+ * `read:sessions`; a contract is shown only to the principal that started it.
  */
 export const OWNER_PRIVATE_READ_SCOPES: ReadonlySet<string> = new Set([
   'read:email', 'read:profile', 'read:profile-document', 'read:payments', 'read:occasions', 'read:memory',
-  'read:transcripts', 'read:pairing',
+  'read:transcripts', 'read:pairing', 'read:remote', 'read:checkpoints', 'read:calendar', 'read:approvals',
+  'read:principals', 'read:browser-content', 'read:knowledge-content', 'read:channel-content',
+  'read:automation-content', 'read:fleet-content', 'read:skill-content',
 ]);
 
 /** Scopes whose admin writes change who can sign in or what the daemon is allowed to do. */

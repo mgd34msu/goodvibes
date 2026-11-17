@@ -3317,7 +3317,7 @@ export interface OperatorMethodInputMap {
                 label: string;
                 detail: string;
             })[];
-            ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
+            ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "owner-act" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
         };
         sessionId?: string;
         routeId?: string;
@@ -8736,7 +8736,7 @@ export interface OperatorMethodOutputMap {
                     label: string;
                     detail: string;
                 })[];
-                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "owner-act" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -8835,7 +8835,7 @@ export interface OperatorMethodOutputMap {
                     label: string;
                     detail: string;
                 })[];
-                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "owner-act" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -8934,7 +8934,7 @@ export interface OperatorMethodOutputMap {
                     label: string;
                     detail: string;
                 })[];
-                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "owner-act" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -9033,7 +9033,7 @@ export interface OperatorMethodOutputMap {
                     label: string;
                     detail: string;
                 })[];
-                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "owner-act" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -9087,7 +9087,7 @@ export interface OperatorMethodOutputMap {
             category: "delegate" | "execute" | "read" | "write";
             machineState: "awaiting_owner" | "check_boundary" | "collect_rules" | "decision_emitted" | "evaluate_policy" | "evaluate_preset" | "evaluate_session_override" | "normalize_input" | "read_stakes";
             outcome: "approved" | "deferred" | "denied";
-            reason: "boundary_card_details" | "boundary_catastrophic" | "boundary_judgment_input" | "boundary_outward_effect" | "boundary_surface_authority" | "config_allow" | "config_deny" | "invocation_already_admitted" | "jev_act" | "jev_defer" | "jev_reject" | "jev_revise" | "managed_policy_allow" | "managed_policy_deny" | "mode_allow_all" | "mode_denied" | "mode_queued_for_owner" | "owner_approved_outward" | "plan_mode" | "preset_allow" | "preset_deny" | "safety_guardrail" | "session_cached_allow" | "session_cached_deny" | "user_approved" | "user_denied" | "user_rule_allow" | "user_rule_deny";
+            reason: "boundary_card_details" | "boundary_catastrophic" | "boundary_judgment_input" | "boundary_outward_effect" | "boundary_surface_authority" | "config_allow" | "config_deny" | "invocation_already_admitted" | "jev_act" | "jev_defer" | "jev_reject" | "jev_revise" | "managed_policy_allow" | "managed_policy_deny" | "mode_allow_all" | "mode_denied" | "mode_queued_for_owner" | "owner_act" | "owner_approved_outward" | "plan_mode" | "preset_allow" | "preset_deny" | "safety_guardrail" | "session_cached_allow" | "session_cached_deny" | "user_approved" | "user_denied" | "user_rule_allow" | "user_rule_deny";
             sourceLayer: "boundary" | "config_policy" | "invocation_admission" | "jev_decision" | "managed_policy" | "runtime_mode" | "safety_check" | "session_override" | "stakes_preset" | "user_prompt" | "user_rule";
             persisted: boolean;
             classification?: string;
@@ -9152,7 +9152,7 @@ export interface OperatorMethodOutputMap {
                     label: string;
                     detail: string;
                 })[];
-                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "owner-act" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -9245,7 +9245,7 @@ export interface OperatorMethodOutputMap {
                     label: string;
                     detail: string;
                 })[];
-                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "owner-act" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;

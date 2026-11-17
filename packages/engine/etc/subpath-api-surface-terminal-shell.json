@@ -4534,7 +4534,7 @@
       "required": [
         "id"
       ],
-      "text": "export interface OperatorContractMethodEntry { readonly id: string; readonly title?: string | undefined; readonly description?: string | undefined; readonly category?: string | undefined; readonly access?: string | undefined; readonly scopes?: readonly string[] | undefined; readonly http?: { readonly method?: string | undefined; readonly path?: string | undefined; } | undefined; readonly inputSchema?: Record<string, unknown> | undefined; readonly invokable?: boolean | undefined; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export interface OperatorContractMethodEntry { readonly id: string; readonly title?: string | undefined; readonly description?: string | undefined; readonly category?: string | undefined; readonly access?: string | undefined; readonly scopes?: readonly string[] | undefined; readonly http?: { readonly method?: string | undefined; readonly path?: string | undefined; } | undefined; readonly inputSchema?: Record<string, unknown> | undefined; readonly invokable?: boolean | undefined; readonly ownerOnly?: boolean | undefined; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
       "name": "OperatorHttpBinding",
@@ -7220,6 +7220,11 @@
       "name": "operatorRouteLabel",
       "kind": "function",
       "text": "export declare function operatorRouteLabel(methodId: OperatorMethodId): string; ;; via OperatorMethodId = export type OperatorMethodId = typeof OPERATOR_METHOD_IDS[number];"
+    },
+    {
+      "name": "ownerOnlyOperatorMethodIds",
+      "kind": "function",
+      "text": "export declare function ownerOnlyOperatorMethodIds(): readonly string[];"
     },
     {
       "name": "packageArtifactFilename",
@@ -13061,7 +13066,7 @@
       "required": [
         "id"
       ],
-      "text": "export interface OperatorContractMethodEntry { readonly id: string; readonly title?: string | undefined; readonly description?: string | undefined; readonly category?: string | undefined; readonly access?: string | undefined; readonly scopes?: readonly string[] | undefined; readonly http?: { readonly method?: string | undefined; readonly path?: string | undefined; } | undefined; readonly inputSchema?: Record<string, unknown> | undefined; readonly invokable?: boolean | undefined; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
+      "text": "export interface OperatorContractMethodEntry { readonly id: string; readonly title?: string | undefined; readonly description?: string | undefined; readonly category?: string | undefined; readonly access?: string | undefined; readonly scopes?: readonly string[] | undefined; readonly http?: { readonly method?: string | undefined; readonly path?: string | undefined; } | undefined; readonly inputSchema?: Record<string, unknown> | undefined; readonly invokable?: boolean | undefined; readonly ownerOnly?: boolean | undefined; } ;; via Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
       "name": "OperatorHttpBinding",
@@ -13123,6 +13128,11 @@
       "name": "operatorRequestPath",
       "kind": "function",
       "text": "export declare function operatorRequestPath(request: PreparedOperatorRequest): string;"
+    },
+    {
+      "name": "ownerOnlyOperatorMethodIds",
+      "kind": "function",
+      "text": "export declare function ownerOnlyOperatorMethodIds(): readonly string[];"
     },
     {
       "name": "prepareOperatorRequest",
@@ -21965,7 +21975,7 @@
         "projectPath",
         "servers"
       ],
-      "text": "export interface McpWorkspaceSnapshot { readonly projectPath: string; readonly globalPath: string; readonly effectiveConfig: McpEffectiveConfig; readonly servers: readonly McpWorkspaceServerRow[]; } ;; via McpEffectiveConfig = export interface McpEffectiveConfig { readonly servers: readonly McpServerConfigEntry[]; readonly locations: readonly McpConfigLocation[]; }"
+      "text": "export interface McpWorkspaceSnapshot { readonly projectPath: string; readonly globalPath: string; readonly effectiveConfig: McpEffectiveConfig; readonly servers: readonly McpWorkspaceServerRow[]; } ;; via McpEffectiveConfig = export interface McpEffectiveConfig { readonly servers: readonly McpServerConfigEntry[]; readonly locations: readonly McpConfigLocation[]; readonly held?: readonly McpServerConfigEntry[] | undefined; }"
     },
     {
       "name": "buildMcpWorkspaceFormFields",
@@ -21985,7 +21995,7 @@
     {
       "name": "mergeServers",
       "kind": "function",
-      "text": "export declare function mergeServers(effectiveConfig: McpEffectiveConfig, runtimeServers: readonly McpServerSecurityRecord[]): McpWorkspaceServerRow[]; ;; via McpEffectiveConfig = export interface McpEffectiveConfig { readonly servers: readonly McpServerConfigEntry[]; readonly locations: readonly McpConfigLocation[]; } ;; McpServerSecurityRecord = export interface McpServerSecurityRecord { readonly name: string; readonly connected: boolean; readonly phase?: McpClientPhase | undefined; readonly lastError?: string | undefined; readonly reconnect?: McpReconnectStatus | undefined; readonly transport?: 'stdio' | 'http' | undefined; readonly protocolVersion?: string | undefined; readonly protocolEra?: 'modern' | 'legacy' | undefined; readonly role: McpServerRole; readonly trustMode: McpTrustMode; readonly allowedPaths: readonly string[]; readonly allowedHosts: readonly string[]; readonly schemaFreshness: SchemaFreshness; readonly quarantineReason?: QuarantineReason | undefined; readonly quarantineDetail?: string | undefined; readonly quarantineApprovedBy?: string | undefined; readonly sessionTrustMode?: McpTrustMode | undefined; readonly sessionRole?: McpServerRole | undefined; readonly configuredTrustMode?: McpTrustMode | undefined; readonly configuredRole?: McpServerRole | undefined; }"
+      "text": "export declare function mergeServers(effectiveConfig: McpEffectiveConfig, runtimeServers: readonly McpServerSecurityRecord[]): McpWorkspaceServerRow[]; ;; via McpEffectiveConfig = export interface McpEffectiveConfig { readonly servers: readonly McpServerConfigEntry[]; readonly locations: readonly McpConfigLocation[]; readonly held?: readonly McpServerConfigEntry[] | undefined; } ;; McpServerSecurityRecord = export interface McpServerSecurityRecord { readonly name: string; readonly connected: boolean; readonly phase?: McpClientPhase | undefined; readonly lastError?: string | undefined; readonly reconnect?: McpReconnectStatus | undefined; readonly transport?: 'stdio' | 'http' | undefined; readonly protocolVersion?: string | undefined; readonly protocolEra?: 'modern' | 'legacy' | undefined; readonly role: McpServerRole; readonly trustMode: McpTrustMode; readonly allowedPaths: readonly string[]; readonly allowedHosts: readonly string[]; readonly schemaFreshness: SchemaFreshness; readonly quarantineReason?: QuarantineReason | undefined; readonly quarantineDetail?: string | undefined; readonly quarantineApprovedBy?: string | undefined; readonly sessionTrustMode?: McpTrustMode | undefined; readonly sessionRole?: McpServerRole | undefined; readonly configuredTrustMode?: McpTrustMode | undefined; readonly configuredRole?: McpServerRole | undefined; }"
     },
     {
       "name": "nextEnumValue",

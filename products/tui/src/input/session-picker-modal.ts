@@ -109,8 +109,16 @@ export class SessionPickerModal extends SavedSessionPickerState {
    */
   protected override refreshAdditionalSources(): void {
     if (this.sessionBroker) {
-      this.crossSurfaceSessions = this.sessionBroker.listSessions();
-      this.crossSurfaceView = this.sessionBroker.crossSurfaceView;
+      const broker = this.sessionBroker;
+      this.crossSurfaceSessions = broker.listSessions();
+      this.crossSurfaceView = broker.crossSurfaceView;
+      // The cross-surface rows are pulled when the picker opens (not polled); the
+      // last pull renders now and the fresh one lands behind it.
+      void broker.refresh?.().then(() => {
+        this.crossSurfaceSessions = broker.listSessions();
+        this.crossSurfaceView = broker.crossSurfaceView;
+        this.onRosterRefreshed?.();
+      }).catch(() => undefined);
     } else {
       this.crossSurfaceSessions = [];
       this.crossSurfaceView = DORMANT_CROSS_SURFACE_VIEW;

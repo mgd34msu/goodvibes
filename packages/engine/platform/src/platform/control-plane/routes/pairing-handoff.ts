@@ -20,7 +20,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { MintedPairingToken, PairingTokenManager } from '../../pairing/pairing-token-store.js';
-import { PairingLimitReachedError } from '../../pairing/pairing-token-store.js';
+import { PairingLimitReachedError, PairingMinterRevokedError, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
 import type { StepUpGatewayService } from './stepup.js';
 import type { PushGatewayService } from './push.js';
 import {
@@ -96,13 +96,18 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     // `device.nodes.maxPaired` has to hold. The refusal names the setting and
     // the live count (see PairingLimitReachedError), 409, because the request
     // is fine and the state is what refuses it. The token is an offer until
-    // the phone uses it: unused, it is not a device and expires.
+    // the phone uses it: unused, it is not a device and expires. A paired
+    // device asking records itself as the minter, so revoking it revokes this
+    // token too; a device whose own pairing is gone is refused (403).
     const minted: MintedPairingToken = ((): MintedPairingToken => {
       try {
-        return deps.tokens.mint({ name });
+        return deps.tokens.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId) });
       } catch (error) {
         if (error instanceof PairingLimitReachedError) {
           throw new GatewayVerbError(error.message, error.code, 409);
+        }
+        if (error instanceof PairingMinterRevokedError) {
+          throw new GatewayVerbError(error.message, error.code, 403);
         }
         throw error;
       }

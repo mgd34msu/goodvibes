@@ -238,7 +238,8 @@ devices are unpaired to fit under it again.
   `PAIRING_TOKEN_NOT_FOUND`, never a `200`-noop.
 - **Mint** a fresh token for the same use case pairing normally does, `pairing.tokens.create({
   name })` or `pairing.handoff.create`, both bounded by [the device cap](#device-cap). A token
-  a paired device mints with `pairing.tokens.create` or `pairing.tokens.migrate` records that
+  a paired device mints with `pairing.tokens.create`, `pairing.handoff.create` or
+  `pairing.tokens.migrate` records that
   device as `mintedBy`; a device whose own pairing is gone cannot mint (403
   `PAIRING_TOKEN_NOT_FOUND`).
 

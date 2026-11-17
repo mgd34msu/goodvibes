@@ -173,6 +173,7 @@ class BatchJobFiles {
     const invalid: QuarantinedRow[] = [];
     const badFiles: string[] = [];
     const submissionFiles: string[] = [];
+    const requestFiles: string[] = [];
     const jobs: Record<string, DaemonBatchJob> = {};
     const staleBefore = now() - STALE_TEMP_FILE_MIN_AGE_MS;
     for (const name of readdirSync(this.dir)) {
@@ -186,7 +187,12 @@ class BatchJobFiles {
         submissionFiles.push(path);
         continue;
       }
-      if (!name.endsWith('.json') || name.endsWith('.result.json') || name.endsWith('.request.json')) continue;
+      // Requests are matched to their rows after every row is read.
+      if (name.endsWith('.request.json')) {
+        requestFiles.push(name);
+        continue;
+      }
+      if (!name.endsWith('.json') || name.endsWith('.result.json')) continue;
       let id: string;
       try { id = decodeURIComponent(name.slice(0, -'.json'.length)); } catch { id = name; }
       let value: unknown;
@@ -216,6 +222,14 @@ class BatchJobFiles {
       jobs[id] = job.status === 'completed' ? this.withResult(job) : job;
     }
     for (const path of submissionFiles) this.applySubmission(path, jobs);
+    // A request whose row was never written (the job was refused when its row
+    // could not be saved) belongs to no job; it is removed, not kept forever.
+    for (const name of requestFiles) {
+      let id: string;
+      try { id = decodeURIComponent(name.slice(0, -'.request.json'.length)); } catch { continue; }
+      if (jobs[id] || badFiles.some((path) => path === this.jobPath(id))) continue;
+      try { unlinkSync(join(this.dir, name)); } catch { /* removed already; tried again next start */ }
+    }
     if (invalid.length > 0) {
       try {
         this.quarantine(invalid);

@@ -157,6 +157,12 @@ export interface EngineParseResult<TCommand extends string, TFlags> {
   readonly errors: readonly string[];
   /** Non-fatal notices, deprecation and soft warnings. */
   readonly warnings: readonly string[];
+  /**
+   * The flag names refused in `errors` (unknown, not taken by this command, or
+   * belonging to another surface), as typed, so a caller can add advice for a
+   * particular flag without matching the refusal's wording.
+   */
+  readonly refusedFlags: readonly string[];
 }
 
 // ---------------------------------------------------------------------------

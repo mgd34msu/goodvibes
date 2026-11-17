@@ -61,7 +61,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     if (cli.errors.length) {
       // The unit carries no endpoint flags, so the parser refuses these before dispatch; name the supported route.
       const endpointFlag = cli.command === 'install-service'
-        && cli.errors.some((error) => /^--(port|hostname) is not a flag/.test(error));
+        && cli.refusedFlags.some((flag) => flag === '--port' || flag === '--hostname');
       return result({ exitCode: 2, lines: [...cli.errors,
         ...(endpointFlag ? ['The installed service reads controlPlane.host and controlPlane.port from settings each time it starts, so a flag here could never reach it.',
           `Set the persistent binding instead: goodvibes-daemon config set controlPlane.host <host> / controlPlane.port <port>, then run \`${cli.command}\` again.`] : []),

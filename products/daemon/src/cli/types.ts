@@ -66,4 +66,6 @@ export interface DaemonCliParseResult {
   readonly errors: readonly string[];
   /** Non-fatal notices. Printed, then the command runs. */
   readonly warnings: readonly string[];
+  /** The flag names refused in `errors`, as typed. */
+  readonly refusedFlags: readonly string[];
 }

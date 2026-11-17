@@ -272,6 +272,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
 ): EngineParseResult<TCommand, TFlags> {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const refusedFlags: string[] = [];
   const commandArgs: string[] = [];
   const positionals: string[] = [];
   let flags = catalog.createDefaultFlags();
@@ -304,6 +305,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
           flags: catalog.createDefaultFlags(),
           errors,
           warnings,
+          refusedFlags,
         };
       }
       // 'passthrough': the token is an ordinary positional below; the
@@ -382,6 +384,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
       const rejected = catalog.rejectedFlags?.[name];
       if (rejected) {
         errors.push(`${name} is not a ${binary} flag, ${rejected.reason} belongs to another surface.`);
+        refusedFlags.push(name);
         if (inlineValue === undefined && rejected.takesValue) index += 1;
         continue;
       }
@@ -394,6 +397,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
         continue;
       }
       errors.push(catalog.unknownOptionError?.(name) ?? unacceptedOptionError(catalog, spec, arity, name));
+      refusedFlags.push(name);
       const kind = arity.get(name);
       if (inlineValue === undefined && kind !== undefined && kindConsumesNextValue(kind, argv, index)) index += 1;
       continue;
@@ -486,7 +490,7 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
   }
 
   const result: EngineParseResult<TCommand, TFlags> = {
-    binary, command, rawCommand, commandArgs, positionals, flags, errors, warnings,
+    binary, command, rawCommand, commandArgs, positionals, flags, errors, warnings, refusedFlags,
   };
   return catalog.postProcess ? catalog.postProcess(result) : result;
 }

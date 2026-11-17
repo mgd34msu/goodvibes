@@ -100,12 +100,22 @@ function readLifetime(contract: Contract, owner: NativeContractServices, signal?
     finish() { for (const id of owned) waiting.get(contract)?.delete(id); if (owned.size > 0) publish(); },
   };
 }
-/** Routing uses the same owner signal and before-attempt guard as every other native read. */
+/**
+ * Routing uses the same owner signal and before-attempt guard as every other
+ * native read. Choosing a route makes no change, so when the set decision
+ * model fails while it reads the work under Hybrid, the same selector runs
+ * again on the route planner's no-model path (the session's model); under
+ * Decision Model Only the failure stops the work.
+ */
 export async function nativeContractRoute(selector: ContractRouteSelector, contract: Contract, services: NativeContractServices | undefined, request: Parameters<ContractRouteSelector>[0], signal?: AbortSignal) {
-  if (contract.nativeSource === undefined) return selector({ ...request, signal });
+  if (contract.nativeSource === undefined) {
+    const select = () => selector({ ...request, signal });
+    return decisionOrClassic(select, select);
+  }
   autonomousSourceEvidence(nativeContractSourceForAdmission(contract));
   const scope = readLifetime(contract, ownedServices(services), signal);
-  try { scope.verify(); const route = await selector({ ...request, signal, beforeAttempt: scope.beforeAttempt, onRetry: scope.onRetry }); scope.verify(); return route; }
+  const select = async () => { scope.verify(); const route = await selector({ ...request, signal, beforeAttempt: scope.beforeAttempt, onRetry: scope.onRetry }); scope.verify(); return route; };
+  try { return await decisionOrClassic(select, select); }
   finally { scope.finish(); }
 }
 

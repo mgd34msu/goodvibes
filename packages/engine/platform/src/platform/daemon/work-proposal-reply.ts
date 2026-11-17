@@ -127,10 +127,12 @@ async function resolveOwnedProposalReply(input: ChannelIngressPolicyInput, deps:
   const proposalCurrent = deps.captureProposalSource?.(target);
   const text = input.text ?? '';
   // With no decision model in use the reply is read literally; nothing is asked.
+  // A reading the set model did not answer (failed, slow) is read literally too.
   const answer = isClassicOperation() ? proposalAnswerLiterally(text)
     : deps.reading?.target === target
       ? deps.reading.answer
-      : (await readInboundMessage({ message: text, proposal: { task: target.task, summary: target.summary } }, { signal: deps.readingOptions?.signal })).proposal;
+      : await readInboundMessage({ message: text, proposal: { task: target.task, summary: target.summary } }, { signal: deps.readingOptions?.signal })
+        .then((read) => read.source === 'fallback' && read.proposal === 'unsure' ? proposalAnswerLiterally(text) : read.proposal);
   // An unsure reading answers nothing: the message goes on as conversation and the proposal stays pending.
   if (answer === undefined || answer === 'unsure' || answer === 'message') return { consumed: false };
   // Checked once, where the answer is acted on.

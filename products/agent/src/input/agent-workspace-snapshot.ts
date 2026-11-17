@@ -1,11 +1,12 @@
 import { readConnectedHostOperatorToken } from '@goodvibes-jev/engine/terminal-shell/agent-turn/connected-host-auth';
-import { basename, sep } from 'node:path';
+import { basename } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
 import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn/routine-registry';
 import { memoryRecordTemporalStatus, resolveCanonicalMemoryDbPath } from '@goodvibes-jev/engine/platform/platform/state';
 import { storeFileChangeStamp } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-change-stamp';
 import { describeMemoryPromptEligibility, isPromptActiveMemory } from '@goodvibes-jev/engine/terminal-shell/agent-turn/memory-prompt';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
+import { agentRuntimeProfileBaseHome } from '../agent/runtime-profile.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-media.ts';
@@ -82,15 +83,9 @@ function describeReadFailures(failures: AgentWorkspaceReadFailures): string[] {
   return warnings;
 }
 
-function inferActiveRuntimeProfile(homeDirectory: string): string {
-  const marker = `${sep}.goodvibes${sep}agent${sep}profile-homes${sep}`;
-  return homeDirectory.includes(marker) ? basename(homeDirectory) : '(default home)';
-}
-
-function inferRuntimeProfileBaseHome(homeDirectory: string): string {
-  const marker = `${sep}.goodvibes${sep}agent${sep}profile-homes${sep}`;
-  const markerIndex = homeDirectory.indexOf(marker);
-  return markerIndex >= 0 ? homeDirectory.slice(0, markerIndex) : homeDirectory;
+/** The profile this session runs in: a profile home is one the profile module's own path rule recognises. */
+function activeRuntimeProfileName(homeDirectory: string): string {
+  return homeDirectory && agentRuntimeProfileBaseHome(homeDirectory) !== homeDirectory ? basename(homeDirectory) : '(default home)';
 }
 
 export interface AgentWorkspaceLiveMemoryCounters {
@@ -299,7 +294,7 @@ export function buildAgentWorkspaceDocumentOpsPart(context: CommandContext, read
 /** What a workspace editor opened by a model tool reads: starter templates, routines, the review packet part, calendar OAuth status. */
 export function buildAgentWorkspaceEditorContextPart(context: CommandContext): Pick<AgentWorkspaceRuntimeSnapshot,
   'runtimeStarterTemplates' | 'localRoutines' | 'recentReviewerHandoffArtifacts' | 'reviewPacketDefaults' | 'calendarOAuthConfigStatus'> {
-  const { runtimeStarterTemplates } = buildAgentWorkspaceRuntimeProfilesSnapshot(inferRuntimeProfileBaseHome(context.workspace?.shellPaths?.homeDirectory ?? ''));
+  const { runtimeStarterTemplates } = buildAgentWorkspaceRuntimeProfilesSnapshot(context.workspace?.shellPaths?.homeDirectory ?? '');
   const reviewPacket = buildAgentWorkspaceReviewPacketPart(context);
   return {
     runtimeStarterTemplates: runtimeStarterTemplates.map(summarizeStarterTemplate),
@@ -361,8 +356,8 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
   const { artifactListSnapshot, recentReviewerHandoffs, reviewPacketDefaults, reviewerBadge, reviewPacketTimeline, reviewPacketWizard } = reviewPacket;
   const setupSmokeHistory = buildSetupSmokeHistory(context);
   const discoveredBehavior = summarizeAgentBehaviorDiscovery(context.workspace?.shellPaths);
-  const profileBaseHome = inferRuntimeProfileBaseHome(context.workspace?.shellPaths?.homeDirectory ?? '');
-  const { runtimeProfiles, runtimeStarterTemplates, selectedRuntimeProfile, runtimeProfileRoot } = buildAgentWorkspaceRuntimeProfilesSnapshot(profileBaseHome);
+  // The profile functions resolve the base home themselves, from inside a profile session too.
+  const { runtimeProfiles, runtimeStarterTemplates, selectedRuntimeProfile, runtimeProfileRoot } = buildAgentWorkspaceRuntimeProfilesSnapshot(context.workspace?.shellPaths?.homeDirectory ?? '');
   const { voiceProviders, mediaProviders, voiceMediaReadiness } = buildAgentWorkspaceVoiceMediaPart(context);
   const mcpSnapshot = buildAgentWorkspaceMcpServerSnapshot(context);
   const warnings: string[] = [];
@@ -551,7 +546,7 @@ export function buildAgentWorkspaceRuntimeSnapshot(context: CommandContext): Age
     mcpQuarantinedServerCount: mcpSnapshot.quarantinedCount,
     mcpAllowAllServerCount: mcpSnapshot.allowAllCount,
     browserToolExposureEnabled: config.browserPwaEnabled,
-    activeRuntimeProfile: inferActiveRuntimeProfile(context.workspace?.shellPaths?.homeDirectory ?? ''),
+    activeRuntimeProfile: activeRuntimeProfileName(context.workspace?.shellPaths?.homeDirectory ?? ''),
     selectedRuntimeProfile: selectedRuntimeProfile?.id ?? null,
     selectedRuntimeProfileExists: selectedRuntimeProfile?.exists ?? false,
     selectedRuntimeProfileSelectedAt: selectedRuntimeProfile?.selectedAt ?? null,

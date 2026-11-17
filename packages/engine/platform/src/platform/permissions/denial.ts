@@ -29,6 +29,8 @@ export interface DenialSource {
   readonly userReason?: string | undefined;
   /** The gate's own explanation of a refusal (a boundary check's reason and fix). */
   readonly detail?: string | undefined;
+  /** Present when the gate built the decision itself (gate/classify.ts, a held call); the error text is read from it. */
+  readonly decision?: ToolDecision | undefined;
 }
 
 /** True when this refusal was produced by plan mode. */
@@ -57,8 +59,6 @@ export function buildToolDenial(source: DenialSource): ToolDenial {
 /** A gate result, as {@link toolDecisionOf} reads it. */
 export interface DecisionSource extends DenialSource {
   readonly approved: boolean;
-  /** Present when the gate built the decision itself (gate/classify.ts); used as is. */
-  readonly decision?: ToolDecision | undefined;
   /** Jev's receipt, when Jev decided. */
   readonly autonomousDecision?: { readonly decisionId: string; readonly summary: string } | undefined;
 }
@@ -116,6 +116,9 @@ const REFUSALS: Readonly<Record<string, RefusalFacts>> = {
     next: () => ['change the call to do only what the task needs and try again'] },
   jev_defer: { state: 'Jev deferred this call', standing: false,
     next: () => ['carry on without it and report that it was not run'] },
+  mode_queued_for_owner: { state: 'the execution mode held this call for the owner to approve; it has not run', standing: false,
+    next: () => ['carry on with the work that does not need this call',
+      'the owner is shown it at the end of the run and can approve it with /held; after that the same call runs'] },
 } satisfies Partial<Record<PermissionDecisionReasonCode, RefusalFacts>>;
 
 const UNKNOWN_REFUSAL: RefusalFacts = { state: 'the permission layer refused this call', standing: false,
@@ -157,6 +160,18 @@ export function buildDenialErrorMessage(toolName: string, source: DenialSource):
       + `scope: ${source.sourceLayer}). Do not attempt mutating or command-execution tools. `
       + `Present a concrete plan of the changes you intend to make and wait for the user to `
       + `approve it or switch out of plan mode.`
+    );
+  }
+  // A call the gate decided itself and did not refuse (held for the owner) is
+  // told exactly as its decision says, so the agent reads one account of it.
+  const decision = source.decision;
+  if (decision && decision.state !== 'refused') {
+    const held = decision.state === 'queued-for-owner';
+    const next = decision.next ?? refusalFacts(source.reasonCode, toolName).next;
+    return (
+      `Tool '${toolName}' was ${held ? `held for the owner${decision.heldId ? ` (held id ${decision.heldId})` : ''}` : 'not run'}: `
+      + `${decision.reason} (reason: ${source.reasonCode}, scope: ${source.sourceLayer}). `
+      + `${held ? 'It has not run; it runs only if the owner approves it.' : 'It has not run.'} Next: ${next.join('; ')}.`
     );
   }
   const facts = refusalFacts(source.reasonCode, toolName);

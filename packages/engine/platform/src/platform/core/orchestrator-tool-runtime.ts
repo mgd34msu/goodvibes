@@ -601,13 +601,13 @@ async function executeToolCallsInMode(
         // Structured, call-scoped denial: the asking agent gets reason + scope on
         // the failed result (not just a bare string) and can continue honestly.
         // Plan-mode refusals surface reason 'plan-mode' with plan-steering text.
-        const denialSource = { reasonCode: checkResult.reasonCode, sourceLayer: checkResult.sourceLayer, userReason: checkResult.userReason, detail: checkResult.detail };
+        const denialSource = { reasonCode: checkResult.reasonCode, sourceLayer: checkResult.sourceLayer, userReason: checkResult.userReason, detail: checkResult.detail, decision: checkResult.decision };
         const err = new PermissionError(buildDenialErrorMessage(call.name, denialSource));
         const deniedResult = {
           callId: call.id,
           success: false,
           error: err.message,
-          decision: checkResult.decision ?? toolDecisionOf({ ...denialSource, approved: false }),
+          decision: toolDecisionOf({ ...denialSource, approved: false }),
           denial: buildToolDenial(denialSource),
           ...(checkResult.autonomousDecision ? { autonomousDecision: checkResult.autonomousDecision } : {}),
         };

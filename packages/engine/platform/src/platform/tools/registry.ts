@@ -322,8 +322,8 @@ export async function runRegisteredTool(callId: string, name: string, args: Reco
   const signal = options?.signal;
   const verdict = await owner.checkDetailed(name, args, undefined, { definition, ...(signal ? { signal } : {}) });
   if (!verdict.approved) {
-    const source = { reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason, detail: verdict.detail };
-    return { callId, success: false, error: buildDenialErrorMessage(name, source), decision: toolDecisionOf({ ...source, approved: false, decision: verdict.decision }, name) };
+    const source = { reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason, detail: verdict.detail, decision: verdict.decision };
+    return { callId, success: false, error: buildDenialErrorMessage(name, source), decision: toolDecisionOf({ ...source, approved: false }, name) };
   }
   return registry.execute(callId, name, verdict.modifiedArgs ?? args, signal ? { signal } : undefined);
 }

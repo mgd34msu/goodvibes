@@ -511,6 +511,8 @@ function composeClientRuntimeServices(
     configManager,
     daemonHome: options.daemonHome ?? resolveGoodVibesDaemonHome(homeDirectory),
   });
+  // Its store watches hold it; they end with this composition (registered first, so closed after its consumers).
+  disposalScope.registry.add('secret store watches', () => secretsManager.close());
   // Provider subscriptions (OAuth sessions like the 'openai-subscriber' login)
   // live in the platform's SHARED tier, not this surface's own root: the
   // daemon hosts every conversational turn, and a login completed on another

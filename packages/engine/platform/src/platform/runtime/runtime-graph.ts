@@ -182,7 +182,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     : shellPaths.resolveProjectPath(surfaceRoot, ...segments);
   // Built before anything that touches session state: every session path derives from it.
   const { surface, sessionManager } = createSessionStorageServices({ nativeDataWriter: seams.nativeDataWriter, surfaceRoot, workingDirectory, homeDirectory });
-  const featureFlags = resolveRuntimeFeatureFlags({ configManager, featureFlags: seams.featureFlags });
+  // A daemon serves the telemetry traces routes, so it records spans unless its settings say otherwise.
+  const featureFlags = resolveRuntimeFeatureFlags({ configManager, featureFlags: seams.featureFlags, recordTracesUnlessSet: product.surface === 'daemon' });
   scope.registry.add('feature flag settings bridge', () => disposeRuntimeFeatureFlags(featureFlags));
   // Registered first so it closes last: the tracer sends the spans its exporters still hold after every other teardown has ended its own.
   scope.registry.add('telemetry tracer', () => releaseComposedTelemetry());
@@ -215,6 +216,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     configManager,
     daemonHome: roots.daemonHome ?? resolveGoodVibesDaemonHome(homeDirectory),
   });
+  // Its store watches hold it; they end with this composition (registered first, so closed after its consumers).
+  scope.registry.add('secret store watches', () => secretsManager.close());
   const judgment = composeJudgment({ config: configManager, secrets: secretsManager, env: process.env, stateRoot: shellPaths.resolveProjectPath(surfaceRoot), disposal: scope.registry });
   // Provider subscriptions live in the SHARED tier so a login completed on one
   // surface is visible to every other.

@@ -375,7 +375,7 @@ export class SecretsManager {
    */
   captureReadSource(): () => void {
     assertSecurityReadSource(!this.pendingLocalMutations.size, 'secret store');
-    this.#startWatching();
+    this.#startWatching(true);
     const revision = this.#revisionSource.revision(), policy = this.getPolicy();
     return () => assertSecurityReadSource(!this.pendingLocalMutations.size && this.#revisionSource.revision() === revision
       && this.getPolicy() === policy, 'secret store');
@@ -471,10 +471,19 @@ export class SecretsManager {
    * holder re-reading the disk to find out. Started on the first subscription
    * or capture; the watches never keep the process alive. A directory that
    * does not exist yet is not watched; the `stat` on the next read notices it.
+   *
+   * Each watch's callback holds this manager, so the watches end with it:
+   * {@link close} (run by the disposal scope that built the manager) closes
+   * them for good, and when the last subscriber leaves and no capture asked
+   * for them they are closed until the next subscription.
    */
   #watchers: FSWatcher[] | null = null;
-  #startWatching(): void {
-    if (this.#watchers) return;
+  /** A capture relies on the watch to move the revision; it stays until {@link close}. */
+  #watchForCaptures = false;
+  #closed = false;
+  #startWatching(forCapture = false): void {
+    if (forCapture) this.#watchForCaptures = true;
+    if (this.#watchers || this.#closed) return;
     this.#watchers = [];
     const directories = new Map<string, Set<string>>();
     for (const path of [...this.getAllCandidateStores().map((store) => store.path), this.keyFilePath]) {
@@ -493,6 +502,34 @@ export class SecretsManager {
         this.#watchers.push(watcher);
       } catch { /* not watchable now; reads still compare identities */ }
     }
+  }
+
+  #stopWatching(): void {
+    const watchers = this.#watchers;
+    this.#watchers = null;
+    for (const watcher of watchers ?? []) {
+      try { watcher.close(); } catch { /* already closed */ }
+    }
+  }
+
+  /** Closes the store watches when no subscriber or capture needs them any more. */
+  #releaseWatch(): void {
+    if (this.#watchForCaptures || this.#elsewhereListeners.size || this.credentialInvalidationListeners.size) return;
+    this.#stopWatching();
+  }
+
+  /**
+   * Ends this manager's store watches for good. A manager built for a hosted
+   * workspace or a one-shot command calls this from the disposal scope that
+   * built it, so neither the watches nor the decrypted store cache they keep
+   * reachable outlive it. Reads still work after it; they compare file
+   * identities on each read instead of being told by a watch.
+   */
+  close(): void {
+    this.#closed = true;
+    this.#stopWatching();
+    this.#storeCache.clear();
+    this.#resolvedReferences.clear();
   }
 
   #noticeStoreChange(paths: readonly string[]): void {
@@ -523,7 +560,7 @@ export class SecretsManager {
   onDidChangeElsewhere(listener: () => void): () => void {
     this.#startWatching();
     this.#elsewhereListeners.add(listener);
-    return () => { this.#elsewhereListeners.delete(listener); };
+    return () => { this.#elsewhereListeners.delete(listener); this.#releaseWatch(); };
   }
 
   /**
@@ -547,7 +584,7 @@ export class SecretsManager {
   onDidInvalidateCredentials(listener: () => void): () => void {
     this.#startWatching();
     this.credentialInvalidationListeners.add(listener);
-    return () => { this.credentialInvalidationListeners.delete(listener); };
+    return () => { this.credentialInvalidationListeners.delete(listener); this.#releaseWatch(); };
   }
 
   private notifyCredentialInvalidation(): void {
@@ -581,7 +618,7 @@ export class SecretsManager {
    */
   captureLocalCredentialReadset(): () => void {
     if (this.pendingLocalMutations.size) throw new Error('Credential owner is busy.');
-    this.#startWatching();
+    this.#startWatching(true);
     const revision = this.#revisionSource.revision(), policy = this.getPolicy();
     return () => {
       if (this.pendingLocalMutations.size || this.#revisionSource.revision() !== revision || this.getPolicy() !== policy) throw new Error('Credential source changed.');

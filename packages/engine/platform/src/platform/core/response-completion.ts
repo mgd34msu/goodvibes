@@ -9,7 +9,7 @@ import { CompletionEvidenceProjection } from './response-completion-evidence.js'
 import { CompletionEvidenceBudgetError } from './response-completion-budget.js';
 import { captureStrictJudgmentJson, JudgmentResultAdmissionError, prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
 import { captureConversationEvidence, type ConversationManager, type ConversationMessageSnapshot } from './conversation.js';
-import { responseCompletion, completionApplicability, MAX_ANSWER_PASSAGES } from './batteries/response-completion.js';
+import { answerPassages, responseCompletion, completionApplicability, MAX_ANSWER_PASSAGES } from './batteries/response-completion.js';
 
 /** The questions of the response-completion battery asked of every checked draft. */
 const RESPONSE_COMPLETION_CHECKS = ['false_blocker', 'unfinished', 'unsupported', 'unanswered', 'unnecessary_permission'] as const;
@@ -794,7 +794,7 @@ export class ResponseCompletionGuard {
       const passages = typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter(undefined, { granularity: 'sentence' }).segment(response)].map(({ segment }) => segment) : [];
       // One request over the whole answer names the first unsupported passage, with the evidence sent once.
       if (passages.length > 1 && passages.length <= MAX_ANSWER_PASSAGES && passages.join('') === response) {
-        const located = await responseCompletion.run(port, { ...state as object, passages } as never,
+        const located = await responseCompletion.run(port, { ...state as object, passages: answerPassages(passages) } as never,
           { ...readingOptions, only: ['unsupported_passage'], site: responseCompletion.name })
           .catch((error: unknown) => { batch.abort(); throw error; });
         const reading = located.readings.unsupported_passage;

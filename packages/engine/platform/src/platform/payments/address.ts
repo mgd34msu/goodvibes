@@ -31,6 +31,12 @@ import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './che
  * from a channel message, or from anything on the page. A half-filled address
  * form is worse than a refusal, because it can succeed.
  *
+ * The owner-profile address text is the owner's own stored address too. With no
+ * decision model to check how the session's model split it into fields, those
+ * fields go on the order only through an explicit approval that lists every
+ * field (silence buys nothing); text that could not be split is named in the
+ * refusal, so the owner knows why it was not used.
+ *
  * ══ Billing is INDEPENDENT of shipping ════════════════════════════════════
  *
  * There is no `payments.billingSameAsShipping` setting in the schema, checked,
@@ -122,6 +128,45 @@ export interface AddressStore {
   /** A retained restriction; never permission to transmit the address. */
   readonly assertCurrent?: (() => void) | undefined;
   read(kind: AddressKind, options?: PostalReadOptions): Promise<PostalAddress | null>;
+  /**
+   * With no decision model in use: whether this kind's address took fields
+   * from the owner-profile address text that no decision model checked, or
+   * that text could not be used. Undefined whenever a decision model read it.
+   */
+  profileText?(kind: AddressKind): ProfileAddressText | undefined;
+}
+
+/** How the owner-profile address text was used when no decision model read it. */
+export type ProfileAddressText =
+  | { readonly state: 'split-unchecked'; readonly fields: readonly AddressFieldName[] }
+  | { readonly state: 'not-split' };
+
+const FIELD_LABELS: Readonly<Record<AddressFieldName, string>> = {
+  name: 'name', line1: 'line 1', line2: 'line 2', city: 'city', region: 'region', postalCode: 'postal code', country: 'country',
+};
+
+/** The sentence a refusal adds when the profile text was not read by a decision model. */
+function profileTextNote(kind: AddressKind, profileText: ProfileAddressText | undefined): string {
+  if (profileText?.state === 'not-split') {
+    return ` Your owner profile has the ${kind} address written as text, but no decision model is in use and it could not be split into these fields, so it was not used.`;
+  }
+  if (profileText?.state === 'split-unchecked') {
+    return ` The ${profileText.fields.map(field => FIELD_LABELS[field]).join(', ')} came from the ${kind} address text in your owner profile; the rest was not in it.`;
+  }
+  return '';
+}
+
+/**
+ * One line for the purchase approval when address fields came from the
+ * owner-profile text unchecked: every field typed into the order, so the owner
+ * approves exactly what is sent. Null when nothing came from that text.
+ */
+export function renderUncheckedProfileAddress(address: PostalAddress | null, kind: AddressKind, profileText: ProfileAddressText | undefined): string | null {
+  if (address === null || profileText?.state !== 'split-unchecked') return null;
+  const fields = (Object.keys(FIELD_LABELS) as AddressFieldName[])
+    .filter(field => addressFieldValue(address, field).trim().length > 0)
+    .map(field => `${FIELD_LABELS[field]} '${sanitizeOwnerNoticeField(addressFieldValue(address, field), 120)}'`);
+  return `the ${kind} address, read from the address text in your owner profile by your model: ${fields.join(', ')}`;
 }
 
 export interface AddressCheck {
@@ -141,13 +186,13 @@ export function addressFieldValue(address: PostalAddress, field: AddressFieldNam
  * Names every missing field rather than the first, so one refusal tells the
  * owner everything they have to go and set.
  */
-export function checkAddress(address: PostalAddress | null, kind: AddressKind): AddressCheck {
+export function checkAddress(address: PostalAddress | null, kind: AddressKind, profileText?: ProfileAddressText): AddressCheck {
   if (address === null) {
     return {
       ok: false,
       missing: [...REQUIRED_FIELDS],
       reason:
-        `Refused: no ${kind} address is stored, so I have nowhere to send this. `
+        `Refused: no ${kind} address is stored, so I have nowhere to send this.${profileTextNote(kind, profileText)} `
         + `Set it in the TUI, the agent or the webui under payments.${kind}Address before asking me to buy something.`,
     };
   }
@@ -157,8 +202,8 @@ export function checkAddress(address: PostalAddress | null, kind: AddressKind): 
     ok: false,
     missing,
     reason:
-      `Refused: the stored ${kind} address is missing ${missing.join(', ')}. `
-      + 'I will not guess at an address or fill part of one, set the missing fields and ask me again.',
+      `Refused: the stored ${kind} address is missing ${missing.join(', ')}.${profileTextNote(kind, profileText)} `
+      + `I will not guess at an address or fill part of one, set the missing fields under payments.${kind}Address and ask me again.`,
   };
 }
 
@@ -198,7 +243,7 @@ export async function fillAddresses(
       current();
       const address = captureOwnedJson(await deps.store.read(kind, { signal: owner.signal })) as PostalAddress | null;
       current();
-      const check = checkAddress(address, kind);
+      const check = checkAddress(address, kind, deps.store.profileText?.(kind));
       if (!check.ok || address === null) {
         return { ok: false, filled: 0, failedField: `${kind}.${check.missing[0] ?? 'address'}`, reason: check.reason };
       }

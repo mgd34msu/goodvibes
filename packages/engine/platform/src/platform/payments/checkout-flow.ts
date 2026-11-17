@@ -103,6 +103,7 @@ import {
   checkAddress,
   fillAddresses,
   renderDestination,
+  renderUncheckedProfileAddress,
   type AddressFieldTarget,
   type AddressStore,
 } from './address.js';
@@ -718,11 +719,16 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     addresses = deps.addresses.prepare ? await deps.addresses.prepare(addressKinds, { signal }) : deps.addresses;
     for (const kind of addressKinds) {
       const stored = await addresses.read(kind, { signal });
-      const check = checkAddress(stored, kind);
+      const profileText = addresses.profileText?.(kind);
+      const check = checkAddress(stored, kind, profileText);
       if (!check.ok) {
         await release();
         return refused(kind === 'shipping' ? 'no-shipping-address' : 'no-billing-address', check.reason ?? 'Refused: the stored address is incomplete.');
       }
+      // Fields read from the owner-profile text with no decision model to
+      // check them: the owner approves exactly what goes on the order.
+      const unchecked = renderUncheckedProfileAddress(stored, kind, profileText);
+      if (unchecked !== null) notChecked.push(unchecked);
     }
     // One check for the whole verification: a stale read can only have refused above.
     current(); addresses.assertCurrent?.();

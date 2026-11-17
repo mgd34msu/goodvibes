@@ -19,7 +19,7 @@ import { PostalAddressHeldError, type PostalReadOptions, type PreparedPostalAddr
  * own test doubles. Nothing here validates completeness; this module only
  * reads what config holds.
  */
-import type { AddressKind, AddressStore } from '../address.js';
+import type { AddressKind, AddressStore, ProfileAddressText } from '../address.js';
 import type { PaymentsConfigReader } from '../payments-config.js';
 import type { PostalAddress } from '../types.js';
 
@@ -57,6 +57,13 @@ export function configBackedAddressStore(
         assertCurrent(); const value = captured.get(kind);
         if (!value) throw new PostalAddressHeldError();
         return value.value;
+      }, profileText(kind: AddressKind): ProfileAddressText | undefined {
+        const value = captured.get(kind);
+        if (value?.profileText === 'not-split') return { state: 'not-split' };
+        if (value?.profileText === 'split-unchecked' && value.splitParts && value.splitParts.length > 0) {
+          return { state: 'split-unchecked', fields: value.splitParts };
+        }
+        return undefined;
       } });
     },
   };

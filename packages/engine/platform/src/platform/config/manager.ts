@@ -564,14 +564,19 @@ export class ConfigManager {
         if (this.getConfigurationIncarnation() !== revision || this.profilePostalReader !== reader || this.profilePostalEpoch !== installation) throw new PostalAddressHeldError();
       };
       check();
-      const fallback = await decisionOrClassic<PreparedPostalAddress | null>(
-        () => reader && POSTAL_PARTS.some(part => stored[part] === '')
-          ? reader(kind, { ...options, assertCurrent: check }) : Promise.resolve(null),
-        () => null);
+      // The reader owns both paths: with no decision model in use it returns
+      // the profile text's fields unchecked and says so (`profileText`).
+      const readProfile = () => reader && POSTAL_PARTS.some(part => stored[part] === '')
+        ? reader(kind, { ...options, assertCurrent: check }) : Promise.resolve(null);
+      const fallback = await decisionOrClassic<PreparedPostalAddress | null>(readProfile, readProfile);
       check(); fallback?.assertCurrent();
       const value = Object.freeze(Object.fromEntries(POSTAL_PARTS.map(part => [part, stored[part] || fallback?.value?.[part] || ''])) as unknown as PostalParts);
+      const splitParts = fallback?.profileText === 'split-unchecked'
+        ? POSTAL_PARTS.filter(part => stored[part] === '' && (fallback.value?.[part] ?? '') !== '') : [];
       return Object.freeze({ value: POSTAL_PARTS.some(part => value[part] !== '') ? value : null,
         ...(isClassicOperation() ? { provenance: 'classic' as const, profileAssessment: 'not-evaluated' as const } : {}),
+        ...(splitParts.length > 0 ? { profileText: 'split-unchecked' as const, splitParts: Object.freeze(splitParts) }
+          : fallback?.profileText === 'not-split' ? { profileText: 'not-split' as const } : {}),
         assertCurrent: () => { check(); fallback?.assertCurrent(); } });
     });
   }

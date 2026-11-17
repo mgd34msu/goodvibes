@@ -8,8 +8,17 @@ export class PostalAddressHeldError extends Error {
 }
 export interface PreparedPostalAddress {
   readonly provenance?: 'classic';
-  /** Without a decision model, this returns native stored fields; no prose profile address was interpreted. */
+  /** Without a decision model, no decision model checked any field taken from the owner-profile address text. */
   readonly profileAssessment?: 'not-evaluated';
+  /**
+   * Without a decision model, how the owner-profile address text was used:
+   * `split-unchecked` when the session's model split it into fields that no
+   * decision model checked (`splitParts` names the fields taken from it), so a
+   * purchase asks the owner to approve them; `not-split` when it could not be
+   * split and was not used.
+   */
+  readonly profileText?: 'split-unchecked' | 'not-split';
+  readonly splitParts?: readonly PostalPart[];
   readonly value: PostalParts | null;
   /** Restriction only, never permission to disclose or place an order. */
   readonly assertCurrent: () => void;

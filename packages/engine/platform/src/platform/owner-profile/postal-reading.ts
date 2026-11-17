@@ -32,15 +32,33 @@ export const postalAddressExtraction = defineExtractionVerifier({
   ],
 });
 
+/** The proposal's shape, exactly the postal parts as strings or null. */
+function proposalRecord(proposal: unknown): Record<string, JsonValue> {
+  if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)
+    || Object.keys(proposal).length !== POSTAL_PARTS.length) throw new PostalAddressHeldError();
+  const record = proposal as Record<string, JsonValue>;
+  for (const part of POSTAL_PARTS) if (!Object.hasOwn(record, part) || (record[part] !== null && typeof record[part] !== 'string')) throw new PostalAddressHeldError();
+  return record;
+}
+
 /**
- * Without a decision model a prose profile address is not interpreted for an
- * order: an unchecked reading could ship a purchase to the wrong place. The
- * owner's stored address fields stay the address, and the result says the
- * profile prose was not read; when those fields are missing, the checkout names
- * the fields to set.
+ * Without a decision model the session's own model still proposes the fields
+ * from the profile address text (the request this reading makes anyway), and
+ * no decision model checks them. The result names the fields taken from that
+ * proposal as unchecked, so a purchase lists them in an approval the owner
+ * must answer (silence buys nothing). With no usable proposal the text is not
+ * used, and the checkout says so and names the fields to set.
  */
-function notInterpreted(assertCurrent: () => void): PreparedPostalAddress {
-  return Object.freeze({ provenance: 'classic' as const, profileAssessment: 'not-evaluated' as const, value: null, assertCurrent });
+function unchecked(record: Record<string, JsonValue> | undefined, assertCurrent: () => void): PreparedPostalAddress {
+  const parts = record && Object.freeze(Object.fromEntries(POSTAL_PARTS.map(part => {
+    const value = record[part];
+    return [part, typeof value === 'string' ? value.trim() : ''];
+  })) as unknown as PostalParts);
+  const splitParts = parts ? POSTAL_PARTS.filter(part => parts[part] !== '') : [];
+  return Object.freeze(parts && splitParts.length > 0
+    ? { provenance: 'classic' as const, profileAssessment: 'not-evaluated' as const, profileText: 'split-unchecked' as const,
+      splitParts: Object.freeze(splitParts), value: parts, assertCurrent }
+    : { provenance: 'classic' as const, profileAssessment: 'not-evaluated' as const, profileText: 'not-split' as const, value: null, assertCurrent });
 }
 
 export function createProfilePostalReader(
@@ -52,6 +70,8 @@ export function createProfilePostalReader(
     return withConfiguredDecisionModelPolicy(async () => {
       let nativeCurrent = () => { options.signal?.throwIfAborted(); };
       let decisionPhase = false;
+      let proposed: { readonly record: Record<string, JsonValue>; readonly assertCurrent: () => void } | undefined;
+      let withoutDecisionModel = async (): Promise<PreparedPostalAddress> => unchecked(undefined, nativeCurrent);
       try {
         const current = source.captureRead();
         const fieldId = `commerce.${kind}Address`;
@@ -71,7 +91,25 @@ export function createProfilePostalReader(
         if (!fallbackEnabled || !valid || !value.trim()) return Object.freeze({ value: null, assertCurrent: check });
         // Privacy-screen even when no provider is configured; never hash or log a raw rejected field.
         snapshotJudgmentInput({ source: value });
-        if (isClassicOperation()) return notInterpreted(check);
+        withoutDecisionModel = async () => {
+          if (proposed) return unchecked(proposed.record, proposed.assertCurrent);
+          if (!providers) return unchecked(undefined, check);
+          let proposerCurrent = () => {};
+          const assertCurrent = () => { check(); proposerCurrent(); };
+          try {
+            const proposer = capturePostalProposer(providers, check, options.signal ?? new AbortController().signal);
+            proposerCurrent = proposer.assertCurrent;
+            const record = proposalRecord(await proposer.propose(value));
+            assertCurrent();
+            return unchecked(record, assertCurrent);
+          } catch {
+            // A stop, a cancel or a changed profile still ends the reading
+            // (`check` throws); a failed or unusable proposal leaves the text unused.
+            check();
+            return unchecked(undefined, check);
+          }
+        };
+        if (isClassicOperation()) return await withoutDecisionModel();
         if (!providers) throw new PostalAddressHeldError();
         let providerCurrent = () => {};
         decisionPhase = true;
@@ -82,10 +120,8 @@ export function createProfilePostalReader(
         const assertCurrent = () => { check(); owner.assertCurrent(); proposer.assertCurrent(); };
         const proposal = await proposer.propose(value);
         assertCurrent();
-        if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)
-          || Object.keys(proposal).length !== POSTAL_PARTS.length) throw new PostalAddressHeldError();
-        const record = proposal as Record<string, JsonValue>;
-        for (const part of POSTAL_PARTS) if (!Object.hasOwn(record, part) || (record[part] !== null && typeof record[part] !== 'string')) throw new PostalAddressHeldError();
+        const record = proposalRecord(proposal);
+        proposed = { record, assertCurrent: () => { check(); proposer.assertCurrent(); } };
         // The canonical verifier receives only the captured field and the bounded proposed record.
         const port: JudgmentPort = { ...owner.port, async ask(request) {
           assertCurrent(); const response = await owner.port.ask(request); assertCurrent();
@@ -105,7 +141,9 @@ export function createProfilePostalReader(
         try { nativeCurrent(); } catch { throw new PostalAddressHeldError(); }
         if (error instanceof DecisionModelsDisabledError) throw error;
         // A content-proposal provider outage is not decision-chain exhaustion.
-        if (decisionPhase && activateClassicFallback(error)) return notInterpreted(nativeCurrent);
+        if (decisionPhase && activateClassicFallback(error)) {
+          try { return await withoutDecisionModel(); } catch { throw new PostalAddressHeldError(); }
+        }
         throw new PostalAddressHeldError();
       }
     });

@@ -115,7 +115,7 @@ export interface BootstrapCommandSectionOptions {
   readonly knowledgeService?: KnowledgeService;
   readonly projectPlanningService?: import('@goodvibes-jev/engine/platform/platform/knowledge').ProjectPlanningService;
   readonly projectPlanningProjectId?: string;
-  readonly workPlanStore?: import('@goodvibes-jev/engine/platform/platform/knowledge').ProjectWorkPlan;
+  readonly workPlan?: import('@goodvibes-jev/engine/platform/platform/knowledge').ProjectWorkPlan;
   readonly pluginManager?: PluginManager;
   readonly hookWorkbench?: HookWorkbench;
   readonly providerOptimizer?: import('@goodvibes-jev/engine/platform/platform/providers').ProviderOptimizer;
@@ -286,7 +286,7 @@ export function createBootstrapCommandWorkspaceSection(
     | 'bookmarkManager'
     | 'projectPlanningService'
     | 'projectPlanningProjectId'
-    | 'workPlanStore'
+    | 'workPlan'
   >,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandWorkspaceSection {

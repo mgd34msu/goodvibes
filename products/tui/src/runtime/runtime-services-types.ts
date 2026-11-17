@@ -203,7 +203,7 @@ export interface RuntimeServices {
   readonly homeGraphService: HomeGraphService;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: ProjectWorkPlan;
+  readonly workPlan: ProjectWorkPlan;
   readonly memoryStore: MemoryStore;
   readonly memoryRegistry: MemoryRegistry;
   /** Host-vs-client memory access: local until bootstrap.ts activates it for an adopted 'external' daemon (mirrors sessionSpine). */

@@ -496,7 +496,7 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
   /** The project work plan: the planning service's task rows for this project. */
-  readonly workPlanStore: ProjectWorkPlan;
+  readonly workPlan: ProjectWorkPlan;
   readonly memoryStore: MemoryStore;
   readonly memoryRegistry: MemoryRegistry;
   /**

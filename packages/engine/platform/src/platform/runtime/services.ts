@@ -499,7 +499,7 @@ export interface ComposedRuntimeServices extends RuntimeServices {
   readonly sessionPresence: { isAttached(sessionId: string): boolean };
   readonly projectPlanningProjectId: string;
   /** The project work plan: the planning service's task rows for this project. */
-  readonly workPlanStore: ProjectWorkPlan;
+  readonly workPlan: ProjectWorkPlan;
   readonly memorySpine: MemorySpineClient;
   readonly stopDurabilityHousekeeping: () => void;
   readonly stopWakeHousekeeping: () => void;

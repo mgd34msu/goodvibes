@@ -72,7 +72,7 @@ export interface LearningRecord {
 }
 
 export interface LearningCuratorNativeContext {
-  readonly workspace?: Pick<CommandContext['workspace'], 'shellPaths'> & { readonly workPlanStore?: Pick<NonNullable<CommandContext['workspace']['workPlanStore']>, 'snapshotNow'> };
+  readonly workspace?: Pick<CommandContext['workspace'], 'shellPaths'> & { readonly workPlan?: Pick<NonNullable<CommandContext['workspace']['workPlan']>, 'snapshotNow'> };
   readonly clients?: { readonly agentKnowledgeApi?: { readonly memory?: Pick<MemoryApi, 'getAll'> } };
   readonly session?: {
     readonly sessionManager?: Pick<NonNullable<CommandContext['session']['sessionManager']>, 'list' | 'load'>
@@ -96,7 +96,7 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
   };
   assertCaller();
   const paths = [
-    ['workspace', 'shellPaths'], ['workspace', 'workPlanStore'], ['clients', 'agentKnowledgeApi', 'memory'],
+    ['workspace', 'shellPaths'], ['workspace', 'workPlan'], ['clients', 'agentKnowledgeApi', 'memory'],
     ['session', 'sessionManager'], ['session', 'runtime'],
   ];
   const identities = paths.map(keys => {
@@ -107,7 +107,7 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
     return { keys, value: parent };
   });
   const memory = context.clients?.agentKnowledgeApi?.memory;
-  const work = context.workspace?.workPlanStore;
+  const work = context.workspace?.workPlan;
   const manager = context.session?.sessionManager;
   const runtime = context.session?.runtime;
   const sessionId = runtime?.sessionId;

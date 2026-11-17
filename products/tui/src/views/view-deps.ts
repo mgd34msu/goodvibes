@@ -56,7 +56,7 @@ export type ResolvedBuiltinViewDeps = BuiltinViewDeps & {
   readonly sessionMemoryStore: SessionMemoryStore;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: ProjectWorkPlan;
+  readonly workPlan: ProjectWorkPlan;
   readonly policyRuntimeState: PolicyRuntimeState;
 };
 
@@ -76,7 +76,7 @@ export function resolveBuiltinViewDeps(deps: BuiltinViewDeps): ResolvedBuiltinVi
     sessionMemoryStore: required(ui.sessions.sessionMemoryStore, 'Session memory store'),
     projectPlanningService: required(ui.planning.projectPlanningService, 'Project planning service'),
     projectPlanningProjectId: required(ui.planning.projectPlanningProjectId, 'Project planning project id'),
-    workPlanStore: required(ui.planning.workPlanStore, 'Work plan store'),
+    workPlan: required(ui.planning.workPlan, 'Work plan'),
     policyRuntimeState: required(ui.platform.policyRuntimeState, 'Policy runtime state'),
   };
 }

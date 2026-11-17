@@ -144,7 +144,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const {
       configManager, featureFlags, gatewayMethods, approvalBroker, sessionBroker, channelPolicy, secretsManager,
       providerRegistry, judgment, distributedRuntime, pairingTokens, knowledgeStore, projectPlanningProjectId,
-      workPlanStore, agentManager, automationManager, nativeMutationHost: autonomousHost, triggerManager,
+      workPlan, agentManager, automationManager, nativeMutationHost: autonomousHost, triggerManager,
       workspaceTrustManager, workspaceCheckpointManager, contractRunner, contractOperator, hookDispatcher,
       permissionManager, acpHost,
     } = graph;
@@ -287,7 +287,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       ...graph.agentToolDependencies,
       ...(workspaceSwap ? { workspaceSwap } : {}),
       // Workers keep the project work plan the work plan view shows.
-      workPlan: workPlanStore,
+      workPlan,
       toolExecutionObserver: (tool: string, args: Record<string, unknown>, success: boolean) => ciAutoWatchObserver?.(tool, args, success),
       // A background agent's `query` tool leaves its questions in the same inbox; the agent takes the
       // owner's answer on its next model request, or, if it stopped, on its next run (a channel's next turn).
@@ -307,9 +307,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // Work-plan tasks live in the shared plan file; a copy not yet moved there is still read from the knowledge store.
       readSource: (id) => {
         const record = knowledgeStore.getLegacyImportRecord(id);
-        return record.source ? record : workPlanStore.service.readWorkPlanTaskImportRecord(id);
+        return record.source ? record : workPlan.service.readWorkPlanTaskImportRecord(id);
       },
-      workPlanTaskImportIds: projectId => [...workPlanStore.service.listWorkPlanTaskImportIds(projectId), ...knowledgeStore.listWorkPlanTaskImportIds(projectId)],
+      workPlanTaskImportIds: projectId => [...workPlan.service.listWorkPlanTaskImportIds(projectId), ...knowledgeStore.listWorkPlanTaskImportIds(projectId)],
       scopes: nativeScopes,
       port: judgment.port, decisionLog: judgment.decisionLog,
     });

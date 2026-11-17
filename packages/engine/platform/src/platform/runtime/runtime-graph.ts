@@ -413,7 +413,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   });
   scope.registry.add('work plan file', () => projectPlanningService.dispose());
   // The project work plan: the planning service's task rows for this project.
-  const workPlanStore = new ProjectWorkPlan({
+  const workPlan = new ProjectWorkPlan({
     service: projectPlanningService,
     projectId: projectPlanningProjectId,
     projectRoot: workingDirectory,
@@ -491,7 +491,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const sessionMemoryStore = new SessionMemoryStore();
   const sessionLineageTracker = new SessionLineageTracker();
   const sessionChangeTracker = new SessionChangeTracker();
-  const planManager = new ExecutionPlanManager(workPlanStore);
+  const planManager = new ExecutionPlanManager(workPlan);
   const adaptivePlanner = new AdaptivePlanner();
   const idempotencyStore = new IdempotencyStore();
   const overflowHandler = new OverflowHandler({
@@ -898,7 +898,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     homeGraphService,
     projectPlanningService,
     projectPlanningProjectId,
-    workPlanStore,
+    workPlan,
     knowledgeStore,
     memoryStore,
     memoryRegistry,

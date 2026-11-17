@@ -21,7 +21,7 @@ const STATUS_COMMANDS: Record<string, ProjectWorkPlanTaskStatus> = {
 };
 
 function getStore(ctx: import('../command-registry.ts').CommandContext): ProjectWorkPlan | null {
-  return ctx.workspace.workPlanStore ?? null;
+  return ctx.workspace.workPlan ?? null;
 }
 
 function openWorkPlanModal(ctx: import('../command-registry.ts').CommandContext): void {

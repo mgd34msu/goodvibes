@@ -175,7 +175,7 @@ export interface RuntimeServices {
   readonly homeGraphService: HomeGraphService;
   readonly projectPlanningService: ProjectPlanningService;
   readonly projectPlanningProjectId: string;
-  readonly workPlanStore: ProjectWorkPlan;
+  readonly workPlan: ProjectWorkPlan;
   /** Native project ledger; actor issuance stays in trusted host composition. */
   readonly workLedger: WorkLedgerService;
   readonly memoryStore: MemoryStore;

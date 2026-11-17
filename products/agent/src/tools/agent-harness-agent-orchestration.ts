@@ -385,7 +385,7 @@ function workspacesByRunnerId(workspaces: readonly RemoteWorkspaceEvidenceRecord
 
 function workPlanItems(context: CommandContext): readonly WorkPlanItem[] {
   // A pure read of the plan's rows: it takes no lock and writes nothing.
-  return context.workspace.workPlanStore?.snapshotNow().tasks ?? [];
+  return context.workspace.workPlan?.snapshotNow().tasks ?? [];
 }
 
 function workPlanItemsByAgentId(items: readonly WorkPlanItem[]): Map<string, readonly WorkPlanItem[]> {

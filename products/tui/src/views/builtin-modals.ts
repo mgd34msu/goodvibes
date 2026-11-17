@@ -142,7 +142,7 @@ export function registerBuiltinModals(
   }));
   manager.registerModalRedirect('memory', 'memory-modal');
 
-  manager.registerModalSurface(createWorkPlanModalSurface({ workPlanStore: deps.workPlanStore }));
+  manager.registerModalSurface(createWorkPlanModalSurface({ workPlan: deps.workPlan }));
   manager.registerModalRedirect('work-plan', 'work-plan-modal');
 
   manager.registerModalSurface(createKeybindingsModalSurface({

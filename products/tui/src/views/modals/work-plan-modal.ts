@@ -37,7 +37,7 @@ const STATUS_ORDER: readonly WorkPlanItemStatus[] = ['pending', 'in_progress', '
 export type WorkPlanItemLike = Pick<ProjectWorkPlanTask, 'taskId' | 'title' | 'status' | 'owner' | 'source' | 'notes' | 'agentId' | 'contractId' | 'sessionId' | 'updatedAt'>;
 
 export interface WorkPlanModalDeps {
-  readonly workPlanStore: Pick<ProjectWorkPlan, 'projectRoot' | 'revision' | 'subscribe'> & {
+  readonly workPlan: Pick<ProjectWorkPlan, 'projectRoot' | 'revision' | 'subscribe'> & {
     snapshot(): Promise<{ readonly tasks: readonly WorkPlanItemLike[]; readonly revision: number }>;
   };
 }
@@ -123,7 +123,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
     this.requestRender = requestRender;
     // An edit here or in another program (the Agent, the daemon, the web UI) re-reads the plan when its revision moved.
     this.unsubscribe?.();
-    this.unsubscribe = this.deps.workPlanStore.subscribe(() => this.refreshIfMoved());
+    this.unsubscribe = this.deps.workPlan.subscribe(() => this.refreshIfMoved());
     this.refresh();
   }
 
@@ -138,7 +138,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
   private refreshIfMoved(): void {
     if (this.loading || this.shownRevision === null || !this.requestRender) return;
     let current: number;
-    try { current = this.deps.workPlanStore.revision(); } catch { return; }
+    try { current = this.deps.workPlan.revision(); } catch { return; }
     if (current !== this.shownRevision) this.refresh();
   }
 
@@ -146,7 +146,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
   private refresh(): void {
     const sequence = ++this.loadSequence;
     this.loading = true;
-    this.deps.workPlanStore.snapshot().then((plan) => {
+    this.deps.workPlan.snapshot().then((plan) => {
       if (sequence !== this.loadSequence) return;
       this.items = [...plan.tasks];
       this.shownRevision = plan.revision;
@@ -173,7 +173,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
     const header = [
-      `Project ${this.deps.workPlanStore.projectRoot}`,
+      `Project ${this.deps.workPlan.projectRoot}`,
       progressBar(pct),
       `pending ${counts.get('pending') ?? 0}  active ${counts.get('in_progress') ?? 0}  blocked ${counts.get('blocked') ?? 0}  done ${counts.get('done') ?? 0}  failed ${counts.get('failed') ?? 0}  cancelled ${counts.get('cancelled') ?? 0}`,
       ...(this.loadError ? [`The work plan could not be read: ${this.loadError}. Press r to read it again.`] : []),

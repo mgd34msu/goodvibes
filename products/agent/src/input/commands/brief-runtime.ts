@@ -19,7 +19,7 @@ function reason(error: unknown): string {
 function workPlanCounts(ctx: CommandContext): WorkPlanReading {
   const counts = Object.fromEntries(WORK_PLAN_STATUSES.map((status) => [status, 0])) as StatusCounts;
   try {
-    const plan = ctx.workspace?.workPlanStore?.snapshotNow();
+    const plan = ctx.workspace?.workPlan?.snapshotNow();
     if (!plan) return { total: 0, counts };
     for (const status of WORK_PLAN_STATUSES) counts[status] = plan.counts[status];
     return { total: plan.counts.total, counts };

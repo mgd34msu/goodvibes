@@ -29,7 +29,7 @@ export function registerWorkPlanRuntimeCommands(registry: CommandRegistry): void
         await registry.execute('work', args, ctx);
         return;
       }
-      const store = ctx.workspace?.workPlanStore;
+      const store = ctx.workspace?.workPlan;
       if (!store) { ctx.print('Local work plan is unavailable in this shell. Native owner work uses /work submit-file <JSON-path>.'); return; }
       let input: LocalWorkPlanCommand;
       if ((action === 'show' || action === 'list') && args.length <= 1) input = { action: 'list' };

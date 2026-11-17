@@ -232,7 +232,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   registerAgentReminderScheduleTool(toolRegistry, services.shellPaths, configManager);
   registerAgentScheduleEditTool(toolRegistry, services.shellPaths, configManager);
   registerAgentScheduleTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentWorkPlanTool(toolRegistry, services.workPlanStore);
+  registerAgentWorkPlanTool(toolRegistry, services.workPlan);
   installAgentToolPolicyGuard(toolRegistry);
   compactRegisteredToolDefinitions(toolRegistry);
   return { toolRegistry, fileCache, projectIndex, dispose };

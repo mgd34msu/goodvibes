@@ -104,7 +104,7 @@ export function projectCommandWorkspaceSection<
     readonly bookmarkManager?: unknown | undefined;
     readonly projectPlanningService?: unknown | undefined;
     readonly projectPlanningProjectId?: unknown | undefined;
-    readonly workPlanStore?: unknown | undefined;
+    readonly workPlan?: unknown | undefined;
   },
 >(options: Options) {
   return {
@@ -114,7 +114,7 @@ export function projectCommandWorkspaceSection<
     bookmarkManager: options.bookmarkManager,
     projectPlanningService: options.projectPlanningService,
     projectPlanningProjectId: options.projectPlanningProjectId,
-    workPlanStore: options.workPlanStore,
+    workPlan: options.workPlan,
   } as {
     keybindingsManager: Options['keybindingsManager'];
     fileUndoManager: Options['fileUndoManager'];
@@ -122,7 +122,7 @@ export function projectCommandWorkspaceSection<
     bookmarkManager: Options['bookmarkManager'];
     projectPlanningService: Options['projectPlanningService'];
     projectPlanningProjectId: Options['projectPlanningProjectId'];
-    workPlanStore: Options['workPlanStore'];
+    workPlan: Options['workPlan'];
   };
 }
 
@@ -175,7 +175,7 @@ export function projectBootstrapShellCommandOptions<
       readonly automationManager: unknown;
       readonly projectPlanningService: unknown;
       readonly projectPlanningProjectId: unknown;
-      readonly workPlanStore: unknown;
+      readonly workPlan: unknown;
       readonly providerOptimizer: unknown;
       readonly pluginManager: unknown;
       readonly hookWorkbench: unknown;
@@ -245,7 +245,7 @@ export function projectBootstrapShellCommandOptions<
     automationManager: input.services.automationManager,
     projectPlanningService: input.services.projectPlanningService,
     projectPlanningProjectId: input.services.projectPlanningProjectId,
-    workPlanStore: input.services.workPlanStore,
+    workPlan: input.services.workPlan,
     providerOptimizer: input.services.providerOptimizer,
     pluginManager: input.services.pluginManager,
     hookWorkbench: input.services.hookWorkbench,
@@ -305,7 +305,7 @@ export function projectBootstrapShellCommandOptions<
     automationManager: Input['services']['automationManager'];
     projectPlanningService: Input['services']['projectPlanningService'];
     projectPlanningProjectId: Input['services']['projectPlanningProjectId'];
-    workPlanStore: Input['services']['workPlanStore'];
+    workPlan: Input['services']['workPlan'];
     providerOptimizer: Input['services']['providerOptimizer'];
     pluginManager: Input['services']['pluginManager'];
     hookWorkbench: Input['services']['hookWorkbench'];
@@ -374,7 +374,7 @@ export function projectAgentToolDependencies<
       /** The memory spine under the name the product gives it; `active` is true while memory goes over the wire. */
       readonly memorySpineClient?: ({ readonly active: boolean } & import('@goodvibes-jev/engine/platform/platform/runtime/memory-spine').MemoryAccess) | undefined;
       readonly memorySpine?: ({ readonly active: boolean } & import('@goodvibes-jev/engine/platform/platform/runtime/memory-spine').MemoryAccess) | undefined;
-      readonly workPlanStore?: unknown;
+      readonly workPlan?: unknown;
       readonly sandboxSessionRegistry: unknown;
       readonly workflow: unknown;
       readonly contextAccountingHolder: unknown;
@@ -420,7 +420,7 @@ export function projectAgentToolDependencies<
     workflowServices: input.services.workflow,
     contextAccountingHolder: input.services.contextAccountingHolder,
     // A worker keeps the same project work plan as the conversation that spawned it.
-    workPlan: input.services.workPlanStore,
+    workPlan: input.services.workPlan,
     // A worker's tool calls fire the owner's tool hooks, as the conversation's own calls do.
     toolCallHooks: input.services.hookDispatcher,
   } as {
@@ -456,7 +456,7 @@ export function projectAgentToolDependencies<
     sandboxSessionRegistry: Input['services']['sandboxSessionRegistry'];
     workflowServices: Input['services']['workflow'];
     contextAccountingHolder: Input['services']['contextAccountingHolder'];
-    workPlan: Input['services']['workPlanStore'];
+    workPlan: Input['services']['workPlan'];
     toolCallHooks: Input['services']['hookDispatcher'];
   };
 }

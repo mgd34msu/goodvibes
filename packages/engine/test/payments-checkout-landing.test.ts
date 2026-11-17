@@ -7,7 +7,7 @@ describe('the page a submitted checkout landed on', () => {
   });
 
   test('a decline names no order, whatever else the page says', () => {
-    expect(readOrderConfirmation('Order #10293. Your payment was declined, please try again.', true)).toEqual({ orderId: null, challenge: null });
+    expect(readOrderConfirmation('Thank you for your order! Order number: AB-10293. Your payment was declined, please try again.', true)).toEqual({ orderId: null, challenge: null });
   });
 
   test('a card-shaped number is never taken as the order number', () => {

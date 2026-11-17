@@ -1,4 +1,5 @@
-export { PostalAddressHeldError, postalConfigKey, readConfigSettingForDisplay } from './postal-address.js';
+export { PostalAddressHeldError } from './postal-address.js';
+export { readConsumerSetting, type ConsumerConfigReader } from './profile-fallback.js';
 export type { PostalKind, PostalParts, PostalReadOptions, PreparedPostalAddress } from './postal-address.js';
 /**
  * Config system barrel export.

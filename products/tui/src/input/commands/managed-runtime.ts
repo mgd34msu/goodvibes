@@ -23,12 +23,12 @@ import { describeSetupTransferChanges, isSecurityBearingChange } from './local-s
 
 /** The stored settings, never an owner-profile value: a rollback must not pin a profile value as a setting. */
 function buildConfigSnapshot(
-  manager: { getStored: (key: ConfigKey) => unknown },
+  manager: { get: (key: ConfigKey) => unknown },
 ): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {};
   for (const entry of CONFIG_SCHEMA) {
     try {
-      snapshot[entry.key] = structuredClone(manager.getStored(entry.key));
+      snapshot[entry.key] = structuredClone(manager.get(entry.key));
     } catch {
       // A key with no place in this build's settings tree is not part of the snapshot.
     }

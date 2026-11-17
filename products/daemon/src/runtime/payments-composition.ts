@@ -56,7 +56,7 @@ import type { OwnerMailHandler, OwnerMailRelay } from './owner-mail-relay.js';
 export interface PaymentsCompositionOptions {
   readonly paymentContinuationOwner?: Pick<import('@goodvibes-jev/engine/platform/platform/payments').NativeCheckoutWindowRestorationOptions, 'pairing' | 'scopes'> | undefined;
   readonly nativeDataWriter?: import('@goodvibes-jev/engine/platform/platform/runtime/self-update').NativeDataWriteOwner | undefined;
-  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'preparePostalAddress'>>;
+  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'preparePostalAddress' | 'resolveForConsumer'>>;
   readonly shellPaths: ShellPathService;
   readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'>;
   /** Binding the catalog is what turns the family from a 501 facade into handlers. */
@@ -188,8 +188,13 @@ function daemonScopedSecrets(secretsManager: Pick<SecretsManager, 'get' | 'set' 
 }
 
 /** Read live, per call: a budget raised five minutes ago applies to the next read. */
-function livePaymentsConfig(configManager: Pick<ConfigManager, 'get'>): PaymentsConfigReader {
-  return { get: (key: string) => configManager.get(key as Parameters<ConfigManager['get']>[0]) };
+function livePaymentsConfig(configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'resolveForConsumer'>>): PaymentsConfigReader {
+  const resolveForConsumer = configManager.resolveForConsumer?.bind(configManager);
+  return {
+    get: (key: string) => configManager.get(key as Parameters<ConfigManager['get']>[0]),
+    // The owner's currency and zone come from the profile when the setting is unset.
+    ...(resolveForConsumer ? { resolveForConsumer: (key: string) => resolveForConsumer(key as Parameters<ConfigManager['get']>[0]) } : {}),
+  };
 }
 
 /**

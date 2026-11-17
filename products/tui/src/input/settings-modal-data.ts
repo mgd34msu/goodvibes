@@ -217,11 +217,11 @@ export function buildSettingGroups(
   });
   const hostMetadataUnavailable = hostEntries.some(entry => entry.metadataUnavailable !== undefined);
   // A number or string host setting is edited like a schema row: the manager's
-  // getStored, setDynamic and validation take a registered host key.
+  // get, setDynamic and validation take a registered host key.
   const hostValueEntries = hostSchema.flatMap((setting): BuiltinSettingEntry[] => {
     if (setting.type === 'boolean') return [];
     const row: ConfigSetting = { key: setting.key as ConfigKey, type: setting.type, default: setting.default, description: setting.description };
-    const currentValue = configManager.getStored(row.key);
+    const currentValue = configManager.get(row.key);
     return [{
       setting: row, currentValue, isDefault: deepEqual(currentValue, row.default),
       metadataUnavailable: hostMetadataUnavailable ? POLICY_METADATA_UNAVAILABLE : undefined,
@@ -239,7 +239,7 @@ export function buildSettingGroups(
     const rawCat = setting.key.split('.')[0] as string;
     const cat = rawCat as SettingsCategory;
     // A settings row shows the stored setting; an owner-profile value is a consumer's fact, not this row's.
-    const currentValue = configManager.getStored(setting.key as ConfigKey);
+    const currentValue = configManager.get(setting.key as ConfigKey);
     const resolved = lookup?.(setting.key as ConfigKey)?.entry;
     const entry: SettingEntry = {
       setting,
@@ -754,7 +754,7 @@ function refreshBuiltinSettingValue(entry: BuiltinSettingEntry, configManager: C
     entry.isDefault = refreshedLocal.isDefault;
     return;
   }
-  entry.currentValue = configManager.getStored(entry.setting.key);
+  entry.currentValue = configManager.get(entry.setting.key);
   entry.isDefault = deepEqual(entry.currentValue, entry.setting.default);
 }
 

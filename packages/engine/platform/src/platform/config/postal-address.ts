@@ -19,12 +19,4 @@ export interface PostalReadOptions {
   readonly assertCurrent?: (() => void) | undefined;
 }
 export type ProfilePostalReader = (kind: PostalKind, options: PostalReadOptions) => Promise<PreparedPostalAddress>;
-export function postalConfigKey(key: string): boolean {
-  return (['shipping', 'billing'] as const).some(kind => POSTAL_PARTS.some(part => key === `payments.${kind}Address.${part}`));
-}
 
-/** Per-row UI read: a held postal reading never tears down the whole settings surface. */
-export function readConfigSettingForDisplay(read: () => unknown): { readonly value: unknown; readonly held?: string | undefined } {
-  try { return { value: read() }; }
-  catch (error) { if (!(error instanceof PostalAddressHeldError)) throw error; return { value: undefined, held: error.message }; }
-}

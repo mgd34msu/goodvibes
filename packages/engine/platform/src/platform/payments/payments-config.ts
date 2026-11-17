@@ -12,7 +12,8 @@
  * nothing until the daemon was bounced, which is the failure that makes a
  * settings screen untrustworthy.
  *
- * So every field below is read through `configManager.get` on each call.
+ * So every field below is read through `configManager.get` on each call (the
+ * owner's currency and zone through `resolveForConsumer`, which the profile fills).
  *
  * ══ The timezone comes from config, which the profile feeds ═══════════════
  *
@@ -37,6 +38,7 @@
  * screen, or a message.
  */
 import { parseMoneyAmount } from '../config/money-value.js';
+import { readConsumerSetting } from '../config/profile-fallback.js';
 import { minorUnitExponent } from './money-parsing.js';
 import { DEFAULT_MARKETPLACE_LISTING_THRESHOLDS } from './marketplace-listing.js';
 import { merchantPolicyFromConfig, type MerchantPolicy } from './merchant-recourse.js';
@@ -47,10 +49,18 @@ import type { PaymentsServiceConfig } from './payments-gateway-service.js';
 /** The narrow slice of the config manager this needs. Injectable for tests. */
 export interface PaymentsConfigReader {
   get(key: string): unknown;
+  /** The profile-filled value of an unset key (currency, zone); see `ConfigManager.resolveForConsumer`. */
+  resolveForConsumer?(key: string): unknown;
 }
 
 function readString(config: PaymentsConfigReader, key: string, fallback: string): string {
   const value = config.get(key);
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+/** A setting the owner profile fills when it is unset: the owner's currency and zone. */
+function readConsumerString(config: PaymentsConfigReader, key: string, fallback: string): string {
+  const value = readConsumerSetting(config, key);
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
 }
 
@@ -166,7 +176,7 @@ export function readBudgetLimits(config: PaymentsConfigReader, currency: string)
  * place to stop than a crash in a config reader.
  */
 export function readPaymentsServiceConfig(config: PaymentsConfigReader): PaymentsServiceConfig {
-  const currencyRaw = readString(config, 'payments.currency', 'USD');
+  const currencyRaw = readConsumerString(config, 'payments.currency', 'USD');
   const currency = parseCurrencyCode(currencyRaw) ?? (parseCurrencyCode('USD') as CurrencyCode);
 
   return {
@@ -174,7 +184,7 @@ export function readPaymentsServiceConfig(config: PaymentsConfigReader): Payment
     budgetCurrency: currency,
     // Unset resolves to UTC, matching day.ts. The owner profile maps
     // location.timezone onto this key, so the owner's location drives the daily reset.
-    timezone: readString(config, 'daemon.timezone', 'UTC'),
+    timezone: readConsumerString(config, 'daemon.timezone', 'UTC'),
     preferredTier: readTier(config),
     // An hour survives a meeting; denial is the recoverable outcome, so
     // too-short costs friction and too-long holds a cart against a drifting

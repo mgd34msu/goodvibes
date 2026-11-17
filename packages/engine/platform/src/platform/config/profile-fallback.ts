@@ -1,5 +1,6 @@
 /**
- * profile-fallback.ts, the port `ConfigManager.get()` reads an unset key through.
+ * profile-fallback.ts, the port `ConfigManager.resolveForConsumer()` reads an
+ * unset key through.
  *
  * This file exists so `platform/config` gains NO import of
  * `platform/owner-profile`. The profile module opens files, watches a directory
@@ -10,9 +11,11 @@
  *
  * ## Where the fallback applies, and where it must not
  *
- * `ConfigManager.get()` ONLY. Never `getAll()`, never a category read, never a
- * settings dump or export, never a settings row: those read `getStored()`. `get()` is one keyed read by a consumer that needs
- * that value to do its job. A dump is a different act: it hands the whole
+ * `ConfigManager.resolveForConsumer()` ONLY. Never `get()`, `getAll()`, a
+ * category read, a settings dump, snapshot, export or settings row: those carry
+ * the stored setting, so a restore or import never pins a profile value as an
+ * explicit setting. `resolveForConsumer()` is one keyed read by a consumer that
+ * needs that value to do its job. A dump is a different act: it hands the whole
  * settings surface to a caller, and a fallback applied there would put
  * `commerce.shippingAddress` in front of something that never asked for it and
  * never triggered the closed-tier disclosure rule. A bulk read therefore sees
@@ -63,11 +66,8 @@ export function isUnsetConfigValue(value: unknown): boolean {
  * that never installs a profile behaves byte-for-byte as it did before this
  * existed.
  *
- * Called from `get()` and from nowhere else. That is the containment rule, and
- * it is a rule about the CALLER, so it cannot be enforced from inside here,
- * which is why it is written down at the top of this file and asserted by
- * owner-profile-consumers.test.ts against `getAll()`, `getCategory()` and
- * `getRaw()` rather than left as an intention.
+ * Called from `ConfigManager.resolveForConsumer()` and from nowhere else; every
+ * other read of the manager returns the stored value by construction.
  */
 export function resolveWithProfileFallback(
   key: string,
@@ -82,4 +82,18 @@ export function resolveWithProfileFallback(
   // `ConfigManager.preparePostalAddress`.
   try { fromProfile = reader(key); } catch { return stored; }
   return fromProfile === undefined ? stored : fromProfile;
+}
+
+/** A config slice whose owner may also answer the profile-filled value of one key. */
+export interface ConsumerConfigReader {
+  get(key: string): unknown;
+  resolveForConsumer?(key: string): unknown;
+}
+
+/**
+ * The value a feature acts on: the profile-filled value where the reader
+ * offers one (a `ConfigManager`), the stored setting otherwise.
+ */
+export function readConsumerSetting(config: ConsumerConfigReader, key: string): unknown {
+  return config.resolveForConsumer ? config.resolveForConsumer(key) : config.get(key);
 }

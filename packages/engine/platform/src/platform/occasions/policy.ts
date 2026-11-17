@@ -13,12 +13,15 @@
  * ConfigManager to this interface, the same adaptation the check-in uses.
  */
 import { OCCASIONS_CONFIG_KEYS } from './types.js';
+import { readConsumerSetting } from '../config/profile-fallback.js';
 import { occasionsConfigDefaults } from '../config/schema-domain-occasions.js';
 import type { OccasionsPolicy } from './sweep.js';
 
 /** The narrow config surface this feature reads and writes. */
 export interface OccasionsConfigAccess {
   get(key: string): unknown;
+  /** The profile-filled value of an unset key (the owner's zone); see `ConfigManager.resolveForConsumer`. */
+  resolveForConsumer?(key: string): unknown;
   /** Actual configuration incarnation, including no-op and ABA mutation intent. */
   getConfigurationIncarnation?(): number;
   set(key: string, value: string | boolean | number): void;
@@ -74,6 +77,6 @@ export function readOccasionsPolicy(config: OccasionsConfigAccess): OccasionsPol
  * 3am.
  */
 export function readOccasionsTimezone(config: OccasionsConfigAccess): string {
-  const value = config.get('daemon.timezone');
+  const value = readConsumerSetting(config, 'daemon.timezone');
   return typeof value === 'string' ? value : '';
 }

@@ -87,7 +87,6 @@ export interface HostSettingEntry extends SettingEntryState {
 }
 
 interface SettingEntryState extends CommonSettingEntryState {
-  valueUnavailable?: string;
   flag?: FlagEntry;
   ownerFlagId?: string;
 }

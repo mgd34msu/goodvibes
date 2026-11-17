@@ -47,7 +47,7 @@ import {
   type ProviderCalendar,
   type ResolvedClientConfig,
 } from '@goodvibes-jev/engine/platform/platform/calendar';
-import { createOAuthLocalListener } from '@goodvibes-jev/engine/platform/platform/config';
+import { createOAuthLocalListener, readConsumerSetting } from '@goodvibes-jev/engine/platform/platform/config';
 import type { ConfigKey } from '../../config/index.ts';
 import type { SecretScope } from '../../config/secrets.ts';
 import { resolveCredentialWriteScope } from '../../config/credential-scope.ts';
@@ -66,6 +66,8 @@ export const CALENDAR_OAUTH_CLIENT_SECRET_KEYS: Record<CalendarProviderId, strin
 /** The narrow config-manager slice this service reads. */
 export interface CalendarConfigReader {
   get(key: string): unknown;
+  /** The profile-filled value of an unset key (the owner's zone); see `ConfigManager.resolveForConsumer`. */
+  resolveForConsumer?(key: string): unknown;
 }
 
 /**
@@ -537,9 +539,9 @@ export class CalendarOAuthService {
     return { result, calendar, ownerZone };
   }
 
-  /** The owner's zone: `daemon.timezone` when set, else this machine's zone, else UTC. */
+  /** The owner's zone: `daemon.timezone` when set, else the owner profile's zone, else this machine's zone, else UTC. */
   ownerZone(): string {
-    const configured = this.readString('daemon.timezone');
+    const configured = this.readString('daemon.timezone', true);
     if (configured) return configured;
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   }
@@ -571,14 +573,15 @@ export class CalendarOAuthService {
     };
   }
 
-  private readString(key: string): string | undefined {
+  /** `forConsumer` reads the value the owner profile fills when the setting is unset. */
+  private readString(key: string, forConsumer = false): string | undefined {
     // get() throws when the config section does not exist yet (nothing has seeded
     // 'calendar'). Treat that as "unset", an environment where nobody has registered
     // an OAuth app yet is a normal state that reads as not-configured, not a schema
     // error surfaced to the operator.
     let value: unknown;
     try {
-      value = this.config.get(key);
+      value = forConsumer ? readConsumerSetting(this.config, key) : this.config.get(key);
     } catch {
       return undefined;
     }

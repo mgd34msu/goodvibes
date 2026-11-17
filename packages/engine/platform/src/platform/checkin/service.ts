@@ -30,6 +30,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { assembleCheckinBriefing, summarizeCheckinState } from './briefing.js';
 import { validateSchedule } from '../automation/schedules.js';
 import { isQuietHours, parseQuietHours } from './quiet-hours.js';
+import { readConsumerSetting } from '../config/profile-fallback.js';
 import { CHANNEL_DELIVERY_SURFACE_KINDS, parseChannelDeliveryTarget } from '../channels/delivery/types.js';
 import type { CheckinReceiptStore } from './receipts.js';
 import {
@@ -53,6 +54,8 @@ const DEFAULT_CADENCE = '0 */4 * * *';
  */
 export interface CheckinConfigAccess {
   get(key: string): unknown;
+  /** The profile-filled value of an unset key (quiet hours, channel); see `ConfigManager.resolveForConsumer`. */
+  resolveForConsumer?(key: string): unknown;
   set(key: string, value: string | boolean): void;
   /**
    * Writes several keys as one update (one settings write). Throws when the
@@ -204,8 +207,8 @@ export class CheckinService {
     return {
       enabled: get(CHECKIN_CONFIG_KEYS.enabled) === true,
       cadence: asString(get(CHECKIN_CONFIG_KEYS.cadence)) || DEFAULT_CADENCE,
-      deliveryChannel: asString(get(CHECKIN_CONFIG_KEYS.deliveryChannel)),
-      quietHours: asString(get(CHECKIN_CONFIG_KEYS.quietHours)),
+      deliveryChannel: asString(readConsumerSetting(this.deps.config, CHECKIN_CONFIG_KEYS.deliveryChannel)),
+      quietHours: asString(readConsumerSetting(this.deps.config, CHECKIN_CONFIG_KEYS.quietHours)),
     };
   }
 

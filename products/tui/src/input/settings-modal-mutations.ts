@@ -116,7 +116,7 @@ export function applySettingValue({
   // of surfacing the honest "Save failed" message the write path below produces.
   let previousValue: unknown;
   try {
-    previousValue = configManager.getStored(key);
+    previousValue = configManager.get(key);
   } catch (e) {
     logger.error('SettingsModal: failed to read previous config value', { key, error: summarizeError(e) });
   }
@@ -133,7 +133,7 @@ export function applySettingValue({
       for (const entry of entries) {
         if (entry.setting.key !== key) continue;
         // A settings row shows the stored setting; an owner-profile value is a consumer's fact, not this row's.
-        entry.currentValue = configManager.getStored(key);
+        entry.currentValue = configManager.get(key);
         entry.isDefault = deepEqual(entry.currentValue, entry.setting.default);
         refreshHostSettingEntry(entry, configManager);
       }

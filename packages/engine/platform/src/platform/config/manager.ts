@@ -1,5 +1,5 @@
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { postalConfigKey, POSTAL_PARTS, PostalAddressHeldError, type ProfilePostalReader, type PostalKind, type PostalReadOptions, type PreparedPostalAddress, type PostalParts } from './postal-address.js';
+import { POSTAL_PARTS, PostalAddressHeldError, type ProfilePostalReader, type PostalKind, type PostalReadOptions, type PreparedPostalAddress, type PostalParts } from './postal-address.js';
 import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
 import { PreparedSettingsTarget, settingsFileIdentity } from './prepared-target.js';
 import { createHash } from 'node:crypto';
@@ -557,13 +557,22 @@ export class ConfigManager {
   }
 
   /**
-   * Get a config value by dot-path key.
-   *
-   * An UNSET key may resolve from the owner profile when a fallback reader is
-   * installed, one keyed read by a consumer that needs the value. Deliberately
-   * not applied by `getAll()` or any category/dump path: see ./profile-fallback.ts.
+   * Get a config value by dot-path key: the setting as stored (or its
+   * default). Never the owner profile, so a settings row, dump, snapshot or
+   * export carries only what was set; see `resolveForConsumer`.
    */
   get<K extends ConfigKey>(key: K): ConfigValue<K> {
+    const { parent, field } = this.#resolvePath(key);
+    return detachedConfigValue(parent[field]) as ConfigValue<K>;
+  }
+
+  /**
+   * The value a feature acts on: the stored setting, or, when it is unset and
+   * the owner profile records the fact (the owner's zone, currency, quiet hours
+   * or preferred channel), the profile's value. One keyed read by the consumer
+   * that needs it; never used for a listing or export. See ./profile-fallback.ts.
+   */
+  resolveForConsumer<K extends ConfigKey>(key: K): ConfigValue<K> {
     const { parent, field } = this.#resolvePath(key);
     return detachedConfigValue(resolveWithProfileFallback(key, parent[field], this.profileFallback)) as ConfigValue<K>;
   }
@@ -571,12 +580,6 @@ export class ConfigManager {
   /** Whether a settings file or a runtime override holds this key, rather than the shipped default. One map lookup. */
   isExplicitlySet(key: ConfigKey): boolean {
     return this.runtimeState.sources.has(key) || this.runtimeState.overrides.has(key);
-  }
-
-  /** Explicit stored value for settings edit/clear receipts, without profile disclosure. */
-  getStored<K extends ConfigKey>(key: K): ConfigValue<K> {
-    const { parent, field } = this.#resolvePath(key);
-    return detachedConfigValue(parent[field]) as ConfigValue<K>;
   }
 
   /** Validate registration and return an immutable, manager-bound boolean handle. */
@@ -2012,7 +2015,7 @@ export class ConfigManager {
   describeConfigKeySource(key: ConfigKey): ConfigKeySource {
     return describeKeySource({
       key,
-      value: postalConfigKey(key) ? (() => { const { parent, field } = this.#resolvePath(key); return parent[field]; })() : this.get(key),
+      value: this.get(key),
       shareable: isSharedConfigKey(key),
       daemonOwned: isDaemonOwnedConfigKey(key),
       sharedTierPath: this.sharedTierPath,

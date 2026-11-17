@@ -1,4 +1,4 @@
-import { PostalAddressHeldError } from '../config/postal-address.js';
+import { isUnsetConfigValue } from '../config/profile-fallback.js';
 /**
  * consumers.ts, every place that used to hold or guess a fact about the owner,
  * reading it from here instead.
@@ -8,14 +8,14 @@ import { PostalAddressHeldError } from '../config/postal-address.js';
  * call-site edits. An explicitly configured value still wins; the profile fills
  * only the gap where a scalar setting is unset. The current schema includes
  * payment settings and `daemon.timezone`. Postal address parts use the async
- * verified preparation boundary; this synchronous reader holds those requests.
+ * verified preparation boundary; this synchronous reader answers nothing for them.
  * A missing config section throws before a fallback can run, and
  * {@link profileFallbackStatus} catches that failure when reporting the map.
  *
  * ## Where the fallback applies
  *
- * `ConfigManager.get()` only. Never a bulk listing, category read, dump or
- * export, see `config/profile-fallback.ts` for the rule and the reasoning:
+ * `ConfigManager.resolveForConsumer()` only. Never `get()`, a bulk listing,
+ * category read, dump or export, see `config/profile-fallback.ts` for the rule and the reasoning:
  * a config dump resolving through the profile would hand a caller
  * `commerce.shippingAddress` when it asked for "the settings", without ever
  * passing the closed-tier disclosure rule.
@@ -182,14 +182,12 @@ export function createConsumerFallbackReader(
   return (key: string): unknown => {
     if (!isEnabled()) return undefined;
     const row = ROW_BY_CONFIG_KEY.get(key);
-    if (row === undefined) return undefined;
-    if (row.addressPart !== undefined && source.status().kind === 'unavailable') throw new PostalAddressHeldError();
+    // An address part is never a synchronous answer: `ConfigManager.preparePostalAddress` reads it.
+    if (row === undefined || row.addressPart !== undefined) return undefined;
     const field = source.get(row.fieldId);
     if (field === undefined || !field.valid) return undefined;
     const value = field.value.trim();
-    if (value.length === 0) return undefined;
-    if (row.addressPart === undefined) return value;
-    throw new PostalAddressHeldError();
+    return value.length === 0 ? undefined : value;
   };
 }
 
@@ -208,10 +206,11 @@ export interface ConsumerFallbackStatus {
  * Report which consumer keys currently resolve from the profile.
  *
  * §13.1: a listing may show THAT a key resolves from the profile; it does not
- * show the value, and nothing here returns one. The `get` call is wrapped
- * because `ConfigManager.resolvePath()` throws for a section absent from a
- * build. A held postal fallback is reported as held, and an absent section is
- * reported as a missing key; neither prevents the other rows from being listed.
+ * show the value, and nothing here returns one. `get` reads the stored setting
+ * and is wrapped because it throws for a section absent from a build, which is
+ * reported as a missing key. An address part the profile holds is reported as
+ * held: it is used only after the async verified reading. Neither prevents the
+ * other rows from being listed.
  */
 export function profileFallbackStatus(
   source: ConsumerProfileSource,
@@ -219,14 +218,15 @@ export function profileFallbackStatus(
 ): readonly ConsumerFallbackStatus[] {
   return CONSUMER_FALLBACKS.map((row) => {
     let keyExists = true;
-    let held = false;
-    try { get(row.configKey); }
-    catch (error) { if (error instanceof PostalAddressHeldError) held = true; else keyExists = false; }
+    let stored: unknown;
+    try { stored = get(row.configKey); }
+    catch { keyExists = false; }
     const field = source.get(row.fieldId);
     const present = field?.valid === true && field.value.trim().length > 0;
+    const held = present && row.addressPart !== undefined;
     return {
       configKey: row.configKey, fieldId: row.fieldId, keyExists,
-      resolvesFromProfile: keyExists && present && !held,
+      resolvesFromProfile: keyExists && present && !held && isUnsetConfigValue(stored),
       status: held ? 'held' : present ? 'available' : 'missing',
     };
   });

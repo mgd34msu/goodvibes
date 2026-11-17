@@ -4,7 +4,6 @@ import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes-jev/engine/
 import { TerminalSettingsModalState } from '@goodvibes-jev/engine/terminal-shell/settings-modal-state';
 import { moveSettingsSelection, selectSettingsTarget } from '@goodvibes-jev/engine/terminal-shell/settings-navigation';
 import { hasActiveExecutionMode, readExecutionMode, refreshExecutionMode, setExecutionMode } from '../permissions/execution-mode.ts';
-import { postalConfigKey, readConfigSettingForDisplay } from '@goodvibes-jev/engine/platform/platform/config';
 /** SettingsModal state for the /settings and /config fullscreen workspace. */
 
 import type { ModelPickerTarget } from './model-picker.ts';
@@ -748,21 +747,18 @@ export class SettingsModal extends TerminalSettingsModalState<
     for (const setting of getAgentSettingsSchema(configManager)) {
       const rawCat = setting.key.split('.')[0] as string;
       const cat = rawCat as SettingsCategory;
-      const display = readConfigSettingForDisplay(() =>
-        setting.key === 'permissions.mode'
-          ? readExecutionMode(configManager)
-          : setting.kind === 'host'
-            ? configManager.getHostBooleanSetting(setting.key).get()
-            : configManager.get(setting.key),
-      );
-      const currentValue = display.value;
+      const currentValue = setting.key === 'permissions.mode'
+        ? readExecutionMode(configManager)
+        : setting.kind === 'host'
+          ? configManager.getHostBooleanSetting(setting.key).get()
+          : configManager.get(setting.key);
       const resolved = setting.kind === 'host' ? undefined : lookup?.(setting.key)?.entry;
       const entry: SettingEntry = {
         setting,
         currentValue,
         isDefault: currentValue === setting.default,
-        effectiveSource: policyError || display.held ? 'unavailable' : resolved?.effectiveSource,
-        metadataUnavailable: policyError ?? display.held,
+        effectiveSource: policyError ? 'unavailable' : resolved?.effectiveSource,
+        metadataUnavailable: policyError,
         // `locked`/`lockReason` now come only from a genuine higher-priority
         // config layer. The blanket host-owned lock that used to force them here
         // is gone, those keys route to the daemon that owns them.
@@ -904,13 +900,10 @@ export class SettingsModal extends TerminalSettingsModalState<
           this._refreshHostEntry(entry);
           continue;
         }
-        const display = readConfigSettingForDisplay(() =>
-          entry.setting.key === 'permissions.mode'
-            ? readExecutionMode(this.configManager!)
-            : this.configManager!.get(entry.setting.key as never),
-        );
-        entry.currentValue = display.value;
-        entry.metadataUnavailable = display.held;
+        entry.currentValue = entry.setting.key === 'permissions.mode'
+          ? readExecutionMode(this.configManager)
+          : this.configManager.get(entry.setting.key as never);
+        entry.metadataUnavailable = undefined;
         entry.isDefault = entry.currentValue === entry.setting.default;
         if (entry.setting.key === 'permissions.mode')
           entry.sourceLabel = hasActiveExecutionMode(this.configManager) ? 'Active hosted session' : undefined;
@@ -1042,7 +1035,7 @@ export class SettingsModal extends TerminalSettingsModalState<
       );
       return true;
     }
-    const previousValue = postalConfigKey(key) ? this.configManager.getStored(key) : this.configManager.get(key);
+    const previousValue = this.configManager.get(key);
     // A setting the DAEMON acts on is written where it is acted on. Writing it
     // into this process's own store is the defect this routing exists to end:
     // the modal accepted the value, reported success, and configured nothing,
@@ -1084,9 +1077,8 @@ export class SettingsModal extends TerminalSettingsModalState<
       for (const entries of this.groups.values()) {
         const entry = entries.find((candidate) => candidate.setting.key === key);
         if (entry) {
-          const display = readConfigSettingForDisplay(() => this.configManager!.get(key));
-          entry.currentValue = display.value;
-          entry.metadataUnavailable = display.held;
+          entry.currentValue = this.configManager.get(key);
+          entry.metadataUnavailable = undefined;
           entry.isDefault = entry.currentValue === entry.setting.default;
           this._refreshHostEntry(entry);
         }

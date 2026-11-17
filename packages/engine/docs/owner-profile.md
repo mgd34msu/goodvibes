@@ -358,7 +358,7 @@ no way to connect it to anything.
 
 **The initial load is synchronous, at boot.** An earlier version of this section
 prescribed a `ready` promise that verbs and consumer reads would await. That was
-wrong, and the reason is worth keeping: **`ConfigManager.get()` is synchronous**,
+wrong, and the reason is worth keeping: **`ConfigManager.resolveForConsumer()` is synchronous**,
 so a fallback reader has nothing to await with. A readiness promise could have
 closed the verb half of the window and never the consumer half, which is the
 half that costs the owner a mis-timed check-in. Reading the file once,
@@ -1250,14 +1250,19 @@ key is unset.
 That direction matters. A profile that overrode a value the owner deliberately
 configured would be the drift class in reverse.
 
-**The fallback applies in `ConfigManager.get()` only, never in a bulk listing or
-export path.** `get()` is a single keyed read by a consumer that needs the value
-to do its job. A config dump is a different act: it hands the whole settings
+**The fallback applies in `ConfigManager.resolveForConsumer()` only.**
+`ConfigManager.get()` and every listing, settings row, snapshot, rollback and
+export read the stored setting. `resolveForConsumer()` is a single keyed read by
+a consumer that needs the value to do its job (the check-in's quiet hours and
+channel, the occasions and payments day boundary, the payments currency, the
+calendar's zone). A config dump is a different act: it hands the whole settings
 surface to a caller, and if the fallback applied there, `commerce.shippingAddress`
 would appear in a config listing without passing the closed-tier disclosure rule
-of §11.2. So a bulk read sees the raw stored value, unset, and the profile
-value reaches only the consumer that asked for that one key. A listing may show
-*that* a key resolves from the profile; it does not show the value.
+of §11.2, and a snapshot restored or a bundle imported later would pin the
+profile's value as an explicit setting that no longer follows the profile. So a
+bulk read sees the raw stored value, unset, and the profile value reaches only
+the consumer that asked for that one key. A listing may show *that* a key
+resolves from the profile; it does not show the value.
 
 The payment and daemon settings exist in the current schema. A declared map
 connects those keys to the profile fields, and scalar reads use the profile only
@@ -1267,7 +1272,7 @@ default `payments.currency` value of `USD`.
 Postal addresses use `ConfigManager.preparePostalAddress()` instead of a
 synchronous scalar fallback. It reads the configured address parts, prepares a
 verified profile address when parts are missing, and preserves each configured
-part. A synchronous request for a profile-backed postal part remains held.
+part. A synchronous read of a postal part answers the stored part only.
 The prepared result also checks that the configuration and installed profile
 reader remain current before a consumer uses the address.
 

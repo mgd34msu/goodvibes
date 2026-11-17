@@ -1,4 +1,3 @@
-import { PostalAddressHeldError } from './postal-address.js';
 /**
  * daemon-config-read.ts, reading config by OWNERSHIP, the other half of the
  * routing table in daemon-config-route.ts.
@@ -326,11 +325,7 @@ function localEntry(
   const store = scope === 'daemon'
     ? (local.getDaemonTierPath?.() ?? local.getConfigPath())
     : local.getConfigPath();
-  try { return { key, scope, source: 'local', status: 'ok', value: local.get(key), store, reason }; }
-  catch (error) {
-    if (!(error instanceof PostalAddressHeldError)) throw error;
-    return { key, scope, source: 'local', status: 'unavailable', store, reason, error: error.message };
-  }
+  return { key, scope, source: 'local', status: 'ok', value: local.get(key), store, reason };
 }
 
 function daemonEntry(

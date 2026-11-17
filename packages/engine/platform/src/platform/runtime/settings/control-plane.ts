@@ -1,4 +1,3 @@
-import { postalConfigKey } from '../../config/postal-address.js';
 import type { ConfigManager } from '../../config/manager.js';
 import { join } from 'node:path';
 import { CONFIG_SCHEMA } from '../../config/index.js';
@@ -509,7 +508,7 @@ function rollbackManagedApplyLocked(configManager: ConfigManager, token: string,
 
 /** The value the setting has now: the config is the one store of it. */
 function liveSettingValue(configManager: ConfigManager, key: ConfigKey): unknown {
-  return postalConfigKey(key) ? configManager.getStored(key) : configManager.get(key);
+  return configManager.get(key);
 }
 
 /** A pulled or managed layer is in effect only while the live setting still holds the value it applied. */

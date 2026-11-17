@@ -101,7 +101,7 @@ export function buildSetupTransferBundle(ctx: CommandContext, snapshot: SetupRev
     // The stored setting, never an owner-profile value: an exported profile value
     // would become an explicit setting on import and stop following the profile.
     let value: unknown;
-    try { value = structuredClone(ctx.platform.configManager.getStored(entry.key as ConfigKey)); }
+    try { value = structuredClone(ctx.platform.configManager.get(entry.key as ConfigKey)); }
     catch { continue; } // a key with no place in this build's settings tree does not travel
     // Only settings that differ from the default travel: an exported default would
     // become an explicit override on import and keep an old default pinned.

@@ -646,7 +646,7 @@ function buildTuiSettingsImportPlan(context: CommandContext, read: TuiImportSour
     const known = agentWorkspaceSettingSchema(context, key);
     const current = known === null ? undefined
       : known.kind === 'host' ? readAgentSettingValue(configManager, known)
-        : configManager.getStored(known.key);
+        : configManager.get(known.key);
     return {
       key,
       source: entry.source,
@@ -663,7 +663,7 @@ function buildTuiSettingsImportPlan(context: CommandContext, read: TuiImportSour
       settings.push(skippedEntry(key, entry, 'Not an Agent-owned setting, so it is not imported.'));
       continue;
     }
-    const current = configManager.getStored(setting.key);
+    const current = configManager.get(setting.key);
     const status: TuiImportStatus = valuesMatch(current, entry.value) ? 'unchanged' : 'would_import';
     settings.push({
       key: setting.key,
@@ -959,7 +959,7 @@ export async function applyAgentWorkspaceTuiSettingsImport(
       createdAt: new Date().toISOString(),
       settings: changing.map((entry) => isSecretLikeSettingKey(entry.key)
         ? { key: entry.key, previous: null, restorable: false }
-        : { key: entry.key, previous: configManager.getStored(entry.key as Parameters<typeof configManager.getStored>[0]) ?? null, restorable: true }),
+        : { key: entry.key, previous: configManager.get(entry.key as Parameters<typeof configManager.get>[0]) ?? null, restorable: true }),
     });
   }
 

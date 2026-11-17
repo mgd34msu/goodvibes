@@ -21,8 +21,10 @@ export function registerComposedCheckinGatewayMethods(catalog: GatewayMethodCata
     const configManager = deps.configManager;
     const onDidInvalidate = deps.configManager.onDidInvalidate.bind(configManager);
     const subscribe = configManager.subscribe?.bind(configManager);
+    const resolveForConsumer = configManager.resolveForConsumer?.bind(configManager);
     const checkinConfig = {
       get: (key: string): unknown => configManager.get(key as ConfigKey),
+      ...(resolveForConsumer ? { resolveForConsumer: (key: string): unknown => resolveForConsumer(key as ConfigKey) } : {}),
       onDidInvalidate: (listener: () => void) => onDidInvalidate(listener),
       ...(subscribe ? { subscribe: (key: string, listener: () => void) => subscribe(key as ConfigKey, listener) } : {}),
       set: (key: string, value: string | boolean): void => configManager.set(key as ConfigKey, value as never),

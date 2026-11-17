@@ -80,7 +80,7 @@ export interface OccasionsCompositionDeps {
   /** The store that already owns the owner-profile file. */
   readonly ownerProfile: OwnerProfileStore;
   /** Reads the live `occasions.*` and `daemon.timezone` policy. */
-  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getConfigurationIncarnation'>>;
+  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getConfigurationIncarnation' | 'resolveForConsumer'>>;
   /** Absolute path of the machine-owned state file. */
   readonly statePath: string;
   /** Where a nudge is delivered. Absent ⇒ pull-only, through `occasions.pending`. */
@@ -159,6 +159,7 @@ export function composeOccasions(
     config: {
       ...(deps.configManager.getConfigurationIncarnation ? { getConfigurationIncarnation: () => deps.configManager.getConfigurationIncarnation!() } : {}),
       get: (key: string): unknown => deps.configManager.get(key as ConfigKey),
+      ...(deps.configManager.resolveForConsumer ? { resolveForConsumer: (key: string): unknown => deps.configManager.resolveForConsumer!(key as ConfigKey) } : {}),
       set: (): void => {
         // Settings are written through the ordinary config surface, which is
         // what puts them in the generated settings UIs. A second write path
@@ -276,7 +277,7 @@ export function composeOccasions(
  */
 export interface OccasionsInstallDeps {
   readonly nativeMutationHost?: NativeMutationHost | undefined;
-  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getConfigurationIncarnation'>>;
+  readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getConfigurationIncarnation' | 'resolveForConsumer'>>;
   readonly shellPaths: { resolveUserPath(...segments: string[]): string };
   /** Surface root the state file resolves under; required, never defaulted (control-plane-store-paths.ts). */
   readonly surfaceRoot: string;

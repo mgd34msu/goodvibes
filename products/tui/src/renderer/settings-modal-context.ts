@@ -151,7 +151,6 @@ function buildFlagContext(entry: SettingEntry | null): string[] {
     `Setting: ${feature.enablement.key} = ${formatValue(entry)}`,
     `State: ${displayState}`,
     ...(entry.metadataUnavailable ? [`Source: unavailable`, `Unavailable: ${entry.metadataUnavailable}`] : []),
-    ...(entry.valueUnavailable ? [`Value unavailable: ${entry.valueUnavailable} You can set an explicit value here.`] : []),
     // A capability the registry declares not operable reads as disabled no
     // matter what its settings key says. Without this line the row shows a
     // value of true beside a state of disabled and explains nothing, the
@@ -232,11 +231,10 @@ export const { currentSettingValue, buildSettingContext } = createSettingContext
   cursor: GLYPHS.surface.cursor,
   formatValue,
   label: getSettingLabel,
-  source: (entry) => (entry.metadataUnavailable || entry.valueUnavailable ? 'unavailable' : (entry.effectiveSource ?? 'default')),
+  source: (entry) => (entry.metadataUnavailable ? 'unavailable' : (entry.effectiveSource ?? 'default')),
   detail(entry) {
     const lines: string[] = [];
     if (entry.metadataUnavailable) lines.push(`Unavailable: ${entry.metadataUnavailable}`);
-    if (entry.valueUnavailable) lines.push(`Value unavailable: ${entry.valueUnavailable} You can set an explicit value here.`);
     if (entry.locked) lines.push(`Locked: ${entry.lockReason ?? 'This setting is locked by a higher-priority layer.'}`);
     if (entry.conflict) lines.push(`Conflict: resolve with /settings-sync resolve ${entry.setting.key} local|synced.`);
 

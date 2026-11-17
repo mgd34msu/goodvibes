@@ -725,7 +725,7 @@ export async function setHarnessSetting(
     await setExecutionMode(configManager, mode);
     return { key: setting.key, action: 'set', previous, current: readExecutionMode(configManager), ...executionModeDestination(configManager) };
   }
-  const previous = configManager.getStored(setting.key);
+  const previous = configManager.get(setting.key);
   const coerced = coerceHarnessSettingValue(setting, value);
   if (setting.type === 'string' && isSecretConfigKey(setting.key)) {
     const secretValue = String(coerced);
@@ -808,7 +808,7 @@ export async function resetHarnessSetting(
     handle.reset();
     return { key: setting.key, action: 'reset', previous, current: handle.get() };
   }
-  const previous = configManager.getStored(setting.key);
+  const previous = configManager.get(setting.key);
   const deletesSecret = isSecretConfigKey(setting.key);
   if (deletesSecret && typeof previous === 'string' && isSecretReferenceValue(previous) && !secretsManager?.delete) {
     throw new Error(`Cannot reset ${setting.key}: secrets manager is unavailable to delete the stored secret.`);
@@ -842,7 +842,7 @@ export async function resetHarnessSetting(
       key: setting.key,
       action: 'reset',
       previous: redactHarnessSettingValue(setting.key, previous),
-      current: redactHarnessSettingValue(setting.key, configManager.getStored(setting.key)),
+      current: redactHarnessSettingValue(setting.key, configManager.get(setting.key)),
       scope: configKeyScope(setting.key),
       appliedBy: 'local',
     };

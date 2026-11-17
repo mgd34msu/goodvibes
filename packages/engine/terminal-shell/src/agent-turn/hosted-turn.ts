@@ -70,6 +70,7 @@ import { registerAgentChannelSendTool } from './channel-send-tool.js';
 import { registerAgentBrowserTool, type AgentBrowserToolOptions, type BrowserToolBackend } from './browser-tool.js';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './google-wiring.js';
 import { connectedHostGoogleCalendar } from './google-tool.js';
+import { registerAgentCalendarTool, type AgentCalendarToolOptions } from './connected-calendar-tool.js';
 import { AGENT_PLATFORM_TOOL_ADMISSION, decorateAgentWorkerRegistry, installAgentToolPolicy } from './read-modes.js';
 import { connectedHostFamilyRemote } from './family-remote.js';
 import { registerAgentLocalRegistryTool } from './local-registry-tool.js';
@@ -191,6 +192,12 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   if (deps.browser) registerAgentBrowserTool(registry, deps.browser);
   // The google tool waits on the same book the accounts alias opened its watch in.
   wireAgentGoogleTool(registry, deps.accountExpectations ? { ...deps.google, expectations: deps.accountExpectations } : deps.google);
+  // The connected Google and Microsoft calendars (/calendar connect), read and
+  // written over the same settings and credential stores the google tool uses.
+  registerAgentCalendarTool(registry, {
+    config: deps.google.configManager as unknown as AgentCalendarToolOptions['config'],
+    secrets: deps.google.secretsManager as unknown as AgentCalendarToolOptions['secrets'],
+  });
 }
 
 /**
@@ -234,7 +241,7 @@ function hostedAgentSection(): string {
   const names = (list: readonly string[]): string => list.map((name) => `\`${name}\``).join(', ');
   return [
     '## This Agent turn is hosted by the daemon',
-    'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_learning_consolidation`, `agent_channel_send`, `browser` (the daemon\'s browser), `google` (the daemon\'s Google account and calendar) and, in the daemon\'s own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
+    'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_learning_consolidation`, `agent_channel_send`, `browser` (the daemon\'s browser), `google` (the daemon\'s Google account and calendar), `connected_calendar` (the connected Google and Outlook calendars) and, in the daemon\'s own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
     'The Agent Knowledge, research report and model comparison tools `agent_knowledge`, `agent_knowledge_ingest`, `agent_research_report` and `agent_model_compare` are here too: Agent Knowledge is this daemon\'s own, reached in process as the Agent reaches it, reports and comparisons are saved to the same artifact store, and a comparison\'s apply mode sets the Agent\'s own model setting.',
     'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing` and `agent_operator_method` are here too: their host is this daemon, reached in process with the credentials the GoodVibes Agent presents on this machine, so each call is admitted and judged exactly as in the Agent\'s own process: a call made on the owner\'s behalf (a schedule change, a channel draft, a profile or occasion write) is judged as the Agent\'s, and a purchase start or cancel carries the owner\'s request.',
     'The schedule tools `schedule`, `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` are here too: they list, create, edit, run, pause, resume and delete this daemon\'s own schedules through `agent_operator_method` and `agent_operator_action`, so each change is admitted and judged as in the Agent\'s own process.',

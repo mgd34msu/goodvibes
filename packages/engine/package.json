@@ -3567,6 +3567,11 @@
       "types": "./terminal-shell/dist/agent-turn/browser-tool.d.ts",
       "import": "./terminal-shell/dist/agent-turn/browser-tool.js"
     },
+    "./terminal-shell/agent-turn/calendar-oauth-service": {
+      "bun": "./terminal-shell/src/agent-turn/calendar-oauth-service.ts",
+      "types": "./terminal-shell/dist/agent-turn/calendar-oauth-service.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/calendar-oauth-service.js"
+    },
     "./terminal-shell/agent-turn/capability-summary-prompt": {
       "bun": "./terminal-shell/src/agent-turn/capability-summary-prompt.ts",
       "types": "./terminal-shell/dist/agent-turn/capability-summary-prompt.d.ts",
@@ -3606,6 +3611,11 @@
       "bun": "./terminal-shell/src/agent-turn/channel-send-tool.ts",
       "types": "./terminal-shell/dist/agent-turn/channel-send-tool.d.ts",
       "import": "./terminal-shell/dist/agent-turn/channel-send-tool.js"
+    },
+    "./terminal-shell/agent-turn/connected-calendar-tool": {
+      "bun": "./terminal-shell/src/agent-turn/connected-calendar-tool.ts",
+      "types": "./terminal-shell/dist/agent-turn/connected-calendar-tool.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/connected-calendar-tool.js"
     },
     "./terminal-shell/agent-turn/connected-host-auth": {
       "bun": "./terminal-shell/src/agent-turn/connected-host-auth.ts",

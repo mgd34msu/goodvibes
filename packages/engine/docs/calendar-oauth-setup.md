@@ -141,6 +141,27 @@ Then run the connect flow. The authorization URL it opens carries your client id
 its `client_id` parameter. If you see the id you registered, the flow is running on
 your app.
 
+## Creating events
+
+Once an account is connected, the GoodVibes Agent can add events to it with its
+`connected_calendar` tool, in its own process and in a session the daemon hosts for it:
+
+- `action: "calendars"` lists the calendars of every connected account and whether each
+  can be written.
+- `action: "create"` adds an event. `provider` is `google` or `outlook`; `calendarId`
+  (an id or a name from the list) picks the calendar, otherwise the primary writable
+  one is used. `start` and `end` are `YYYY-MM-DD` for an all-day event (`end` is the
+  day after the last day; one day when it is left out) or `YYYY-MM-DDTHH:mm`. A time
+  with no zone is the owner's local time (`daemon.timezone`, else this machine's
+  zone); one with `Z` or an offset is that instant; `timeZone` names an IANA zone.
+
+The title, location and description are checked before anything is sent: an event
+whose text repeats untrusted content read in the same turn, or that carries card
+details, is refused. When the provider refuses the request, the result says no event
+was created and why. When the request was sent and no answer came back (the
+connection dropped or the deadline passed), the result says the event may or may not
+exist; check the calendar (`/calendar upcoming`) before creating it again.
+
 ## Related
 
 - `docs/google-setup-runbook.md`: the wider Google connector setup, including mail.

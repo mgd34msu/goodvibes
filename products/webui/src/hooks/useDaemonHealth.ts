@@ -35,11 +35,12 @@ const HEALTH_PROBE_INTERVAL_MS = 15_000;
 const DIRECT_PROBE_TIMEOUT_MS = 5_000;
 
 /**
- * Ping endpoint, lightweight, always-available.
- * We treat this probe as PURE LIVENESS: ok = status < 500 (includes 401 when
- * the daemon is up but unauthenticated).
+ * Ping endpoint, lightweight, always-available. The daemon answers it before
+ * authentication (200 with `authenticated: false` for a caller it does not
+ * know), so a liveness probe never shows as a failed request in the console.
+ * We treat this probe as PURE LIVENESS: ok = status < 500.
  */
-const PING_PATH = '/api/local-auth';
+const PING_PATH = '/api/control-plane/auth';
 
 const SSE_FROM_STREAM: Record<EventStreamStatus, SseState> = {
   idle: 'disabled',

@@ -264,7 +264,7 @@
       "method": "POST",
       "path": "/api/remote/pair/verify",
       "auth": "none",
-      "description": "Exchange an approved pair request and challenge for a scoped peer token.",
+      "description": "Exchange an approved pair request and challenge for a scoped peer token. Answers 404 while the request is still pending or the challenge does not match, so the device keeps polling; a rejected, expired or already verified request answers 410 REMOTE_PAIR_REQUEST_SETTLED and the device must request pairing again.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1072,7 +1072,7 @@
       "path": "/api/remote/work/{workId}/complete",
       "auth": "bearer-peer-token",
       "requiredScope": "remote:complete",
-      "description": "Complete, fail, or cancel a claimed work item.",
+      "description": "Complete, fail, or cancel a claimed work item. Answers 404 for work that is unknown or not claimed by this peer; a report on work already settled in another state answers 409 REMOTE_WORK_SETTLED with the stored work, records nothing, and must not be sent again.",
       "inputSchema": {
         "type": "object",
         "properties": {

@@ -1232,7 +1232,7 @@ Create a pending pair request and receive a challenge for operator approval.
 
 ### `pair.verify`
 
-Exchange an approved pair request and challenge for a scoped peer token.
+Exchange an approved pair request and challenge for a scoped peer token. Answers 404 while the request is still pending or the challenge does not match, so the device keeps polling; a rejected, expired or already verified request answers 410 REMOTE_PAIR_REQUEST_SETTLED and the device must request pairing again.
 
 - HTTP: `POST /api/remote/pair/verify`
 - Auth: `none`
@@ -1771,7 +1771,7 @@ Report peer liveness, capability, command, version, and client-mode metadata.
 
 ### `work.complete`
 
-Complete, fail, or cancel a claimed work item.
+Complete, fail, or cancel a claimed work item. Answers 404 for work that is unknown or not claimed by this peer; a report on work already settled in another state answers 409 REMOTE_WORK_SETTLED with the stored work, records nothing, and must not be sent again.
 
 - HTTP: `POST /api/remote/work/{workId}/complete`
 - Auth: `bearer-peer-token`

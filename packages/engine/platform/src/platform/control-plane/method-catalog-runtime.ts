@@ -82,6 +82,13 @@ import {
   MCP_SERVERS_RESPONSE_SCHEMA,
   MCP_TOOLS_RESPONSE_SCHEMA,
 } from './method-catalog-runtime-mcp.js';
+import type { ContractErrorCode } from '../types/foundation-contract.js';
+
+const REMOTE_PAIR_REQUEST_SETTLED: ContractErrorCode = { code: 'REMOTE_PAIR_REQUEST_SETTLED', status: 409, meaning: 'The request was rejected or expired, so it cannot be approved; ask the device to request pairing again.' };
+const REMOTE_PAIR_REPLACES_PEER: ContractErrorCode = { code: 'REMOTE_PAIR_REPLACES_PEER', status: 409, meaning: 'The request names an existing peer and verifying it would replace that peer; approve again with confirmReplace: true only if it is the same device re-pairing.' };
+const REMOTE_PEER_REVOKED: ContractErrorCode = { code: 'REMOTE_PEER_REVOKED', status: 409, meaning: 'The peer is revoked and cannot receive work; rotate its token or pair it again first.' };
+const REMOTE_PEER_NOT_PAIRED: ContractErrorCode = { code: 'REMOTE_PEER_NOT_PAIRED', status: 409, meaning: 'The peer has not verified its pairing, so it holds no token to pull work with; ask the device to verify, then send the work again.' };
+const REMOTE_BACKEND_ID_TAKEN: ContractErrorCode = { code: 'REMOTE_BACKEND_ID_TAKEN', status: 409, meaning: 'A paired peer already has that id; register the backend under another id.' };
 
 /**
  * `snapshotMetrics()`'s shape (see platform/runtime/metrics.ts): process-wide
@@ -237,6 +244,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     http: { method: 'POST', path: '/api/remote/pair/requests/{requestId}/approve' },
     inputSchema: REMOTE_PAIR_REQUEST_ACTION_INPUT_SCHEMA,
     outputSchema: REMOTE_PAIR_APPROVAL_OUTPUT_SCHEMA,
+    errorCodes: [REMOTE_PAIR_REQUEST_SETTLED, REMOTE_PAIR_REPLACES_PEER],
   }),
   methodDescriptor({
     id: 'remote.pair.requests.reject',
@@ -313,6 +321,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     http: { method: 'POST', path: '/api/remote/peers/{peerId}/invoke' },
     inputSchema: REMOTE_PEER_INVOKE_INPUT_SCHEMA,
     outputSchema: REMOTE_PEER_INVOKE_OUTPUT_SCHEMA,
+    errorCodes: [REMOTE_PEER_REVOKED, REMOTE_PEER_NOT_PAIRED],
   }),
   methodDescriptor({
     id: 'remote.backends.list',
@@ -336,6 +345,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     http: { method: 'POST', path: '/api/remote/backends' },
     inputSchema: REMOTE_BACKEND_REGISTER_INPUT_SCHEMA,
     outputSchema: REMOTE_BACKEND_OUTPUT_SCHEMA,
+    errorCodes: [REMOTE_BACKEND_ID_TAKEN],
   }),
   methodDescriptor({
     id: 'remote.backends.remove',

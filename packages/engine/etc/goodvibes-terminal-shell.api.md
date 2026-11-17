@@ -1099,6 +1099,7 @@ export const processOutputError: {
     version: number;
     description: string;
     context?: string;
+    withoutContext?: readonly "error"[];
     items: {
         error: YesNoItem;
     };

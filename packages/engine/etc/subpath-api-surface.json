@@ -48956,7 +48956,7 @@
         "overageMinorUnits",
         "toleranceMinorUnits"
       ],
-      "text": "export interface BudgetReservation { readonly id: string; readonly dayKey: DayKey; readonly itemMinorUnits: MinorUnits; readonly overageMinorUnits: MinorUnits; readonly toleranceMinorUnits: MinorUnits; readonly createdAtMs: number; readonly expiresAtMs: number; readonly retainUntilSettled?: true; }"
+      "text": "export interface BudgetReservation { readonly id: string; readonly dayKey: DayKey; readonly itemMinorUnits: MinorUnits; readonly overageMinorUnits: MinorUnits; readonly toleranceMinorUnits: MinorUnits; readonly createdAtMs: number; readonly expiresAtMs: number; readonly timezone?: string; readonly retainUntilSettled?: true; }"
     },
     {
       "name": "BudgetStateSnapshot",
@@ -50947,7 +50947,7 @@
         "purchaseId",
         "toleranceMinorUnits"
       ],
-      "text": "export interface SpendRecord { readonly purchaseId: string; readonly atMs: number; readonly itemMinorUnits: MinorUnits; readonly overageMinorUnits: MinorUnits; readonly toleranceMinorUnits: MinorUnits; }"
+      "text": "export interface SpendRecord { readonly purchaseId: string; readonly atMs: number; readonly itemMinorUnits: MinorUnits; readonly overageMinorUnits: MinorUnits; readonly toleranceMinorUnits: MinorUnits; readonly timezone?: string; readonly dayKey?: DayKey; }"
     },
     {
       "name": "StandingAuthorization",

@@ -211,6 +211,22 @@ export class KnowledgeRowTable<T extends object> implements Map<string, T> {
     this.#sizeEpoch = -1;
   }
 
+  /**
+   * Drops what is derived from the decoded records (the whole-table read, the
+   * secondary-key and absent-key answers), rebuilt by the next read that needs
+   * them. The decoded records stay: their identity is what staleness checks compare.
+   */
+  releaseDerived(): void {
+    this.#absent.clear();
+    this.#lookups.clear();
+    this.#scan = undefined;
+    this.#scanLookups = undefined;
+    this.#absentEpoch = -1;
+    this.#lookupEpoch = -1;
+    this.#scanEpoch = -1;
+    this.#scanLookupsEpoch = -1;
+  }
+
   /** The record whose secondary key is `key` (first stored, when several share it). */
   lookup(key: string): T | undefined {
     const lookup = this.#spec.lookup;
@@ -496,6 +512,11 @@ export class KnowledgeNodeRevisionRows implements Map<string, KnowledgeNodeRevis
   }
 
   clear(): void {
+    this.#memo.clear();
+  }
+
+  /** Every read hands out a fresh list, so the remembered lists can all go; the next read decodes again. */
+  releaseDerived(): void {
     this.#memo.clear();
   }
 

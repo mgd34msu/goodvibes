@@ -545,6 +545,17 @@ export class KnowledgeStore {
     return total;
   }
 
+  /**
+   * Hands memory back under pressure without losing a row: the tables drop
+   * what they derived from their decoded records (rebuilt by the next read
+   * that needs it), and at `flush` SQLite also releases this connection's page
+   * and statement memory. Nothing in the file is touched.
+   */
+  releaseMemory(level: 'floor' | 'flush'): void {
+    for (const table of Object.values(this.#tables)) table.releaseDerived();
+    if (level === 'flush' && this.sqlite.isReady) this.sqlite.exec('PRAGMA shrink_memory');
+  }
+
   async batch<T>(operation: () => Promise<T>): Promise<T> {
     await this.init();
     return this.sqlite.batch(operation);

@@ -129,8 +129,8 @@ export interface DaemonMemoryGovernanceOptions {
   readonly receiptPath: string;
   /** Graceful shutdown work run before a tripwire exit. */
   readonly onTripwireShutdown?: ((receipt: MemoryTripwireReceipt) => Promise<void> | void) | undefined;
-  /** The daemon's knowledge stores (regular + agent + home-graph): real counts + a real jobRuns trim. */
-  readonly knowledgeStores: ReadonlyArray<{ retainedEntryCount(): number; pruneJobRuns(keep: number): number }>;
+  /** The daemon's knowledge stores (regular + agent + home-graph): decoded records held, and a trim that loses no row. */
+  readonly knowledgeStores: ReadonlyArray<{ retainedEntryCount(): number; releaseMemory(level: 'floor' | 'flush'): void }>;
   /** The shared session broker: real retained-record count + a real GC/truncate trim. */
   readonly sessionBroker: { retainedRecordCount(): number; trimRetained(level: 'floor' | 'flush'): void };
   /** What the governor does instead of exiting at the tripwire; a terminal keeps running and warns. */
@@ -140,10 +140,11 @@ export interface DaemonMemoryGovernanceOptions {
 /**
  * Build and start the daemon's memory governance with REAL cache adapters:
  * every registered cache exposes a genuine retained-entry count and a trim that
- * actually reclaims (knowledge job-run history pruning, session broker GC +
- * bucket truncation). Caches with no reachable real adapter are NOT registered
- *, a no-op registration would make the governor's shed tiers theater and the
- * tripwire's "flush didn't help" note vacuous.
+ * actually reclaims memory without losing data (the knowledge stores' derived
+ * read answers and SQLite page memory; closed sessions' history held by the
+ * session broker, whose on-disk copy stays). Caches with no reachable real
+ * adapter are NOT registered: a no-op registration would make the governor's
+ * shed tiers theater and the tripwire's "flush didn't help" note vacuous.
  */
 export function wireDaemonMemoryGovernance(options: DaemonMemoryGovernanceOptions): MemoryGovernanceHandles {
   const caches: Array<{ id: MemoryCacheId; cache: RegisteredCache }> = [
@@ -152,12 +153,9 @@ export function wireDaemonMemoryGovernance(options: DaemonMemoryGovernanceOption
       cache: {
         name: 'knowledge stores (regular + agent + home-graph)',
         entryCount: () => options.knowledgeStores.reduce((sum, store) => sum + store.retainedEntryCount(), 0),
+        // Memory only: job-run history and every other row stay in the file.
         trim: (level) => {
-          // Real reclaim: prune the retained job-run history (Map + sqlite
-          // rows). Floor keeps a short recent history; flush keeps only
-          // active runs. Authoritative source/node mirrors are never dropped.
-          const keep = level === 'flush' ? 0 : 50;
-          for (const store of options.knowledgeStores) store.pruneJobRuns(keep);
+          for (const store of options.knowledgeStores) store.releaseMemory(level);
         },
       },
     },

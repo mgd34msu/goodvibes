@@ -3,8 +3,8 @@ import type { CapturedWriteRevision } from '../shared/captured-write-revision.js
 import { assertCapturedToolWriteRevision, captureCapturedToolWriteRevision, assertCapturedToolMutationCurrent, assertCapturedToolReadAccess, hasCapturedToolInvocation, prepareCapturedToolBackup } from '../shared/captured-input-tools.js';
 import type { ReadAccessFilter } from '../shared/read-access.js';
 import { chmodSync, constants, lstatSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmdirSync, statSync, writeFileSync, copyFileSync, unlinkSync, type BigIntStats } from 'node:fs';
-import { basename, dirname, extname, join, relative, resolve as resolvePath, sep } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
+import { createHash, randomBytes } from 'node:crypto';
 import type { Tool, ToolDefinition, ToolExecuteOptions } from '../../types/tools.js';
 import { WRITE_SCHEMA, WRITE_TEXT_ENCODINGS, type WriteInput, type WriteFileInput, type WriteMode } from './schema.js';
 import { runValidators, capValidatorOutput, describeUndeclaredValidators, undeclaredValidators, type ValidatorName, type ValidatorRunner } from '../shared/validators.js';
@@ -23,6 +23,8 @@ import { resolveWritablePath } from '../../utils/path-safety.js';
 import { noteSourceFilesWritten } from '../../intelligence/import-graph.js';
 import { collectPostEditDiagnostics, type DiagnosticsProvider } from '../shared/post-edit-diagnostics.js';
 import { ToolInputProjectionError } from '../input-projection.js';
+import { declaredRecoverable } from '../../gate/classify.js';
+import { isYoloExecution } from '../../gate/execution-context.js';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -114,11 +116,19 @@ const BACKUPS_KEPT_PER_FILE = 5;
 /** `<ms>` or, for a second backup in the same millisecond, `<ms>_<n>`. */
 const BACKUP_SUFFIX = /^(\d+)(?:_(\d+))?$/;
 
-/** Where a file's backups live: src/foo.ts -> <projectRoot>/.goodvibes/.backups/src/ with names foo.ts.<ms>. */
+/**
+ * Where a file's backups live: src/foo.ts -> <projectRoot>/.goodvibes/.backups/src/ with names foo.ts.<ms>.
+ * A file outside the project goes under .backups/_outside/<sha256 of its path>/, so its backups never
+ * land among, or are pruned from, another directory's own files.
+ */
 function backupLocation(resolvedPath: string, projectRoot: string): { directory: string; name: string } {
   // resolvedPath is resolved against the real project root, so the backup path is too.
   const root = realpathSync(resolvePath(projectRoot), 'utf8');
-  const target = join(root, '.goodvibes', '.backups', relative(root, resolvedPath));
+  const rel = relative(root, resolvedPath);
+  const outside = rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+  const target = outside
+    ? join(root, '.goodvibes', '.backups', '_outside', createHash('sha256').update(resolvedPath).digest('hex'), basename(resolvedPath))
+    : join(root, '.goodvibes', '.backups', rel);
   return { directory: dirname(target), name: basename(target) };
 }
 
@@ -606,9 +616,10 @@ export function createWriteTool(options?: {
     parameters: WRITE_SCHEMA as Record<string, unknown>,
     sideEffects: ['write_fs'],
     subjects: { paths: ['files[].path'] },
-    // Undo restores UTF-8 text only; raw bytes and other encodings get no undo entry,
-    // and a validator runs a project command that undo cannot take back.
-    ...(options.fileUndoManager ? { recoverable: { unless: ['files[].content_base64', 'files[].encoding', 'validate.after[]'] } } : {}),
+    // Undo puts back the exact bytes a write replaced (text or not) and the bytes it wrote;
+    // a write in another encoding gets no undo entry, and a validator runs a project
+    // command that undo cannot take back.
+    ...(options.fileUndoManager ? { recoverable: { unless: ['files[].encoding', 'validate.after[]'] } } : {}),
     concurrency: 'serial',
     supportsProgress: true,
   };
@@ -640,7 +651,7 @@ export function createWriteTool(options?: {
       const warnings: string[] = [];
       // Every file this call writes is one undo entry.
       const undoCall = options.fileUndoManager?.beginCall();
-      const pendingUndo: Array<{ path: string; beforeContent: string | null; afterContent: string; tool: 'write'; call: number | undefined }> = [];
+      const pendingUndo: Array<{ path: string; beforeContent: string | Buffer | null; afterContent: string | Buffer; tool: 'write'; call: number | undefined }> = [];
       const transactionMode = input.transaction?.mode ?? 'none';
       const atomic = transactionMode === 'atomic';
       // Snapshots for atomic rollback: map from resolvedPath -> original content (null = new file)
@@ -789,10 +800,10 @@ export function createWriteTool(options?: {
         } catch (error) { preparationError = summarizeError(error); }
 
         // Before-content for undo and atomic rollback, read before the write happens.
-        let beforeContent: string | null = null;
+        let beforeContent: string | Buffer | null = null;
         let existedBeforeWrite: boolean | undefined;
-        // Why /undo cannot restore this file, when it cannot. Undo compares the
-        // file read as UTF-8, so a latin1/ascii/binary write would never match.
+        // Why /undo cannot restore this file, when it cannot. Undo records the
+        // text written, so a write in another encoding would never match it.
         let undoSkipReason: string | undefined = !fileInput.encoding || fileInput.encoding === 'utf-8' || fileInput.encoding === 'utf8'
           ? undefined
           : `it was written in encoding '${fileInput.encoding}', which /undo cannot restore`;
@@ -812,6 +823,11 @@ export function createWriteTool(options?: {
               const failure = await rollbackAtomic(fileInput.path, `Atomic transaction cannot safely snapshot '${fileInput.path}': ${summarizeError(err)}`);
               return { ...failure, warnings: [warning, ...failure.warnings ?? []] };
             }
+            // A call the gate let through as recoverable must stay so: without the bytes it replaces, it is not.
+            if (options.fileUndoManager && declaredRecoverable(definition, args) && !isYoloExecution()) {
+              errors.push(`${fileInput.path}: its content before the write could not be read (${summarizeError(err)}), so the write could not be undone; nothing was written to it. Make the file readable and write it again.`);
+              continue;
+            }
             appendWarning(warnings, warning);
             state = undefined;
             undoSkipReason = 'its content before the write could not be read';
@@ -819,12 +835,9 @@ export function createWriteTool(options?: {
           if (state !== undefined) {
             existedBeforeWrite = state.bytes !== null;
             if (state.bytes !== null) {
-              beforeContent = state.bytes.toString('utf-8');
-              // Undo restores text; a file that is not valid UTF-8 would come back altered, so it gets no undo entry.
-              if (!Buffer.from(beforeContent, 'utf-8').equals(state.bytes)) {
-                beforeContent = null;
-                undoSkipReason ??= 'its content before the write is not UTF-8 text, which /undo cannot restore byte for byte';
-              }
+              const text = state.bytes.toString('utf-8');
+              // A file that is not valid UTF-8 text (a database, an image) is kept as its bytes, so undo puts it back exactly.
+              beforeContent = Buffer.from(text, 'utf-8').equals(state.bytes) ? text : state.bytes;
             }
             // Store snapshot for atomic transaction rollback
             if (atomic && !snapshots.has(resolvedPath)) {
@@ -934,7 +947,7 @@ export function createWriteTool(options?: {
             }
 
             // Snapshot for /undo file support
-            const noUndo = binaryPayload ? 'binary content cannot be restored byte for byte by /undo' : undoSkipReason;
+            const noUndo = undoSkipReason;
             if (options?.fileUndoManager && noUndo !== undefined) {
               appendWarning(
                 warnings,
@@ -943,7 +956,7 @@ export function createWriteTool(options?: {
               );
             } else if (options?.fileUndoManager) {
               try {
-                const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: content, tool: 'write' as const, call: undoCall };
+                const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: outcome.result._bytes ?? content, tool: 'write' as const, call: undoCall };
                 if (atomic) pendingUndo.push(snapshot);
                 else options.fileUndoManager.snapshot(snapshot);
               } catch (err) {

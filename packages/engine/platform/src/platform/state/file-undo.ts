@@ -9,10 +9,14 @@ import { summarizeError } from '../utils/error-display.js';
 export interface FileOperation {
   /** Absolute resolved path to the file. */
   path: string;
-  /** File content before the operation. Null if the file did not exist. */
-  beforeContent: string | null;
-  /** File content after the operation. */
-  afterContent: string;
+  /**
+   * File content before the operation. Null if the file did not exist. Bytes
+   * when it was not UTF-8 text (a database, an image, an archive), so undo
+   * puts back exactly what was there.
+   */
+  beforeContent: string | Buffer | null;
+  /** File content after the operation: bytes when the write put bytes that are not UTF-8 text. */
+  afterContent: string | Buffer;
   /** Human-readable label, e.g. "write" or "edit". */
   tool: 'write' | 'edit';
   /** ISO timestamp of the operation. */
@@ -57,22 +61,30 @@ export class FileUndoConflictError extends Error {
   }
 }
 
-/** The file's text, or null when it does not exist. */
-function readCurrent(path: string): string | null {
+/** The file's bytes, or null when it does not exist. */
+function readCurrent(path: string): Buffer | null {
   try {
-    return readFileSync(path, 'utf-8');
+    return readFileSync(path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw err;
   }
 }
 
+/** Whether the file holds `content` exactly (text compared as its UTF-8 bytes). */
+function holds(current: Buffer | null, content: string | Buffer | null): boolean {
+  if (current === null || content === null) return current === content;
+  return current.equals(typeof content === 'string' ? Buffer.from(content, 'utf-8') : content);
+}
+
 /** Put `content` at `path`; null removes the file. */
-function restore(path: string, content: string | null): void {
+function restore(path: string, content: string | Buffer | null): void {
   if (content === null) {
     try { unlinkSync(path); } catch (err) { if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err; }
-  } else {
+  } else if (typeof content === 'string') {
     writeFileSync(path, content, 'utf-8');
+  } else {
+    writeFileSync(path, content);
   }
 }
 
@@ -147,15 +159,15 @@ export class FileUndoManager {
     if (!entry) return null;
     const operations = direction === 'undo' ? [...entry.operations].reverse() : [...entry.operations];
     const paths = entry.operations.map((op) => op.path);
-    const expected = (op: FileOperation): string | null => direction === 'undo' ? op.afterContent : op.beforeContent;
-    const target = (op: FileOperation): string | null => direction === 'undo' ? op.beforeContent : op.afterContent;
+    const expected = (op: FileOperation): string | Buffer | null => direction === 'undo' ? op.afterContent : op.beforeContent;
+    const target = (op: FileOperation): string | Buffer | null => direction === 'undo' ? op.beforeContent : op.afterContent;
     const done: FileOperation[] = [];
     try {
       for (const op of operations) {
         const current = readCurrent(op.path);
         // A file the call created and that is already gone is the state undo wants.
         const settled = direction === 'undo' && op.beforeContent === null && current === null;
-        if (!settled && current !== expected(op)) throw new FileUndoConflictError(op.path, direction, paths);
+        if (!settled && !holds(current, expected(op))) throw new FileUndoConflictError(op.path, direction, paths);
       }
       for (const op of operations) {
         restore(op.path, target(op));
@@ -200,7 +212,7 @@ export class FileUndoManager {
     const all = entry.operations.map((op) => op.path);
     for (const op of operations) {
       const current = readCurrent(op.path);
-      if (!(op.beforeContent === null && current === null) && current !== op.afterContent) {
+      if (!(op.beforeContent === null && current === null) && !holds(current, op.afterContent)) {
         // It can never apply again; kept, it would be found first by every later look.
         this.undoStack.splice(index, 1);
         throw new FileUndoConflictError(op.path, 'undo', all);

@@ -52,7 +52,34 @@ let counters = zero();
 /** Sync wrappers that call other patched functions count only the outer call. */
 let depth = 0;
 
-export function resetCounters(): void { counters = zero(); }
+/**
+ * MEASURE_TRACE=<kind>[,<kind>...] (counter names such as stats, fileWrites,
+ * sqliteStatements) lists every counted operation of those kinds, with its
+ * first argument; MEASURE_TRACE_STACK=1 adds the calling frames. run.ts prints
+ * the list of the last measured run, which is how a count that grew is traced
+ * to the code that added it.
+ */
+const traceKinds = new Set((process.env.MEASURE_TRACE ?? '').split(',').map((kind) => kind.trim()).filter(Boolean));
+const traceStacks = process.env.MEASURE_TRACE_STACK === '1';
+let traceLog: string[] = [];
+function trace(kind: string, what: () => string): void {
+  if (!traceKinds.has(kind)) return;
+  const frames = traceStacks ? ` @ ${new Error().stack?.split('\n').slice(3, 9).map((line) => line.trim().replace(/^at /, '')).join(' < ') ?? ''}` : '';
+  traceLog.push(`${kind} ${what()}${frames}`);
+}
+function describe(value: unknown): string {
+  if (typeof value === 'string') return value.length > 160 ? `${JSON.stringify(value.slice(0, 120))}... (${value.length} chars)` : value;
+  if (typeof value === 'number' || typeof value === 'bigint') return `fd ${value}`;
+  if (ArrayBuffer.isView(value)) return `(${value.byteLength} bytes)`;
+  if (value instanceof URL) return value.href;
+  return value === undefined ? '' : Object.prototype.toString.call(value);
+}
+/** A scenario's own line in the trace, kept when MEASURE_TRACE names `kind`. */
+export function traceNote(kind: string, line: string): void { trace(kind, () => line); }
+/** The traced operations since the counters were last reset. */
+export function takeTrace(): string[] { const taken = traceLog; traceLog = []; return taken; }
+
+export function resetCounters(): void { counters = zero(); traceLog = []; }
 export function snapshotCounters(): Counters { return { ...counters }; }
 
 const originalReadFileSync = fs.readFileSync.bind(fs);
@@ -80,7 +107,7 @@ function encodingOf(options: unknown): unknown {
 type AnyFunction = (...args: unknown[]) => unknown;
 
 /** Replace `target[name]` with a counting wrapper. `measure` sees the arguments and the (awaited) result. */
-function wrap(target: object, name: string, kind: Kind, measure?: (args: unknown[], result: unknown) => void): void {
+function wrap(target: object, name: string, kind: Kind, measure?: (args: unknown[], result: unknown) => void, label?: (self: unknown, args: unknown[]) => string): void {
   const record = target as Record<string, unknown>;
   const original = record[name];
   if (typeof original !== 'function') return;
@@ -88,6 +115,7 @@ function wrap(target: object, name: string, kind: Kind, measure?: (args: unknown
   const wrapped = function (this: unknown, ...args: unknown[]): unknown {
     if (depth > 0) return fn.apply(this, args);
     counters[kind]++;
+    trace(kind, () => label ? label(this, args) : `${name} ${describe(args[0])}`);
     depth++;
     let result: unknown;
     try { result = fn.apply(this, args); }
@@ -208,6 +236,7 @@ const originalBunWrite = Bun.write.bind(Bun) as AnyFunction;
 try {
   bun['write'] = function (...args: unknown[]): unknown {
     counters.fileWrites++;
+    trace('fileWrites', () => `Bun.write ${describe(args[0])}`);
     addWritten(byteLength(args[1]));
     return originalBunWrite(...args);
   };
@@ -222,6 +251,7 @@ try {
       try {
         Object.defineProperty(file, name, { configurable: true, value: (...inner: unknown[]) => {
           counters.fileReads++;
+          trace('fileReads', () => `Bun.file.${name} ${describe(args[0])}`);
           const ms = readDelayOf(args[0]);
           if (ms > 0) return waitFor(ms).then(() => (method as AnyFunction).apply(file, inner));
           return (method as AnyFunction).apply(file, inner);
@@ -230,7 +260,7 @@ try {
     }
     const exists = file['exists'];
     if (typeof exists === 'function') {
-      try { Object.defineProperty(file, 'exists', { configurable: true, value: () => { counters.stats++; return (exists as AnyFunction).call(file); } }); } catch { /* left uncounted */ }
+      try { Object.defineProperty(file, 'exists', { configurable: true, value: () => { counters.stats++; trace('stats', () => `Bun.file.exists ${describe(args[0])}`); return (exists as AnyFunction).call(file); } }); } catch { /* left uncounted */ }
     }
     return file;
   };
@@ -247,7 +277,7 @@ for (const name of ['prepare', 'query']) {
     const statement = original.apply(this, args) as object;
     if (!wrappedStatements.has(statement)) {
       wrappedStatements.add(statement);
-      for (const method of ['run', 'all', 'get', 'values', 'iterate']) wrap(statement, method, 'sqliteStatements');
+      for (const method of ['run', 'all', 'get', 'values', 'iterate']) wrap(statement, method, 'sqliteStatements', undefined, (self) => `${method} ${String(self)}`);
     }
     return statement;
   };

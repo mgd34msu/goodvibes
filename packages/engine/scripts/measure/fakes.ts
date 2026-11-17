@@ -29,11 +29,12 @@ export interface PortCounts {
 }
 
 export const decisionCounts: PortCounts = { requests: 0, bytes: 0, bySite: {}, unrouted: {} };
-export const providerCounts = { requests: 0, bytes: 0 };
+/** Conversation-model requests; `tools` and `toolBytes` are the tool definitions those requests carried. */
+export const providerCounts = { requests: 0, bytes: 0, tools: 0, toolBytes: 0, lastTools: [] as Array<{ readonly name: string; readonly bytes: number; readonly parameters: boolean }> };
 
 export function resetFakeCounts(): void {
   decisionCounts.requests = 0; decisionCounts.bytes = 0; decisionCounts.bySite = {}; decisionCounts.unrouted = {};
-  providerCounts.requests = 0; providerCounts.bytes = 0;
+  providerCounts.requests = 0; providerCounts.bytes = 0; providerCounts.tools = 0; providerCounts.toolBytes = 0; providerCounts.lastTools = [];
 }
 
 function sizeOf(value: unknown): number {
@@ -148,6 +149,12 @@ export function countingProvider(script: ChatResponse[]): LLMProvider {
     chat: async (request: ChatRequest): Promise<ChatResponse> => {
       providerCounts.requests++;
       providerCounts.bytes += sizeOf({ model: request.model, systemPrompt: request.systemPrompt, messages: request.messages, tools: request.tools });
+      providerCounts.tools += request.tools?.length ?? 0;
+      providerCounts.toolBytes += sizeOf(request.tools ?? []);
+      providerCounts.lastTools = (request.tools ?? []).map((tool) => ({
+        name: tool.name, bytes: sizeOf(tool),
+        parameters: Object.keys((tool.parameters as { properties?: object } | undefined)?.properties ?? {}).length > 0,
+      }));
       return script.shift() ?? textAnswer('Done.');
     },
   } as unknown as LLMProvider;

@@ -8,12 +8,12 @@ import { dirname, join } from 'node:path';
 import { createHostedSessionRuntime, type HostedSessionRuntime } from '../../../platform/src/platform/hosted-sessions/session-runtime.ts';
 import { executeToolCalls } from '../../../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import { createEmitterContext } from '../../../platform/src/platform/core/orchestrator-runtime.ts';
-import { withExecutionModeOwner } from '../../../platform/src/platform/gate/execution-context.ts';
+import { withExecutionMode, withExecutionModeOwner } from '../../../platform/src/platform/gate/execution-context.ts';
 import { buildDurableRuleForDecision } from '../../../platform/src/platform/permissions/approval-rules.ts';
 import type { ToolCall, ToolResult } from '../../../platform/src/platform/types/tools.ts';
 import { ConfigManager } from '../../../platform/src/platform/config/manager.ts';
 import { createFloor, seedWorkspace, SURFACE, type Floor } from '../compose.ts';
-import { textAnswer, toolCallAnswer } from '../fakes.ts';
+import { providerCounts, textAnswer, toolCallAnswer } from '../fakes.ts';
 import { assertOutcome, type Instance, type MeasureEnv, type Scenario } from '../harness.ts';
 import { setSlowReads } from '../instrument.ts';
 
@@ -169,7 +169,12 @@ function turnScenario(name: string, drives: string, calls: (run: number) => Chec
           assertOutcome(executed === batch.length, `${batch.length} calls were asked for but ${executed} ran`);
           const final = messages.at(-1);
           assertOutcome(final?.role === 'assistant' && String(final.content).includes('Every step is done.'), `the turn did not end with the model's final answer (last message: ${final?.role ?? 'none'})`);
-          return { toolsExecuted: executed, toolErrorsInTranscript: 0, transcriptMessages: before + messages.length, ...options.extra?.(wallMs), ...s.floor.latency() };
+          return {
+            toolsExecuted: executed, toolErrorsInTranscript: 0, transcriptMessages: before + messages.length,
+            // Summed over the turn's model requests.
+            toolDefinitionsSent: providerCounts.tools, toolDefinitionBytesSent: providerCounts.toolBytes,
+            ...options.extra?.(wallMs), ...s.floor.latency(),
+          };
         },
         verify: (run) => options.after?.(env, run),
         dispose: () => { setSlowReads(undefined); return closeSession(s); },
@@ -181,9 +186,10 @@ function turnScenario(name: string, drives: string, calls: (run: number) => Chec
 function permissionScenario(rules: number): Scenario {
   return {
     name: `permission-decision-${rules}-rules`,
-    drives: `One autonomous admission (PermissionManager.admitAutonomous) of a prepared exec call (echo) with ${rules} remembered rules in permission-rules.json; the last rule is the one that allows it. The timing includes ToolRegistry.prepareCall, as the tool path does.`,
+    drives: `One autonomous admission (PermissionManager.admitAutonomous) of a prepared exec call (echo) with ${rules} remembered rules in permission-rules.json; the last rule is the one that allows it. The call runs under the mode in force, captured as executeToolCalls captures it (core/orchestrator-tool-runtime.ts). The timing includes ToolRegistry.prepareCall, as the tool path does.`,
     entries: [
-      `${P}/permissions/manager.ts:609 PermissionManager.admitAutonomous`,
+      `${P}/core/orchestrator-tool-runtime.ts:363 executeToolCalls (captureExecutionMode, withExecutionMode)`,
+      `${P}/permissions/manager.ts:896 PermissionManager.admitAutonomous`,
       `${P}/permissions/user-rule-store.ts:238 UserPermissionRuleStore.rules`,
       `${P}/tools/registry.ts:812 ToolRegistry.prepareCall`,
     ],
@@ -193,14 +199,19 @@ function permissionScenario(rules: number): Scenario {
         async op(run) {
           const id = `admit-${run}`;
           const mode = s.session.liveTurnControls.getPermissionMode();
-          return withExecutionModeOwner({ getMode: () => mode, getRevision: () => 0 }, async () => {
-            const call = await s.session.toolRegistry.prepareCall(id, 'exec', { commands: [{ cmd: 'echo measure' }] });
-            const admission = await s.floor.services.permissionManager.admitAutonomous(id, call.name, call.args, {
-              sourceOf: () => ({ goal: 'Measure one permission decision', criteria: ['Decide once'] }),
-              schemaRevision: call.schemaRevision, preparedCall: { registry: s.session.toolRegistry, call },
-            });
-            assertOutcome(admission.result.approved, `the remembered rule did not allow the call: ${admission.result.reasonCode ?? 'no reason'}`);
-            return { allowed: 1 };
+          const manager = s.floor.services.permissionManager;
+          return withExecutionModeOwner({ getMode: () => mode, getRevision: () => 0 }, () => {
+            // The mode in force for the call, captured as executeToolCalls captures it before admitting a call.
+            const selection = manager.captureExecutionMode();
+            return withExecutionMode(selection.mode, async () => {
+              const call = await s.session.toolRegistry.prepareCall(id, 'exec', { commands: [{ cmd: 'echo measure' }] });
+              const admission = await manager.admitAutonomous(id, call.name, call.args, {
+                sourceOf: () => ({ goal: 'Measure one permission decision', criteria: ['Decide once'] }),
+                schemaRevision: call.schemaRevision, preparedCall: { registry: s.session.toolRegistry, call },
+              });
+              assertOutcome(admission.result.approved, `the remembered rule did not allow the call: ${admission.result.reasonCode ?? 'no reason'}`);
+              return { allowed: 1 };
+            }, selection.assertCurrent);
           });
         },
         dispose: () => closeSession(s),

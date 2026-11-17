@@ -1,5 +1,5 @@
 /** Scenario shape and the measurement loop. Types only plus the loop; no product imports. */
-import { fixtureTraffic, readKernelIo, resetCounters, resetFixtureTraffic, snapshotCounters, networkLog, type Counters, type KernelIo } from './instrument.ts';
+import { fixtureTraffic, readKernelIo, resetCounters, resetFixtureTraffic, snapshotCounters, takeTrace, networkLog, type Counters, type KernelIo } from './instrument.ts';
 import { decisionCounts, providerCounts, resetFakeCounts } from './fakes.ts';
 
 export interface MeasureEnv {
@@ -41,6 +41,8 @@ export interface RunSample {
   readonly providerRequests: number;
   readonly providerBytes: number;
   readonly extra: Record<string, number>;
+  /** Operations of the kinds named in MEASURE_TRACE. */
+  readonly trace: readonly string[];
 }
 
 export interface ScenarioReport {
@@ -58,6 +60,8 @@ export interface ScenarioReport {
   readonly unroutedDecisions: Record<string, number>;
   readonly networkRefused: readonly string[];
   readonly setupMs: number;
+  /** With MEASURE_TRACE set: the traced operations of the last measured run. */
+  readonly trace?: readonly string[];
   readonly error?: string;
 }
 
@@ -109,6 +113,7 @@ async function measureOnce(instance: Instance, run: number, base: KernelIo): Pro
   if (fixtureTraffic.requests > 0) Object.assign(extra, { fixtureRequests: fixtureTraffic.requests, fixtureBytes: fixtureTraffic.bytes });
   const k1 = readKernelIo();
   const counted = snapshotCounters();
+  const traced = takeTrace();
   const decisions = { requests: decisionCounts.requests, bytes: decisionCounts.bytes };
   const provider = { requests: providerCounts.requests, bytes: providerCounts.bytes };
   await instance.verify?.(run);
@@ -126,6 +131,7 @@ async function measureOnce(instance: Instance, run: number, base: KernelIo): Pro
     providerRequests: provider.requests,
     providerBytes: provider.bytes,
     extra,
+    trace: traced,
   };
 }
 
@@ -165,5 +171,6 @@ export async function measure(scenario: Scenario, env: MeasureEnv): Promise<Scen
     decisionSites, unroutedDecisions,
     networkRefused: [...new Set(networkLog)],
     setupMs,
+    ...(samples.at(-1)?.trace.length ? { trace: samples.at(-1)!.trace } : {}),
   };
 }

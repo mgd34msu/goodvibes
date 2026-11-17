@@ -8,8 +8,9 @@ export type MetadataCliResult = { readonly stdout?: string; readonly stderr?: st
 
 /** Preserve the normal CLI parser and help precedence without runtime setup. */
 export function metadataCliResult(argv: readonly string[], binary = 'goodvibes'): MetadataCliResult | null {
-  // `host` is parsed by its own command; the shared parser would refuse it.
-  if (argv[0] === 'host') return null;
+  // `host` and `acp` are parsed by their own commands (acp answers its own
+  // --help); the shared parser would refuse them.
+  if (argv[0] === 'host' || argv[0] === 'acp') return null;
   const { cli } = parseNativeShellCli(argv, binary, (args, name) => parseWithCatalog(args, GOODVIBES_CLI_CATALOG, name));
   if (cli.errors.length > 0) return { stderr: `${cli.errors.join('\n')}\n\n${renderGoodVibesHelp(binary)}`, exitCode: 2 };
   return shellMetadataResult(cli, binary, {

@@ -34,7 +34,7 @@ import {
   sharedWorkspaceRegisterPath,
   type WorkspaceRegistrationStore,
 } from '../workspace/index.js';
-import { normalizeWorkspaceRoot } from '../workspace/registration/resolution.js';
+import { normalizeWorkspaceRoot, pathCovers } from '../workspace/registration/resolution.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { PermissionCategory } from '../permissions/index.js';
@@ -127,6 +127,82 @@ export function trustGatedAsk(
 }
 
 export type WorkspaceTrustLevel = 'trusted' | 'restricted';
+
+/**
+ * What a repository brings with it (its hooks file, its MCP server files)
+ * waits on the owner's trust of the workspace: until he trusts it, nothing in
+ * those files is loaded or started. An undecided workspace is not trusted.
+ * Every product reads the same decision (the user's workspace register).
+ */
+export interface RepositoryTrust {
+  /** The workspace's real path. */
+  readonly workspaceRoot: string;
+  /** Reads the saved decision once; later calls return at once. */
+  load(): Promise<void>;
+  isTrusted(): boolean;
+  /** Called each time the owner trusts the workspace from this process. Returns the unsubscribe. */
+  onTrusted(listener: () => void): () => void;
+}
+
+/** The check a loader of repository files (the hooks file, project MCP files) holds them back with. */
+export interface RepositoryFileGate {
+  /** Reads the saved trust decision once; later calls return at once. */
+  load(): Promise<void>;
+  /** True when this file waits on the owner's trust of the workspace. */
+  holds(path: string): boolean;
+  /** Called each time the owner trusts the workspace. Returns the unsubscribe. */
+  onTrusted(listener: () => void): () => void;
+}
+
+/** The gate over `trust` for the files under its workspace; see {@link heldForRepositoryTrust}. */
+export function repositoryFileGate(trust: RepositoryTrust, homeDirectory: string): RepositoryFileGate {
+  return {
+    load: () => trust.load(),
+    holds: (path) => heldForRepositoryTrust(trust, path, homeDirectory),
+    onTrusted: (listener) => trust.onTrusted(listener),
+  };
+}
+
+/** The words every surface uses when what a repository brings is waiting on the owner's trust. */
+export const REPOSITORY_TRUST_NEXT_STEP = 'Run /trust workspace trusted to turn them on, or leave the workspace untrusted to keep them off.';
+
+/**
+ * The one notice a terminal app shows when what the workspace's repository
+ * brought is waiting on the owner's trust: its hooks file and the MCP servers
+ * its files name. Null when nothing waits (a trusted workspace reads no file).
+ */
+export async function repositoryTrustNotice(input: {
+  readonly trust: Pick<RepositoryTrust, 'isTrusted' | 'load' | 'workspaceRoot'>;
+  /** The hooks file the workbench holds back, or null. */
+  readonly hooksFileWaiting: string | null;
+  /** The MCP servers the registry holds back. */
+  readonly heldMcpServers: () => Promise<readonly string[]>;
+}): Promise<string | null> {
+  await input.trust.load();
+  if (input.trust.isTrusted()) return null;
+  const servers = await input.heldMcpServers();
+  const waiting = [
+    ...(input.hooksFileWaiting !== null ? [`its hooks file (${input.hooksFileWaiting}) is not loaded`] : []),
+    ...(servers.length > 0 ? [`its MCP ${servers.length === 1 ? 'server' : 'servers'} ${servers.join(', ')} ${servers.length === 1 ? 'is' : 'are'} not started`] : []),
+  ];
+  if (waiting.length === 0) return null;
+  return `[Startup] Hooks and MCP servers from this repository wait on workspace trust: you have not trusted ${input.trust.workspaceRoot}, so ${waiting.join(' and ')}. ${REPOSITORY_TRUST_NEXT_STEP}`;
+}
+
+/**
+ * True when `path` is a file the repository in `trust.workspaceRoot` could have
+ * brought, so it waits on the owner's trust. A workspace that is the owner's
+ * home directory holds no repository: files there are his own.
+ */
+export function heldForRepositoryTrust(trust: Pick<RepositoryTrust, 'workspaceRoot' | 'isTrusted'>, path: string, homeDirectory: string): boolean {
+  if (trust.isTrusted()) return false;
+  const root = trust.workspaceRoot;
+  if (root === canonicalWorkspaceRoot(homeDirectory)) return false;
+  // Where the path is written and where it leads: a link in the checkout does not make its file the owner's.
+  let real: string;
+  try { real = realpathSync(path); } catch { real = resolve(path); }
+  return pathCovers(root, normalizeWorkspaceRoot(resolve(path))) || pathCovers(root, real);
+}
 
 /** The file earlier builds kept inside the workspace; read only to say it is no longer honored. */
 const LEGACY_TRUST_FILE = 'trust.json';
@@ -247,6 +323,7 @@ export class WorkspaceTrustManager {
   /** True when an earlier build's in-workspace trust.json was found and not honored. */
   private legacyIgnored = false;
   private question: WorkspaceTrustQuestion | null = null;
+  private readonly trustedListeners = new Set<() => void>();
   /** The directory judged, as its real path: the key of the decision. */
   readonly workspaceRoot: string;
   private readonly legacyFile: string;
@@ -365,6 +442,12 @@ export class WorkspaceTrustManager {
     return this.level === 'trusted';
   }
 
+  /** Called each time the owner trusts this workspace from this process (RepositoryTrust). Returns the unsubscribe. */
+  onTrusted(listener: () => void): () => void {
+    this.trustedListeners.add(listener);
+    return () => { this.trustedListeners.delete(listener); };
+  }
+
   /**
    * Record the owner's decision. It takes effect at once for this process; the
    * save to the user's register only spares asking again next time, so a save
@@ -373,6 +456,7 @@ export class WorkspaceTrustManager {
   async setLevel(level: WorkspaceTrustLevel): Promise<{ readonly saved: boolean; readonly fault?: string | undefined }> {
     ++this.decisionRevision;
     this.revision++;
+    const becameTrusted = level === 'trusted' && this.level !== 'trusted';
     this.level = level;
     this.loaded = true;
     this.legacyIgnored = false;
@@ -385,6 +469,12 @@ export class WorkspaceTrustManager {
       return { saved: false, fault: `the workspace register ${this.registerPath} could not be written (${summarizeError(error)})` };
     } finally {
       this.pendingDecisions--;
+      // The decision is in effect for this process either way; what waited on it starts now.
+      if (becameTrusted) {
+        for (const listener of [...this.trustedListeners]) {
+          try { listener(); } catch (error) { logger.warn('workspace trust: a listener for the trusted workspace failed', { workspace: this.workspaceRoot, error: summarizeError(error) }); }
+        }
+      }
     }
   }
 

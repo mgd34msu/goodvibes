@@ -60,6 +60,18 @@ export interface McpServerConfigEntry {
 export interface McpEffectiveConfig {
   readonly servers: readonly McpServerConfigEntry[];
   readonly locations: readonly McpConfigLocation[];
+  /**
+   * Servers named in a project file that waits on the owner's trust of the
+   * workspace (`holdProjectFile`): not started, and not in place of an owner's
+   * server of the same name. Empty when nothing waits.
+   */
+  readonly held?: readonly McpServerConfigEntry[] | undefined;
+}
+
+/** How a start path reads the files: a project file the owner has not trusted yet is held back. */
+export interface McpEffectiveConfigOptions {
+  /** True when this project file waits on the owner's trust of the workspace. */
+  readonly holdProjectFile?: ((path: string) => boolean) | undefined;
 }
 
 
@@ -374,15 +386,21 @@ export function loadMcpConfig(roots: McpConfigRoots): McpConfig {
   return { servers: loadMcpEffectiveConfig(roots).servers.map((entry) => entry.server) };
 }
 
-export function loadMcpEffectiveConfig(roots: McpConfigRoots): McpEffectiveConfig {
+export function loadMcpEffectiveConfig(roots: McpConfigRoots, options: McpEffectiveConfigOptions = {}): McpEffectiveConfig {
   const locations = getMcpConfigLocations(roots);
   const serversByName = new Map<string, McpServerConfigEntry>();
+  const held: McpServerConfigEntry[] = [];
 
   for (const location of locations) {
     try {
       if (!existsSync(location.path)) continue;
       const config = location.writable ? readMcpConfigAtPath(location.path) : readExternalMcpConfig(location.path);
       const projectScope = location.kind === 'project-mcp' || location.kind === 'project-goodvibes';
+      // A file the repository could have brought starts nothing, and replaces none of the owner's servers, until he trusts the workspace.
+      if (projectScope && options.holdProjectFile?.(location.path) === true) {
+        for (const server of config.servers) held.push({ server, source: location });
+        continue;
+      }
       for (const parsed of config.servers) {
         const nameProblem = serverNameProblem(parsed.name);
         if (nameProblem) {
@@ -405,6 +423,7 @@ export function loadMcpEffectiveConfig(roots: McpConfigRoots): McpEffectiveConfi
   return {
     servers: [...serversByName.values()],
     locations,
+    ...(held.length > 0 ? { held } : {}),
   };
 }
 

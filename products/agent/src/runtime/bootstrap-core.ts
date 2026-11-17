@@ -21,6 +21,8 @@ import { publishToSharedFeed } from '../core/notices.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { repositoryTrustNotice } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { HooksFileAwaitingTrustError } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { existingGoogleConnectionOwner } from '@goodvibes-jev/engine/platform/platform/google';
 import { installCloudflareAccessFetch } from '@goodvibes-jev/engine/platform/platform/cloudflare';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
@@ -424,10 +426,20 @@ export async function initializeBootstrapCore(
   await syncConfiguredServices(domainDispatch.syncIntegration, services.serviceRegistry);
 
   // A bad hooks file must not stop the product from starting; it runs without file hooks until fixed.
+  // One in a workspace the owner has not trusted waits for that trust, and he is told once.
   try {
     await hookWorkbench.loadAndApplyManagedHooks();
   } catch (err) {
-    logger.warn('agent hooks file not loaded; continuing without file hooks (non-fatal)', { error: summarizeError(err) });
+    if (!(err instanceof HooksFileAwaitingTrustError)) logger.warn('agent hooks file not loaded; continuing without file hooks (non-fatal)', { error: summarizeError(err) });
+  }
+  const repositoryTrust = services.repositoryTrust;
+  if (repositoryTrust) {
+    void repositoryTrustNotice({
+      trust: repositoryTrust,
+      hooksFileWaiting: hookWorkbench.getAwaitingTrust(),
+      heldMcpServers: () => services.mcpRegistry.heldForWorkspaceTrust(services.shellPaths),
+    }).then((notice) => { if (notice) startupNotices.report(notice); },
+      (error: unknown) => { logger.warn('agent workspace trust notice not shown', { error: summarizeError(error) }); });
   }
 
   // The automation session register's record for a session: created for the

@@ -295,12 +295,18 @@ export type {
 
 export {
   detectPriorWorkspaceState,
+  heldForRepositoryTrust,
   readPersistedWorkspaceTrust,
+  REPOSITORY_TRUST_NEXT_STEP,
+  repositoryFileGate,
+  repositoryTrustNotice,
   trustGatedAsk,
   WorkspaceTrustManager,
 } from './workspace-trust.js';
 export type {
   PersistedWorkspaceTrustView,
+  RepositoryFileGate,
+  RepositoryTrust,
   WorkspaceTrustLevel,
   WorkspaceTrustManagerOptions,
   WorkspaceTrustPaths,

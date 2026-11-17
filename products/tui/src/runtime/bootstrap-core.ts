@@ -68,7 +68,8 @@ import { join } from 'node:path';
 import type { SystemMessagePriority } from '../core/system-message-router.ts';
 import { SessionSpineClient, SessionUnionCache, TUI_SPINE_PARTICIPANT } from '@goodvibes-jev/engine/platform/platform/runtime/session-spine';
 import { SessionInboundInputPoller, createBootstrapInboundInputPoller } from './session-inbound-inputs.ts';
-import type { WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { repositoryTrustNotice, type WorkspaceTrustLevel } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { HooksFileAwaitingTrustError } from '@goodvibes-jev/engine/platform/platform/hooks';
 import { createRuntimeNotifier, syncNotifierQueueIntegrations } from './bootstrap-notifier-sync.ts';
 
 // --- Pre-router buffer ---
@@ -540,11 +541,18 @@ export async function initializeBootstrapCore(
 
   const permissionManager = createTuiTurnPermissionManager(services, () => services.requestTrustDecision());
   // A bad hooks file must not stop the product from starting; it runs without file hooks until fixed.
+  // One in a workspace the owner has not trusted waits for that trust, and he is told once.
   try {
     await hookWorkbench.loadAndApplyManagedHooks();
   } catch (err) {
-    logger.warn('tui hooks file not loaded; continuing without file hooks (non-fatal)', { error: summarizeError(err) });
+    if (!(err instanceof HooksFileAwaitingTrustError)) logger.warn('tui hooks file not loaded; continuing without file hooks (non-fatal)', { error: summarizeError(err) });
   }
+  void repositoryTrustNotice({
+    trust: services.workspaceTrustManager,
+    hooksFileWaiting: hookWorkbench.getAwaitingTrust(),
+    heldMcpServers: () => services.mcpRegistry.heldForWorkspaceTrust(services.shellPaths),
+  }).then((notice) => { if (notice) routeOrBuffer(notice, 'high'); },
+    (error: unknown) => { logger.warn('tui workspace trust notice not shown', { error: summarizeError(error) }); });
 
   const runtime: MutableRuntimeState = {
     ...initialTerminalRuntimeFields(

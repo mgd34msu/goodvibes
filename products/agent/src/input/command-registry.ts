@@ -165,6 +165,8 @@ export interface CommandProviderServices extends TerminalCommandProviderServices
  */
 export interface CommandWorkspaceUiServices extends TerminalCommandWorkspaceUiServices {
   keybindingsManager?: KeybindingsManager;
+  /** The owner's trust of this workspace, which what a repository brings (its hooks file, its MCP files) waits on. */
+  workspaceTrustManager?: import('@goodvibes-jev/engine/platform/platform/runtime/operations').WorkspaceTrustManager;
 
   processManager?: ProcessManager;
 }

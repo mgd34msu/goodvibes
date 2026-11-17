@@ -210,6 +210,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     channelDeliveryRouter: services.channelDeliveryRouter,
     devices: services.devicesClient,
     processManager: services.processManager,
+    ...(services.repositoryTrust ? { workspaceTrustManager: services.repositoryTrust } : {}),
     executionLedger: services.executionLedger,
     approvalsView: services.approvalsView,
     knowledgeService: services.agentKnowledgeService,

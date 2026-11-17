@@ -94,7 +94,7 @@ import {
   type ApprovalRaiser,
 } from './permissions/permission-composition.js';
 import { resolveCanonicalMemoryDbPath } from '../state/canonical-memory.js';
-import { WorkspaceTrustManager } from './workspace-trust.js';
+import { repositoryFileGate, WorkspaceTrustManager } from './workspace-trust.js';
 import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS } from './workspace-trust-approval.js';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from './feature-announcements.js';
 import { DeterministicReplayEngine } from '../core/deterministic-replay.js';
@@ -626,6 +626,13 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     )
     : raiseApproval;
   const workspaceTrustFor = trustChoice?.resolveFor && workspaceTrustManager ? trustChoice.resolveFor(workspaceTrustManager) : undefined;
+  // What a repository brings (its hooks file, its MCP server files) waits on the owner's trust of the
+  // workspace in every product, including one whose own actions pass no trust gate: it reads the same
+  // saved decision. An undecided workspace is not trusted.
+  const repositoryTrust = workspaceTrustManager ?? new WorkspaceTrustManager({ shellPaths, surfaceRoot });
+  const repositoryGate = repositoryFileGate(repositoryTrust, homeDirectory);
+  scope.registry.add('repository hooks file trust', hookWorkbench.bindTrustGate(repositoryGate));
+  scope.registry.add('repository MCP file trust', mcpRegistry.bindRepositoryTrust(repositoryGate));
   const permissionManager = createBrokeredPermissionManager({
     workspaceTrust: workspaceTrustManager ?? null,
     requestApproval,
@@ -937,6 +944,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     surface,
     shellPaths,
     ...(workspaceTrustManager ? { workspaceTrustManager } : {}),
+    repositoryTrust,
     permissionManager,
     requestApproval,
     memoryGovernor,

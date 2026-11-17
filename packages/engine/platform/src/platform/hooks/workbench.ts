@@ -7,6 +7,7 @@ import { matchesEventPath, matchesMatcher } from './matcher.js';
 import { chainProblem, hookDefinitionProblem, hooksFileRefusal, type HookDispatcher } from './dispatcher.js';
 import type { HookChain, HookDefinition, HookEvent, HookResult, HookType, HooksConfig } from './types.js';
 import type { ConfigManager } from '../config/manager.js';
+import type { RepositoryFileGate } from '../runtime/workspace-trust.js';
 import { summarizeError } from '../utils/error-display.js';
 
 export interface HookAuthoringAction {
@@ -42,6 +43,20 @@ export interface HookWorkbenchOptions {
   readonly hookDispatcher: Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'>;
   readonly configManager: Pick<ConfigManager, 'get' | 'getWorkingDirectory'>;
   readonly hooksFilePathResolver?: (() => string) | undefined;
+}
+
+/**
+ * Whether a hooks file may load: a file the workspace's repository could have
+ * brought waits until the owner trusts the workspace. Bound by the product's composition.
+ */
+export type HooksFileTrustGate = RepositoryFileGate;
+
+/** The hooks file was not loaded because the workspace it sits in is not trusted yet. */
+export class HooksFileAwaitingTrustError extends Error {
+  constructor(readonly path: string) {
+    super(`The hooks file ${path} is in this workspace, which you have not trusted, so its hooks are not loaded and run nothing. Run /trust workspace trusted to load them.`);
+    this.name = 'HooksFileAwaitingTrustError';
+  }
 }
 
 const EMPTY_CONFIG: HooksConfig = Object.freeze({ hooks: {}, chains: [] });
@@ -98,6 +113,9 @@ export class HookWorkbench {
   /** Why the last load could not read the hooks file; while set, nothing may overwrite it. */
   private loadFailure: string | null = null;
   private lastImportRejections: string[] = [];
+  private trustGate: HooksFileTrustGate | null = null;
+  /** The hooks file waiting on the owner's trust of the workspace, or null. */
+  private awaitingTrust: string | null = null;
 
   constructor(
     private readonly hookDispatcher: Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'>,
@@ -106,6 +124,27 @@ export class HookWorkbench {
 
   getHooksFilePath(): string {
     return this.hooksFilePathResolver();
+  }
+
+  /**
+   * Hold a hooks file the workspace's repository could have brought until the
+   * owner trusts the workspace, and load it the moment he does. Returns the
+   * unbinding.
+   */
+  bindTrustGate(gate: HooksFileTrustGate): () => void {
+    this.trustGate = gate;
+    const unsubscribe = gate.onTrusted(() => {
+      if (this.awaitingTrust === null) return;
+      void this.loadAndApplyManagedHooks().catch((error: unknown) => {
+        logger.warn('HookWorkbench: the hooks file was not loaded after the workspace was trusted', { error: summarizeError(error) });
+      });
+    });
+    return () => { unsubscribe(); if (this.trustGate === gate) this.trustGate = null; };
+  }
+
+  /** The hooks file waiting on the owner's trust of the workspace, or null when none waits. */
+  getAwaitingTrust(): string | null {
+    return this.awaitingTrust;
   }
 
   getManagedConfig(): HooksConfig {
@@ -194,6 +233,18 @@ export class HookWorkbench {
   }
 
   async loadAndApplyManagedHooks(path = this.getHooksFilePath()): Promise<void> {
+    const gate = this.trustGate;
+    if (gate !== null && existsSync(path)) {
+      await gate.load();
+      if (gate.holds(path)) {
+        // Nothing from it runs, including hooks an earlier load of it left registered.
+        this.hookDispatcher.clearLoaded();
+        this.awaitingTrust = path;
+        this.recordAction({ kind: 'reload', target: path, timestamp: Date.now(), detail: 'waiting on workspace trust; not loaded' });
+        throw new HooksFileAwaitingTrustError(path);
+      }
+    }
+    this.awaitingTrust = null;
     this.loadManagedConfig(path);
     // Hooks already running stay as they are when the file cannot be trusted or read.
     if (this.loadFailure !== null) throw new Error(`The running hooks were left unchanged: ${path} ${this.loadFailure}.`);

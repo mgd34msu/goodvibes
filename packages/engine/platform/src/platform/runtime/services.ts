@@ -339,6 +339,12 @@ export interface RuntimeServices {
   readonly surfaceRoot: string;
   /** The workspace trust owner every ask in this graph passes; absent when the product composed without one. */
   readonly workspaceTrustManager?: WorkspaceTrustManager | undefined;
+  /**
+   * The owner's trust of this workspace as what a repository brings (its hooks
+   * file, its MCP server files) reads it: the trust owner above, or, in a product
+   * without one, the same saved decision read for this alone.
+   */
+  readonly repositoryTrust?: WorkspaceTrustManager | undefined;
   /** The permission manager background and hosted runs ask through, behind the trust gate when there is one. */
   readonly permissionManager?: PermissionManager | undefined;
   /** platform-owned memory governance: samples RSS/heap, sheds caches, pauses jobs, trips on leaks. */

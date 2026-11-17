@@ -470,7 +470,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/subscription` | Manage provider subscription sessions. |
 | `/tasks` | Inspect connected-host tasks without starting or mutating local background work. |
 | `/title` | Show or set the conversation title. |
-| `/trust` | Review trust posture and export portable trust bundles. |
+| `/trust` | Review trust posture, set this workspace's trust (`/trust workspace trusted\|restricted`), and export portable trust bundles. Until you trust the workspace, its repository's hooks file is not loaded and the MCP servers its `.mcp/mcp.json` and `.goodvibes/mcp.json` name do not start; the Agent says so once at start. Your own hooks and MCP files are not affected. |
 | `/tts` | Submit a normal prompt and play the assistant response through live TTS. |
 | `/undo` | Undo the last conversation turn. |
 | `/unpin` | Unpin a model from the favorites list. |

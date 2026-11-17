@@ -5,7 +5,8 @@ export { HookDispatcher, hookDefinitionProblem, hooksFileRefusal } from './dispa
 export type { HookRunnerDeps } from './dispatcher.js';
 export { ChainEngine } from './chain-engine.js';
 export { HookActivityTracker } from './activity.js';
-export { HookWorkbench, createHookWorkbench } from './workbench.js';
+export { HookWorkbench, HooksFileAwaitingTrustError, createHookWorkbench } from './workbench.js';
+export type { HooksFileTrustGate } from './workbench.js';
 export { createHookApi, createHookApiDispatcher } from './hook-api.js';
 export type {
   CreateHookApiOptions,

@@ -52,6 +52,7 @@ import type {
   McpServerConfig,
 } from './config.js';
 import type { HookDispatcher } from '../hooks/dispatcher.js';
+import type { RepositoryFileGate } from '../runtime/workspace-trust.js';
 import type { HookEvent } from '../hooks/types.js';
 import { McpPermissionManager } from '../runtime/mcp/permissions.js';
 import { McpSchemaFreshnessTracker } from '../runtime/mcp/schema-freshness.js';
@@ -154,6 +155,10 @@ export class McpRegistry {
   private clients = new Map<string, McpClient>();
   private readonly executionByClient = new WeakMap<McpClient, { assertCurrent: () => void; close: () => void }>();
   private serverConfigs = new Map<string, McpServerConfig>();
+  /** Holds back a project MCP file until the owner trusts the workspace; null when the product binds none. */
+  private repositoryGate: RepositoryFileGate | null = null;
+  /** The roots the configured servers were last started from, so trusting the workspace starts the ones it held. */
+  private startedRoots: McpConfigRoots | null = null;
   private readonly pendingConnections = new Map<string, PendingMcpConnection>();
   /** Why a configured server's last connect attempt failed; a failed client is not kept, so this is the only record. */
   private readonly connectFailures = new Map<string, string>();
@@ -279,8 +284,42 @@ export class McpRegistry {
     }
   }
 
+  /**
+   * Start no server a project file names, and let none of them stand in for an
+   * owner's server of the same name, until the owner trusts the workspace; start
+   * them the moment he does. Returns the unbinding.
+   */
+  bindRepositoryTrust(gate: RepositoryFileGate): () => void {
+    this.repositoryGate = gate;
+    const unsubscribe = gate.onTrusted(() => {
+      const roots = this.startedRoots;
+      if (roots === null || this.permissionHost?.signal.aborted === true) return;
+      this.reload(roots).catch((error: unknown) => {
+        logger.warn('McpRegistry: the workspace\'s MCP servers did not start after it was trusted', { error: summarizeError(error) });
+      });
+    });
+    return () => { unsubscribe(); if (this.repositoryGate === gate) this.repositoryGate = null; };
+  }
+
+  /** The configuration the start paths read: the files, with a project file the owner has not trusted held back. */
+  private async startableConfig(roots: McpConfigRoots): Promise<McpEffectiveConfig> {
+    this.startedRoots = roots;
+    const gate = this.repositoryGate;
+    if (gate === null) return loadMcpEffectiveConfig(roots);
+    await gate.load();
+    return loadMcpEffectiveConfig(roots, { holdProjectFile: (path) => gate.holds(path) });
+  }
+
+  /** The servers a project file names that wait on the owner's trust of the workspace; empty when none wait. */
+  async heldForWorkspaceTrust(roots: McpConfigRoots): Promise<readonly string[]> {
+    const gate = this.repositoryGate;
+    if (gate === null) return [];
+    await gate.load();
+    return (loadMcpEffectiveConfig(roots, { holdProjectFile: (path) => gate.holds(path) }).held ?? []).map((entry) => entry.server.name);
+  }
+
   async reload(roots: McpConfigRoots): Promise<McpReloadResult> {
-    const effective = loadMcpEffectiveConfig(roots);
+    const effective = await this.startableConfig(roots);
     return this.applyConfig(effective.servers.map((entry) => entry.server));
   }
 
@@ -380,20 +419,27 @@ export class McpRegistry {
     if (this.clients.get(serverName)?.isConnected) return;
     const pending = this.pendingConnections.get(serverName);
     if (pending) { await pending.done; return; }
-    const entry = loadMcpEffectiveConfig(roots).servers.find((candidate) => candidate.server.name === serverName);
-    if (!entry) return;
+    const effective = await this.startableConfig(roots);
+    const entry = effective.servers.find((candidate) => candidate.server.name === serverName);
+    if (!entry) {
+      const held = effective.held?.find((candidate) => candidate.server.name === serverName);
+      if (held) throw new Error(`it is named in ${held.source.path}, a file in this workspace, which you have not trusted, so it is not started. Run /trust workspace trusted to start it.`);
+      return;
+    }
     await this.connectServer(entry.server);
   }
 
   /** Start every configured server that is not connected or connecting, without waiting; each reports `starting` meanwhile. */
   startConfigured(roots: McpConfigRoots, onSettled?: (name: string, error?: unknown) => void): void {
-    for (const { server } of loadMcpEffectiveConfig(roots).servers) {
-      if (this.clients.get(server.name)?.isConnected || this.pendingConnections.has(server.name)) continue;
-      this.connectServer(server).then(
-        () => onSettled?.(server.name),
-        (error: unknown) => { logger.info('McpRegistry: background connect failed', { server: server.name, err: summarizeError(error) }); onSettled?.(server.name, error); },
-      );
-    }
+    this.startableConfig(roots).then((effective) => {
+      for (const { server } of effective.servers) {
+        if (this.clients.get(server.name)?.isConnected || this.pendingConnections.has(server.name)) continue;
+        this.connectServer(server).then(
+          () => onSettled?.(server.name),
+          (error: unknown) => { logger.info('McpRegistry: background connect failed', { server: server.name, err: summarizeError(error) }); onSettled?.(server.name, error); },
+        );
+      }
+    }, (error: unknown) => { logger.info('McpRegistry: the configured servers could not be read', { err: summarizeError(error) }); });
   }
 
   /**

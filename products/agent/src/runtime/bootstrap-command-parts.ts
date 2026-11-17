@@ -89,6 +89,7 @@ export interface BootstrapCommandSectionOptions {
   readonly runtime: MutableRuntimeState;
   readonly keybindingsManager?: KeybindingsManager;
   readonly processManager?: import('@goodvibes-jev/engine/platform/platform/tools').ProcessManager;
+  readonly workspaceTrustManager?: import('@goodvibes-jev/engine/platform/platform/runtime/operations').WorkspaceTrustManager;
   readonly requestRender: () => void;
   readonly requestPermission: PermissionRequestHandler;
   readonly toolRegistry: ToolRegistry;
@@ -273,13 +274,18 @@ export function createBootstrapCommandWorkspaceSection(
     | 'profileManager'
     | 'bookmarkManager'
     | 'processManager'
+    | 'workspaceTrustManager'
     | 'projectPlanningService'
     | 'projectPlanningProjectId'
     | 'workPlan'
   >,
   shellServices: BootstrapCommandShellServices,
 ): BootstrapCommandWorkspaceSection {
-  return { ...projectCommandWorkspaceSection(options), processManager: options.processManager, ...shellServices.workspace };
+  return {
+    ...projectCommandWorkspaceSection(options), processManager: options.processManager,
+    ...(options.workspaceTrustManager ? { workspaceTrustManager: options.workspaceTrustManager } : {}),
+    ...shellServices.workspace,
+  };
 }
 
 export function createBootstrapCommandPlatformSection(

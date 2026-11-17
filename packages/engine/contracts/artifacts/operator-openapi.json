@@ -529,6 +529,52 @@
                                     "escalations"
                                   ],
                                   "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exec-prompt"
+                                      ]
+                                    },
+                                    "command": {
+                                      "type": "string"
+                                    },
+                                    "prompt": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "command",
+                                    "prompt"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "fetch-localhost"
+                                      ]
+                                    },
+                                    "host": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "host",
+                                    "url"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               ]
                             },
@@ -1147,6 +1193,52 @@
                                       "path",
                                       "tool"
                                     ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exec-prompt"
+                                      ]
+                                    },
+                                    "command": {
+                                      "type": "string"
+                                    },
+                                    "prompt": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "command",
+                                    "prompt"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "fetch-localhost"
+                                      ]
+                                    },
+                                    "host": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "host",
+                                    "url"
+                                  ],
+                                  "additionalProperties": false
                                   },
                                   "label": {
                                     "type": "string"
@@ -1719,6 +1811,52 @@
                               }
                             }
                           },
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exec-prompt"
+                                      ]
+                                    },
+                                    "command": {
+                                      "type": "string"
+                                    },
+                                    "prompt": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "command",
+                                    "prompt"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "fetch-localhost"
+                                      ]
+                                    },
+                                    "host": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "host",
+                                    "url"
+                                  ],
+                                  "additionalProperties": false
                           "required": [
                             "callId",
                             "tool",
@@ -2279,6 +2417,52 @@
                         },
                         "claimedBy": {
                           "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exec-prompt"
+                                      ]
+                                    },
+                                    "command": {
+                                      "type": "string"
+                                    },
+                                    "prompt": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "command",
+                                    "prompt"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "fetch-localhost"
+                                      ]
+                                    },
+                                    "host": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "host",
+                                    "url"
+                                  ],
+                                  "additionalProperties": false
                         },
                         "claimedAt": {
                           "type": "number"
@@ -3017,6 +3201,52 @@
                               },
                               "remember": {
                                 "type": "boolean"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "exec-prompt"
+                                        ]
+                                      },
+                                      "command": {
+                                        "type": "string"
+                                      },
+                                      "prompt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "command",
+                                      "prompt"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "fetch-localhost"
+                                        ]
+                                      },
+                                      "host": {
+                                        "type": "string"
+                                      },
+                                      "url": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "host",
+                                      "url"
+                                    ],
+                                    "additionalProperties": false
                               },
                               "rememberTier": {
                                 "type": "string",

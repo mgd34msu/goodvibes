@@ -572,6 +572,52 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                     "escalations"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "exec-prompt"
+                      ]
+                    },
+                    "command": {
+                      "type": "string"
+                    },
+                    "prompt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "command",
+                    "prompt"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "fetch-localhost"
+                      ]
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "host",
+                    "url"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },

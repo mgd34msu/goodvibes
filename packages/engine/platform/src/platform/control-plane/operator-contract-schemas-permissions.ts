@@ -60,11 +60,28 @@ const PERMISSION_ATTRIBUTION_SANDBOX_ESCALATION_SCHEMA = objectSchema({
 }, ['kind', 'sandbox', 'escalations'], { additionalProperties: false });
 
 export const PERMISSION_ATTRIBUTION_SCHEMA: Record<string, unknown> = {
+// A running command blocked on its own terminal prompt, brokered as an ask whose
+// approval carries the typed answer back to the command.
+const PERMISSION_ATTRIBUTION_EXEC_PROMPT_SCHEMA = objectSchema({
+  kind: enumSchema(['exec-prompt']),
+  command: STRING_SCHEMA,
+  prompt: STRING_SCHEMA,
+}, ['kind', 'command', 'prompt'], { additionalProperties: false });
+
+// The first fetch of a loopback host, asked once for that host.
+const PERMISSION_ATTRIBUTION_FETCH_LOCALHOST_SCHEMA = objectSchema({
+  kind: enumSchema(['fetch-localhost']),
+  host: STRING_SCHEMA,
+  url: STRING_SCHEMA,
+}, ['kind', 'host', 'url'], { additionalProperties: false });
+
   anyOf: [
     PERMISSION_ATTRIBUTION_BACKGROUND_AGENT_SCHEMA,
     PERMISSION_ATTRIBUTION_MCP_SERVER_SCHEMA,
     PERMISSION_ATTRIBUTION_SANDBOX_ESCALATION_SCHEMA,
   ],
+    PERMISSION_ATTRIBUTION_EXEC_PROMPT_SCHEMA,
+    PERMISSION_ATTRIBUTION_FETCH_LOCALHOST_SCHEMA,
 };
 
 // Remember tiers: how far an approval decision reaches. The ask carries the

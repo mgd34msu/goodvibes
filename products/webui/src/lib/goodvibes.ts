@@ -734,37 +734,18 @@ export interface ApprovalEditHunk {
 type ContractApprovalRecord = OperatorMethodOutput<'approvals.list'>['approvals'][number];
 type ContractApprovalRequest = ContractApprovalRecord['request'];
 
-/**
- * A running command blocked on its own terminal (host-key confirm, credential ask). The
- * daemon brokers it as an ordinary ask with tool 'exec:prompt'; an approval whose
- * `modifiedArgs.answer` is a string feeds that text to the waiting child. The published
- * attribution schema does not list this kind yet, so it is added here.
- */
-export interface ExecPromptAttribution {
-  readonly kind: 'exec-prompt';
-  readonly command: string;
-  readonly prompt: string;
-}
-
-export type ApprovalAttribution = NonNullable<ContractApprovalRequest['attribution']> | ExecPromptAttribution;
+export type ApprovalAttribution = NonNullable<ContractApprovalRequest['attribution']>;
 export type ApprovalAnalysis = ContractApprovalRequest['analysis'];
 export type ApprovalRememberOption = NonNullable<ContractApprovalRequest['rememberOptions']>[number];
-export type ApprovalRequest = OmitDeclared<ContractApprovalRequest, 'attribution'> & {
-  readonly attribution?: ApprovalAttribution;
-};
+export type ApprovalRequest = ContractApprovalRequest;
 export type ApprovalDecision = NonNullable<ContractApprovalRecord['decision']>;
 export type ApprovalStatus = ContractApprovalRecord['status'];
 export type ApprovalAuditRecord = ContractApprovalRecord['audit'][number];
-export type ApprovalRecord = OmitDeclared<ContractApprovalRecord, 'request'> & { readonly request: ApprovalRequest };
+export type ApprovalRecord = ContractApprovalRecord;
 /** What the broker recorded for the decision: the tier, whether the reason was stored, whether modifiedArgs reached the run. */
 export type ApprovalRecordedOutcome = NonNullable<OperatorMethodOutput<'approvals.approve'>['recorded']>;
-export type ApprovalSnapshotResult = OmitDeclared<OperatorMethodOutput<'approvals.list'>, 'approvals'> & {
-  readonly approvals: readonly ApprovalRecord[];
-};
 /** The reply of approvals.approve, deny, claim and cancel (one shape for all four). */
-export type ApprovalActionResult = OmitDeclared<OperatorMethodOutput<'approvals.approve'>, 'approval'> & {
-  readonly approval: ApprovalRecord;
-};
+export type ApprovalActionResult = OperatorMethodOutput<'approvals.approve'>;
 
 /**
  * Optional per-hunk selection and remember tier for `approvals.approve`. Omitting
@@ -1495,21 +1476,21 @@ export const client = {
     // approvals.*: the TOutput below is the contract's reply with the exec-prompt
     // attribution added (see ApprovalRecord).
     approvals: {
-      list: () => invokeOperator<'approvals.list', ApprovalSnapshotResult>('approvals.list'),
+      list: () => invokeOperator('approvals.list'),
       // selectedHunks: an index array into the pending approval's own
       // edit list. Omit it to approve the whole request. The daemon computes
       // modifiedArgs server-side, this call never carries a computed diff.
       approve: async (approvalId: string, input?: ApprovalApproveInput) =>
-        invokeOperator<'approvals.approve', ApprovalActionResult>('approvals.approve', approveInput(approvalId, input)),
+        invokeOperator('approvals.approve', approveInput(approvalId, input)),
       cancel: (approvalId: string) =>
-        invokeOperator<'approvals.cancel', ApprovalActionResult>('approvals.cancel', { approvalId }),
+        invokeOperator('approvals.cancel', { approvalId }),
       claim: (approvalId: string) =>
-        invokeOperator<'approvals.claim', ApprovalActionResult>('approvals.claim', { approvalId }),
+        invokeOperator('approvals.claim', { approvalId }),
       // deny sends the optional text as `note` (the audit trail) and `reason` (the
       // broker's structured user-declined feedback); `recorded.reasonStored` reports
       // whether the reason was kept.
       deny: (approvalId: string, input?: ApprovalDenyInput) =>
-        invokeOperator<'approvals.deny', ApprovalActionResult>(
+        invokeOperator(
           'approvals.deny',
           { approvalId, disposition: 'denied', ...(input?.note ? { note: input.note } : {}), ...(input?.reason ? { reason: input.reason } : {}) },
         ),

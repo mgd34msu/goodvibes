@@ -1044,6 +1044,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "escalations"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "exec-prompt"
+                              ]
+                            },
+                            "command": {
+                              "type": "string"
+                            },
+                            "prompt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "prompt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "fetch-localhost"
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "url"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
@@ -1589,6 +1635,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "path",
                               "tool"
                             ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "exec-prompt"
+                              ]
+                            },
+                            "command": {
+                              "type": "string"
+                            },
+                            "prompt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "prompt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "fetch-localhost"
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "url"
+                          ],
+                          "additionalProperties": false
                           },
                           "label": {
                             "type": "string"
@@ -2122,6 +2214,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       }
                     }
                   },
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "exec-prompt"
+                              ]
+                            },
+                            "command": {
+                              "type": "string"
+                            },
+                            "prompt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "prompt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "fetch-localhost"
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "url"
+                          ],
+                          "additionalProperties": false
                   "required": [
                     "callId",
                     "tool",
@@ -2681,6 +2819,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 },
                 "claimedBy": {
                   "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "exec-prompt"
+                              ]
+                            },
+                            "command": {
+                              "type": "string"
+                            },
+                            "prompt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "prompt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "fetch-localhost"
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "url"
+                          ],
+                          "additionalProperties": false
                 },
                 "claimedAt": {
                   "type": "number"
@@ -3363,6 +3547,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       },
                       "remember": {
                         "type": "boolean"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "exec-prompt"
+                                ]
+                              },
+                              "command": {
+                                "type": "string"
+                              },
+                              "prompt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "command",
+                              "prompt"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "fetch-localhost"
+                                ]
+                              },
+                              "host": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "host",
+                              "url"
+                            ],
+                            "additionalProperties": false
                       },
                       "rememberTier": {
                         "type": "string",
@@ -3816,6 +4046,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "required": [
             "request"
           ],
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "exec-prompt"
+                          ]
+                        },
+                        "command": {
+                          "type": "string"
+                        },
+                        "prompt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "command",
+                        "prompt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "fetch-localhost"
+                          ]
+                        },
+                        "host": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "host",
+                        "url"
+                      ],
+                      "additionalProperties": false
           "additionalProperties": false
         },
         "outputSchema": {
@@ -4142,6 +4418,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "type": "object",
                             "additionalProperties": {}
                           },
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "exec-prompt"
+                              ]
+                            },
+                            "command": {
+                              "type": "string"
+                            },
+                            "prompt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "prompt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "fetch-localhost"
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "url"
+                          ],
+                          "additionalProperties": false
                           {
                             "type": "array",
                             "items": {}
@@ -4526,7 +4848,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
-        "ownerOnly": true,
         "invokable": true
       },
       {

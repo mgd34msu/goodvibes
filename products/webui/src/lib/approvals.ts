@@ -151,6 +151,8 @@ export function attributionLabel(attribution: ApprovalAttribution | undefined): 
       return `Sandbox "${attribution.sandbox}" wants host access: ${attribution.escalations.join(', ')}`;
     case 'exec-prompt':
       return `Command waiting on its terminal: ${attribution.command}`;
+    case 'fetch-localhost':
+      return `First fetch of ${attribution.host} on this machine: ${attribution.url}`;
     default:
       return null;
   }

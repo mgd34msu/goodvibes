@@ -572,7 +572,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
@@ -615,7 +615,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({
@@ -642,7 +642,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     replay: {
       in: 'body',
       name: 'messageId',
-      behavior: 'Sending the same messageId again (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again. Use it to resend after a lost response.',
+      behavior: 'Sending the same messageId again to the same session (1 to 128 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the receipt of the input already recorded, flagged duplicate, instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response.',
     },
     events: ['control.session_update'],
     inputSchema: bodyEnvelopeSchema({

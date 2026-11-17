@@ -211,11 +211,19 @@ function announceRolloverOnChannel(
 /** Input-row metadata field holding the idempotency key of a message that carried a provider id. */
 export const PROVIDER_MESSAGE_KEY_FIELD = 'providerMessageKey';
 
-/** surface kind, surface id, conversation and provider id: the same message is never recorded under two of these. */
+/**
+ * surface kind, surface id, conversation, provider id and, when the caller
+ * names one, the session: the same message is never recorded under two of
+ * these. A caller addressing sessions by id numbers its messages per session
+ * ("1", "msg-1"), so the same id sent to another session is another message,
+ * never a duplicate of the first session's input.
+ */
 export function providerMessageKey(input: SubmitSharedSessionMessageInput): string | null {
   const id = input.providerMessageId?.trim();
   if (!id) return null;
-  return `${input.surfaceKind}:${input.surfaceId}:${input.externalId ?? ''}:${id}`;
+  const key = `${input.surfaceKind}:${input.surfaceId}:${input.externalId ?? ''}:${id}`;
+  const sessionId = input.sessionId?.trim();
+  return sessionId ? `${key}:session:${sessionId}` : key;
 }
 
 export async function handleSharedSessionIntent(

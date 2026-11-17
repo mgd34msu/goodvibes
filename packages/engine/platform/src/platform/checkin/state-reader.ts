@@ -179,6 +179,9 @@ export function judgeOnlyWhenOwnerNeeded(judge: CheckinJudge, reader: RuntimeChe
     reason: `Nothing needs the owner: ${reader.ownerSources().join(', ')}.`,
   };
   return {
-    decide: (briefing, options) => reader.ownerNeeded() === 0 ? Promise.resolve(quiet) : judge.decide(briefing, options),
+    decide: (briefing, options) => {
+      const ownerNeeded = reader.ownerNeeded();
+      return ownerNeeded === 0 ? Promise.resolve(quiet) : judge.decide(briefing, { ...options, ...(ownerNeeded === null ? {} : { ownerNeeded }) });
+    },
   };
 }

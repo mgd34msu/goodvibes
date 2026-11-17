@@ -418,9 +418,6 @@ export class CheckinService {
           else jobRevision = jobRevisionOf(job);
         }
         current();
-        if (isClassicOperation()) return await this.record(trigger, ranAt, 'skipped-decision-models-disabled', 'not assembled', {
-          decisionReason: 'Automatic check-ins require decision models; no contact judgment or message was produced.',
-        });
         const snapshot = await this.deps.stateReader.snapshot();
         current();
         briefingSummary = summarizeCheckinState(snapshot);

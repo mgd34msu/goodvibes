@@ -44,6 +44,8 @@ export interface CheckinJudgmentReceipt {
 }
 export type CheckinJudgeOptions = Pick<CallOptions, 'signal' | 'beforeAttempt' | 'onRetry'> & {
   readonly onJudgment?: (judgment: CheckinJudgmentReceipt) => void;
+  /** How many things wait for the owner, counted by code; without a decision model, any is a reason to contact. */
+  readonly ownerNeeded?: number | undefined;
 };
 
 /** The typed judgment and verified note, never a scraped chat decision. */

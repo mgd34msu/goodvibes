@@ -276,7 +276,7 @@ export function serviceStatusExitCode(status: ManagedServiceStatus): number {
  * definition at `path` (`definitionOwner`, see `ManagedDefinitionOwner`) when
  * known, plus the code.
  */
-export function serviceStatusJson(status: ManagedServiceStatus, definitionOwner?: ManagedDefinitionOwner): string {
+export function serviceStatusJson(status: ManagedServiceStatus, owner?: ManagedDefinitionOwner): string {
   return JSON.stringify(
     {
       ok: true,
@@ -284,7 +284,7 @@ export function serviceStatusJson(status: ManagedServiceStatus, definitionOwner?
         platform: status.platform,
         serviceName: status.serviceName,
         path: status.path,
-        ...(definitionOwner === undefined ? {} : { definitionOwner }),
+        ...(owner === undefined ? {} : { definitionOwner: owner }),
         installed: status.installed,
         running: status.running,
         autostart: status.autostart,

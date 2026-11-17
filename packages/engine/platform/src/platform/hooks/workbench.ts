@@ -75,7 +75,8 @@ function screenImport(config: HooksConfig): { config: HooksConfig; rejected: str
   for (const [pattern, defs] of Object.entries(config.hooks ?? {})) {
     if (!Array.isArray(defs)) { rejected.push(`${pattern}: the value must be an array of hook definitions`); continue; }
     for (const def of defs) {
-      const problem = hookDefinitionProblem(def);
+      // The key too: a dead key, or a `match` that disagrees with it, is refused on reload.
+      const problem = hookDefinitionProblem(def, pattern);
       if (problem !== null) rejected.push(`${pattern}: ${problem}`);
       else (hooks[pattern] ??= []).push(def);
     }

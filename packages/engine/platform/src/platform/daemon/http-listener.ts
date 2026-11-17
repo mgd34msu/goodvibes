@@ -476,9 +476,9 @@ export class HttpListener {
     }
 
     const hookEvent: HookEvent = {
-      path: `${phase}:webhook:${eventType}` as unknown as import('../hooks/types.js').HookEventPath,
+      path: `${phase as HookEvent['phase']}:webhook:${eventType}`,
       phase: phase as HookEvent['phase'],
-      category: 'workflow' as HookEvent['category'],
+      category: 'webhook',
       specific: eventType,
       sessionId: '',
       timestamp: Date.now(),

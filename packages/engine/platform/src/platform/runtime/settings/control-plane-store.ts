@@ -5,6 +5,8 @@ import { ConfigManager } from '../../config/manager.js';
 import { CONFIG_SCHEMA } from '../../config/index.js';
 import type { ConfigKey } from '../../config/index.js';
 import { configKeyFacts } from '../../config/config-key-facts.js';
+import { credentialValueRefusal } from '../../config/write-admission.js';
+import { isSecretBearingConfigKey, isSecretReferenceValue } from '../../config/secret-bearing-config-keys.js';
 import { ConfigError } from '../../types/errors.js';
 import { withSyncFileLock } from '../../config/sync-file-lock.js';
 import { defaultStore, getSettingsControlPath, migrateStore } from './host-setting-policy-read.js';
@@ -216,6 +218,35 @@ export function configSnapshot(configManager: ConfigManager): Record<ConfigKey, 
     snapshot[entry.key] = structuredClone((postalConfigKey(entry.key) ? configManager.getStored(entry.key) : configManager.get(entry.key)));
   }
   return snapshot;
+}
+
+/** What the control-plane file and its reviews keep for a credential setting's literal value. */
+export const SECRET_LITERAL_PLACEHOLDER = '(credential set; value not recorded)';
+
+/**
+ * The value to record or show for `key`: a credential setting's literal (a
+ * value kept from before settings held only references) becomes a placeholder
+ * that says it is set; a `goodvibes://secrets/…` reference, an empty value and
+ * every other setting are kept as they are.
+ */
+export function recordableSettingValue(key: string, value: unknown): unknown {
+  return isCredentialLiteral(key, value) ? SECRET_LITERAL_PLACEHOLDER : structuredClone(value);
+}
+
+/** A credential setting holding a literal rather than a `goodvibes://secrets/…` reference. */
+export function isCredentialLiteral(key: string, value: unknown): boolean {
+  return isSecretBearingConfigKey(key) && typeof value === 'string' && value.trim() !== '' && !isSecretReferenceValue(value);
+}
+
+/**
+ * Refuse a bundle that carries a credential literal before anything about it is
+ * staged, shown or written; the refusal names the setting, never the value.
+ */
+export function assertNoCredentialLiterals(settings: Readonly<Record<string, unknown>>, bundleKind: string): void {
+  for (const [key, value] of Object.entries(settings)) {
+    const refusal = credentialValueRefusal(key, value);
+    if (refusal) throw new ConfigError(`The ${bundleKind} carries a credential literal for ${key}; nothing was staged or written. ${refusal.reason} ${refusal.next}`);
+  }
 }
 
 export function sourcePriority(source: SettingsSource): number {

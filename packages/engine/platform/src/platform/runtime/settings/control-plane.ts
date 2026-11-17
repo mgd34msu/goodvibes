@@ -6,8 +6,11 @@ import type { ConfigKey } from '../../config/index.js';
 import { ProfileManager } from '../../profiles/manager.js';
 import type { ManagedSettingsBundle } from '../sandbox/types.js';
 import {
+  assertNoCredentialLiterals,
   configSnapshot,
+  isCredentialLiteral,
   defaultStore,
+  recordableSettingValue,
   getConfigControlPlaneDir,
   readBundleRisk,
   makeRollbackToken,
@@ -115,7 +118,9 @@ export function exportSettingsSyncBundle(configManager: ConfigManager): Settings
     version: 1,
     exportedAt: Date.now(),
     source: 'settings-sync',
-    settings: configSnapshot(configManager),
+    // A credential setting's literal (kept from before settings held only references) is not exported.
+    settings: Object.fromEntries(Object.entries(configSnapshot(configManager))
+      .filter(([key, value]) => !isCredentialLiteral(key, value))),
   };
 }
 
@@ -134,6 +139,7 @@ function applySettingsSyncBundleLocked(
   path: string,
   configDir: string,
 ): { appliedCount: number; conflictCount: number; skippedLockedKeys?: readonly ConfigKey[] } {
+  assertNoCredentialLiterals(bundle.settings, 'settings-sync bundle');
   const before = configSnapshot(configManager);
   const store = readStoreForWrite(configDir);
   const nextSynced: SettingsLayerRecord[] = [...store.syncedSettings];
@@ -160,8 +166,8 @@ function applySettingsSyncBundleLocked(
         conflictCount++;
         nextConflicts.push({
           key,
-          localValue: structuredClone(previousValue),
-          incomingValue: structuredClone(nextValue),
+          localValue: recordableSettingValue(key, previousValue),
+          incomingValue: recordableSettingValue(key, nextValue),
           source: 'synced',
           path,
           updatedAt: Date.now(),
@@ -283,6 +289,8 @@ async function buildManagedStage(
   path: string,
 ): Promise<StagedManagedBundle> {
   assertManagedBundleShape(bundle);
+  // A credential travels as a goodvibes://secrets/ reference; a literal is refused before it is staged, shown or rated.
+  assertNoCredentialLiterals(bundle.settings, 'managed settings bundle');
   const current = configSnapshot(configManager);
   const changes: ManagedBundleChange[] = [];
   const ignoredKeys: string[] = [];
@@ -293,7 +301,7 @@ async function buildManagedStage(
     const previousValue = current[key]!;
     changes.push({
       key,
-      previousValue: structuredClone(previousValue),
+      previousValue: recordableSettingValue(key, previousValue),
       nextValue: structuredClone(nextValue),
       changed: JSON.stringify(previousValue) !== JSON.stringify(nextValue),
       locked: true,
@@ -382,7 +390,7 @@ function applyStagedManagedBundleLocked(
   try {
     for (const change of stagedChanges) {
       // The value to roll back to is the one in effect now, not the one seen at staging.
-      previousValues[change.key] = structuredClone(before[change.key]);
+      previousValues[change.key] = recordableSettingValue(change.key, before[change.key]);
       configManager.setDynamic(change.key, change.nextValue, { bypassManagedLock: true });
       written.push(change.key);
       nextManaged.push(toLayerRecord(

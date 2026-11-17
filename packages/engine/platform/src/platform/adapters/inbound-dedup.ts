@@ -115,7 +115,10 @@ export function inboundDedupKey(
 /** The ntfy adapter's shared cache, see the module docstring for why it is here. */
 export const ntfyInboundDedup = new InboundMessageDedup();
 
-/** Shared by the chat adapters that have a provider message id; keys carry the surface name. */
+/**
+ * The claim every chat surface's pipeline takes on a provider message
+ * (surface-message.ts `runSurfaceMessage`), and GitHub's; keys carry the surface name.
+ */
 export const surfaceInboundDedup = new InboundMessageDedup();
 
 /**

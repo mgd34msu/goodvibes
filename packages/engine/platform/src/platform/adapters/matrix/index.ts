@@ -1,5 +1,4 @@
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString } from '../helpers.js';
-import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
@@ -72,58 +71,55 @@ export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceA
   const eventId = readString(event.event_id);
   const msgtype = readString(content?.msgtype);
 
-  const dedupKey = inboundDedupKey('matrix', roomId, eventId);
-  return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const surfaceId = readString(context.configManager.get('surfaces.matrix.userId')) ?? 'matrix';
-    const outcome = await runSurfaceMessage(context, {
-      ingress: {
-        surface: 'matrix',
-        userId: sender,
-        channelId: roomId,
-        groupId: roomId,
-        threadId,
-        workspaceId: readString(payload.homeserver) ?? readString(context.configManager.get('surfaces.matrix.homeserverUrl')),
-        conversationKind: threadId ? 'thread' : 'channel',
-        text,
-        mentioned: matrixMentioned(payload, content, readString(context.configManager.get('surfaces.matrix.userId')), text),
-        metadata: { ...payload, ...(replyToMessageId ? { replyToMessageId } : {}) },
-      },
-      binding: {
-        kind: threadId ? 'thread' : 'channel',
-        surfaceKind: 'matrix',
-        surfaceId,
-        externalId: threadId ?? roomId,
-        channelId: roomId,
-        threadId,
-        title: roomId,
-        metadata: {
-          ...(eventId ? { eventId } : {}),
-          ...(msgtype ? { msgtype } : {}),
-          ...(replyToMessageId ? { replyToMessageId } : {}),
-        },
-      },
-      text,
-      logLabel: 'handleMatrixSurfaceWebhook',
-      control: 'notice',
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+  const providerMessageId = eventId;
+  const surfaceId = readString(context.configManager.get('surfaces.matrix.userId')) ?? 'matrix';
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'matrix',
       userId: sender,
-      displayName: readString(payload.displayName) ?? sender,
-      signal: req.signal,
-      committed,
-    });
-    if (outcome.kind === 'no-text') {
-      // Whether a room is one-to-one is not in the event, so the sender is not answered here.
-      const attachment = msgtype === 'm.image' || msgtype === 'm.audio' || msgtype === 'm.video' || msgtype === 'm.file' ? msgtype.slice(2) : undefined;
-      return Response.json({
-        ok: true,
-        acknowledged: true,
-        queued: false,
-        outcome: 'ignored',
-        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
-        ...(attachment ? { attachment } : {}),
-        bindingId: outcome.binding.id,
-      });
-    }
-    return surfaceOutcomeResponse(outcome);
+      channelId: roomId,
+      groupId: roomId,
+      threadId,
+      workspaceId: readString(payload.homeserver) ?? readString(context.configManager.get('surfaces.matrix.homeserverUrl')),
+      conversationKind: threadId ? 'thread' : 'channel',
+      text,
+      mentioned: matrixMentioned(payload, content, readString(context.configManager.get('surfaces.matrix.userId')), text),
+      metadata: { ...payload, ...(replyToMessageId ? { replyToMessageId } : {}) },
+    },
+    binding: {
+      kind: threadId ? 'thread' : 'channel',
+      surfaceKind: 'matrix',
+      surfaceId,
+      externalId: threadId ?? roomId,
+      channelId: roomId,
+      threadId,
+      title: roomId,
+      metadata: {
+        ...(eventId ? { eventId } : {}),
+        ...(msgtype ? { msgtype } : {}),
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+      },
+    },
+    text,
+    logLabel: 'handleMatrixSurfaceWebhook',
+    control: 'notice',
+    ...(providerMessageId ? { providerMessageId } : {}),
+    userId: sender,
+    displayName: readString(payload.displayName) ?? sender,
+    signal: req.signal,
   });
+  if (outcome.kind === 'no-text') {
+    // Whether a room is one-to-one is not in the event, so the sender is not answered here.
+    const attachment = msgtype === 'm.image' || msgtype === 'm.audio' || msgtype === 'm.video' || msgtype === 'm.file' ? msgtype.slice(2) : undefined;
+    return Response.json({
+      ok: true,
+      acknowledged: true,
+      queued: false,
+      outcome: 'ignored',
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(attachment ? { attachment } : {}),
+      bindingId: outcome.binding.id,
+    });
+  }
+  return surfaceOutcomeResponse(outcome);
 }

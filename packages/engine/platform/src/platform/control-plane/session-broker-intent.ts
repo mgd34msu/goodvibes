@@ -80,6 +80,8 @@ export interface HandleSharedSessionIntentDeps {
    */
   sendSurfaceNotice?: ((routeId: string, text: string) => void) | undefined;
   buildContinuationTask(sessionId: string): string;
+  /** Bring a session's stored messages and inputs into memory when they are on disk only; one log read, then nothing. */
+  loadSessionHistory?(sessionId: string): void;
   /** What an earlier delivery recorded under this provider message key, when anything. */
   findProviderMessage?(key: string): ProviderMessageClaim | null;
   /** Remember which input holds a provider message key. */
@@ -235,12 +237,20 @@ export async function handleSharedSessionIntent(
 ): Promise<SharedSessionSubmission> {
   await deps.start();
 
+  const binding = await deps.resolveBinding(input);
   const providerKey = providerMessageKey(input);
+  if (providerKey) {
+    // The session this message would land in may be closed with its history
+    // still on disk (after a restart); its stored rows are what tells a
+    // redelivery from a new message, so they are read before the lookup.
+    for (const sessionId of new Set([input.sessionId, binding?.sessionId])) {
+      if (sessionId) deps.loadSessionHistory?.(sessionId);
+    }
+  }
   const earlier = providerKey ? deps.findProviderMessage?.(providerKey) ?? null : null;
   if (earlier?.kind === 'held') return earlier.submission;
   const retry = earlier?.kind === 'retry' ? earlier : undefined;
 
-  const binding = await deps.resolveBinding(input);
   // WHERE the session came from decides what a CLOSED one means, and the two
   // sources are not interchangeable. `input.sessionId` is a caller naming one
   // specific record, it asked about THAT session, and the honest answer when

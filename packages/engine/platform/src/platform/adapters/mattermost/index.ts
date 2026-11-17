@@ -1,5 +1,4 @@
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
-import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
@@ -78,68 +77,65 @@ export async function handleMattermostSurfaceWebhook(req: Request, context: Surf
   const teamId = readString(post?.team_id) ?? readString(body.team_id);
   if (!channelId) return Response.json({ error: 'Missing channel id' }, { status: 400 });
 
-  const dedupKey = inboundDedupKey('mattermost', channelId, readString(post?.id) ?? readString(body.post_id));
+  const providerMessageId = readString(post?.id) ?? readString(body.post_id);
   const direct = readString(body.channel_type) === 'D' || readString(post?.channel_type) === 'D';
-  return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const task = message;
-    const outcome = await runSurfaceMessage(context, {
-      ingress: {
-        surface: 'mattermost',
-        userId,
-        channelId,
-        groupId: teamId ?? channelId,
-        threadId,
-        workspaceId: teamId,
-        conversationKind: threadId ? 'thread' : 'channel',
-        text: task,
-        // An outgoing webhook only fires on its trigger word, which is the mention;
-        // a direct message is addressed to the bot by definition.
-        mentioned: declaredMention(body, Boolean(readString(body.trigger_word)) || direct),
-        metadata: {
-          ...body,
-          ...(post ? { post } : {}),
-        },
-      },
-      binding: {
-        kind: threadId ? 'thread' : 'channel',
-        surfaceKind: 'mattermost',
-        surfaceId: teamId ?? 'mattermost',
-        externalId: threadId ?? channelId,
-        channelId,
-        threadId,
-        title: readString(body.channel_name) ?? channelId,
-        metadata: {},
-      },
-      text: task,
-      logLabel: 'handleMattermostSurfaceWebhook',
-      // An outgoing webhook shows the `text` of its answer in the channel.
-      control: 'response',
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+  const task = message;
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'mattermost',
       userId,
-      displayName: readString(body.user_name) ?? userId,
-      signal: req.signal,
-      committed,
-    });
-    if (outcome.kind === 'no-text') {
-      const attachment = hasAttachments(post?.file_ids) ? 'attachment' : undefined;
-      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, direct) : false;
-      return Response.json({
-        ok: true,
-        acknowledged: true,
-        queued: false,
-        outcome: 'ignored',
-        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
-        ...(attachment ? { attachment, notified } : {}),
-        bindingId: outcome.binding.id,
-      });
-    }
-    if (outcome.kind === 'control') return surfaceOutcomeResponse(outcome, { text: outcome.message });
-    if (outcome.kind === 'started' && (req.headers.get('content-type') ?? '').includes('application/x-www-form-urlencoded')) {
-      return Response.json({
-        response_type: 'ephemeral',
-        text: 'GoodVibes accepted the request and is processing it.',
-      });
-    }
-    return surfaceOutcomeResponse(outcome);
+      channelId,
+      groupId: teamId ?? channelId,
+      threadId,
+      workspaceId: teamId,
+      conversationKind: threadId ? 'thread' : 'channel',
+      text: task,
+      // An outgoing webhook only fires on its trigger word, which is the mention;
+      // a direct message is addressed to the bot by definition.
+      mentioned: declaredMention(body, Boolean(readString(body.trigger_word)) || direct),
+      metadata: {
+        ...body,
+        ...(post ? { post } : {}),
+      },
+    },
+    binding: {
+      kind: threadId ? 'thread' : 'channel',
+      surfaceKind: 'mattermost',
+      surfaceId: teamId ?? 'mattermost',
+      externalId: threadId ?? channelId,
+      channelId,
+      threadId,
+      title: readString(body.channel_name) ?? channelId,
+      metadata: {},
+    },
+    text: task,
+    logLabel: 'handleMattermostSurfaceWebhook',
+    // An outgoing webhook shows the `text` of its answer in the channel.
+    control: 'response',
+    ...(providerMessageId ? { providerMessageId } : {}),
+    userId,
+    displayName: readString(body.user_name) ?? userId,
+    signal: req.signal,
   });
+  if (outcome.kind === 'no-text') {
+    const attachment = hasAttachments(post?.file_ids) ? 'attachment' : undefined;
+    const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, direct) : false;
+    return Response.json({
+      ok: true,
+      acknowledged: true,
+      queued: false,
+      outcome: 'ignored',
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(attachment ? { attachment, notified } : {}),
+      bindingId: outcome.binding.id,
+    });
+  }
+  if (outcome.kind === 'control') return surfaceOutcomeResponse(outcome, { text: outcome.message });
+  if (outcome.kind === 'started' && (req.headers.get('content-type') ?? '').includes('application/x-www-form-urlencoded')) {
+    return Response.json({
+      response_type: 'ephemeral',
+      text: 'GoodVibes accepted the request and is processing it.',
+    });
+  }
+  return surfaceOutcomeResponse(outcome);
 }

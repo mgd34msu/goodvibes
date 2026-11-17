@@ -1,6 +1,5 @@
 import type { ChannelConversationKind } from '../../channels/index.js';
 import { constantTimeEquals, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, ingressMetadata, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
-import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
@@ -154,82 +153,79 @@ export async function handleMSTeamsSurfaceWebhook(req: Request, context: Surface
   const teamId = readString(team?.['id']);
   const channelEntryId = readString(channel?.['id']);
   const tenantId = readString(tenant?.['id']);
-  const dedupKey = inboundDedupKey('msteams', conversationId, readString(activity.id));
+  const providerMessageId = readString(activity.id);
   const conversationKind = teamsConversationKind(conversationType, replyToId);
-  return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const outcome = await runSurfaceMessage(context, {
-      ingress: {
-        surface: 'msteams',
-        userId: readString(from?.id),
-        channelId,
-        groupId: channelEntryId ?? channelId,
-        threadId: replyToId,
-        workspaceId: teamId ?? tenantId,
-        conversationKind,
-        text,
-        mentioned: teamsMentioned(activity, conversationType, [
-          readString(context.configManager.get('surfaces.msteams.botId')),
-          readString(context.configManager.get('surfaces.msteams.appId')),
-        ]),
-        metadata: {
-          activityId: readString(activity.id),
-          conversationId,
-          conversationType,
-          replyToId,
-          serviceUrl,
-          teamId,
-          channelId: channelEntryId,
-          tenantId,
-        },
-      },
-      binding: {
-        kind: replyToId ? 'thread' : 'channel',
-        surfaceKind: 'msteams',
-        surfaceId: readString(context.configManager.get('surfaces.msteams.botId'))
-          ?? readString(context.configManager.get('surfaces.msteams.appId'))
-          ?? 'msteams',
-        externalId: replyToId ?? conversationId,
-        channelId: channelId,
-        threadId: replyToId,
-        title: readString(conversation?.name) ?? readString(channel?.id) ?? conversationId,
-        metadata: {
-          ...ingressMetadata(activity),
-          conversationId,
-          serviceUrl,
-          conversationType,
-          replyToId,
-          teamId,
-          channelId: channelEntryId,
-        },
-      },
-      text,
-      logLabel: 'handleMSTeamsSurfaceWebhook',
-      // The Bot Framework does not show the webhook answer; replies go through the connector.
-      control: 'notice',
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'msteams',
       userId: readString(from?.id),
-      displayName: readString(from?.name) ?? readString(from?.id),
-      signal: req.signal,
-      committed,
-    });
-    if (outcome.kind === 'no-text') {
-      const attachment = hasAttachments(activity.attachments) && (activity.attachments as unknown[]).some((entry) => readString(readRecord(entry)?.contentType) !== 'text/html') ? 'attachment' : undefined;
-      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, conversationKind === 'direct') : false;
-      logger.info('handleMSTeamsSurfaceWebhook: activity acknowledged without queueing', {
-        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
-        bindingId: outcome.binding.id,
+      channelId,
+      groupId: channelEntryId ?? channelId,
+      threadId: replyToId,
+      workspaceId: teamId ?? tenantId,
+      conversationKind,
+      text,
+      mentioned: teamsMentioned(activity, conversationType, [
+        readString(context.configManager.get('surfaces.msteams.botId')),
+        readString(context.configManager.get('surfaces.msteams.appId')),
+      ]),
+      metadata: {
         activityId: readString(activity.id),
-      });
-      return Response.json({
-        ok: true,
-        acknowledged: true,
-        queued: false,
-        outcome: 'ignored',
-        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
-        ...(attachment ? { attachment, notified } : {}),
-        bindingId: outcome.binding.id,
-      });
-    }
-    return surfaceOutcomeResponse(outcome);
+        conversationId,
+        conversationType,
+        replyToId,
+        serviceUrl,
+        teamId,
+        channelId: channelEntryId,
+        tenantId,
+      },
+    },
+    binding: {
+      kind: replyToId ? 'thread' : 'channel',
+      surfaceKind: 'msteams',
+      surfaceId: readString(context.configManager.get('surfaces.msteams.botId'))
+        ?? readString(context.configManager.get('surfaces.msteams.appId'))
+        ?? 'msteams',
+      externalId: replyToId ?? conversationId,
+      channelId: channelId,
+      threadId: replyToId,
+      title: readString(conversation?.name) ?? readString(channel?.id) ?? conversationId,
+      metadata: {
+        ...ingressMetadata(activity),
+        conversationId,
+        serviceUrl,
+        conversationType,
+        replyToId,
+        teamId,
+        channelId: channelEntryId,
+      },
+    },
+    text,
+    logLabel: 'handleMSTeamsSurfaceWebhook',
+    // The Bot Framework does not show the webhook answer; replies go through the connector.
+    control: 'notice',
+    ...(providerMessageId ? { providerMessageId } : {}),
+    userId: readString(from?.id),
+    displayName: readString(from?.name) ?? readString(from?.id),
+    signal: req.signal,
   });
+  if (outcome.kind === 'no-text') {
+    const attachment = hasAttachments(activity.attachments) && (activity.attachments as unknown[]).some((entry) => readString(readRecord(entry)?.contentType) !== 'text/html') ? 'attachment' : undefined;
+    const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, conversationKind === 'direct') : false;
+    logger.info('handleMSTeamsSurfaceWebhook: activity acknowledged without queueing', {
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      bindingId: outcome.binding.id,
+      activityId: readString(activity.id),
+    });
+    return Response.json({
+      ok: true,
+      acknowledged: true,
+      queued: false,
+      outcome: 'ignored',
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(attachment ? { attachment, notified } : {}),
+      bindingId: outcome.binding.id,
+    });
+  }
+  return surfaceOutcomeResponse(outcome);
 }

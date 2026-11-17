@@ -1255,6 +1255,7 @@ export class SharedSessionBroker {
         announceSurfaceReply: (binding) => this.announceSurfaceReply(binding),
         ...(this.surfaceNoticeSender ? { sendSurfaceNotice: this.surfaceNoticeSender } : {}),
         buildContinuationTask: (sessionId) => this.buildContinuationTask(sessionId),
+        loadSessionHistory: (sessionId) => this.loadDeferredHistory(sessionId),
         findProviderMessage: (key) => this.findProviderMessage(key),
         noteProviderMessage: (key, sessionId, inputId) => { this.providerMessageIndexed().set(key, { sessionId, inputId }); },
         ...(this.conversationGateConfig ? { conversationGateConfig: this.conversationGateConfig } : {}),

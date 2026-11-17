@@ -1,5 +1,4 @@
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
-import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
@@ -61,57 +60,54 @@ export async function handleBlueBubblesSurfaceWebhook(req: Request, context: Sur
   const conversationId = chatGuid ?? senderId;
   if (!conversationId) return Response.json({ error: 'Missing BlueBubbles chat identifier' }, { status: 400 });
 
-  const dedupKey = inboundDedupKey('bluebubbles', conversationId, messageId);
+  const providerMessageId = messageId;
   const conversationKind = conversationKindForChatGuid(chatGuid, Boolean(message.isGroup ?? payload.isGroup));
-  return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const outcome = await runSurfaceMessage(context, {
-      ingress: {
-        surface: 'bluebubbles',
-        userId: senderId,
-        channelId: conversationId,
-        groupId: conversationId,
-        conversationKind,
-        text,
-        mentioned: declaredMention(payload, conversationKind === 'direct'),
-        metadata: payload,
-      },
-      binding: {
-        kind: 'channel',
-        surfaceKind: 'bluebubbles',
-        surfaceId: readString(payload.account)
-          ?? readString(context.configManager.get('surfaces.bluebubbles.account'))
-          ?? 'bluebubbles',
-        externalId: conversationId,
-        channelId: conversationId,
-        title: senderId ?? conversationId,
-        metadata: {
-          ...(messageId ? { messageId } : {}),
-          ...(chatGuid ? { chatGuid } : {}),
-          ...(senderId ? { senderId } : {}),
-        },
-      },
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'bluebubbles',
+      userId: senderId,
+      channelId: conversationId,
+      groupId: conversationId,
+      conversationKind,
       text,
-      logLabel: 'handleBlueBubblesSurfaceWebhook',
-      control: 'notice',
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
-      userId: senderId ?? conversationId,
-      displayName: senderId ?? conversationId,
-      signal: req.signal,
-      committed,
-    });
-    if (outcome.kind === 'no-text') {
-      const attachment = hasAttachments(message.attachments) ? 'attachment' : undefined;
-      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, conversationKind === 'direct') : false;
-      return Response.json({
-        ok: true,
-        acknowledged: true,
-        queued: false,
-        outcome: 'ignored',
-        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
-        ...(attachment ? { attachment, notified } : {}),
-        bindingId: outcome.binding.id,
-      });
-    }
-    return surfaceOutcomeResponse(outcome);
+      mentioned: declaredMention(payload, conversationKind === 'direct'),
+      metadata: payload,
+    },
+    binding: {
+      kind: 'channel',
+      surfaceKind: 'bluebubbles',
+      surfaceId: readString(payload.account)
+        ?? readString(context.configManager.get('surfaces.bluebubbles.account'))
+        ?? 'bluebubbles',
+      externalId: conversationId,
+      channelId: conversationId,
+      title: senderId ?? conversationId,
+      metadata: {
+        ...(messageId ? { messageId } : {}),
+        ...(chatGuid ? { chatGuid } : {}),
+        ...(senderId ? { senderId } : {}),
+      },
+    },
+    text,
+    logLabel: 'handleBlueBubblesSurfaceWebhook',
+    control: 'notice',
+    ...(providerMessageId ? { providerMessageId } : {}),
+    userId: senderId ?? conversationId,
+    displayName: senderId ?? conversationId,
+    signal: req.signal,
   });
+  if (outcome.kind === 'no-text') {
+    const attachment = hasAttachments(message.attachments) ? 'attachment' : undefined;
+    const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, conversationKind === 'direct') : false;
+    return Response.json({
+      ok: true,
+      acknowledged: true,
+      queued: false,
+      outcome: 'ignored',
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(attachment ? { attachment, notified } : {}),
+      bindingId: outcome.binding.id,
+    });
+  }
+  return surfaceOutcomeResponse(outcome);
 }

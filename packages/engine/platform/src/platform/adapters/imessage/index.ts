@@ -1,5 +1,4 @@
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, readIdentifier, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
-import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 import type { SurfaceAdapterContext } from '../types.js';
@@ -29,54 +28,51 @@ export async function handleIMessageSurfaceWebhook(req: Request, context: Surfac
   const message = readString(payload.message) ?? readString(payload.text) ?? '';
   if (!chatId) return Response.json({ error: 'Missing chatId' }, { status: 400 });
 
-  const dedupKey = inboundDedupKey('imessage', chatId, readIdentifier(payload.guid ?? payload.messageId ?? payload.id));
+  const providerMessageId = readIdentifier(payload.guid ?? payload.messageId ?? payload.id);
   const threadId = readString(payload.threadId);
-  return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const outcome = await runSurfaceMessage(context, {
-      ingress: {
-        surface: 'imessage',
-        userId: chatId,
-        channelId: chatId,
-        groupId: chatId,
-        threadId,
-        conversationKind: threadId ? 'thread' : 'direct',
-        text: message,
-        mentioned: declaredMention(payload, !threadId),
-        metadata: payload,
-      },
-      binding: {
-        kind: threadId ? 'thread' : 'channel',
-        surfaceKind: 'imessage',
-        surfaceId: readString(payload.account) ?? readString(context.configManager.get('surfaces.imessage.account')) ?? 'imessage',
-        externalId: threadId ?? chatId,
-        channelId: chatId,
-        threadId,
-        title: chatId,
-        metadata: {},
-      },
-      text: message,
-      logLabel: 'handleIMessageSurfaceWebhook',
-      control: 'notice',
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'imessage',
       userId: chatId,
-      displayName: chatId,
+      channelId: chatId,
+      groupId: chatId,
+      threadId,
+      conversationKind: threadId ? 'thread' : 'direct',
+      text: message,
+      mentioned: declaredMention(payload, !threadId),
+      metadata: payload,
+    },
+    binding: {
+      kind: threadId ? 'thread' : 'channel',
+      surfaceKind: 'imessage',
+      surfaceId: readString(payload.account) ?? readString(context.configManager.get('surfaces.imessage.account')) ?? 'imessage',
+      externalId: threadId ?? chatId,
+      channelId: chatId,
+      threadId,
       title: chatId,
-      metadata: ingressMetadata(payload),
-      signal: req.signal,
-      committed,
-    });
-    if (outcome.kind === 'no-text') {
-      const attachment = hasAttachments(payload.attachments) ? 'attachment' : undefined;
-      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, !threadId && !readString(payload.groupId)) : false;
-      return Response.json({
-        acknowledged: true,
-        queued: false,
-        outcome: 'ignored',
-        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
-        ...(attachment ? { attachment, notified } : {}),
-        bindingId: outcome.binding.id,
-      });
-    }
-    return surfaceOutcomeResponse(outcome);
+      metadata: {},
+    },
+    text: message,
+    logLabel: 'handleIMessageSurfaceWebhook',
+    control: 'notice',
+    ...(providerMessageId ? { providerMessageId } : {}),
+    userId: chatId,
+    displayName: chatId,
+    title: chatId,
+    metadata: ingressMetadata(payload),
+    signal: req.signal,
   });
+  if (outcome.kind === 'no-text') {
+    const attachment = hasAttachments(payload.attachments) ? 'attachment' : undefined;
+    const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, !threadId && !readString(payload.groupId)) : false;
+    return Response.json({
+      acknowledged: true,
+      queued: false,
+      outcome: 'ignored',
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(attachment ? { attachment, notified } : {}),
+      bindingId: outcome.binding.id,
+    });
+  }
+  return surfaceOutcomeResponse(outcome);
 }

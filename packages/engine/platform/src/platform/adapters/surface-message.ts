@@ -14,6 +14,7 @@ import type { UpsertRouteBindingInput } from '../channels/route-manager.js';
 import type { SharedSessionSubmission } from '../control-plane/session-types.js';
 import type { SurfaceAdapterContext, SurfaceIngressDecision, TrySpawnAgentResult } from './types.js';
 import { ingressAnswerResponse } from './helpers.js';
+import { duplicateDeliveryResponse, surfaceInboundDedup } from './inbound-dedup.js';
 
 type IngressInput = Parameters<SurfaceAdapterContext['authorizeSurfaceIngress']>[0];
 
@@ -195,10 +196,59 @@ export type SurfaceIngressOutcome =
   | { readonly kind: 'refused'; readonly reason: string; readonly decision: SurfaceIngressDecision }
   /** Admitted and bound, but there is no text to act on (an attachment, an empty message). */
   | { readonly kind: 'no-text'; readonly binding: AutomationRouteBinding }
+  /** A redelivery of a provider message this daemon is handling or has handled; nothing was done again. */
+  | { readonly kind: 'duplicate' }
   | SurfaceMessageOutcome;
 
-/** The whole sequence: policy, binding, then {@link submitSurfaceMessage}. */
+/**
+ * Whether handling a provider message ended in a state a redelivery must not
+ * repeat: a command ran, a gate or ingress answer was given, the message was
+ * taken by an agent, or an admitted message had nothing to act on. A refusal
+ * that consumed nothing, a failed start or a throw before the message was
+ * taken lets a redelivery do the work again.
+ */
+function keepsDeliveryClaim(outcome: SurfaceIngressOutcome): boolean {
+  switch (outcome.kind) {
+    case 'refused': return outcome.decision.consumed !== undefined;
+    case 'not-started': return false;
+    default: return true;
+  }
+}
+
+/**
+ * The whole sequence: policy, binding, then {@link submitSurfaceMessage}, once
+ * per provider message. Every surface's pipeline claims the provider's own
+ * message id here, so no adapter keeps a claim of its own: a redelivery
+ * arriving while the first is handled, or after it, answers `duplicate`. The
+ * session broker keeps the durable claim for a submitted message (its stored
+ * input row, read across a restart); this one covers what happens before the
+ * broker (a control command, an ingress answer, an attachment notice) for as
+ * long as a provider redelivers (inbound-dedup.ts). A message without a
+ * provider id is not deduplicated.
+ */
 export async function runSurfaceMessage(
+  context: SurfaceAdapterContext,
+  input: SurfaceIngressMessage,
+): Promise<SurfaceIngressOutcome> {
+  const providerId = input.providerMessageId?.trim();
+  const key = providerId
+    ? `${input.binding.surfaceKind}:${input.binding.surfaceId}:${input.externalId ?? input.binding.externalId}:${providerId}`
+    : '';
+  if (!surfaceInboundDedup.claim(key)) return { kind: 'duplicate' };
+  let kept = false;
+  try {
+    const outcome = await runSurfaceMessageOnce(context, {
+      ...input,
+      committed: () => { kept = true; input.committed?.(); },
+    });
+    if (keepsDeliveryClaim(outcome)) kept = true;
+    return outcome;
+  } finally {
+    if (!kept) surfaceInboundDedup.release(key);
+  }
+}
+
+async function runSurfaceMessageOnce(
   context: SurfaceAdapterContext,
   input: SurfaceIngressMessage,
 ): Promise<SurfaceIngressOutcome> {
@@ -224,6 +274,8 @@ export function surfaceOutcomeResponse(
   extra: Record<string, unknown> = {},
 ): Response {
   switch (outcome.kind) {
+    case 'duplicate':
+      return duplicateDeliveryResponse();
     case 'refused':
       return ingressAnswerResponse(outcome.decision);
     case 'control':

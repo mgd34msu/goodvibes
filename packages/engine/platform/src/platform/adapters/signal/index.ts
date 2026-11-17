@@ -1,6 +1,5 @@
 import { constantTimeEquals, parseJsonRecord, readBearerOrHeaderToken, readTextBodyWithinLimit, readRecord, readString, declaredMention, ingressMetadata, readIdentifier, noticeUnsupportedAttachment, hasAttachments } from '../helpers.js';
 import { runSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
-import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import type { SurfaceAdapterContext } from '../types.js';
 
@@ -78,54 +77,51 @@ export async function handleSignalSurfaceWebhook(req: Request, context: SurfaceA
   // message was written in one, otherwise the sender.
   const conversationId = groupId ?? sender;
 
-  const dedupKey = inboundDedupKey('signal', conversationId, readIdentifier(payload.messageId ?? payload.id ?? payload.timestamp));
-  return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-    const outcome = await runSurfaceMessage(context, {
-      ingress: {
-        surface: 'signal',
-        userId: sender,
-        channelId: conversationId,
-        groupId: conversationId,
-        threadId,
-        conversationKind: threadId ? 'thread' : groupId ? 'group' : 'direct',
-        ...(threadId ? { parentConversationKind: groupId ? 'group' as const : 'direct' as const } : {}),
-        text: message,
-        mentioned: declaredMention(payload, signalMentionsAccount(payload, message, readString(context.configManager.get('surfaces.signal.account')), groupId)),
-        metadata: payload,
-      },
-      binding: {
-        kind: threadId ? 'thread' : 'channel',
-        surfaceKind: 'signal',
-        surfaceId: readString(payload.account) ?? readString(context.configManager.get('surfaces.signal.account')) ?? 'signal',
-        externalId: threadId ?? conversationId,
-        channelId: conversationId,
-        threadId,
-        title: conversationId,
-        metadata: { ...(groupId ? { groupId } : {}), senderId: sender },
-      },
-      text: message,
-      logLabel: 'handleSignalSurfaceWebhook',
-      control: 'notice',
-      ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+  const providerMessageId = readIdentifier(payload.messageId ?? payload.id ?? payload.timestamp);
+  const outcome = await runSurfaceMessage(context, {
+    ingress: {
+      surface: 'signal',
       userId: sender,
-      displayName: sender,
+      channelId: conversationId,
+      groupId: conversationId,
+      threadId,
+      conversationKind: threadId ? 'thread' : groupId ? 'group' : 'direct',
+      ...(threadId ? { parentConversationKind: groupId ? 'group' as const : 'direct' as const } : {}),
+      text: message,
+      mentioned: declaredMention(payload, signalMentionsAccount(payload, message, readString(context.configManager.get('surfaces.signal.account')), groupId)),
+      metadata: payload,
+    },
+    binding: {
+      kind: threadId ? 'thread' : 'channel',
+      surfaceKind: 'signal',
+      surfaceId: readString(payload.account) ?? readString(context.configManager.get('surfaces.signal.account')) ?? 'signal',
+      externalId: threadId ?? conversationId,
+      channelId: conversationId,
+      threadId,
       title: conversationId,
-      metadata: ingressMetadata(payload),
-      signal: req.signal,
-      committed,
-    });
-    if (outcome.kind === 'no-text') {
-      const attachment = hasAttachments(payload.attachments) || hasAttachments(readDataMessage(payload)?.attachments) ? 'attachment' : undefined;
-      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, !threadId && !groupId) : false;
-      return Response.json({
-        acknowledged: true,
-        queued: false,
-        outcome: 'ignored',
-        reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
-        ...(attachment ? { attachment, notified } : {}),
-        bindingId: outcome.binding.id,
-      });
-    }
-    return surfaceOutcomeResponse(outcome);
+      metadata: { ...(groupId ? { groupId } : {}), senderId: sender },
+    },
+    text: message,
+    logLabel: 'handleSignalSurfaceWebhook',
+    control: 'notice',
+    ...(providerMessageId ? { providerMessageId } : {}),
+    userId: sender,
+    displayName: sender,
+    title: conversationId,
+    metadata: ingressMetadata(payload),
+    signal: req.signal,
   });
+  if (outcome.kind === 'no-text') {
+    const attachment = hasAttachments(payload.attachments) || hasAttachments(readDataMessage(payload)?.attachments) ? 'attachment' : undefined;
+    const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, !threadId && !groupId) : false;
+    return Response.json({
+      acknowledged: true,
+      queued: false,
+      outcome: 'ignored',
+      reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
+      ...(attachment ? { attachment, notified } : {}),
+      bindingId: outcome.binding.id,
+    });
+  }
+  return surfaceOutcomeResponse(outcome);
 }

@@ -7,7 +7,6 @@ import { summarizeError } from '../../utils/error-display.js';
 import { fetchWithTimeout } from '../../utils/fetch-with-timeout.js';
 import { resolveSecretInput, type SecretRefResolutionOptions } from '../../config/secret-refs.js';
 import { hasAttachments, ingressAnswer, ingressAnswerResponse, noticeUnsupportedAttachment, readRecord, readTextBodyWithinLimit } from '../helpers.js';
-import { duplicateDeliveryResponse, inboundDedupKey, runOncePerMessage } from '../inbound-dedup.js';
 import { answerSurfaceControl, runSurfaceMessage, submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
 export async function handleSlackSurfaceWebhook(req: Request, context: SurfaceAdapterContext): Promise<Response> {
@@ -220,79 +219,76 @@ export async function handleSlackSurfacePayload(
     const attachment = hasAttachments(rawEvent?.files) ? 'file' : undefined;
     if (!task && !attachment) return new Response(null, { status: 200 });
     // One mentioning message arrives as both `message` and `app_mention`, and Slack
-    // redelivers an event whose acknowledgement took longer than 3 seconds. Channel
-    // and message timestamp name the message across all of those deliveries.
-    const dedupKey = inboundDedupKey('slack', event.channelId, event.eventTs);
-    return runOncePerMessage(dedupKey, duplicateDeliveryResponse, async (committed) => {
-      const outcome = await runSurfaceMessage(context, {
-        ingress: {
-          surface: 'slack',
-          userId: event.userId,
-          channelId: event.channelId,
-          groupId: event.channelId,
-          threadId: event.threadTs ?? event.eventTs,
-          workspaceId: event.teamId,
-          conversationKind: event.threadTs ? 'thread' : 'channel',
-          parentConversationKind: 'channel',
-          text: task,
-          mentioned,
-          metadata: {
-            eventType: event.eventType,
-            eventTs: event.eventTs,
-          },
-        },
-        binding: {
-          kind: event.threadTs ? 'thread' : 'channel',
-          surfaceKind: 'slack',
-          surfaceId: event.teamId || 'slack',
-          externalId: event.threadTs ?? event.channelId,
-          channelId: event.channelId,
-          threadId: event.threadTs,
-          title: `Slack ${event.eventType}`,
-          metadata: {
-            userId: event.userId,
-            eventType: event.eventType,
-            eventTs: event.eventTs,
-            // Clears a one-shot reply URL an earlier release stored on this binding.
-            responseUrl: undefined,
-          },
-        },
-        text: task,
-        logLabel: 'handleSlackSurfacePayload',
-        // Slack does not show the answer to an event; a command's answer goes to the conversation.
-        control: 'notice',
-        ...(dedupKey ? { providerMessageId: dedupKey } : {}),
+    // redelivers an event whose acknowledgement took longer than 3 seconds. The
+    // message timestamp, in its conversation, names the message across all of those
+    // deliveries; the pipeline claims it once.
+    const providerMessageId = event.eventTs;
+    const outcome = await runSurfaceMessage(context, {
+      ingress: {
+        surface: 'slack',
         userId: event.userId,
-        displayName: event.userId,
-        title: `Slack ${event.eventType}`,
+        channelId: event.channelId,
+        groupId: event.channelId,
+        threadId: event.threadTs ?? event.eventTs,
+        workspaceId: event.teamId,
+        conversationKind: event.threadTs ? 'thread' : 'channel',
+        parentConversationKind: 'channel',
+        text: task,
+        mentioned,
         metadata: {
           eventType: event.eventType,
           eventTs: event.eventTs,
         },
-        signal: req.signal,
-        committed,
-      });
-      if (outcome.kind === 'refused') {
-        // Slack retries a failed event three times and stops delivering to an app whose deliveries mostly fail.
-        return ingressAnswerResponse(outcome.decision);
-      }
-      if (outcome.kind === 'no-text') {
-        // A message that is only a file: say so in a one-to-one conversation; in a channel it is chatter.
-        const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, rawEvent?.channel_type === 'im') : false;
-        committed();
-        return Response.json({
-          ok: true,
-          acknowledged: true,
-          queued: false,
-          outcome: 'ignored',
-          reason: 'unsupported-attachment',
-          attachment,
-          notified,
-          bindingId: outcome.binding.id,
-        });
-      }
-      return surfaceOutcomeResponse(outcome);
+      },
+      binding: {
+        kind: event.threadTs ? 'thread' : 'channel',
+        surfaceKind: 'slack',
+        surfaceId: event.teamId || 'slack',
+        externalId: event.threadTs ?? event.channelId,
+        channelId: event.channelId,
+        threadId: event.threadTs,
+        title: `Slack ${event.eventType}`,
+        metadata: {
+          userId: event.userId,
+          eventType: event.eventType,
+          eventTs: event.eventTs,
+          // Clears a one-shot reply URL an earlier release stored on this binding.
+          responseUrl: undefined,
+        },
+      },
+      text: task,
+      logLabel: 'handleSlackSurfacePayload',
+      // Slack does not show the answer to an event; a command's answer goes to the conversation.
+      control: 'notice',
+      ...(providerMessageId ? { providerMessageId } : {}),
+      userId: event.userId,
+      displayName: event.userId,
+      title: `Slack ${event.eventType}`,
+      metadata: {
+        eventType: event.eventType,
+        eventTs: event.eventTs,
+      },
+      signal: req.signal,
     });
+    if (outcome.kind === 'refused') {
+      // Slack retries a failed event three times and stops delivering to an app whose deliveries mostly fail.
+      return ingressAnswerResponse(outcome.decision);
+    }
+    if (outcome.kind === 'no-text') {
+      // A message that is only a file: say so in a one-to-one conversation; in a channel it is chatter.
+      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, rawEvent?.channel_type === 'im') : false;
+      return Response.json({
+        ok: true,
+        acknowledged: true,
+        queued: false,
+        outcome: 'ignored',
+        reason: 'unsupported-attachment',
+        attachment,
+        notified,
+        bindingId: outcome.binding.id,
+      });
+    }
+    return surfaceOutcomeResponse(outcome);
   }
 
   const actionPayload = event.payload;

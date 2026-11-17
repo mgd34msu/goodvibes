@@ -161,14 +161,28 @@ compiles that evidence into durable graph records:
   `knowledge.answer_gap` issues when the store cannot answer a useful question
 
 The semantic layer is provider-backed when the daemon has a usable current LLM
-provider/model. If no provider is available or a provider call fails, the platform
-falls back to deterministic extraction so ingest/reindex still produces
-source-grounded facts, pages, and gaps. LLM output is accepted only as JSON and
-is treated as an interpretation of stored evidence, not as a replacement for
-the source artifact or extraction record. Provider-backed semantic calls are
-bounded: the platform serializes semantic LLM requests by default, passes abort
-signals into provider calls, and treats timeouts as a deterministic fallback
-rather than letting reindex or ask hang indefinitely.
+provider/model. If no provider is available, the platform uses deterministic
+extraction so ingest/reindex still produces source-grounded facts, pages, and
+gaps. When a configured provider call fails or times out (two minutes by
+default), the source's semantic state records the reason
+(`skippedReason`, `generationFailed: true`) and the source is tried again on
+the next reindex; the costlier per-sentence path is not used in its place. LLM
+output is accepted only as JSON and is treated as an interpretation of stored
+evidence, not as a replacement for the source artifact or extraction record.
+Provider-backed semantic calls are bounded: the platform serializes semantic
+LLM requests by default, caps the generation's output, and passes abort signals
+into provider calls.
+
+Each generated fact must quote the source text it rests on; a fact whose quote
+the source does not contain is left out without a model request. The remaining
+facts are checked in batches: usefulness for feature-like facts and support
+(every field, and the attachment to each subject) are each one request per
+twelve facts of a source, with the source text sent once. A fact's subjects
+come from the links the source already has, and a reading is asked only when
+several subjects are possible. Enriching one document holds only the rows it
+read (the source, its extraction, the edges at the source, its subjects), so
+writes to other documents never cancel it and its cost does not grow with the
+size of the knowledge base.
 
 Semantic enrichment runs from the shared knowledge ingest path, can be refreshed
 with the `knowledge-semantic-enrichment` job, and is also run by
@@ -259,7 +273,7 @@ terminal states record exactly why a task stopped.
 | `extracting` | Retired, never written; kept for older rows and clients |
 | `applying` | Accepted repair sources are being linked into the graph |
 | `verified` | The accepted sources were semantically enriched after apply |
-| `closed` | Repair finished; sources were accepted and linked to the gap |
+| `closed` | Repair finished; sources were accepted and linked to the gap. The gap is retired; if it is observed again the task returns to `detected` |
 | `blocked` | Repair cannot proceed and the reason is recorded, such as no repairer configured or the run budget exhausted; recovery sweeps revisit blocked tasks |
 | `suppressed` | Classification judged the gap not applicable, so the pipeline will not retry it |
 | `needs_review` | Retired, never written; there is no human review lane for refinement tasks |
@@ -335,17 +349,36 @@ snippet-to-answer logic.
 Answer synthesis has a platform-owned hard timeout; if a provider ignores its own
 timeout or abort signal, Ask falls back instead of pinning the daemon.
 
+An answer reads its space once and takes a stated shortlist from local
+ranking: at most 24 records are read for relevance, quoted passages take one
+request per accepted source, at most 16 facts and 24 sources are read for
+ranking, and at most 8 linked objects are read. A reading that does not settle
+leaves its candidate out and is counted in `answer.quality.unsettled`; only the
+verification of the answer itself can withhold it. `answer.quality.excerpts`
+names the field and offsets of each quoted passage of the answer's sources. A
+question the knowledge base cannot answer is recorded as an answer gap after the
+answer is decided: an earlier gap with the same normalised question and subjects
+is reused without a request, otherwise at most one earlier gap sharing a subject
+is read for equivalence.
+
 If Ask identifies answer gaps and semantic gap repair is configured, the platform
 queues refinement tasks and starts repair.
 
-For concrete Home Assistant object questions with weak or missing evidence, Ask
-also performs one bounded foreground repair/re-answer pass. That pass is still
-capped by the caller timeout and the platform's source limits, but it lets direct
-feature/specification questions use newly repaired official/vendor evidence
-immediately when extraction and promotion finish in time. If the bounded pass
-cannot produce usable facts, Ask returns the current best answer plus
-`refinementTaskIds` so clients can show repair progress and ask again after the
-graph improves.
+For subject-scoped questions with weak or missing evidence, Ask also performs
+one bounded foreground repair pass, capped by the caller timeout or 20 seconds
+by default. The answer is computed again only when that repair changed the
+evidence (it linked a source or promoted a fact), or when Ask waited for another
+caller's repair of the same gap that was actually running and it retired the
+gap. Otherwise Ask returns the first answer with `refinement.status: "active"`
+and `refinementTaskIds` while repair continues in the background, or
+`"deferred"` with `nextRepairAttemptAt` when every gap is inside the retry window
+of an earlier attempt.
+
+A repaired gap is retired (its node becomes `stale`), so later runs spend their
+slots on gaps still open; when the same gap is observed again its `closed` task
+moves back to `detected` for a new attempt. A run's `limit` applies after gaps
+waiting out their retry window and gaps with a final task are set aside, and
+`force` re-reads a gap marked repaired but never skips the retry window.
 
 When callers use the generic `knowledgeSpaceId: "homeassistant"` alias,
 answer-gap tasks are written to the concrete `homeassistant:<installationId>`
@@ -802,9 +835,16 @@ integration guidance.
 
 ## Retrieval and packets
 
-Knowledge retrieval awaits recorded relevance readings over current scoped
-source and node content. Packet APIs select exact evidence spans and build
-token-bounded context bundles for agents:
+Knowledge retrieval ranks the scoped sources and nodes locally against the
+question and reads only a stated top 24 for relevance, each with the passages
+that mention the question; the rest are counted, not read, so a search or packet
+costs the same on a large knowledge base as on a small one. A reading that does
+not settle leaves its record out and is counted. The same request over unchanged
+records reuses its reading, and an agent started by another agent reuses the
+packet prepared for its parent's task. Packets report `candidates`
+(`total`, `considered`, `unsettled`). Packet APIs select exact evidence spans
+(one request per accepted source) and build token-bounded context bundles for
+agents:
 
 - `knowledge.search` (operator id)
 - `knowledge.packet` (operator id)

@@ -21,7 +21,6 @@ import { wireMemoryPressureChannelNotice } from './notification-dispatch.js';
 import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints, type WorkspaceCheckpointing } from './workspace-checkpointing.js';
 import { createSessionConversationRewindPort } from './conversation-rewind-port.js';
 import { createShellPathService } from './index.js';
-import { bindPairingRotationLimit } from '@goodvibes-jev/engine/platform/platform/runtime/security';
 import type { DaemonHandlerCompositionOptions } from './daemon-handler-composition.js';
 import { createDaemonNativeWorkExecutionActivation } from './native-work-execution-activation.js';
 import { createBrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
@@ -218,10 +217,6 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const { clusterGroup, clusterCoordinator } = createClusterServices({ configManager, shellPaths, secretsManager });
     disposalScope.registry.add('cluster group', () => clusterGroup.stop());
     disposalScope.registry.add('cluster coordinator', () => clusterCoordinator.stop('runtime closing'));
-    // In managed mode the pairing store refuses a device token past the rotation age where it authenticates.
-    disposalScope.registry.add('pairing rotation limit', bindPairingRotationLimit(pairingTokens, { configManager, featureFlags }));
-    // Last-seen times are kept in memory between writes; the last ones are written at shutdown.
-    disposalScope.registry.add('pairing last-seen', () => pairingTokens.flushLastSeen());
     // Browser composition fills this shared holder before async host registration.
     const browserCheckoutSeam = createBrowserCheckoutSeamHolder();
     // The one browser the `browser.*` verbs serve; a session hosted for the Agent drives it too.

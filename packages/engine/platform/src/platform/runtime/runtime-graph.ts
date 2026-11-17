@@ -77,7 +77,7 @@ import { PluginManager } from '../plugins/manager.js';
 import { BookmarkManager } from '../bookmarks/manager.js';
 import { ProfileManager } from '../profiles/manager.js';
 import { CrossSessionTaskRegistry } from '../sessions/orchestration/index.js';
-import { createConfiguredTokenAuditor, startPairingTokenAudit } from './pairing-token-audit.js';
+import { bindPairingRotationLimit, createConfiguredTokenAuditor, startPairingTokenAudit } from './pairing-token-audit.js';
 import { UserAuthManager } from '../security/user-auth.js';
 import { PairingTokenManager } from '../pairing/pairing-token-store.js';
 import { AcpHostService } from '../acp/host.js';
@@ -249,11 +249,21 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // Per-pairing named revocable operator tokens. The cap is read per mint, so a
   // `device.nodes.maxPaired` change applies to the next pairing without a restart.
   // Opened at start, or on first read for a product that chose `on-demand`.
+  // Wherever the store is opened (a daemon, or one hosted by a terminal app), managed
+  // rotation is enforced where a device token authenticates, and the last-seen times
+  // held between writes are written when the graph closes.
   let pairingTokensOpened: PairingTokenManager | undefined;
-  const pairingTokens = (): PairingTokenManager => pairingTokensOpened ??= new PairingTokenManager(
-    roots.pairingTokenPath ?? controlPlaneStorePath(shellPaths, surfaceRoot, 'pairing-tokens.json'),
-    { maxPaired: () => configManager.get('device.nodes.maxPaired'), nativeDataWriter },
-  );
+  const pairingTokens = (): PairingTokenManager => {
+    if (pairingTokensOpened) return pairingTokensOpened;
+    const store = new PairingTokenManager(
+      roots.pairingTokenPath ?? controlPlaneStorePath(shellPaths, surfaceRoot, 'pairing-tokens.json'),
+      { maxPaired: () => configManager.get('device.nodes.maxPaired'), nativeDataWriter },
+    );
+    pairingTokensOpened = store;
+    scope.registry.add('pairing rotation limit', bindPairingRotationLimit(store, { configManager, featureFlags }));
+    scope.registry.add('pairing last-seen', () => store.flushLastSeen());
+    return store;
+  };
   const pairingTokensAtStart = (product.pairingTokens ?? 'open') === 'open';
   if (pairingTokensAtStart) pairingTokens();
   const localUserAuthManager = seams.localUserAuthManager ?? new UserAuthManager({

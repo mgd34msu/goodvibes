@@ -1,32 +1,34 @@
 /** A refused key save does not take a machine out of its group. */
 import { expect, test } from 'bun:test';
+import { chmodSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { createGroup } from '../platform/src/platform/cluster/group-operations.ts';
 import { GroupKeyNotSavedError } from '../platform/src/platform/cluster/group-runtime.ts';
-import { GROUP_MATERIAL_SECRET_KEY } from '../platform/src/platform/cluster/group-store.ts';
-import { addGroupNode, createGroupWorld, destroyGroupWorld, MemorySecretStore, stopGroupWorld } from './cluster-group-harness.ts';
+import { addGroupNode, createGroupWorld, destroyGroupWorld, stopGroupWorld, type GroupTestNode } from './cluster-group-harness.ts';
 
-/** The real in-memory secret store, with one refused write or one failed read on request: the store is outside the group runtime. */
-class RefusingSecrets extends MemorySecretStore {
-  refuseNextSet = false;
-  failNextGet = false;
-  override async set(key: string, value: string): Promise<void> {
-    if (key === GROUP_MATERIAL_SECRET_KEY && this.refuseNextSet) { this.refuseNextSet = false; throw new Error('fixture store busy'); }
-    await super.set(key, value);
-  }
-  override async get(key: string): Promise<string | null> {
-    if (key === GROUP_MATERIAL_SECRET_KEY && this.failNextGet) { this.failNextGet = false; throw new Error('fixture store unavailable'); }
-    return super.get(key);
-  }
+/** The daemon secret store's directory refuses new files: a save fails, the saved key still reads. */
+function refuseWrites(node: GroupTestNode): () => void {
+  chmodSync(node.daemonSecretsDirectory, 0o500);
+  return () => chmodSync(node.daemonSecretsDirectory, 0o700);
+}
+
+/** The daemon secret store can neither be written nor read. */
+function refuseWritesAndReads(node: GroupTestNode): () => void {
+  const files = readdirSync(node.daemonSecretsDirectory).map(name => join(node.daemonSecretsDirectory, name));
+  for (const file of files) chmodSync(file, 0o000);
+  const allowWrites = refuseWrites(node);
+  return () => { allowWrites(); for (const file of files) chmodSync(file, 0o600); };
 }
 
 test('a refused key save keeps this machine in its group on the key it holds, and the next attempt saves', async () => {
-  const world = createGroupWorld(), secrets = new RefusingSecrets();
+  const world = createGroupWorld();
   try {
-    const node = await addGroupNode(world, 'refused-save', { secrets });
+    const node = await addGroupNode(world, 'refused-save');
     const created = await createGroup(node.context, {}); if (!created.ok) throw new Error(created.error);
     const held = node.runtime.keyring().currentGeneration;
-    secrets.refuseNextSet = true;
+    const restore = refuseWrites(node);
     await expect(node.runtime.rotate('scheduled', 'fixture rotation')).rejects.toBeInstanceOf(GroupKeyNotSavedError);
+    restore();
     expect(node.runtime.membership).toBe('member');
     expect(node.runtime.keyring().groupId).toBe(created.data.groupId);
     expect(node.runtime.keyring().currentGeneration).toBe(held);
@@ -35,14 +37,19 @@ test('a refused key save keeps this machine in its group on the key it holds, an
   } finally { await stopGroupWorld(world); destroyGroupWorld(world); }
 });
 
-test('a refused key save whose store cannot be read back is recovered by the next housekeeping pass', async () => {
-  const world = createGroupWorld(), secrets = new RefusingSecrets();
+test('a refused key save whose store cannot be read stays unconfirmed, not groupless, until the store reads again', async () => {
+  const world = createGroupWorld();
   try {
-    const node = await addGroupNode(world, 'unknown-save', { secrets });
+    const node = await addGroupNode(world, 'unknown-save');
     const created = await createGroup(node.context, {}); if (!created.ok) throw new Error(created.error);
-    secrets.refuseNextSet = true; secrets.failNextGet = true;
-    await expect(node.runtime.rotate('scheduled', 'fixture rotation')).rejects.toThrow();
-    expect(node.runtime.membership).toBe('unreadable-key-material');
+    const restore = refuseWritesAndReads(node);
+    try {
+      await expect(node.runtime.rotate('scheduled', 'fixture rotation')).rejects.toThrow();
+      expect(node.runtime.membership).toBe('unreadable-key-material');
+      // A pass while the store still cannot be read must not take "unreadable" for "never joined".
+      await node.runtime.runHousekeeping();
+      expect(node.runtime.membership).toBe('unreadable-key-material');
+    } finally { restore(); }
     await node.runtime.runHousekeeping();
     expect(node.runtime.membership).toBe('member');
     expect(node.runtime.keyring().groupId).toBe(created.data.groupId);

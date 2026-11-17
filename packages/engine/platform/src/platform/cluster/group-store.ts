@@ -325,6 +325,39 @@ export interface ClusterSecretStore {
   onDidChange?(listener: (key: string) => void): () => void;
 }
 
+/** What {@link clusterSecretStoreFrom} needs of the secrets store; `SecretsManager` satisfies it. */
+export interface ClusterSecretsSource {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
+  /** The daemon tier's own entry; throws when that store exists but cannot be read. */
+  getWriteScopeEntry(key: string, scope: 'daemon'): Promise<string | null>;
+  onDidChange?(listener: (key: string) => void): () => void;
+}
+
+/**
+ * The cluster's view of the secrets store.
+ *
+ * `SecretsManager.get` answers an unreadable store with "nothing stored". The
+ * group must not take that for absence: a machine would leave its group, and a
+ * replicated credential would be announced as deleted to every member. Every
+ * key the cluster stores is daemon-owned, so an absent answer is checked
+ * against the daemon tier itself, which throws when it cannot be read.
+ */
+export function clusterSecretStoreFrom(source: ClusterSecretsSource): ClusterSecretStore {
+  const onDidChange = source.onDidChange;
+  return {
+    get: async (key) => {
+      const value = await source.get(key);
+      if (value === null) await source.getWriteScopeEntry(key, 'daemon');
+      return value;
+    },
+    set: (key, value) => source.set(key, value),
+    delete: (key) => source.delete(key),
+    ...(onDidChange ? { onDidChange: (listener: (key: string) => void) => onDidChange.call(source, listener) } : {}),
+  };
+}
+
 /** One actual store read distinguishes absence from unreadable/uncertain data. */
 export interface GroupMaterialObservation {
   readonly material: GroupKeyMaterial | null;

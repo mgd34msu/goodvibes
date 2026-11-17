@@ -112,6 +112,7 @@ export {
 export {
   adoptGroupKeys,
   clearGroupKeyMaterial,
+  clusterSecretStoreFrom,
   createGroupKeyMaterial,
   GROUP_MATERIAL_SECRET_KEY,
   GROUP_STATE_FILENAME,
@@ -127,6 +128,7 @@ export {
   saveGroupKeyMaterial,
   sweepKeyHistory,
   type ClusterSecretStore,
+  type ClusterSecretsSource,
   type GroupKeyMaterial,
   type GroupKeyRecord,
 } from './group-store.js';

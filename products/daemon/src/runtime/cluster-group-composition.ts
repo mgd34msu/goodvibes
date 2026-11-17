@@ -19,6 +19,7 @@
 import {
   ClusterGroupRuntime,
   clusterElectionTiming,
+  clusterSecretStoreFrom,
   createClusterGroupVerbs,
   createSystemClusterClock,
   normalizeDisplayName,
@@ -84,7 +85,7 @@ const KEY_LOST_REJOIN_MIN_GAP_MS = 60_000;
 export function createClusterGroupComposition(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
-  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
+  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getWriteScopeEntry'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;
@@ -119,6 +120,7 @@ export function createClusterGroupComposition(options: {
   const nodeDisplayName = nodeDisplayNameFor(options.configManager, nodeId);
   const clock = options.clock ?? createSystemClusterClock();
 
+  const secrets = clusterSecretStoreFrom(options.secretsManager);
   let requestRejoin: () => void = () => {};
   const runtime = new ClusterGroupRuntime({
     onKeyGenerationLost: () => requestRejoin(),
@@ -130,13 +132,9 @@ export function createClusterGroupComposition(options: {
       logger,
     }),
     // Narrower than the SecretsManager itself: the group layer gets get/set/
-    // delete on one key and nothing else.
-    secrets: {
-      get: (key) => options.secretsManager.get(key),
-      set: (key, value) => options.secretsManager.set(key, value),
-      delete: (key) => options.secretsManager.delete(key),
-      ...(options.secretsManager.onDidChange ? { onDidChange: (listener: (key: string) => void) => options.secretsManager.onDidChange!(listener) } : {}),
-    },
+    // delete on its own keys and nothing else, and an unreadable store is an
+    // error to it, never an empty one.
+    secrets,
     stateDirectory,
     nodeId,
     nodeDisplayName,
@@ -162,11 +160,7 @@ export function createClusterGroupComposition(options: {
 
   const context: GroupOperationsContext = {
     runtime,
-    secrets: {
-      get: (key) => options.secretsManager.get(key),
-      set: (key, value) => options.secretsManager.set(key, value),
-      delete: (key) => options.secretsManager.delete(key),
-    },
+    secrets: { get: secrets.get, set: secrets.set, delete: secrets.delete },
     settings: groupSettings,
     nodeId,
     nodeDisplayName,
@@ -269,7 +263,7 @@ export function createClusterGroupComposition(options: {
 export function createClusterServices(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
-  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
+  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getWriteScopeEntry'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;

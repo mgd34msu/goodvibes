@@ -20,8 +20,12 @@ import type { OperatorMethodOutput } from '@goodvibes-jev/engine/platform';
 
 /** voice.local.status output, the no-network installed/available snapshot. */
 export type VoiceRuntimeStatusResult = OperatorMethodOutput<'voice.local.status'>;
-/** voice.local.install receipt, the one-act install outcome. */
-export type VoiceLocalInstallResult = OperatorMethodOutput<'voice.local.install'>;
+/**
+ * The one-act install receipt. voice.local.install answers at once with the run
+ * it started; the receipt is read from voice.local.status as `lastInstall` once
+ * the run ends.
+ */
+export type VoiceLocalInstallResult = NonNullable<NonNullable<VoiceRuntimeStatusResult['lastInstall']>['receipt']>;
 /** The live per-component progress carried on voice.local.status WHILE an install runs. */
 export type VoiceInstallProgress = NonNullable<VoiceRuntimeStatusResult['installInProgress']>;
 /** One live install component's progress (latest phase wins). */

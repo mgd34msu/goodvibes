@@ -1,13 +1,13 @@
 /** Host-owned tool controls. Subprocess output is evidence, never authority. */
 import type { EntryType } from '@goodvibes-jev/judgment';
 import { randomUUID } from 'node:crypto';
-import { isDeepStrictEqual } from 'node:util';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
-import { captureOwnedJson, snapshotJudgmentInput } from '../../gate/judgment-input.js';
-import { autonomousSourceEvidence, captureAutonomousSource, retainAutonomousSource } from '../../permissions/autonomous.js';
+import { snapshotJudgmentInput } from '../../gate/judgment-input.js';
+import { autonomousSourceEvidence } from '../../permissions/autonomous.js';
 import { admitExternalRequest, type ExternalPermissionHost } from '../../permissions/external-request.js';
 import { currentExternalOperationSource } from '../../permissions/external-operation-scope.js';
 import { logAdmissionFailure } from './admission-failure.js';
+import { openAutonomousAdmission, type AutonomousAdmissionScope } from './autonomous-admission.js';
 import type { WorkspaceTrustManager } from '../workspace-trust.js';
 import type { ExecPromptAsk, ExecPromptAnswer, ExecPromptExecution } from '../../tools/exec/interactive.js';
 
@@ -29,13 +29,8 @@ export function discardExecPromptAnswer(answer: ExecPromptAnswer): void { answer
 export async function answerExecPrompt(host: AutonomousToolPromptHost, ask: ExecPromptAsk,
   execution?: ExecPromptExecution): Promise<ExecPromptAnswer> {
   const operation = currentExternalOperationSource();
-  if (!operation || !execution || !host.port.recorder || host.workspaceTrust === undefined) return { answered: false };
-  const workspaceTrust = host.workspaceTrust;
-  const prepareTrust = workspaceTrust?.prepareAutonomousConstraint;
-  if (workspaceTrust !== null && typeof prepareTrust !== 'function') return { answered: false };
-  const invalidation = new AbortController();
-  const unsubscribe = host.config.onDidInvalidate(() => invalidation.abort());
-  const signal = AbortSignal.any([host.signal, invalidation.signal, ...(execution.signal ? [execution.signal] : []), ...(operation.signal ? [operation.signal] : [])]);
+  if (!operation || !execution || !host.port.recorder) return { answered: false };
+  let scope: AutonomousAdmissionScope | undefined;
   let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
   let transferred = false;
   try {
@@ -43,17 +38,11 @@ export async function answerExecPrompt(host: AutonomousToolPromptHost, ask: Exec
     // Only a structurally explicit binary control protocol has host-defined
     // response bytes. Free text, credentials and ambiguous prompts are refused.
     if (!/(?:\[[yY]\/[nN]\]|\[[nN]\/[yY]\]|\(yes\/no\)|\[yes\/no\])/i.test(captured.prompt)) return { answered: false };
-    const assertTrust = await prepareTrust?.call(workspaceTrust, 'execute', signal);
-    const source = captureAutonomousSource(operation.sourceOf());
-    const sourceIsCurrent = retainAutonomousSource(source);
+    scope = await openAutonomousAdmission(host, operation, execution, 'execute', 'Terminal control');
+    if (!scope) return { answered: false };
+    const opened = scope;
+    const { signal, assertCurrent, source } = opened;
     const sourceRevision = 'captured-source', requestRevision = 'captured-prompt';
-    let closed = false;
-    const assertCurrent = () => {
-      if (closed) throw new Error('Terminal control admission closed');
-      signal.throwIfAborted(); execution.assertCurrent(); operation.assertCurrent(); assertTrust?.();
-      if (host.workspaceTrust !== workspaceTrust || workspaceTrust?.prepareAutonomousConstraint !== prepareTrust) throw new Error('Workspace trust capability changed');
-      if (!sourceIsCurrent(operation.sourceOf()) || !isDeepStrictEqual(captureOwnedJson(ask), captured)) throw new Error('Terminal source or prompt changed');
-    };
     assertCurrent();
     const sourceId = randomUUID();
     const controls = ['y', 'n', 'yes', 'no', ''] as const;
@@ -77,14 +66,14 @@ export async function answerExecPrompt(host: AutonomousToolPromptHost, ask: Exec
     admission = await admitExternalRequest(host, { connectionId: sourceId, destination: 'owned-exec-terminal', signal, assertCurrent }, operation, {
       tool: 'exec', args: { commands: [{ cmd: captured.command, cwd: captured.workingDirectory }], terminalControl: { prompt: captured.prompt, recentOutput: captured.recentOutput, text } },
       supportingDecisionIds: selected.context.judgmentDecisionIds,
-    });
+    }, opened);
     assertCurrent();
     if (!admission.result.approved) return { answered: false };
     const owned = admission;
     const answer = Object.freeze({ answered: true, text });
-    answers.set(answer, { claim() { assertCurrent(); owned.claim(); }, close() { if (!closed) { closed = true; owned.close(); unsubscribe(); } } });
+    answers.set(answer, { claim() { assertCurrent(); owned.claim(); }, close() { owned.close(); opened.close(); } });
     transferred = true;
     return answer;
   } catch (error) { logAdmissionFailure('terminal prompt', error); return { answered: false }; }
-  finally { if (!transferred) { admission?.close(); unsubscribe(); } }
+  finally { if (!transferred) { admission?.close(); scope?.close(); } }
 }

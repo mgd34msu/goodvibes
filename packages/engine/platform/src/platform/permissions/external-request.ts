@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes-jev/judgment/decisions';
 import { captureOwnedJson } from '../gate/judgment-input.js';
-import { captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, retainAutonomousSource, type AutonomousToolSource } from './autonomous.js';
+import { captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, type AutonomousToolSource } from './autonomous.js';
 import { awaitPermission } from './cancellation.js';
 import { assertCurrentExternalAdmission, claimExternalAdmission, closeExternalAdmission, type PermissionManager } from './manager.js';
 import type { ToolExecutionEffect } from '../tools/registry.js';
@@ -51,26 +51,35 @@ export interface ExternalOperationSource {
   readonly signal?: AbortSignal | undefined;
 }
 
+/**
+ * Admit one external request. The operation's source is captured once and
+ * frozen: it changes only together with the operation, whose own
+ * `assertCurrent` and signal say so, so nothing re-captures or deep-compares it.
+ * A caller that already opened the admission scope (openAutonomousAdmission)
+ * passes it as `opened`, and its subscription, signal and source are used as
+ * they are instead of a second set.
+ */
 export async function admitExternalRequest(host: ExternalPermissionHost, transport: ExternalRequestScope,
-  operation: ExternalOperationSource, input: { readonly tool: string; readonly args: Record<string, unknown>; readonly effect?: ToolExecutionEffect | undefined; readonly supportingDecisionIds?: readonly string[]; readonly serverPolicy?: Readonly<Record<string, unknown>>; readonly protocolSubject?: CapturedProtocolRequest }) {
+  operation: ExternalOperationSource, input: { readonly tool: string; readonly args: Record<string, unknown>; readonly effect?: ToolExecutionEffect | undefined; readonly supportingDecisionIds?: readonly string[]; readonly serverPolicy?: Readonly<Record<string, unknown>>; readonly protocolSubject?: CapturedProtocolRequest },
+  opened?: { readonly signal: AbortSignal; readonly source: AutonomousToolSource }) {
   const externalRequestEvidence = captureExternalRequestEvidence({ destination: transport.destination, ...(input.serverPolicy ? { serverPolicy: input.serverPolicy } : {}) });
-  const invalidation = new AbortController();
-  const unsubscribe = host.config.onDidInvalidate(() => invalidation.abort());
-  const signal = AbortSignal.any([host.signal, transport.signal, invalidation.signal, ...(operation.signal ? [operation.signal] : [])]);
+  let unsubscribe: () => void = () => {};
+  let signal: AbortSignal;
+  if (opened) {
+    signal = transport.signal === opened.signal ? opened.signal : AbortSignal.any([opened.signal, transport.signal]);
+  } else {
+    const invalidation = new AbortController();
+    unsubscribe = host.config.onDidInvalidate(() => invalidation.abort());
+    signal = AbortSignal.any([host.signal, transport.signal, invalidation.signal, ...(operation.signal ? [operation.signal] : [])]);
+  }
   const assertCurrent = (): void => { signal.throwIfAborted(); transport.assertCurrent(); operation.assertCurrent(); };
   try {
     assertCurrent();
-    const source = captureCurrentAutonomousSourceFrame(operation.sourceOf()).source;
-    const sourceIsCurrent = retainAutonomousSource(source);
+    const source = opened?.source ?? captureCurrentAutonomousSourceFrame(operation.sourceOf()).source;
     captureCurrentAutonomousChoices({ resumeConditions: [{ id: transport.connectionId, revision: 'connection' }] });
     const protocol = input.protocolSubject ? readProtocolRequest(input.protocolSubject) : undefined;
     const args = captureOwnedJson(protocol ? { ...input.args, protocolRequest: protocol.meaning } : input.args) as Record<string, unknown>;
-    const sourceOf = () => {
-      assertCurrent();
-      const current = captureCurrentAutonomousSourceFrame(operation.sourceOf()).source;
-      if (!sourceIsCurrent(current)) throw new Error('External operation source changed');
-      return source;
-    };
+    const sourceOf = () => { assertCurrent(); return source; };
     const requestId = randomUUID();
     const admission = await awaitPermission(() => host.permissionManager.admitAutonomous(requestId, input.tool, args, {
       externalRequestEvidence, signal, sourceOf, assertPrepared: assertCurrent, ...(input.supportingDecisionIds ? { preparationDecisionIds: input.supportingDecisionIds } : {}),

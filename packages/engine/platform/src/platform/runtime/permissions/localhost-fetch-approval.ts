@@ -99,17 +99,16 @@ export function buildLocalhostFetchApproval(deps: LocalhostFetchApprovalDeps): L
           // A project file cannot turn this on (it is repository content), so the grant is saved in the user's own settings.
           try {
             deps.configManager.set('fetch.allowLocalhost', true);
+            logger.info('[fetch] localhost fetches allowed (fetch.allowLocalhost persisted in user settings)', {
+              host: input.host,
+            });
           } catch (err) {
-            // Without the saved grant the next fetch would silently ask again, so say what failed.
-            logger.warn('[fetch] localhost fetch was approved but fetch.allowLocalhost could not be saved; refusing this fetch', {
+            // The owner's yes covers this fetch; only remembering it failed, so the next one asks again.
+            logger.warn('[fetch] localhost fetch approved for this request, but fetch.allowLocalhost could not be saved, so the next localhost fetch will ask again', {
               host: input.host,
               error: err instanceof Error ? err.message : String(err),
             });
-            return false;
           }
-          logger.info('[fetch] localhost fetches allowed (fetch.allowLocalhost persisted in user settings)', {
-            host: input.host,
-          });
         }
         return decision.approved;
       } catch (err) {

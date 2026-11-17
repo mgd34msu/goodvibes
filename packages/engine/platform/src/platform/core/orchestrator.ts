@@ -140,6 +140,22 @@ export interface OrchestratorUserInputOptions {
   readonly answersContractQuestion?: string | undefined;
 }
 
+/**
+ * The input of the most recent user turn that failed, as that turn received it.
+ * `rollbackCount` is the message count before the turn added its prompt;
+ * `superseded` is true once a later turn has started, so rolling back to it
+ * would erase that later turn: a retry then sends the input again without
+ * rolling back.
+ */
+export interface FailedTurnInput {
+  readonly turnId: string;
+  readonly text: string;
+  readonly content?: ContentPart[] | undefined;
+  readonly options?: OrchestratorUserInputOptions | undefined;
+  readonly rollbackCount: number;
+  readonly superseded: boolean;
+}
+
 /** A queued input that never ran because its orchestrator was disposed first. */
 export class QueuedInputUndeliveredError extends Error {
   constructor() {
@@ -257,6 +273,9 @@ export class Orchestrator {
   private acpManager: AcpManager | null = null;
   /** Message count at the start of a turn, used to rollback on cancel. */
   private turnStartMessageCount = 0;
+  /** Counts user turns started, so a failed turn knows whether a later one has run since. */
+  private userTurnSeq = 0;
+  private lastFailedUserTurn: (Omit<FailedTurnInput, 'superseded'> & { readonly seq: number }) | null = null;
   /** Whether a streaming block is currently active (for cleanup on abort). */
   private get isStreaming(): boolean { return phaseIsStreaming(this.phase); }
   /** Last token warning bracket (multiples of 10%) to avoid repeat warnings at same level. */
@@ -751,6 +770,19 @@ export class Orchestrator {
     }
   }
 
+  /** The most recent failed user turn's own input and rollback point, or null when none failed. */
+  public failedTurnInput(): FailedTurnInput | null {
+    const failed = this.lastFailedUserTurn;
+    if (!failed) return null;
+    const { seq, ...input } = failed;
+    return { ...input, superseded: seq !== this.userTurnSeq };
+  }
+
+  /** Forget the failed turn once it has been sent again (or the person moved on). */
+  public clearFailedTurnInput(turnId: string): void {
+    if (this.lastFailedUserTurn?.turnId === turnId) this.lastFailedUserTurn = null;
+  }
+
   /** A native owner may cancel only its exact active, nonserialized permit. */
   public cancelNativeConversationTurn(permit: NativeConversationTurnPermit): boolean {
     if (this.activeNativeConversationPermit !== permit) return false;
@@ -928,6 +960,8 @@ export class Orchestrator {
     if (nativeTurn && !resume) startTurnForOwnerInput(options?.origin);
 
     const turnStartTime = Date.now();
+    const userTurnSeq = resume ? undefined : ++this.userTurnSeq;
+    const rollbackCount = this.conversation.getMessageCount();
     const configManager = requireConfigManager(this.coreServices);
     const providerRegistry = requireProviderRegistry(this.coreServices);
 
@@ -978,6 +1012,12 @@ export class Orchestrator {
       terminal.publish?.();
     } catch (err: unknown) {
       this._turnFailed = true;
+      // Recorded before TURN_ERROR is published, so a retry offered on that event
+      // sends this turn's own input, never a prompt queued behind it.
+      if (userTurnSeq !== undefined) {
+        this.lastFailedUserTurn = Object.freeze({ turnId, text, rollbackCount, seq: userTurnSeq,
+          ...(content ? { content } : {}), ...(options ? { options } : {}) });
+      }
       await hookOwner.closeAndDrain();
       // Set before TURN_ERROR so a failover observer of that event reads this fence.
       if (nativeTurn) failNativeConversationTurn(nativeTurn, err instanceof ProviderError && !this.abortController?.signal.aborted && nativeConversationTurnCanRetry());

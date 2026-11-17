@@ -500,8 +500,6 @@ async function main() {
   ): Promise<void> => {
     if (!isNativeConversationTurnReady(state)) return;
     const inputOptions = nativeConversationTurnInputOptions(state, spokenOutput ? createSpokenTurnInputOptions() : undefined);
-    // Provider failover retains the exact same source identity and opaque permit.
-    retryCtx = { count: conversation.getMessageCount(), text: state.result.text, opts: inputOptions };
     streamResult.startNewTurn();
     await runNativeTurnDispatch({
       prepare: () => refreshMemoryRecallSnapshot(ctx.services),
@@ -604,7 +602,6 @@ async function main() {
     actionOffers.retry = null;
     const epoch = ++inputEpoch;
     submissionStatus = null;
-    retryCtx = { count: conversation.getMessageCount(), text, content, opts: inputOptions };
     // Optional memory refresh must not delay displaying or sending the prompt.
     void refreshMemoryRecallSnapshot(ctx.services);
     void orchestrator
@@ -1301,18 +1298,21 @@ async function main() {
 
   unsubs.push(uiServices.events.turns.on('TURN_COMPLETED', (evt) => memoryProvenanceUi.onTurnCompleted(evt)));
 
-  // Stable turn context for failover retry, set in submitInput, read by retryTurn.
-  let retryCtx: { count: number; text: string; content?: ContentPart[]; opts?: Parameters<typeof orchestrator.handleUserInput>[2] } | null =
-    null;
   /**
-   * Roll the conversation back to before the last prompt and submit it again.
+   * Send the failed turn's own prompt again. The orchestrator keeps that turn's
+   * input and the message count before it (provider failover keeps the same
+   * source identity and opaque permit). When no later turn has run, the
+   * conversation is rolled back to before the failed prompt; when one has (a
+   * prompt queued behind it), nothing is rolled back and the prompt is sent as
+   * a new turn, so the later turn is neither erased nor sent twice.
    * `failover` is the user turn's own retry when the failover path asks (the
    * submission then continues the same user turn); without it, as from the
    * Alt+R retry, the submission is a new user turn.
    */
   const resubmitLastTurn = (failover?: { readonly notice: string; readonly retry: FailoverRetry }): boolean => {
-    if (!retryCtx) return false; // nothing to roll back to; the caller narrates instead
-    const { count, text, content: rContent, opts: rOpts } = retryCtx;
+    const failed = orchestrator.failedTurnInput();
+    if (!failed) return false; // nothing failed to send again; the caller narrates instead
+    const { text, content: rContent, options: rOpts } = failed;
     if (rOpts?.nativeConversationTurnPermit && !orchestrator.canRetryNativeConversationTurn(rOpts.nativeConversationTurnPermit)) {
       systemMessageRouter.high(
         'Native turn recovery is required before another model attempt. Its transcript and original source were retained.',
@@ -1325,7 +1325,8 @@ async function main() {
     // The rollback erases the failed turn's transcript, the failover notice included, which is how
     // that notice used to vanish before anyone could read it. The caller hands it over instead, and
     // it is posted here: after the rollback, above the prompt it explains.
-    conversation.removeMessagesAfter(count);
+    orchestrator.clearFailedTurnInput(failed.turnId);
+    if (!failed.superseded) conversation.removeMessagesAfter(failed.rollbackCount);
     if (failover) systemMessageRouter.userReceipt(failover.notice, 'warning');
     const retry = failover?.retry;
     // A failover retry that never submits (cancelled, superseded, or its
@@ -1369,7 +1370,7 @@ async function main() {
   });
   unsubs.push(...streamResult.unsubs);
   // Offer Alt+R when a user-visible error surfaces and the turn can be sent again.
-  wireRetryOfferOnError(streamResult.onErrorSurfaced, actionOffers, () => retryCtx !== null, render);
+  wireRetryOfferOnError(streamResult.onErrorSurfaced, actionOffers, () => orchestrator.failedTurnInput() !== null, render);
   // Companion messages and an activated plan take the composer's turn path as sent
   // (no composer grammar), carrying their origin. Bound once that path's state exists.
   unsubs.push(bindOwnerInput(orchestrator, (text, inputOptions) => {
@@ -1461,7 +1462,9 @@ async function main() {
     // Alt+R retries a failed turn, Alt+J opens a started fix session; plain
     // letters always go to the composer or the open view.
     if (handleShellActionChord(data, actionOffers, {
-      retry: () => { resubmitLastTurn(); },
+      retry: () => {
+        if (!resubmitLastTurn()) systemMessageRouter.high('[Retry] Nothing to send again: the failed prompt has already been sent again.');
+      },
       openSession: (sessionId) => { void commandContext.executeCommand?.('session', ['resume', sessionId]); },
       render,
     })) return;

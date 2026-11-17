@@ -234,6 +234,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Provider-qualified model id (e.g. anthropic:claude-sonnet-4) the provider optimizer routes to while provider.optimizerMode is \"pinned\"; a change applies at once. Empty leaves the optimizer unpinned (falls back to manual)."
   },
   {
+    "key": "provider.visionFallbackModel",
+    "type": "string",
+    "default": "",
+    "description": "Model (provider-qualified, e.g. openai:gpt-4o, or a unique bare id) that reads an image you attach when the current model cannot accept images. Empty (default): such an image is refused and sent nowhere, and the refusal names the models that can read it. Setting this sends those images to the named model's provider."
+  },
+  {
     "key": "behavior.autoCompactThreshold",
     "type": "number",
     "default": 80,
@@ -712,8 +718,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "automation.defaultTimeoutMs",
     "type": "number",
-    "default": 0,
-    "description": "Optional execution timeout for automation runs in milliseconds; 0 disables the deadline",
+    "default": 7200000,
+    "description": "How long an automation run without its own timeout may run, in milliseconds (default two hours); a run past it is stopped and recorded as failed. Applies to running runs at once. 0 removes the deadline",
     "validationHint": "integer in [0, 2147483647]"
   },
   {
@@ -1114,7 +1120,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "payments.budget.dailyItem",
     "type": "number",
     "default": 0,
-    "description": "Most that may be spent on ITEM PRICES in one calendar day, written the way you would say it: 100 is a hundred, 19.99 is nineteen ninety-nine, in whatever payments.currency is set to. The item price alone is checked against this; tax, mandatory fees and delivery draw on the separate overage budget below. Resets at midnight in daemon.timezone (UTC when unset), the boundary is real, so 100 at 23:59 and 100 at 00:00 both go through. Default 0: nothing is bought until you set this.",
+    "description": "Most that may be spent on ITEM PRICES in one calendar day, written the way you would say it: 100 is a hundred, 19.99 is nineteen ninety-nine, in whatever payments.currency is set to. The item price alone is checked against this; tax, mandatory fees and delivery draw on the separate overage budget below. Resets at midnight in daemon.timezone (UTC when unset), the boundary is real, so 100 at 23:59 and 100 at 00:00 both go through. Default 0: until you set it every purchase asks you first, and the first time one does, your inbox offers to set it.",
     "validationHint": "a plain number like 100 or 19.99, no greater than 1000000",
     "unit": "money"
   },
@@ -1828,7 +1834,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "device.capabilities.mode",
     "type": "enum",
     "default": "honor-grants",
-    "description": "How a paired phone's camera, screen, location, clipboard, and device commands are reached. honor-grants (stock): every capability asks the first time and every time after, unless you chose \"always allow\" for that one capability on that one phone. ask-every-time: the prompt appears on every single request and no durable grant is ever consulted or offered, use it when someone else is holding the phone. off: no capability request reaches any paired device at all.",
+    "description": "How a paired phone's camera, screen, location, clipboard, and device commands are reached. honor-grants (stock): every capability asks the first time and every time after, unless you chose \"always allow\" for that one capability on that one phone. ask-every-time: the prompt appears on every single request, permissions.mode yolo included, and no durable grant is ever consulted or offered, use it when someone else is holding the phone. off: no capability request reaches any paired device at all.",
     "enumValues": [
       "off",
       "ask-every-time",
@@ -1857,7 +1863,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "device.location.precision",
     "type": "enum",
     "default": "precise-grantable",
-    "description": "How exact a location the phone will report. precise-grantable (stock): both approximate and street-level fixes are available, and either may be granted durably. ask-precise: street-level fixes are available but always ask, and never offer \"always allow\". coarse-only: street-level fixes are refused entirely; only city-scale approximate location is served.",
+    "description": "How exact a location the phone will report. precise-grantable (stock): both approximate and street-level fixes are available, and either may be granted durably. ask-precise: street-level fixes are available but always ask, permissions.mode yolo included, and neither offer nor honour \"always allow\". coarse-only: street-level fixes are refused entirely; only city-scale approximate location is served.",
     "enumValues": [
       "coarse-only",
       "ask-precise",
@@ -1868,7 +1874,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "device.clipboard.readMode",
     "type": "enum",
     "default": "grantable",
-    "description": "Whether the agent can read what is on the phone's clipboard. grantable (stock): it asks every time and offers \"always allow\", like every other capability. ask-only: it asks every time and never offers a durable grant. off: clipboard reads are refused; putting text ON the clipboard is unaffected.",
+    "description": "Whether the agent can read what is on the phone's clipboard. grantable (stock): it asks every time and offers \"always allow\", like every other capability. ask-only: it asks every time, permissions.mode yolo included, and neither offers nor honours a durable grant. off: clipboard reads are refused; putting text ON the clipboard is unaffected.",
     "enumValues": [
       "off",
       "ask-only",
@@ -3195,6 +3201,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Allow explicit admin-approved remote fetches from private, localhost, or metadata hosts for artifacts and ingest flows"
   },
   {
+    "key": "network.privateDeliveryHosts",
+    "type": "string",
+    "default": "",
+    "description": "Comma-separated hosts on your own network that deliveries you configured may reach: a watcher's target, a notification webhook, the default webhook target (a LAN device 192.168.1.20, a name such as ha.lan, or *.home.lan for every name under it). Such a host may resolve to a private, loopback, link-local, unique-local or shared (CGNAT, Tailscale) address; a cloud metadata address is always refused, and addresses from outside parties never use this list. Your own settings only: a project settings file cannot set it, and adding a host is yours to decide."
+  },
+  {
     "key": "relay.enabled",
     "type": "boolean",
     "default": true,
@@ -3210,7 +3222,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "relay.rendezvousId",
     "type": "string",
     "default": "",
-    "description": "Stable unguessable rendezvous id the daemon registers under; generated on first enable when empty"
+    "description": "The rendezvous id the daemon registers under on the relay, derived from the daemon's relay identity key and recorded here by the daemon; setting it has no effect"
   },
   {
     "key": "relay.label",
@@ -3223,6 +3235,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "boolean",
     "default": false,
     "description": "Require a recent WebAuthn step-up assertion on mutating operator calls arriving via relay (checked against a passkey registered through pairing or the step-up verbs)"
+  },
+  {
+    "key": "runtime.companionChat.closedRetentionDays",
+    "type": "number",
+    "default": 0,
+    "description": "Days after a companion chat is closed before its saved files are deleted. 0 (the default) keeps closed chats forever. Read on every cleanup pass, so a change applies without a restart.",
+    "validationHint": "integer in [0, 36500]"
   },
   {
     "key": "runtime.companionChatLimiter.perSessionLimit",
@@ -3278,7 +3297,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "batch.mode",
     "type": "enum",
     "default": "off",
-    "description": "Daemon provider Batch API mode. off: nothing is queued (the batch job API refuses with BATCH_DISABLED). explicit: the batch job API is open, and a non-streaming OpenAI-compatible chat completion is queued when it sends x-goodvibes-execution: batch. eligible-by-default: every non-streaming OpenAI-compatible chat completion is queued unless it sends x-goodvibes-execution: live; a queued one is answered 202 with the job id and read back at <pathPrefix>/chat/completions/<id>. Streaming requests and terminal, companion and web chat always run live.",
+    "description": "Daemon provider Batch API mode. off: nothing is queued (the batch job API refuses with BATCH_DISABLED). explicit: the batch job API is open, and a non-streaming OpenAI-compatible chat completion is queued when it sends x-goodvibes-execution: batch. eligible-by-default: every non-streaming OpenAI-compatible chat completion whose provider has a Batch API is queued unless it sends x-goodvibes-execution: live (one whose provider cannot batch runs live as usual; batch.fallback applies only to an explicit batch request); a queued one is answered 202 with the job id and read back at <pathPrefix>/chat/completions/<id>. Streaming requests and terminal, companion and web chat always run live.",
     "enumValues": [
       "off",
       "explicit",
@@ -3356,7 +3375,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "cloudflare.accountId",
     "type": "string",
     "default": "",
-    "description": "Cloudflare account id used by platform-owned Worker/Queue provisioning"
+    "description": "Cloudflare account id used by platform-owned Worker/Queue provisioning and by the cloudflare-ai-gateway provider (which falls back to CLOUDFLARE_ACCOUNT_ID when this is empty)."
+  },
+  {
+    "key": "cloudflare.aiGatewayId",
+    "type": "string",
+    "default": "",
+    "description": "Cloudflare AI Gateway id the cloudflare-ai-gateway provider sends through (with cloudflare.accountId). If empty, the provider falls back to CLOUDFLARE_AI_GATEWAY_ID. A change to either id takes effect at once."
   },
   {
     "key": "cloudflare.apiTokenRef",
@@ -3820,6 +3845,30 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "description": "Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes)"
   },
   {
+    "key": "tools.validators.typecheck",
+    "type": "string",
+    "default": "",
+    "description": "Command the write and edit tools run for validate \"typecheck\" in a project that declares no typecheck command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. \"pnpm -r typecheck\" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare."
+  },
+  {
+    "key": "tools.validators.lint",
+    "type": "string",
+    "default": "",
+    "description": "Command the write and edit tools run for validate \"lint\" in a project that declares no lint command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. \"pnpm -r lint\" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare."
+  },
+  {
+    "key": "tools.validators.test",
+    "type": "string",
+    "default": "",
+    "description": "Command the write and edit tools run for validate \"test\" in a project that declares no test command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. \"pnpm -r test\" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare."
+  },
+  {
+    "key": "tools.validators.build",
+    "type": "string",
+    "default": "",
+    "description": "Command the write and edit tools run for validate \"build\" in a project that declares no build command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. \"pnpm -r build\" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool's own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare."
+  },
+  {
     "key": "tools.overflowSpillBackend",
     "type": "enum",
     "default": "file",
@@ -4142,7 +4191,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "fetch.allowLocalhost",
     "type": "boolean",
     "default": false,
-    "description": "Allow the fetch tool to reach localhost/loopback dev servers (e.g. http://localhost:3000) in every project. Set by approving the localhost fetch ask and saved in your own settings, so it never re-asks; a project settings file cannot turn it on. Private-IP and cloud-metadata endpoint blocking is unaffected and absolute."
+    "description": "Allow the fetch tool to reach localhost/loopback dev servers (e.g. http://localhost:3000) in every project. Set by approving the localhost fetch ask and saved in your own settings, so it never re-asks; a project settings file cannot turn it on. Private-IP blocking is governed by fetch.allowedPrivateHosts; cloud-metadata blocking is absolute."
+  },
+  {
+    "key": "fetch.allowedPrivateHosts",
+    "type": "string",
+    "default": "",
+    "description": "Comma-separated private-network hosts the fetch tool may reach when a call names them: a LAN device (192.168.1.20), a container (172.17.0.2), a VPN peer (100.101.102.103), or a name that resolves to one (nas.lan). Patterns match as in fetch.trustedHosts. Applies only to the host a call writes, never to a redirect target; cloud-metadata, link-local, loopback (see fetch.allowLocalhost) and other reserved addresses stay refused. A call in YOLO mode, or one the owner admitted, may also reach a private address written as an IP without this list. Your own settings only: a project settings file cannot set it."
   },
   {
     "key": "fetch.trustedHosts",
@@ -4368,7 +4423,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "planner.adaptive",
     "type": "boolean",
     "default": false,
-    "description": "Score execution-strategy candidates (single/cohort/background/remote) on risk, latency, and capability inputs each turn and select the best one, with /plan mode, explain, and override commands. Default off until the routing-visibility UX lands; off means implicit single-call execution."
+    "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /project-plan mode, override, explain and status work with is consulted when /workstream drafts a plan, whatever this setting says."
   },
   {
     "key": "tools.contractVerification",
@@ -4415,7 +4470,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "key": "runtime.toolBudget.enforced",
     "type": "boolean",
     "default": false,
-    "description": "Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The wall-clock limit stops a call when it is reached and tells the model what it was stopped by. Token and cost are known only when the tool returns, so a call over those is reported to the model as failed with its output kept and a note that its action may have taken effect; they apply only to tools that report tokenCount or costUsd."
+    "description": "Enforce per-call budgets on tool execution: wall-clock, token, and cost limits (runtime.toolBudget.maxMs/maxTokens/maxCostUsd). The wall-clock limit stops a call when it is reached and tells the model what it was stopped by. A call that finishes anyway, or finishes over its token or cost limit (known only when the tool returns), is reported to the model as succeeded, with its output and a note naming the limit it went over; token and cost apply only to tools that report tokenCount or costUsd."
   },
   {
     "key": "runtime.toolBudget.maxMs",
@@ -4592,6 +4647,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "validationHint": "list of { name, command, enabled } objects with optional required (true or false) and verification (\"command\" or \"assertions\"); each name once, and an enabled gate needs a command"
   },
   {
+    "key": "notifications.webhookUrls",
+    "type": "object",
+    "default": [],
+    "description": "Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so the list is shown masked. Applies at the next start",
+    "validationHint": "list of http(s) URLs, for example [\"https://hooks.example.com/abc\"]"
+  },
+  {
     "key": "sandbox.egressAllowlist",
     "type": "object",
     "default": [],
@@ -4604,6 +4666,13 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "default": [],
     "description": "Extra absolute paths the exec sandbox lets commands write besides the workspace. Applies from the next command",
     "validationHint": "list of absolute paths"
+  },
+  {
+    "key": "surfaces.email.imap.authservIds",
+    "type": "object",
+    "default": [],
+    "description": "Authserv-ids the mailbox's own receiving server writes in Authentication-Results, for a provider whose id is not built in (Gmail, Fastmail, Zoho, Yahoo and AOL are). Only a top-most header naming one of these is read as a sender verdict; with none, senders on such a mailbox read as unverified. An entry starting with \".\" matches the hosts under that domain",
+    "validationHint": "list of host names, for example [\"mx.example.com\"] or [\".mail.example.net\"]"
   },
   {
     "key": "worktree.setup.commands",
@@ -4883,7 +4952,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "fetch-sanitization",
     "name": "Fetch Response Sanitization",
-    "description": "Enables fetch response sanitization and host trust tier classification. Sanitizes HTTP response content (none/safe-text/strict modes, default safe-text). Requests to private IPs, cloud metadata endpoints, and encoded private-IP forms are always refused with an honest tool-result reason. Fetches to localhost dev servers ask once; approving saves fetch.allowLocalhost in your own settings. Set fetch.sanitizeMode to none to skip content sanitization for trusted flows.",
+    "description": "Enables fetch response sanitization and host trust tier classification. Sanitizes HTTP response content (none/safe-text/strict modes, default safe-text). Requests to cloud metadata endpoints and encoded private-IP forms are always refused with an honest tool-result reason; a private-network host a call writes is reached only when fetch.allowedPrivateHosts lists it or, written as an IP, in YOLO or an admitted call, and never by redirect. Fetches to localhost dev servers ask once; approving saves fetch.allowLocalhost in your own settings. Set fetch.sanitizeMode to none to skip content sanitization for trusted flows.",
     "domain": "fetch",
     "enablement": {
       "key": "fetch.sanitizeMode",
@@ -4893,7 +4962,8 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
       "fetch.sanitizeMode",
       "fetch.trustedHosts",
       "fetch.blockedHosts",
-      "fetch.allowLocalhost"
+      "fetch.allowLocalhost",
+      "fetch.allowedPrivateHosts"
     ],
     "restartRequired": false,
     "defaultEnabled": true
@@ -5071,7 +5141,7 @@ export const FEATURE_SETTINGS: readonly FeatureSettingMeta[] = [
   {
     "id": "adaptive-execution-planner",
     "name": "Adaptive Execution Planner",
-    "description": "Enables the Adaptive Execution Planner, which scores strategy candidates (single/cohort/background/remote) using risk, latency, and capability inputs and selects the best execution strategy each turn. Exposes /plan mode, /plan explain, and /plan override commands. Disable to revert to implicit single-call execution.",
+    "description": "Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so turning this on changes nothing today. /project-plan mode, override, explain and status work without it: they configure the planner /workstream drafting consults.",
     "domain": "planner",
     "enablement": {
       "key": "planner.adaptive",

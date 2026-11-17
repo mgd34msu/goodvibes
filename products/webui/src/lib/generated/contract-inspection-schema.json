@@ -2968,6 +2968,9 @@
         "proposal"
       ]
     },
+    "ownerPrincipalId": {
+      "type": "string"
+    },
     "ask": {
       "type": "string"
     },

@@ -41,12 +41,11 @@ export const DAEMON_OWNED_CONFIG_PREFIXES: readonly string[] = [
 
 export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   "danger.httpListener",
-  "daemon.timezone"
+  "daemon.timezone",
+  "network.privateDeliveryHosts"
 ] as const;
 
 export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS: readonly string[] = [
-  "conversationGate.gatedSurfaces",
-  "cluster.peers",
   "cluster.groupMaterial",
   "google.oauth.refreshToken",
   "email.passwordRef",

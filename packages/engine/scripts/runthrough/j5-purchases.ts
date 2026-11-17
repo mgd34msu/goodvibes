@@ -25,7 +25,10 @@
  *  - that purchase, waiting on the owner, survives a daemon crash and an ordinary restart;
  *  - inside the limits: completes without asking, submits once to the merchant;
  *  - over a limit: stops, naming the limit and by how much;
- *  - a total that changed at checkout: not submitted.
+ *  - a total that changed at checkout: not submitted;
+ *  - with no decision model (judgment.policy No Decision Model) a purchase
+ *    inside the limits asks the owner, saying what could not be checked
+ *    (that it is not a subscription), and nothing is submitted unasked.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -227,6 +230,21 @@ try {
   journey.check('a total that changed at checkout is not submitted', 'the same purchase flow: the model read 5.00, the page now shows a 9.00 total',
     `purchase ${short(changed.state ?? 'no state', 400)}; submissions ${submissions.length - changedBefore}`,
     submissions.length === changedBefore && changed.state !== undefined && /total|mismatch|changed|differ/i.test(JSON.stringify(changed.state)));
+
+  // 5. No decision model: inside the limits the purchase still asks, and says what was not checked.
+  const policySet = await daemonSet('judgment.policy', 'No Decision Model');
+  await s.restartDaemon();
+  owner = operatorToken(s.home);
+  const noModelBefore = submissions.length;
+  const noModel = await purchase('rt-nomodel', '5.00', '5.00');
+  await Bun.sleep(3_000);
+  const noModelWindows = (noModel.state?.windows as Array<{ kind?: string; notice?: string; windowId?: string }> | undefined) ?? [];
+  journey.check('with no decision model a purchase inside the limits asks the owner and says why', 'judgment.policy No Decision Model; restart; the same purchase flow (5.00) inside the limits',
+    `policy set ${policySet.code}; windows ${short(noModelWindows.map((window) => ({ kind: window.kind, notice: window.notice })), 900)}; submissions ${submissions.length - noModelBefore}`,
+    policySet.code === 0 && submissions.length === noModelBefore && noModelWindows.length > 0 && noModelWindows.every((window) => window.kind === 'approval')
+      && noModelWindows.some((window) => /no decision model is in use/.test(window.notice ?? '') && /not a subscription/.test(window.notice ?? '')));
+  const noModelWindow = noModelWindows[0];
+  if (noModelWindow?.windowId) await api(s.daemon, owner, 'POST', '/api/payments/purchase/deny', { purchaseId: 'rt-nomodel', windowId: noModelWindow.windowId, confirm: true }, { 'x-goodvibes-explicit-user-request': 'true' });
 } catch (error) {
   journey.check('journey ran to the end', 'j5', error instanceof Error ? error.stack ?? error.message : String(error), false);
 } finally {

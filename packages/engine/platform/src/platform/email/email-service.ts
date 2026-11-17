@@ -504,7 +504,7 @@ export class EmailService {
     if (input.signal?.aborted) throw new Error('Mail read was cancelled.');
     const owner = this.deps.replySubjectSourceOwner;
     if (!owner) throw new Error('Mail snapshot requires an owned account lifetime.');
-    const config = this.getValidatedInboxConfig();
+    const config = this.getValidatedConfig('read');
     const sourceRead = owner.beginRead(config);
     const result = await readEmailInboxBatch(this.deps, config, sourceRead, input);
     const current = (): void => {
@@ -695,14 +695,15 @@ export class EmailService {
   /**
    * Verify the configured IMAP and SMTP connections without sending mail or
    * reading the inbox, a real connectivity + authentication check for a
-   * connect-wizard "test connection" step. Does not require config.enabled;
-   * callers that want to gate readiness on enabled should check separately.
+   * connect-wizard "test connection" step. It applies the same setup gate as
+   * reading mail, so a mailbox the test passes is one every read accepts.
    *
    * Never throws, returns a result describing which stage (if any) failed,
    * with a plain-language error message. Never includes the raw password.
    */
   async testConnection(): Promise<EmailConnectionTestResult> {
-    const config = readEmailConfig(this.deps.getConfig);
+    const config = readEmailConfig(this.readConfigFor('read'));
+    if (!config.enabled) return { ok: false, stage: 'config', error: NOT_SET_UP_FOR_READING };
     // A mailbox set up for reading only is tested for reading only; the send
     // half is checked when an SMTP host is configured.
     const sends = config.smtpHost.length > 0;
@@ -795,12 +796,13 @@ export class EmailService {
   // Private
   // -------------------------------------------------------------------------
 
-  private getValidatedInboxConfig(): EmailConfig {
-    const config = readEmailConfig(this.deps.getInboxConfig ?? this.deps.getConfig);
-    if (!config.enabled) throw new EmailConfigurationError('Email inbox reading is not enabled.', 'disabled');
-    const errors = validateEmailInboxConfig(config);
-    if (errors.length > 0) throw new EmailConfigurationError(`Email inbox config is invalid:\n${errors.map(error => `  - ${error}`).join('\n')}`, 'invalid');
-    return config;
+  /**
+   * The config reader for what the operation needs. A read is set up once the
+   * receiving half is (the inbox reader's answer), so a receive-only mailbox
+   * reads; a send needs the sending half too.
+   */
+  private readConfigFor(purpose: 'read' | 'send'): (key: string) => unknown {
+    return purpose === 'read' ? this.deps.getInboxConfig ?? this.deps.getConfig : this.deps.getConfig;
   }
 
   /**
@@ -809,9 +811,9 @@ export class EmailService {
    * From address as well.
    */
   private getValidatedConfig(purpose: 'read' | 'send'): EmailConfig {
-    const config = readEmailConfig(this.deps.getConfig);
+    const config = readEmailConfig(this.readConfigFor(purpose));
     if (!config.enabled) {
-      throw new EmailConfigurationError('Email is not enabled. Set email.enabled = true in config.', 'disabled');
+      throw new EmailConfigurationError(purpose === 'read' ? NOT_SET_UP_FOR_READING : NOT_SET_UP_FOR_SENDING, 'disabled');
     }
     const errors = purpose === 'send' ? validateEmailConfig(config) : validateEmailInboxConfig(config);
     if (errors.length > 0) {
@@ -832,6 +834,11 @@ export class EmailService {
     return this.deps.transport.connectSmtpStartTls;
   }
 }
+
+const NOT_SET_UP_FOR_READING = 'No mailbox is set up for reading. Set surfaces.email.imap.host (or surfaces.email.host) '
+  + 'and surfaces.email.user, and store the email password.';
+const NOT_SET_UP_FOR_SENDING = 'Sending mail is not set up. Set surfaces.email.smtp.host (or surfaces.email.host), '
+  + 'surfaces.email.imap.host and surfaces.email.user, and store the email password.';
 
 /** Which setting holds the SMTP secret reference actually in use, for refusals that name it. */
 function smtpSettingFor(config: EmailConfig): string {

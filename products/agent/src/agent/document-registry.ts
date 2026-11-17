@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { defineLifecycle } from '@goodvibes-jev/engine/platform/platform/utils';
 import { openSqliteFile, type SqliteFile } from '@goodvibes-jev/engine/platform/platform/state';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -303,35 +302,13 @@ export function documentStorePath(shellPaths: AgentDocumentStorePaths): string {
  * read only when it is asked for, so a document's edit history never slows a
  * list. A write is one transaction over the rows it changes.
  */
-const DOCUMENT_MIGRATIONS = (legacyPath: string) => [
+const DOCUMENT_MIGRATIONS = [
   { toVersion: 1, up(db: SqliteFile['db']) {
     db.run('CREATE TABLE documents (id TEXT PRIMARY KEY, id_key TEXT NOT NULL UNIQUE, title_key TEXT NOT NULL, updated_at TEXT NOT NULL, revision INTEGER NOT NULL, record TEXT NOT NULL)');
     db.run('CREATE INDEX documents_title ON documents (title_key)');
     db.run('CREATE TABLE versions (document_id TEXT NOT NULL, seq INTEGER NOT NULL, version TEXT NOT NULL, PRIMARY KEY (document_id, seq))');
-    importLegacyDocuments(db, legacyPath);
   } },
 ];
-
-/**
- * Bring the documents of the earlier single-file store over once, when the
- * database is first created. The old file is left where it was.
- */
-function importLegacyDocuments(db: SqliteFile['db'], legacyPath: string): void {
-  if (!existsSync(legacyPath)) return;
-  let parsed: unknown;
-  try { parsed = JSON.parse(readFileSync(legacyPath, 'utf8')); } catch { return; }
-  const entries = isRecord(parsed) && Array.isArray(parsed.documents) ? parsed.documents : [];
-  const insertDocument = db.query('INSERT OR IGNORE INTO documents (id, id_key, title_key, updated_at, revision, record) VALUES (?, ?, ?, ?, 1, ?)');
-  const insertVersion = db.query('INSERT OR IGNORE INTO versions (document_id, seq, version) VALUES (?, ?, ?)');
-  for (const entry of entries) {
-    const document = parseDocument(entry);
-    if (!document) continue;
-    const versions = document.versions.slice(-MAX_VERSIONS);
-    insertDocument.run(document.id, document.id.toLowerCase(), document.title.toLowerCase(), document.updatedAt,
-      JSON.stringify(storedRecord({ ...document, versions, versionCount: versions.length })));
-    versions.forEach((version, index) => insertVersion.run(document.id, index, JSON.stringify(version)));
-  }
-}
 
 /** The document row: everything but the version history, which keeps only the newest version. */
 function parseRow(record: string): AgentDocumentRecord | null {
@@ -348,7 +325,7 @@ const openStores = new Map<string, SqliteFile>();
 function documentStore(path: string): SqliteFile {
   let store = openStores.get(path);
   if (!store) {
-    store = openSqliteFile(path, { name: 'document store', migrations: DOCUMENT_MIGRATIONS(path.replace(/\.db$/, '.json')) });
+    store = openSqliteFile(path, { name: 'document store', migrations: DOCUMENT_MIGRATIONS });
     openStores.set(path, store);
   }
   return store;

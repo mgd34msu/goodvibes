@@ -373,10 +373,11 @@ export interface MockDaemonOptions {
    */
   hostedStreamFrames?: readonly { event: 'turn' | 'tools' | 'hosted-session-update'; payload: unknown }[];
   /**
-   * Seed for the daemon's undelivered receipt queue, handed over ONCE when
-   * control.status is called with receipts=consume (GET /status?receipts=consume).
-   * Default []. A plain status read never consumes; a second consume returns
-   * none, the "shows once, never re-shows" contract.
+   * Seed for the daemon's undelivered receipt queue, offered by
+   * control.status with receipts=peek (GET /status?receipts=peek) until a
+   * receipts=ack read names them. Default []. A plain status read never touches
+   * the queue; a peek after the ack returns none, the "shows once, never
+   * re-shows" contract.
    */
   daemonReceipts?: readonly { id: string; text: string; at: number }[];
   /**
@@ -1075,8 +1076,8 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   }
   let hostedSessionIdCounter = 0;
 
-  // Undelivered daemon receipts, handed over exactly once, on a receipts=consume
-  // status read, then marked delivered so a re-consume (e.g. a reconnect) returns none.
+  // Undelivered daemon receipts, offered on every receipts=peek status read until a
+  // receipts=ack read names them, so a peek after the ack (e.g. a reconnect) returns none.
   let daemonReceipts: { id: string; text: string; at: number }[] = (options.daemonReceipts ?? []).map((r) => ({ ...r }));
 
   // In-memory canonical store for this test only, a fresh copy of the seed per
@@ -1340,8 +1341,8 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
   // state. Same answer shape as the invoke-path 'control.status' below.
   // Matches /status AND /status?receipts=... (control.status is GET /status;
   // the receipts input rides the query string). A peek offers the queued
-  // receipts until an ack names them; a consume hands them over and marks them
-  // delivered; a plain read is receipt-neutral.
+  // receipts until an ack names them; a plain read is receipt-neutral; any other
+  // mode is refused, as the daemon's input schema refuses it.
   await page.route(/\/status(\?.*)?$/, async (route) => {
     const url = new URL(route.request().url());
     const receiptsMode = url.searchParams.get('receipts');
@@ -1353,10 +1354,8 @@ export async function installMockDaemon(page: Page, options: MockDaemonOptions =
       daemonReceipts = daemonReceipts.filter((receipt) => !acknowledged.includes(receipt.id));
       return json(route, { ok: true, status: 'running' });
     }
-    if (receiptsMode === 'consume') {
-      const delivered = daemonReceipts;
-      daemonReceipts = [];
-      return json(route, { ok: true, status: 'running', receipts: delivered });
+    if (receiptsMode !== null) {
+      return json(route, { code: 'INVALID_ARGUMENT', error: 'receipts must be "peek" or "ack"' }, 400);
     }
     return json(route, { ok: true, status: 'running' });
   });

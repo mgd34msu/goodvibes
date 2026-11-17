@@ -1,5 +1,6 @@
 import { FetchRuntimeService, type FetchRuntimeDeps } from '../tools/fetch/index.js';
 import type { FetchExtractMode } from '../tools/fetch/schema.js';
+import { recordSearchResultsAsUntrusted } from './untrusted-ingest.js';
 import { WebSearchProviderRegistry } from './provider-registry.js';
 import { RefusalError, refusal } from '@goodvibes-jev/engine/errors';
 import type {
@@ -124,7 +125,7 @@ export class WebSearchService {
     const resultsWithEvidence = evidenceRun?.results ?? baseResponse.results;
     const shapedResults = resultsWithEvidence.map((result) => shapeResultForVerbosity(result, verbosity, request.includeEvidence === true));
 
-    return {
+    const response: WebSearchResponse = {
       providerId: provider.id,
       providerLabel: provider.label,
       query: request.query,
@@ -135,6 +136,9 @@ export class WebSearchService {
         ? { ...baseResponse.metadata, evidence: evidenceRun.summary }
         : baseResponse.metadata,
     };
+    // What the pages wrote is about to reach the caller: the ledger records it with its text and origin.
+    recordSearchResultsAsUntrusted(response);
+    return response;
   }
 
   private async attachEvidence(

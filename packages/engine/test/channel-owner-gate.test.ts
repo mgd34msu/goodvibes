@@ -2,6 +2,8 @@
 // Red when: With only a group listed a stranger's direct message is admitted, or with a user and a group listed an unlisted member or an unlisted group is admitted.
 // Proves: The first person to write to an unowned channel becomes its owner, or someone other than the owner answers a pending permission ask by replying in the channel.
 // Red when: The first unknown sender is admitted or made owner without the owner accepting the claim, or a non-owner's "approve" resolves a pending approval.
+// Proves: A card number typed into a chat channel is kept in the session, the policy audit and a model request.
+// Red when: `authorizeSurfaceIngress` reads, records or passes on a message with a card number instead of refusing it first and telling the owner on that channel.
 /**
  * Who reaches the assistant over a chat channel, and who may answer for the
  * owner. On a surface with no owner the first unknown sender is held as a
@@ -116,6 +118,29 @@ describe('a reply in the channel answering a pending permission ask', () => {
       await ask.policy.stop();
     }
   });
+});
+
+test('a card number the owner sends on the channel is refused before anything reads it, and the owner is told', async () => {
+  const policy = await ownedSlack();
+  const notices: string[] = [];
+  const helper = new DaemonSurfaceActionHelper({
+    channelPolicy: policy,
+    routeBindings: { getBinding: () => ({ surfaceKind: 'slack' }), listBindings: () => [] },
+    deliverSurfaceNotice: async (_binding: unknown, message: string) => { notices.push(message); return { delivered: true }; },
+  } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
+  try {
+    const card = await helper.authorizeSurfaceIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct',
+      text: 'use my card 4111 1111 1111 1111 for the kettle' });
+    expect(card.allowed).toBe(false);
+    expect(card.reason).toStartWith('card-shapes-refused');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).not.toContain('1111');
+    // Control: the same words without the number go on to the conversation.
+    expect((await helper.authorizeSurfaceIngress({ surface: 'slack', userId: 'U-OWNER', conversationKind: 'direct',
+      text: 'use my card for the kettle' })).allowed).toBe(true);
+  } finally {
+    await policy.stop();
+  }
 });
 
 /** A telegram surface owned by U-OWNER with the given allowlists. */

@@ -27365,7 +27365,7 @@
     {
       "name": "keepMcpToolRuleFromSettings",
       "kind": "function",
-      "text": "export declare function keepMcpToolRuleFromSettings(mcpRegistry: Pick<McpRegistry, 'storeServerToolRule' | 'listServerSecurity'>, serverName: string, edit: McpToolRuleEdit, done: (message: string, entries: McpEntry[]) => void): void; ;; via McpEntry = export interface McpEntry { name: string; connected: boolean; role: string; trustMode: 'constrained' | 'ask-on-risk' | 'allow-all' | 'blocked'; allowedPaths: string[]; allowedHosts: string[]; toolRules?: readonly McpEntryToolRule[]; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; };"
+      "text": "export declare function keepMcpToolRuleFromSettings(mcpRegistry: Pick<McpRegistry, 'storeServerToolRule' | 'listServerSecurity' | 'clearServerToolDenial'>, serverName: string, edit: McpToolRuleEdit, done: (message: string, entries: McpEntry[]) => void): void; ;; via McpEntry = export interface McpEntry { name: string; connected: boolean; role: string; trustMode: 'constrained' | 'ask-on-risk' | 'allow-all' | 'blocked'; allowedPaths: string[]; allowedHosts: string[]; toolRules?: readonly McpEntryToolRule[]; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; };"
     },
     {
       "name": "parseMcpToolRuleEdit",

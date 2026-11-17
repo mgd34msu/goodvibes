@@ -30,6 +30,8 @@ export interface NativeHeadlessTurnResult {
     readonly cause?: NativeHeadlessFailureCause | undefined;
     /** Set when the resumed session was restored from a crash snapshot before the first request. */
     readonly recovery?: HeadlessSessionRecovery | undefined;
+    /** Set when the run was refused before it started: what is true, why, and what to do. */
+    readonly refusal?: { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[] } | undefined;
 }
 /** What a resumed headless run restored from its session's crash snapshot, as the final frame and the `SESSION_RECOVERED` frame carry it. */
 export interface HeadlessSessionRecovery {
@@ -43,11 +45,13 @@ export interface HeadlessSessionRecovery {
     readonly snapshotKept: boolean;
     readonly messages: number;
     readonly turns: number;
-    /** The turn the process stopped inside: its prompt (masked, bounded), tool results it had, tool calls recorded as interrupted. */
+    /** The turn the process stopped inside: its prompt (masked, bounded), tool results it had, tool calls recorded as interrupted, whether a reply was cut off. */
     readonly interruptedTurn?: {
         readonly prompt: string;
         readonly toolResults: number;
         readonly interruptedToolCalls: readonly { readonly callId: string; readonly tool: string }[];
+        /** The model's reply was still arriving: its text is kept and marked cut off. */
+        readonly partialReply: boolean;
     } | undefined;
     /** What could not be brought back, one line each. */
     readonly lost: readonly string[];

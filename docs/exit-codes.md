@@ -45,6 +45,7 @@ Branching rules that hold for every program:
 | `contract-failed`, `agent-failed` | `1` | Delegated work ended without a result; `error` says why. |
 | `awaiting-owner` | `1` | Delegated work stopped for an owner decision: open the session interactively, answer it, and the work continues. |
 | `turn-unsettled` | `1` | The turn ended without a final event; inspect the session before running again. |
+| `session-open-elsewhere` | `1` | `--resume`, `--continue` or `--session` named a session another running copy has open; nothing was sent. Close it there and run again, or run without the flag. `refusal` says which session. |
 | `invalid-input` | `2` | Fix the command line. |
 | `native-<kind>` | by kind | The recorded intake outcome (`native-turn`, `native-work`, `native-blocked`, `native-refused`, `native-cancelled`). |
 | `native-unknown` | `3` | Run `run --intake-status` before retrying. |

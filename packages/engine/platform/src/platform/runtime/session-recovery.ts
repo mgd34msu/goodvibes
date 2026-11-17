@@ -61,6 +61,8 @@ import {
   resolveSessionsDirPath,
   RECOVERY_FILE_PREFIX,
   RECOVERY_FILE_SUFFIX,
+  type CrashSnapshotTurn,
+  type CrashSnapshotTurnMoment,
   type SessionPersistenceOptions,
   type SessionSnapshot,
 } from './session-persistence-scope.js';
@@ -70,7 +72,19 @@ export type RecoveryFileInfo = {
   timestamp: number;
   sessionId: string;
   returnContext?: SessionReturnContextSummary | undefined;
+  /** The turn the snapshot was taken in; absent on a snapshot that did not record it. */
+  turn?: CrashSnapshotTurn | undefined;
 };
+
+const TURN_MOMENTS: ReadonlySet<string> = new Set<CrashSnapshotTurnMoment>(['TURN_SUBMITTED', 'TOOLS_DONE', 'TURN_COMPLETED', 'TIMER', 'EXIT']);
+
+/** The `turn` a snapshot header recorded, when it is well formed. */
+function readSnapshotTurn(value: unknown): CrashSnapshotTurn | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const turn = value as Record<string, unknown>;
+  if (typeof turn['moment'] !== 'string' || !TURN_MOMENTS.has(turn['moment'])) return undefined;
+  return { moment: turn['moment'] as CrashSnapshotTurnMoment, inFlight: turn['inFlight'] === true, partialReply: turn['partialReply'] === true };
+}
 
 /**
  * All per-session recovery files currently on disk under `dir`, newest-first
@@ -148,17 +162,15 @@ export function writeRecoveryFile(
   try {
     if (!snapshot.messages.length) return false;
     const lines: string[] = [];
-    lines.push(JSON.stringify({ type: 'meta', sessionId, title, timestamp: Date.now() }));
-    if (snapshot.titleSource || snapshot.returnContext) {
-      lines[0]! = JSON.stringify({
-        type: 'meta',
-        sessionId,
-        title,
-        timestamp: Date.now(),
-        titleSource: snapshot.titleSource,
-        returnContext: loadedReturnContext(snapshot.returnContext),
-      });
-    }
+    lines.push(JSON.stringify({
+      type: 'meta',
+      sessionId,
+      title,
+      timestamp: Date.now(),
+      ...(snapshot.titleSource ? { titleSource: snapshot.titleSource } : {}),
+      ...(snapshot.returnContext ? { returnContext: loadedReturnContext(snapshot.returnContext) } : {}),
+      ...(snapshot.turn ? { turn: snapshot.turn } : {}),
+    }));
     for (const message of snapshot.messages) {
       lines.push(JSON.stringify({ type: 'message', ...message }));
     }
@@ -221,6 +233,7 @@ function readRecoveryMetaObservation(recoveryFile: string): { readonly info: Rec
     timestamp: typeof meta['timestamp'] === 'number' ? meta['timestamp'] : 0,
     sessionId: typeof meta['sessionId'] === 'string' ? meta['sessionId'] : '',
     returnContext: loadedReturnContext(meta['returnContext']),
+    turn: readSnapshotTurn(meta['turn']),
   } };
 }
 
@@ -400,6 +413,7 @@ function parseRecoveryFile(recoveryFile: string, expectedSessionId?: string, exp
     title: typeof meta['title'] === 'string' ? meta['title'] : undefined,
     titleSource: meta['titleSource'] as ConversationTitleSource | undefined,
     returnContext: loadedReturnContext(meta['returnContext']),
+    turn: readSnapshotTurn(meta['turn']),
     messages: lines.slice(1).map(line => { const { type: _type, ...message } = parse(line); return message; }),
   };
   return { snapshot, physical: source.physical };

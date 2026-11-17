@@ -36,6 +36,25 @@ export const OWNER_ANSWER_SESSION_METADATA = 'answerSession';
 /** Metadata key naming the agent that asked: it takes the answer on its next model request while it runs. */
 export const OWNER_ANSWER_AGENT_METADATA = 'answerAgent';
 
+/**
+ * Metadata key holding the asking terminal session's saved file: present = it
+ * can be opened again, and it is the session's identity (it names the app and
+ * the project store as well as the id; owner-asker-liveness.ts `sessionAskerKey`).
+ */
+export const OWNER_ASKER_SESSION_FILE_METADATA = 'askerSessionFile';
+
+/**
+ * Whether an item recorded with saved file `recorded` belongs to the session
+ * whose saved file is `wanted`. A session with a file takes items that name the
+ * same file, and items that name none (asked before the file was recorded,
+ * matched by id as they always were). A session without one (a hosted
+ * session, a channel's) takes only items that name none, so a terminal
+ * session with the same id is never mistaken for it.
+ */
+export function sessionFileMatches(recorded: string | undefined, wanted: string | undefined): boolean {
+  return recorded === undefined || recorded === wanted;
+}
+
 export interface StoredOwnerItem {
   readonly id: string;
   readonly kind: StoredOwnerItemKind;
@@ -81,7 +100,16 @@ export type QuestionStoreAnswerResult =
 /** Whose questions to read: one session's, one agent's, or both. */
 export interface QuestionAskerScope {
   readonly session?: string | undefined;
+  /** The session's saved file, its identity; absent for a session that has none (see {@link sessionFileMatches}). */
+  readonly sessionFile?: string | undefined;
   readonly agent?: string | undefined;
+}
+
+/** Whether `entry` is the scope's: asked by its agent, or by its session (id and saved file). */
+function inScope(entry: StoredOwnerEntry, scope: QuestionAskerScope): boolean {
+  if (scope.agent !== undefined && metadataText(entry.item, OWNER_ANSWER_AGENT_METADATA) === scope.agent) return true;
+  if (scope.session === undefined || metadataText(entry.item, OWNER_ANSWER_SESSION_METADATA) !== scope.session) return false;
+  return sessionFileMatches(metadataText(entry.item, OWNER_ASKER_SESSION_FILE_METADATA) ?? undefined, scope.sessionFile);
 }
 
 /** Where the one owner inbox store of a home is. */
@@ -227,7 +255,8 @@ export class QuestionStore implements RevisionSource {
     const rows = file.db.query<ItemRow, string[]>(
       `SELECT ${ROW_COLUMNS} FROM owner_items WHERE (${clauses.join(' OR ')}) AND ${UNDELIVERED}`,
     ).all(...params);
-    return rows.map((row) => this.#decode(row)).filter((entry): entry is StoredOwnerEntry => entry !== null);
+    // The index finds the id; the saved file tells namesakes in another app or project apart.
+    return rows.map((row) => this.#decode(row)).filter((entry): entry is StoredOwnerEntry => entry !== null && inScope(entry, scope));
   }
 
   /**
@@ -293,22 +322,29 @@ export class QuestionStore implements RevisionSource {
   /**
    * A session will never be opened again (deleted, or a hosted session ended):
    * its open questions are withdrawn and its waiting answers marked not
-   * deliverable, in one transaction. Returns the ids it changed.
+   * deliverable, in one transaction. `sessionFile` is the session's identity
+   * (see {@link sessionFileMatches}); a namesake's questions are left alone.
+   * Returns the ids it changed.
    */
-  settleSession(sessionId: string, withdrawnReason: string, undeliverableReason: string, now: number): string[] {
+  settleSession(sessionId: string, withdrawnReason: string, undeliverableReason: string, now: number, sessionFile?: string): string[] {
     const file = this.#open();
     return file.tx(() => {
-      const rows = file.db.query<{ id: string; closed_at: number | null }, [string]>(
-        `SELECT id, closed_at FROM owner_items WHERE answer_session = ? AND ${UNDELIVERED}`,
+      const rows = file.db.query<ItemRow, [string]>(
+        `SELECT ${ROW_COLUMNS} FROM owner_items WHERE answer_session = ? AND ${UNDELIVERED}`,
       ).all(sessionId);
-      if (rows.length === 0) return [];
-      file.db.query<never, [string, number, number, string]>(
-        'UPDATE owner_items SET withdrawn_reason = ?, closed_at = ?, updated_at = ? WHERE answer_session = ? AND closed_at IS NULL',
-      ).run(withdrawnReason, now, now, sessionId);
-      file.db.query<never, [string, number, number, string]>(
-        "UPDATE owner_items SET delivery_state = 'undeliverable', delivery_reason = ?, delivery_at = ?, updated_at = ? WHERE answer_session = ? AND answer IS NOT NULL AND delivery_state IS NULL",
-      ).run(undeliverableReason, now, now, sessionId);
-      return rows.map((row) => row.id);
+      const ids = rows
+        .map((row) => this.#decode(row))
+        .filter((entry): entry is StoredOwnerEntry => entry !== null && inScope(entry, { session: sessionId, sessionFile }))
+        .map((entry) => entry.item.id);
+      for (const id of ids) {
+        file.db.query<never, [string, number, number, string]>(
+          'UPDATE owner_items SET withdrawn_reason = ?, closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL',
+        ).run(withdrawnReason, now, now, id);
+        file.db.query<never, [string, number, number, string]>(
+          "UPDATE owner_items SET delivery_state = 'undeliverable', delivery_reason = ?, delivery_at = ?, updated_at = ? WHERE id = ? AND answer IS NOT NULL AND delivery_state IS NULL",
+        ).run(undeliverableReason, now, now, id);
+      }
+      return ids;
     });
   }
 

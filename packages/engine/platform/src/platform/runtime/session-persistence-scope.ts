@@ -25,8 +25,26 @@ import { resolveScopedDirectory } from './surface-root.js';
 import { recoveryFilePath } from './recovery-path.js';
 import type { SessionSurface } from './session-surface.js';
 
+/**
+ * When a crash snapshot was taken: at a turn moment (`TURN_SUBMITTED`,
+ * `TOOLS_DONE`), after a turn's save failed (`TURN_COMPLETED`), by the minute
+ * timer for a change outside a turn (`TIMER`), or on the way out (`EXIT`).
+ */
+export type CrashSnapshotTurnMoment = 'TURN_SUBMITTED' | 'TOOLS_DONE' | 'TURN_COMPLETED' | 'TIMER' | 'EXIT';
+
+/** What a crash snapshot says about the turn it was taken in. */
+export interface CrashSnapshotTurn {
+  readonly moment: CrashSnapshotTurnMoment;
+  /** A turn was still running when the snapshot was taken: restoring it records that turn as interrupted. */
+  readonly inFlight: boolean;
+  /** The last assistant message is a reply that was still arriving: its text is cut off. */
+  readonly partialReply: boolean;
+}
+
 export type SessionSnapshot = {
   messages: Array<Record<string, unknown>>;
+  /** Crash snapshots only: the turn the snapshot was taken in. */
+  turn?: CrashSnapshotTurn | undefined;
   timestamp?: number | undefined;
   title?: string | undefined;
   titleSource?: ConversationTitleSource | undefined;

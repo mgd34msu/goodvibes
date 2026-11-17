@@ -5,13 +5,14 @@
  * or `/session resume`, a headless `run --resume` / `--continue`).
  *
  * The snapshot is the conversation as it stood at the last turn moment (prompt
- * accepted, each tool batch done). When the process stopped inside a turn, the
- * snapshot ends inside it; that turn is recorded as interrupted and never run
- * again on its own: its prompt is marked cancelled (as Esc marks a prompt), the
- * tool results it already had stay as they were, and a tool call the model made
- * whose result never reached disk gets a result that says it was interrupted
- * and that its effect is unknown, never a success. The next prompt continues
- * from there.
+ * accepted, each tool batch done), and records that moment and whether a reply
+ * was still arriving. When the process stopped inside a turn, the snapshot ends
+ * inside it; that turn is recorded as interrupted and never run again on its
+ * own: its prompt is marked cancelled (as Esc marks a prompt), the tool results
+ * it already had stay as they were, a reply that was still arriving keeps its
+ * text with a line saying it was cut off, and a tool call the model made whose
+ * result never reached disk gets a result that says it was interrupted and that
+ * its effect is unknown, never a success. The next prompt continues from there.
  *
  * Also here: what a headless run does so a turn killed mid-flight can be
  * recovered (the same turn-moment snapshot the apps write, and the session lock
@@ -24,11 +25,13 @@ import type { TurnEvent } from '@goodvibes-jev/engine/platform/events';
 import {
   applyRecoverySnapshot,
   closeSessionHere,
+  crashSnapshotTurn,
   deleteRecoveryFile,
   openSessionHere,
   writeCrashSnapshotAtTurnMoments,
   writeLastSessionPointer,
   writeRecoveryFile,
+  type CrashSnapshotTurn,
   type RecoveryApplyRefusal,
   type RecoveryFileInfo,
   type RecoveryRestoreConfirmation,
@@ -55,6 +58,8 @@ export interface InterruptedTurn {
   readonly toolResults: number;
   /** Tool calls with no result on disk; each now has a result recorded as interrupted. */
   readonly interruptedToolCalls: readonly InterruptedToolCall[];
+  /** The model's reply was still arriving: its text is kept and marked cut off. */
+  readonly partialReply: boolean;
 }
 
 /** What restoring a crash snapshot did, in facts a surface can show as they are. */
@@ -96,6 +101,7 @@ export interface CrashRecoveryInput {
 }
 
 const INTERRUPTED_TOOL_RESULT = 'Interrupted: the process stopped before this tool call returned. Whether it took effect is unknown; check before relying on it or running it again.';
+const CUT_OFF_REPLY = '[Reply cut off: the process stopped while this reply was still arriving. It is incomplete.]';
 
 function promptText(message: Extract<ConversationMessageSnapshot, { role: 'user' }>): string {
   return typeof message.content === 'string'
@@ -105,19 +111,24 @@ function promptText(message: Extract<ConversationMessageSnapshot, { role: 'user'
 
 /**
  * Record the turn the snapshot ends inside as interrupted: the prompt marked
- * cancelled, and a result saying "interrupted" for each tool call that has
- * none, placed after the results its message already has. Returns the
+ * cancelled, a reply that was still arriving marked cut off, and a result
+ * saying "interrupted" for each tool call that has none, placed after the
+ * results its message already has. What the snapshot recorded about its turn
+ * (`turn`) decides; a snapshot that recorded nothing is judged by its shape (a
+ * last assistant message without tool calls reads as finished). Returns the
  * messages unchanged and no turn when the snapshot ends on a finished reply.
  */
-export function settleInterruptedTurn(messages: readonly ConversationMessageSnapshot[]): {
+export function settleInterruptedTurn(messages: readonly ConversationMessageSnapshot[], turn?: CrashSnapshotTurn): {
   readonly messages: ConversationMessageSnapshot[];
   readonly interrupted?: InterruptedTurn | undefined;
 } {
   const lastPrompt = messages.findLastIndex((message) => message.role === 'user');
   const tail = messages.slice(lastPrompt + 1).filter((message) => message.role !== 'system');
   const last = tail.at(-1);
-  const finished = last?.role === 'assistant' && !(last.toolCalls?.length);
+  const finished = turn?.inFlight !== true && last?.role === 'assistant' && !(last.toolCalls?.length);
   if (lastPrompt < 0 || finished) return { messages: [...messages] };
+  // The reply still arriving is the last assistant message of the turn.
+  const partialAt = turn?.partialReply === true ? messages.findLastIndex((message, index) => index > lastPrompt && message.role === 'assistant') : -1;
   const answered = new Set(tail.flatMap((message) => (message.role === 'tool' ? [message.callId] : [])));
   const interruptedToolCalls: InterruptedToolCall[] = [];
   const settled: ConversationMessageSnapshot[] = [];
@@ -136,7 +147,11 @@ export function settleInterruptedTurn(messages: readonly ConversationMessageSnap
       settled.push({ ...message, cancelled: true });
       return;
     }
-    settled.push(message);
+    if (index === partialAt && message.role === 'assistant') {
+      settled.push({ ...message, content: message.content ? `${message.content}\n\n${CUT_OFF_REPLY}` : CUT_OFF_REPLY });
+    } else {
+      settled.push(message);
+    }
     if (index > lastPrompt && message.role === 'assistant' && message.toolCalls?.length) {
       const calls = message.toolCalls.filter((call) => !answered.has(call.id)).map((call) => ({ callId: call.id, tool: call.name }));
       open = calls.length > 0 ? { calls } : null;
@@ -150,6 +165,7 @@ export function settleInterruptedTurn(messages: readonly ConversationMessageSnap
       prompt: promptText(prompt),
       toolResults: tail.filter((message) => message.role === 'tool').length,
       interruptedToolCalls,
+      partialReply: partialAt >= 0,
     },
   };
 }
@@ -208,7 +224,7 @@ export function restoreCrashSnapshot(input: CrashRecoveryInput): CrashRecoveryRe
   } catch (error) {
     logger.warn('[Recovery] Moving to the recovered session left a step undone', { sessionId, error: summarizeError(error) });
   }
-  const settled = settleInterruptedTurn(conversation.getMessageSnapshot());
+  const settled = settleInterruptedTurn(conversation.getMessageSnapshot(), info.turn);
   // The restore reset the live conversation, which dropped the side branches;
   // without them back in memory the next save rewrites the session without them.
   const branches = carriedBranches();
@@ -270,6 +286,7 @@ export function describeCrashRecovery(report: CrashRecoveryReport): string {
   if (turn) {
     const calls = turn.interruptedToolCalls;
     parts.push(`The interrupted prompt was kept, marked cancelled, with ${turn.toolResults} tool result(s) it had already obtained`
+      + (turn.partialReply ? '; the reply that was still arriving is kept, marked cut off' : '')
       + (calls.length > 0 ? `; ${calls.length} tool call(s) recorded as interrupted (${calls.map((call) => call.tool).join(', ')}), outcome unknown.` : '.'));
   }
   if (report.lost.length > 0) parts.push(report.lost.join(' '));
@@ -299,6 +316,8 @@ export function keepHeadlessSessionRecoverable(input: {
   readonly bus: Pick<RuntimeEventBus, 'on'>;
   readonly surface: SessionSurface;
   readonly runtime: { readonly sessionId: string };
+  /** Says whether a reply is still arriving, recorded in each snapshot. */
+  readonly conversation: { hasPartialReply(): boolean };
   readonly snapshot: () => SessionSnapshot;
   readonly title: () => string;
   readonly writeSessionPointer: (sessionId: string) => void;
@@ -310,9 +329,10 @@ export function keepHeadlessSessionRecoverable(input: {
   let pointed: string | undefined;
   const stop = writeCrashSnapshotAtTurnMoments({
     subscribe: (moment, handler) => input.bus.on<TurnEvent>(moment, () => handler()),
-    write: () => {
+    write: (moment) => {
       const sessionId = runtime.sessionId;
-      if (!writeRecoveryFile(input.snapshot(), sessionId, input.title(), { surface })) return;
+      const snapshot = { ...input.snapshot(), turn: crashSnapshotTurn(moment, input.conversation) };
+      if (!writeRecoveryFile(snapshot, sessionId, input.title(), { surface })) return;
       if (pointed === sessionId) return;
       pointed = sessionId;
       input.writeSessionPointer(sessionId);

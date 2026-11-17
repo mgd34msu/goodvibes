@@ -21,13 +21,13 @@
 import type { HostInstructions } from '../core/host-instructions.js';
 import {
   answerAgentOf,
-  answerSessionOf,
+  isAskedBySession,
   questionClosedText,
   type OwnerAnswerReader,
   type OwnerItem,
 } from '../control-plane/owner-inbox.js';
 import { logger } from '../utils/logger.js';
-import { holdAskerRunning, type OwnerAskerKind } from '../control-plane/owner-asker-liveness.js';
+import { holdAskerRunning, sessionAskerKey, type OwnerAskerKind } from '../control-plane/owner-asker-liveness.js';
 
 let reader: OwnerAnswerReader | null = null;
 
@@ -313,16 +313,28 @@ export interface SessionAnswerWatch {
  * Watch the answers to the session open in `conversation` (`currentSession`
  * reads which one it is): before each model request it takes what arrived. One
  * hook per conversation; it costs nothing while the session waits on nothing.
+ *
+ * `sessionFile` gives a terminal session's identity, its saved file (it names
+ * the app and the project store, so a namesake elsewhere is another session);
+ * a hosted session has none and is known by its id.
  */
-export function watchSessionAnswers(conversation: RequestingConversation, currentSession: () => string | undefined): SessionAnswerWatch {
+export function watchSessionAnswers(
+  conversation: RequestingConversation,
+  currentSession: () => string | undefined,
+  sessionFile: (sessionId: string) => string | undefined = () => undefined,
+): SessionAnswerWatch {
   // The session the watched questions belong to; when another takes its place they wait in the store for its next open.
   let tracked: string | undefined;
   let closed = false;
   const current = (): string | undefined => (closed ? undefined : currentSession());
+  const fileOf = (sessionId: string | undefined): string | undefined => (sessionId === undefined ? undefined : sessionFile(sessionId));
   const watch = new AnswerWatch(
     () => (current() !== undefined ? conversation.hostInstructions : undefined),
-    () => (tracked !== undefined ? [{ kind: 'session', id: tracked }] : []),
-    (item) => (answerSessionOf(item) !== current() ? 'drop' : leftToRunningAgent(item) ? 'leave' : 'take'),
+    () => (tracked !== undefined ? [{ kind: 'session', id: sessionAskerKey({ session: tracked, sessionFile: fileOf(tracked) }) }] : []),
+    (item) => {
+      const session = current();
+      return !isAskedBySession(item, session, fileOf(session)) ? 'drop' : leftToRunningAgent(item) ? 'leave' : 'take';
+    },
   );
   const follow = (): void => {
     const session = current();
@@ -339,7 +351,7 @@ export function watchSessionAnswers(conversation: RequestingConversation, curren
       const source = reader;
       if (!source) return 0;
       try {
-        const items = source.pendingFor({ session: sessionId });
+        const items = source.pendingFor({ session: sessionId, sessionFile: fileOf(sessionId) });
         for (const item of items) watch.add(item.id);
         return items.length;
       } catch (error) {

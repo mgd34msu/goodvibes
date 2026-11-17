@@ -1,4 +1,4 @@
-import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { buildPersistedSessionContextFromFacts, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { UiRuntimeEvents, RuntimeEventBus } from '@/runtime/index.ts';
 import { deleteRecoveryFile, persistConversation } from '@/runtime/index.ts';
 import { writeCrashSnapshotIfChanged } from '../runtime/recovery-autosave.ts';
@@ -236,8 +236,8 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
   // only if the conversation changed since its last write. A successful
   // turn-end save deletes it, so a snapshot on disk always holds something the
   // session store does not.
-  const writeCrashSnapshot = (): void => {
-    writeCrashSnapshotIfChanged({ conversation, sessionId: runtime.sessionId, surface, buildSessionContinuityHints });
+  const writeCrashSnapshot = (moment: CrashSnapshotTurnMoment = 'TURN_COMPLETED'): void => {
+    writeCrashSnapshotIfChanged({ conversation, sessionId: runtime.sessionId, surface, buildSessionContinuityHints, moment });
   };
   unsubs.push(writeCrashSnapshotAtTurnMoments({
     subscribe: (moment, handler) => events.turns.on(moment, handler),

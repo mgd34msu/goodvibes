@@ -39,6 +39,16 @@ import { logger } from '../utils/logger.js';
 
 export type OwnerAskerKind = 'session' | 'agent';
 
+/**
+ * The one identity of a session asker: its saved file when it has one (a
+ * terminal session: the file names the app, the project store and the id, so
+ * namesakes in another app or project are other sessions), otherwise its id (a
+ * hosted session, a channel's). Locks, delivery and settling all key by it.
+ */
+export function sessionAskerKey(asker: { readonly session: string; readonly sessionFile?: string | undefined }): string {
+  return asker.sessionFile ?? asker.session;
+}
+
 /** The lock file that says asker `id` of `kind` is running, beside the store at `storePath`. */
 export function askerLivenessPath(storePath: string, kind: OwnerAskerKind, id: string): string {
   // Hashed: an id is never used as a file name, whatever characters it holds.
@@ -72,6 +82,10 @@ export function settleAskerLock(path: string, idle?: () => boolean): boolean {
 interface Holding {
   count: number;
   lock: HeldProcessLock | null;
+  /** Settles once the current attempt to take the lock ended: true when this process holds it. */
+  taken: Promise<boolean>;
+  /** The last attempt ended without the lock (another process held it). */
+  missed: boolean;
 }
 
 const holdings = new Map<string, Holding>();
@@ -102,25 +116,60 @@ async function takeAskerLock(path: string): Promise<HeldProcessLock> {
   }
 }
 
+/** Start taking the lock for `holding`; its `taken` settles with the outcome. */
+function attemptHold(path: string, holding: Holding): void {
+  holding.missed = false;
+  holding.taken = takeAskerLock(path).then((lock) => {
+    if (holding.count > 0 && holdings.get(path) === holding) { holding.lock = lock; return true; }
+    giveUp(path, lock);
+    return false;
+  }, (error: unknown) => {
+    // Another process runs the same asker (the same session open twice); it is the one that reads as running.
+    holding.missed = true;
+    logger.debug('[owner-inbox] could not mark an asker running', { path, error: error instanceof Error ? error.message : String(error) });
+    return false;
+  });
+}
+
+/** This process's holding of `path`, taking the lock when nothing here holds or is taking it. */
+function holdingOf(path: string): Holding {
+  let holding = holdings.get(path);
+  if (!holding) {
+    holding = { count: 0, lock: null, taken: Promise.resolve(false), missed: false };
+    holdings.set(path, holding);
+    attemptHold(path, holding);
+  } else if (holding.missed && holding.lock === null) {
+    // The holder that kept it then may have exited; try again.
+    attemptHold(path, holding);
+  }
+  return holding;
+}
+
 /**
  * Mark the asker at `path` running in this process until the returned function
  * is called. Holders in one process share the lock; the last one to stop gives
  * it up and removes the file.
  */
 export function holdAskerRunning(path: string): () => void {
-  let holding = holdings.get(path);
-  if (!holding) {
-    const created: Holding = { count: 0, lock: null };
-    holding = created;
-    holdings.set(path, created);
-    void takeAskerLock(path).then((lock) => {
-      if (created.count > 0 && holdings.get(path) === created) created.lock = lock;
-      else giveUp(path, lock);
-    }).catch((error: unknown) => {
-      // Another process runs the same asker (the same session open twice); it is the one that reads as running.
-      logger.debug('[owner-inbox] could not mark an asker running', { path, error: error instanceof Error ? error.message : String(error) });
-    });
-  }
+  return releaseOf(path, holdingOf(path));
+}
+
+/**
+ * Mark the asker at `path` running here only if no other process does: resolves
+ * with the release once this process holds the lock, or with null when another
+ * process holds it (after a wait of at most a second, which covers a reader's
+ * one-shot attempt). For a caller that must not go on while another process has
+ * the asker (a run resuming a session someone else is writing).
+ */
+export async function claimAskerRunning(path: string): Promise<(() => void) | null> {
+  const holding = holdingOf(path);
+  const release = releaseOf(path, holding);
+  if (await holding.taken && holding.lock) return release;
+  release();
+  return null;
+}
+
+function releaseOf(path: string, holding: Holding): () => void {
   holding.count += 1;
   const held = holding;
   let stopped = false;

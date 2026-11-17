@@ -161,14 +161,16 @@ export type {
 } from './recovery-snapshot-apply.js';
 
 export {
+  claimSessionHere,
   closeSessionHere,
   isSessionOpenElsewhere,
   moveSessionHere,
   openSessionHere,
+  sessionIdentityFile,
   sessionOpenLockPath,
   sweepClosedSessionLocks,
 } from './session-open-lock.js';
-export type { SessionLockSweepResult } from './session-open-lock.js';
+export type { SessionIdentitySurface, SessionLockSweepResult } from './session-open-lock.js';
 
 export {
   DURABILITY_HOUSEKEEPING_INTERVAL_MS,

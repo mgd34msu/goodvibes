@@ -41,9 +41,10 @@ Every `run` writes its session's crash snapshot at the same moments the workspac
 
 - its prompt is kept and marked cancelled, as Esc marks a cancelled prompt;
 - the tool results it had already obtained are kept as they were;
+- a reply that was still arriving when the run stopped keeps its text, followed by a line saying it was cut off and is incomplete; it is never presented as a finished reply (each snapshot records the moment it was taken and whether a reply was still arriving);
 - a tool call the model had made whose result never reached disk gets a result that says it was interrupted and that its effect is unknown (outcome `cancelled`), never a success.
 
-A session killed before its first save has only the snapshot, and resuming it restores that. If the snapshot cannot be applied, the run continues from the saved copy and says why (a session with no saved copy fails with that reason instead). A snapshot whose session another running workspace has open is that workspace's live state and is left alone. A run without one of these flags restores nothing and offers nothing; a snapshot nobody resumes is removed by the retention sweep after `atRest.retentionMaxAgeDays` (30 days by default), with the other crash snapshots.
+A session another running copy has open (a workspace or the TUI, or another run) is refused before anything is sent: exit `1`, `stopReason` `session-open-elsewhere`, and a `refusal` field (`code` `SESSION_OPEN_ELSEWHERE`, `state`, `reason`, `next`); in text mode the refusal is printed on stderr. Close the session there and run again, or run without the flag. A run takes the session's lock before it loads it, so two runs started at once cannot both write it. A session killed before its first save has only the snapshot, and resuming it restores that. If the snapshot cannot be applied, the run continues from the saved copy and says why (a session with no saved copy fails with that reason instead). A snapshot whose session another running workspace has open is that workspace's live state and is left alone. A run without one of these flags restores nothing and offers nothing; a snapshot nobody resumes is removed by the retention sweep after `atRest.retentionMaxAgeDays` (30 days by default), with the other crash snapshots.
 
 The run says what it recovered: in text mode one `[Recovery]` line on stderr before the answer, in `stream-json` a `SESSION_RECOVERED` frame before the first model frame, and in both JSON formats the final frame's `recovery` field. Exit codes do not change.
 
@@ -66,7 +67,8 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | `kind` | no | On failures: `outcome-unknown` (the host may have acted) or `unavailable` (nothing was sent). |
 | `cause` | no | With `kind`: `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed` or `unknown`. |
 | `native` | no | The intake state: `status`, `message`, `request`, `result`, `execution`. |
-| `recovery` | no | Present when the run restored its session from a crash snapshot: `sessionId`, `applied`, `refusal` (when not applied), `snapshotAt`, `snapshotKept`, `messages`, `turns`, `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults`, `interruptedToolCalls` as `{ callId, tool }`), `lost`. |
+| `refusal` | no | Present when the run was refused before it started (`stopReason` `session-open-elsewhere`): `code`, `state`, `reason`, `next`. |
+| `recovery` | no | Present when the run restored its session from a crash snapshot: `sessionId`, `applied`, `refusal` (when not applied), `snapshotAt`, `snapshotKept`, `messages`, `turns`, `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults`, `interruptedToolCalls` as `{ callId, tool }`, `partialReply`), `lost`. |
 
 ### Stream frames
 

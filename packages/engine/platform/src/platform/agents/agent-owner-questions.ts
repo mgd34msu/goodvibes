@@ -14,8 +14,9 @@ import {
   OWNER_ANSWER_AGENT_METADATA,
   OWNER_ANSWER_SESSION_METADATA,
   OWNER_ASKER_HOST_METADATA,
+  OWNER_ASKER_SESSION_FILE_METADATA,
   answerAgentOf,
-  answerSessionOf,
+  isAskedBySession,
   type OwnerAnswerReader,
   type OwnerAskerPresence,
   type OwnerAskerPresenceProbe,
@@ -36,7 +37,7 @@ export interface QuestionAsker {
   readonly session?: string | undefined;
   /** Which process keeps the asker: `hosted` session or `daemon` agent. Absent: a terminal app. */
   readonly host?: 'hosted' | 'daemon' | undefined;
-  /** More facts about the asker kept on the question (a terminal session's saved file and liveness marker). */
+  /** More facts about the asker kept on the question (a terminal session's saved file, which is also its identity). */
   readonly metadata?: Readonly<Record<string, string>> | undefined;
   /** The watch of the asking session's conversation, when that conversation is in this process. */
   readonly sessionWatch?: SessionAnswerWatch | undefined;
@@ -47,7 +48,7 @@ export type AskingInbox = QuestionInbox & Partial<Pick<OwnerAnswerReader, 'claim
 
 function belongsTo(item: OwnerItem, asker: QuestionAsker): boolean {
   if (asker.agent !== undefined) return answerAgentOf(item) === asker.agent;
-  return asker.session !== undefined && answerSessionOf(item) === asker.session && answerAgentOf(item) === undefined;
+  return isAskedBySession(item, asker.session, asker.metadata?.[OWNER_ASKER_SESSION_FILE_METADATA]) && answerAgentOf(item) === undefined;
 }
 
 function askedByLabel(asker: QuestionAsker): string | undefined {

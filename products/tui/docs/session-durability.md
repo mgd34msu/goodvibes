@@ -34,6 +34,12 @@ session does not. An idle session writes nothing.
 
 ## Which session is open where
 
+A session is identified by its saved file, which names the app (`tui`, `agent`), the project it lives
+in and the session id: a TUI session and an Agent session saved under the same name, or two
+projects' sessions with one name, are different sessions. The owner inbox records that file on every
+question a session asks and delivers the answer only to that session; a question recorded before the
+file was kept is matched by its session id, as it always was.
+
 A terminal that has a session open holds that session's lock: an empty file under
 `~/.goodvibes/shared/owner-askers/`, locked with an operating-system lock that is released when the
 process ends, however it ends. It is taken when the session becomes the live one and moves when the
@@ -64,6 +70,9 @@ again on its own:
 
 - the prompt of that turn is kept and marked cancelled, as Esc marks a cancelled prompt;
 - the tool results the turn had already obtained are kept as they were;
+- a reply that was still arriving keeps its text, followed by a line saying it was cut off; every
+  snapshot records the moment it was taken (prompt accepted, a tool batch done, the minute timer,
+  exit) and whether a reply was still arriving, so a cut-off reply is never shown as a finished one;
 - a tool call the model had made whose result never reached disk gets a result that says it was
   interrupted and that its effect is unknown (outcome `cancelled`), never a success;
 - the next prompt you send continues from there.

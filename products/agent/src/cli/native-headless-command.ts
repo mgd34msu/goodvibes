@@ -12,7 +12,7 @@ import { createAgentNativeHostSelection } from '../runtime/agent-native-host-sel
 import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
-import { announceHeadlessRecovery } from '@goodvibes-jev/engine/terminal-shell/headless-command';
+import { announceHeadlessRecovery, refusedHeadlessRun } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes-jev/engine/terminal-shell/session-crash-recovery';
 
 /**
@@ -73,23 +73,32 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
             bus: ctx.runtimeBus,
             surface: ctx.services.surface,
             runtime: ctx.runtime,
+            conversation: ctx.conversation,
             snapshot: sessionSnapshot,
             title: () => ctx.conversation.title ?? '',
             writeSessionPointer: (sessionId) => ctx._writeLastSessionPointer(sessionId),
           });
           let sessionReady = false;
           return settleHeadlessTurn(async () => {
-            const recovered = await restoreHeadlessSession(cli.flags, {
-              surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
-              conversation: ctx.conversation, runtime: ctx.runtime,
-              // Called as a method: the provider API's selectModel reads `this`.
-              selectModel: (model: string) => {
-                const api = ctx.commandContext.clients?.providerApi;
-                if (!api) throw new Error('No provider API in this run; the saved model id stands.');
-                return api.selectModel(model);
-              },
-              canResume: () => !ctx.commandContext.isGenerating?.(),
-            }, signal);
+            // A session another running copy has open is refused, not written to.
+            let recovered: Awaited<ReturnType<typeof restoreHeadlessSession>>;
+            try {
+              recovered = await restoreHeadlessSession(cli.flags, {
+                surface: ctx.services.surface, sessionManager: ctx.services.sessionManager,
+                conversation: ctx.conversation, runtime: ctx.runtime,
+                // Called as a method: the provider API's selectModel reads `this`.
+                selectModel: (model: string) => {
+                  const api = ctx.commandContext.clients?.providerApi;
+                  if (!api) throw new Error('No provider API in this run; the saved model id stands.');
+                  return api.selectModel(model);
+                },
+                canResume: () => !ctx.commandContext.isGenerating?.(),
+              }, signal);
+            } catch (error) {
+              const refused = refusedHeadlessRun(error);
+              if (refused) return refused;
+              throw error;
+            }
             const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
             sessionReady = true;
             const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, limits);

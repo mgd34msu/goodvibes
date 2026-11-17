@@ -481,6 +481,11 @@ export class ConversationManager {
     }
   }
 
+  /** True while a reply is still arriving: the last assistant message is cut off until the stream ends. */
+  public hasPartialReply(): boolean {
+    return this.streamingMessageIndex >= 0;
+  }
+
   public startStreamingBlock(): void {
     this.messages.push({ role: 'assistant', content: '' });
     this.streamingMessageIndex = this.messages.length - 1;

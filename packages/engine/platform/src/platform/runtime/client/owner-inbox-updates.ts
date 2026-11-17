@@ -24,8 +24,10 @@ import type { OwnerAnswerDeliveryReport, OwnerAnswerOutcome, OwnerAnswerReader, 
 import {
   OWNER_ANSWER_AGENT_METADATA,
   OWNER_ANSWER_SESSION_METADATA,
+  OWNER_ASKER_SESSION_FILE_METADATA,
   answerAgentOf,
   answerSessionOf,
+  isAskedBySession,
   questionClosedText,
   readOwnerItem,
 } from '../../control-plane/owner-inbox.js';
@@ -126,7 +128,11 @@ export interface AnswerDeliveryOptions {
   readonly home: OwnerAnswerReader & Pick<OwnerInbox, 'settleSession'>;
   /** The watch of the live conversation's session; undefined until the app wired it. */
   readonly sessionWatch: () => SessionAnswerWatch | undefined;
-  /** Facts kept on a question about the session that asked it: its saved file and liveness marker. */
+  /**
+   * Facts kept on a question about the session that asked it: its saved file,
+   * which is also the session's identity (app, project store and id), so an
+   * answer goes to that session and never to a namesake in another app.
+   */
   readonly askerFacts?: ((sessionId: string) => Readonly<Record<string, string>>) | undefined;
   /** True while a daemon is reachable; its inbox may be another machine's (read over the wire only then). */
   readonly daemonReachable: () => boolean;
@@ -220,12 +226,19 @@ export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDel
   };
 
   const sessionId = (): string | undefined => options.sessionId?.() || undefined;
+  /** A session's identity: its saved file, as recorded on the questions it asks. */
+  const fileOf = (id: string | undefined): string | undefined => {
+    if (id === undefined) return undefined;
+    const file = options.askerFacts?.(id)[OWNER_ASKER_SESSION_FILE_METADATA];
+    return file !== undefined && file.length > 0 ? file : undefined;
+  };
 
   /** One session's questions on a daemon that may keep another store; empty when it keeps this one. */
   const remoteSessionQuestions = async (id: string): Promise<readonly OwnerItem[]> => {
     if (!options.daemonReachable() || daemonSharesStore === true) return [];
     const items = await options.daemon.list({ sessionId: id, kinds: ['question'], status: 'all', limit: SESSION_QUESTION_LIMIT });
-    return items.filter((item) => !learn(item.id));
+    const file = fileOf(id);
+    return items.filter((item) => !learn(item.id) && isAskedBySession(item, id, file));
   };
 
   return {
@@ -245,7 +258,7 @@ export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDel
         },
       } : item);
       const posted = outcome.item;
-      const own = outcome.created || (answerSessionOf(posted) === session && answerAgentOf(posted) === agentId);
+      const own = outcome.created || (isAskedBySession(posted, session, fileOf(session)) && answerAgentOf(posted) === agentId);
       if (posted.status !== 'open' || !own) return outcome;
       if (learn(posted.id)) {
         if (agentId !== undefined) watchAgentQuestion(agentId, posted.id);
@@ -263,14 +276,19 @@ export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDel
       if (item && item.status !== 'open') {
         // The model read the answer itself; it is taken, and it is not told a second time.
         forgetRemote(item.id);
-        const mine = answerSessionOf(item) !== undefined && answerSessionOf(item) === sessionId();
+        const session = sessionId();
+        const mine = isAskedBySession(item, session, fileOf(session));
         if (item.status === 'answered' && mine && held(item.id) && home.claim(item.id)) forgetOwnerQuestion(item.id);
       }
       return item;
     },
-    list(filter?: OwnerInboxListFilter) {
+    async list(filter?: OwnerInboxListFilter) {
       const session = filter?.sessionId ?? sessionId();
-      return inbox.list(session ? { ...filter, sessionId: session } : filter);
+      const items = await inbox.list(session ? { ...filter, sessionId: session } : filter);
+      if (!session) return items;
+      // The store filters by id; a namesake session in another app or project asked the ones whose saved file differs.
+      const file = fileOf(session);
+      return items.filter((item) => answerSessionOf(item) !== session || isAskedBySession(item, session, file));
     },
     async withdraw(id, reason): Promise<OwnerAnswerOutcome> {
       forgetRemote(id);
@@ -301,7 +319,7 @@ export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDel
     async deleteSession(id) {
       const why = `session ${id} was deleted`;
       try {
-        home.settleSession(id, why);
+        home.settleSession(id, why, fileOf(id));
       } catch (error) {
         logger.debug('[owner-inbox] settling the questions of a deleted session failed', { sessionId: id, error: summarizeError(error) });
       }

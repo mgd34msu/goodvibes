@@ -317,6 +317,7 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
       sessionId: ctx.runtime.sessionId,
       surface: ctx.services.surface,
       buildSessionContinuityHints,
+      moment: 'EXIT',
     });
   });
 

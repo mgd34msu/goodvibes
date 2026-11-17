@@ -5,6 +5,8 @@ import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/pla
 import type { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import type { AgentManager } from '@goodvibes-jev/engine/platform/platform/tools';
 import { redactDiagnosticText } from '@goodvibes-jev/engine/platform/platform/utils';
+import { RefusalError } from '@goodvibes-jev/engine/errors';
+import { SESSION_OPEN_ELSEWHERE } from '../startup-lifecycle.js';
 import { HEADLESS_SCHEMA_VERSION, createHeadlessPermissionInput, observeHeadlessTurn, type HeadlessTurnObserverOptions } from './headless-turn-events.js';
 import { dispatchNativeConversationTurn } from './native-conversation-ingress.js';
 import type { NativeConversationIntakeState } from './native-conversation-intake.js';
@@ -245,10 +247,30 @@ export function announceHeadlessRecovery(
       prompt: masked.length > MAX_RECOVERED_PROMPT_CHARS ? `${masked.slice(0, MAX_RECOVERED_PROMPT_CHARS)}...` : masked,
       toolResults: turn.toolResults,
       interruptedToolCalls: turn.interruptedToolCalls,
+      partialReply: turn.partialReply,
     } } : {}),
     lost: report.lost,
   };
   if (format === 'stream-json') write.stdout(JSON.stringify({ schemaVersion: HEADLESS_SCHEMA_VERSION, type: 'SESSION_RECOVERED', ...recovery }));
   else if (format !== 'json') write.stderr(describeCrashRecovery(report));
   return recovery;
+}
+
+/**
+ * The result of a run refused before it started because the session it was
+ * told to resume is open in another running copy: exit `1` (a refusal, like
+ * the host refusing the input), `stopReason` `session-open-elsewhere`, and the
+ * refusal (state, reason, next steps) in the JSON frames. Undefined for any
+ * other error, which stays the run's error.
+ */
+export function refusedHeadlessRun(error: unknown): NativeHeadlessTurnResult | undefined {
+  if (!(error instanceof RefusalError) || error.refusal.code !== SESSION_OPEN_ELSEWHERE) return undefined;
+  const { code, state, reason, next } = error.refusal;
+  return {
+    exitCode: 1,
+    response: '',
+    error: `Refused: ${state}. ${reason} Next: ${next.join('; or ')}.`,
+    stopReason: 'session-open-elsewhere',
+    refusal: { code, state, reason, next },
+  };
 }

@@ -1,6 +1,13 @@
 /**
  * Whether a saved session is open in a running process right now.
  *
+ * A session is identified by its saved file (`sessionIdentityFile`): the file
+ * names the app (`tui`, `agent`), the project store it lives in and the
+ * session id, so a TUI session and an Agent session saved under the same name,
+ * or two projects' sessions with one name, are different sessions. The owner
+ * inbox records the same file on every question a terminal session asks, and
+ * matches answers and locks by it (owner-asker-liveness.ts `sessionAskerKey`).
+ *
  * The fact is a lock the kernel releases (utils/process-lock.ts), and it is the
  * same lock the owner inbox reads to say whether the session that left the
  * owner a question is running (control-plane/owner-asker-liveness.ts): an open
@@ -19,23 +26,36 @@
  */
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { askerLivenessPath, holdAskerRunning, settleAskerLock } from '../control-plane/owner-asker-liveness.js';
+import { askerLivenessPath, claimAskerRunning, holdAskerRunning, sessionAskerKey, settleAskerLock } from '../control-plane/owner-asker-liveness.js';
+import { resolveSessionStorePath } from './session-persistence-scope.js';
 import { ownerInboxStorePath } from '../control-plane/question-store.js';
 import { ProcessLockBusyError, withProcessLockSync } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
 import type { SessionSurface } from './session-surface.js';
 
+/** The parts of a surface that locate a session's identity and its lock. */
+export type SessionIdentitySurface = Pick<SessionSurface, 'homeDirectory' | 'sessionsDir'>;
+
+/**
+ * The one identity of session `sessionId` of this surface: the path of its
+ * saved file (whether or not it exists yet). The owner inbox records it on the
+ * questions the session asks; the session lock is keyed by it.
+ */
+export function sessionIdentityFile(surface: Pick<SessionSurface, 'sessionsDir'>, sessionId: string): string {
+  return resolveSessionStorePath(surface.sessionsDir, sessionId);
+}
+
 /** The lock file a process holds while `sessionId` is open in it. */
-export function sessionOpenLockPath(surface: Pick<SessionSurface, 'homeDirectory'>, sessionId: string): string {
+export function sessionOpenLockPath(surface: SessionIdentitySurface, sessionId: string): string {
   const store = ownerInboxStorePath({ resolveUserPath: (...segments) => join(surface.homeDirectory, '.goodvibes', ...segments) });
-  return askerLivenessPath(store, 'session', sessionId);
+  return askerLivenessPath(store, 'session', sessionAskerKey({ session: sessionId, sessionFile: sessionIdentityFile(surface, sessionId) }));
 }
 
 /**
  * True while a process other than this one has `sessionId` open. A session
  * this process holds is not "elsewhere". Never creates the file, never waits.
  */
-export function isSessionOpenElsewhere(surface: Pick<SessionSurface, 'homeDirectory'>, sessionId: string): boolean {
+export function isSessionOpenElsewhere(surface: SessionIdentitySurface, sessionId: string): boolean {
   if (!sessionId.trim()) return false;
   const path = sessionOpenLockPath(surface, sessionId);
   if (!existsSync(path)) return false;
@@ -53,7 +73,7 @@ export function isSessionOpenElsewhere(surface: Pick<SessionSurface, 'homeDirect
 const openHere = new Map<string, () => void>();
 
 /** Mark `sessionId` open in this process until {@link closeSessionHere}. Holding it twice is one hold. */
-export function openSessionHere(surface: Pick<SessionSurface, 'homeDirectory'>, sessionId: string): void {
+export function openSessionHere(surface: SessionIdentitySurface, sessionId: string): void {
   if (!sessionId.trim()) return;
   const path = sessionOpenLockPath(surface, sessionId);
   if (openHere.has(path)) return;
@@ -65,7 +85,7 @@ export function openSessionHere(surface: Pick<SessionSurface, 'homeDirectory'>, 
 }
 
 /** Give up this process's hold on `sessionId`; the file goes with it unless something else here still holds it. */
-export function closeSessionHere(surface: Pick<SessionSurface, 'homeDirectory'>, sessionId: string): void {
+export function closeSessionHere(surface: SessionIdentitySurface, sessionId: string): void {
   if (!sessionId.trim()) return;
   const path = sessionOpenLockPath(surface, sessionId);
   const release = openHere.get(path);
@@ -74,8 +94,25 @@ export function closeSessionHere(surface: Pick<SessionSurface, 'homeDirectory'>,
   release();
 }
 
+/**
+ * Hold `sessionId` open here only if no other process has it open: true once
+ * this process holds it, false when another process does. Waits at most a
+ * second (for another process's one-shot read); call
+ * {@link isSessionOpenElsewhere} first to refuse without waiting.
+ */
+export async function claimSessionHere(surface: SessionIdentitySurface, sessionId: string): Promise<boolean> {
+  if (!sessionId.trim()) return false;
+  const path = sessionOpenLockPath(surface, sessionId);
+  if (openHere.has(path)) return true;
+  const release = await claimAskerRunning(path);
+  if (!release) return false;
+  if (openHere.has(path)) release();
+  else openHere.set(path, release);
+  return true;
+}
+
 /** The live session of this process changed from `from` to `to`: `to` is held before `from` is let go. */
-export function moveSessionHere(surface: Pick<SessionSurface, 'homeDirectory'>, from: string, to: string): void {
+export function moveSessionHere(surface: SessionIdentitySurface, from: string, to: string): void {
   if (from === to) return;
   openSessionHere(surface, to);
   closeSessionHere(surface, from);
@@ -94,7 +131,7 @@ export interface SessionLockSweepResult {
  * anywhere, this process included, is never touched. An unheld file says
  * nothing a missing one does not, so removing it changes no answer.
  */
-export function sweepClosedSessionLocks(surface: Pick<SessionSurface, 'homeDirectory'>): SessionLockSweepResult {
+export function sweepClosedSessionLocks(surface: SessionIdentitySurface): SessionLockSweepResult {
   const dir = dirname(sessionOpenLockPath(surface, 'probe'));
   let names: string[];
   try {

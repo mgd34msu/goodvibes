@@ -37,6 +37,8 @@ import type { ApprovalActionOutcome } from './approval-broker-owner.js';
 import {
   OWNER_ANSWER_AGENT_METADATA,
   OWNER_ANSWER_SESSION_METADATA,
+  OWNER_ASKER_SESSION_FILE_METADATA,
+  sessionFileMatches,
   sharedQuestionStore,
   type QuestionAskerScope,
   type QuestionStore,
@@ -46,9 +48,9 @@ import {
 } from './question-store.js';
 import type { RevisionSource } from '../utils/revision.js';
 import { logger } from '../utils/logger.js';
-import { askerLivenessPath, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
+import { askerLivenessPath, sessionAskerKey, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
 
-export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA };
+export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA, OWNER_ASKER_SESSION_FILE_METADATA };
 
 export type OwnerItemKind = 'approval' | 'question' | 'claim' | 'purchase' | 'queued-action';
 export type OwnerItemStatus = 'open' | 'answered' | 'withdrawn' | 'expired';
@@ -134,8 +136,6 @@ export interface OwnerAnswerDelivery {
  * turn). Absent: a terminal app's session (TUI, Agent, headless).
  */
 export const OWNER_ASKER_HOST_METADATA = 'askerHost';
-/** Metadata key holding the asking terminal session's saved file: present = it can be opened again. */
-export const OWNER_ASKER_SESSION_FILE_METADATA = 'askerSessionFile';
 
 /** Who asked a question and where the facts about it are kept, read from the item. */
 export interface OwnerAsker {
@@ -179,6 +179,16 @@ function metadataText(item: Pick<OwnerItem, 'metadata'>, key: string): string | 
 /** The session an item's answer goes back to, when a session asked it. */
 export function answerSessionOf(item: Pick<OwnerItem, 'metadata'>): string | undefined {
   return metadataText(item, OWNER_ANSWER_SESSION_METADATA);
+}
+
+/**
+ * Whether session `sessionId`, whose saved file is `sessionFile` (its identity;
+ * undefined for a session that has none), asked `item`. A namesake in another
+ * app or project is another session.
+ */
+export function isAskedBySession(item: Pick<OwnerItem, 'metadata'>, sessionId: string | undefined, sessionFile: string | undefined): boolean {
+  if (sessionId === undefined || answerSessionOf(item) !== sessionId) return false;
+  return sessionFileMatches(metadataText(item, OWNER_ASKER_SESSION_FILE_METADATA), sessionFile);
 }
 
 /** The agent that asked an item, when one did. */
@@ -599,8 +609,9 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       running = settleAskerLock(this.askerLivenessPath('agent', agent), () => !this.#hasOpenQuestion({ agent })) || running;
     }
     if (asker.session !== undefined) {
-      const session = asker.session;
-      running = settleAskerLock(this.askerLivenessPath('session', session), () => !this.#hasOpenQuestion({ session })) || running;
+      const scope = { session: asker.session, sessionFile: asker.sessionFile };
+      const key = sessionAskerKey({ session: asker.session, sessionFile: asker.sessionFile });
+      running = settleAskerLock(this.askerLivenessPath('session', key), () => !this.#hasOpenQuestion(scope)) || running;
     }
     return running;
   }
@@ -764,14 +775,17 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
    * A session will never be opened again: it was deleted, or it is a hosted
    * session that ended. Its open questions are withdrawn and its waiting
    * answers marked not deliverable, saying why, so every list shows it.
+   * `sessionFile` is a terminal session's identity (its saved file); a
+   * namesake's questions in another app or project are left alone.
    */
-  settleSession(sessionId: string, why: string): void {
+  settleSession(sessionId: string, why: string, sessionFile?: string): void {
     const now = this.#now();
     const changed = this.#questions.settleSession(
       sessionId,
       `${why}, so the question will not be answered there`,
       `${why} before the answer reached it. The answer is kept on the question.`,
       now,
+      sessionFile,
     );
     for (const id of changed) {
       const entry = this.#questions.get(id);

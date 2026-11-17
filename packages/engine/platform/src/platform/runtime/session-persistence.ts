@@ -17,6 +17,8 @@ import type { SessionMeta } from '../sessions/manager.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import {
+  type CrashSnapshotTurn,
+  type CrashSnapshotTurnMoment,
   resolveLastSessionPointerPath,
   resolveSessionManager,
   resolveSessionsDirPath,
@@ -34,6 +36,8 @@ export {
   getRecoveryDir,
   getRecoveryFilePath,
   getUserSessionsDir,
+  type CrashSnapshotTurn,
+  type CrashSnapshotTurnMoment,
   type SessionPersistenceLegacyOptions,
   type SessionPersistenceOptions,
   type SessionPersistencePaths,
@@ -57,17 +61,29 @@ export type CrashSnapshotMoment = 'TURN_SUBMITTED' | 'TOOLS_DONE';
  */
 export function writeCrashSnapshotAtTurnMoments(input: {
   readonly subscribe: (moment: CrashSnapshotMoment, handler: () => void) => () => void;
-  readonly write: () => void;
+  /** Writes the snapshot; `moment` goes into it (see {@link crashSnapshotTurn}). */
+  readonly write: (moment: CrashSnapshotMoment) => void;
 }): () => void {
-  const writeNow = (): void => {
+  const writeAt = (moment: CrashSnapshotMoment) => (): void => {
     try {
-      input.write();
+      input.write(moment);
     } catch (error) {
       logger.warn('[Recovery] Crash snapshot write failed; the next turn moment writes it again', { error: summarizeError(error) });
     }
   };
-  const unsubs = [input.subscribe('TURN_SUBMITTED', writeNow), input.subscribe('TOOLS_DONE', writeNow)];
+  const unsubs = [input.subscribe('TURN_SUBMITTED', writeAt('TURN_SUBMITTED')), input.subscribe('TOOLS_DONE', writeAt('TOOLS_DONE'))];
   return () => { for (const unsubscribe of unsubs) unsubscribe(); };
+}
+
+/**
+ * What a crash snapshot taken at `moment` records about its turn: a turn
+ * moment is inside a running turn; a reply still arriving (the conversation's
+ * streaming message) is a running turn at any moment, and its text is marked
+ * cut off, so a restore never presents it as a finished reply. One method call.
+ */
+export function crashSnapshotTurn(moment: CrashSnapshotTurnMoment, conversation: { hasPartialReply(): boolean }): CrashSnapshotTurn {
+  const partialReply = conversation.hasPartialReply();
+  return { moment, inFlight: partialReply || moment === 'TURN_SUBMITTED' || moment === 'TOOLS_DONE', partialReply };
 }
 
 // The crash-recovery API, re-exported so `session-persistence.js` remains the

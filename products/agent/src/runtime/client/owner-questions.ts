@@ -26,6 +26,7 @@ import { OWNER_ASKER_SESSION_FILE_METADATA } from '@goodvibes-jev/engine/platfor
 import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes-jev/engine/platform/platform/agents';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
+import { sessionIdentityFile, type SessionSurface } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { OperatorMethodId, OperatorMethodInput } from '@goodvibes-jev/engine/platform/contracts';
 import { whenSessionOpens } from '@goodvibes-jev/engine/terminal-shell/session-resume';
 import { createConnectedHost, type ConnectedHost } from '../../agent/connected-host-client.ts';
@@ -41,7 +42,9 @@ type UserPaths = { resolveUserPath(...segments: string[]): string };
 /** What the question inbox needs from the runtime. */
 export interface OwnerQuestionServices {
   readonly shellPaths: UserPaths;
-  readonly sessionManager: Pick<SessionManager, 'filePathFor' | 'onDeleted'>;
+  readonly sessionManager: Pick<SessionManager, 'onDeleted'>;
+  /** Where this app keeps its sessions: a session's identity is its saved file there. */
+  readonly surface: Pick<SessionSurface, 'sessionsDir'>;
 }
 
 function connectedHost(options: ConnectedHostInboxOptions): ConnectedHost {
@@ -92,8 +95,8 @@ export function agentOwnerQuestions(services: OwnerQuestionServices, options: Co
     {
       home,
       sessionWatch: () => sessionWatches.get(services),
-      // What any process reads to tell a closed session (its saved file is there) from a deleted one.
-      askerFacts: (id) => ({ [OWNER_ASKER_SESSION_FILE_METADATA]: services.sessionManager.filePathFor(id) }),
+      // The session's identity (app, project store and id), and what any process reads to tell a closed session from a deleted one.
+      askerFacts: (id) => ({ [OWNER_ASKER_SESSION_FILE_METADATA]: sessionIdentityFile(services.surface, id) }),
       daemonReachable,
       daemon,
       // Only for a question a host on another machine holds: its update stream while one is open.
@@ -124,7 +127,7 @@ export function wireOwnerQuestionSessions(
 ): () => void {
   // This process's sessions and agents read their answers from the home store (opened on first use).
   homeOwnerInbox(services.shellPaths);
-  const watch = watchSessionAnswers(conversation, sessionId);
+  const watch = watchSessionAnswers(conversation, sessionId, (id) => sessionIdentityFile(services.surface, id));
   sessionWatches.set(services, watch);
   // A new or forked session takes the conversation's place: the mark that the old one is running goes at once.
   const stopFollowing = onSessionConversationChange(() => watch.refresh());

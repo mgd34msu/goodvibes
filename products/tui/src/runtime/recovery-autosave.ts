@@ -1,4 +1,4 @@
-import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { buildPersistedSessionContextFromFacts, crashSnapshotTurn, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 /**
  * recovery-autosave.ts, the minute timer behind crash recovery, extracted out
  * of main.ts to keep it under the architecture line-count gate.
@@ -55,6 +55,8 @@ export function writeCrashSnapshotIfChanged(input: {
   readonly sessionId: string;
   readonly surface: SessionSurface;
   readonly buildSessionContinuityHints: () => Parameters<typeof buildPersistedSessionContextFromFacts>[2];
+  /** When it is written; recorded in the snapshot so a restore knows a turn was still running. Default: the minute timer. */
+  readonly moment?: CrashSnapshotTurnMoment | undefined;
 }): boolean {
   const { conversation, sessionId, surface } = input;
   if (!conversationChangedSinceDurable(conversation, sessionId)) return false;
@@ -64,7 +66,8 @@ export function writeCrashSnapshotIfChanged(input: {
     conversation.getTitleSource(),
     input.buildSessionContinuityHints(),
   );
-  const written = writeRecoveryFile({ ...snapshot, ...persisted }, sessionId, conversation.title ?? '', { surface });
+  const turn = crashSnapshotTurn(input.moment ?? 'TIMER', conversation);
+  const written = writeRecoveryFile({ ...snapshot, ...persisted, turn }, sessionId, conversation.title ?? '', { surface });
   // A failed write is not recorded, so the next moment, tick or exit tries
   // again; an empty conversation has nothing to keep.
   if (written) markConversationDurable(conversation, sessionId, 'snapshot');

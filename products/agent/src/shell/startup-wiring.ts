@@ -10,7 +10,7 @@ import {
   writeRecoveryFile,
 } from '@/runtime/index.ts';
 import type { RecoveryFileInfo, SessionSnapshot, SessionSurface } from '@/runtime/index.ts';
-import { closeSessionHere, openSessionHere, writeCrashSnapshotAtTurnMoments } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
+import { closeSessionHere, crashSnapshotTurn, openSessionHere, writeCrashSnapshotAtTurnMoments, type CrashSnapshotTurnMoment } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { moveLiveSessionArtifacts } from '../core/session-resume-core.ts';
 import {
   readOnboardingCheckMarker,
@@ -28,7 +28,8 @@ import type { DaemonCliRunner } from '../runtime/daemon-cli-service.ts';
 export interface SessionPersistenceAndRecoveryDeps {
   readonly buildCurrentSessionSnapshot: () => SessionSnapshot;
   readonly runtime: { readonly sessionId: string; readonly model: string; readonly provider: string };
-  readonly conversation: { readonly title?: string | null };
+  /** `hasPartialReply` says whether a reply is still arriving, recorded in the crash snapshot. */
+  readonly conversation: { readonly title?: string | null; hasPartialReply(): boolean };
   readonly workingDir: string;
   readonly homeDirectory: string;
   /** Declare-once session-storage handle (platform/runtime/session-surface.ts); threaded through every persistConversation/checkRecoveryFile/writeRecoveryFile call below instead of loose workingDirectory/homeDirectory options. */
@@ -176,9 +177,9 @@ export function wireSessionPersistenceAndRecovery(
   // batch (shared rule, runtime/session-persistence.ts), so a crash mid-turn
   // keeps the turn's work; the session save below is the copy after that and
   // deletes it, so a snapshot on disk always holds something the store does not.
-  const writeCrashSnapshot = (): void => {
+  const writeCrashSnapshot = (moment: CrashSnapshotTurnMoment = 'TURN_COMPLETED'): void => {
     followLiveSession();
-    writeRecoveryFile(buildCurrentSessionSnapshot(), runtime.sessionId, conversation.title ?? '', { surface });
+    writeRecoveryFile({ ...buildCurrentSessionSnapshot(), turn: crashSnapshotTurn(moment, conversation) }, runtime.sessionId, conversation.title ?? '', { surface });
   };
   const hostedTurn = (event: { readonly turnId?: string } | undefined): boolean =>
     event?.turnId !== undefined && deps.isHostedTurn?.(event.turnId) === true;

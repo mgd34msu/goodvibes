@@ -106,8 +106,8 @@ The full write-up, with upgrade notes and measured speed figures, is in
 - Stop rewriting the whole session store on every heartbeat and message, and
   the whole mail record file on every inbound email.
 - Rewrite the test suites to 151 files (142 in the default suite with 475
-  cases), each opening with the risk it proves; CI runs
-  `bun run validate --job <job>` in 12 jobs.
+  cases), each opening with the risk it proves; CI runs 12 jobs, seven of
+  them `bun run validate --job <job>`.
 
 ### Security
 

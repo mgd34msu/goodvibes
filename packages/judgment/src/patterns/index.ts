@@ -18,6 +18,7 @@ export {
   normalizeForMatch,
   type Fidelity,
   type FidelityChecker,
+  type FidelityClaim,
   type FidelityResult,
   type FidelitySpec,
 } from './fidelity.ts';

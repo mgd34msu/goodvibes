@@ -3,14 +3,13 @@ import { captureNativeSelectedDiffContext, nativeSelectedDiffContextSchema, nati
 import { array, enum as enumSchema, literal, strictObject, string, type z } from 'zod/v4';
 import { randomUUID } from 'node:crypto';
 
-/**
- * Deliberately unbounded. The transcript is acceptance evidence for the work:
- * a cap would either refuse a long conversation outright or drop the messages
- * the judgment must see, and either loses the user's work or its requirements.
- * Consumers must not present these as limits.
+/*
+ * A transcript has no size cap: it is acceptance evidence for the work, and a
+ * cap would refuse a long conversation or drop messages the decision must see.
+ * The intake record names it by session and revision (the store keeps the
+ * messages once per capture), and only the route reading and the admission
+ * decision are sent it.
  */
-export const NATIVE_CONVERSATION_CONTINUATION_MAX_MESSAGES = Infinity;
-export const NATIVE_CONVERSATION_CONTINUATION_MAX_BYTES = Infinity;
 const id = string().min(1).max(200);
 // Spell out the fixed-width segments so generated structural contracts remain
 // compatible with the synchronous client's conservative nested-repeat veto.

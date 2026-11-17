@@ -180,7 +180,11 @@ export function createOperatorNativeConversationIntakeClient(client: Pick<Operat
           });
           const current = await Promise.race([invokeOperator<unknown>('workLedger.intake.get', { inputId: source.sourceRef.inputId }, { signal: controller.signal }), timeout]);
           const parsed = nativeConversationIntakeResultSchema.safeParse(current);
-          if (!parsed.success || parsed.data.kind !== 'turn' || JSON.stringify(parsed.data) !== JSON.stringify(source)) {
+          // The source reference names the input by its revision, which commits the text and the
+          // captured transcript, so the turn is the same one without comparing the transcript itself.
+          if (!parsed.success || parsed.data.kind !== 'turn' || parsed.data.route !== source.route
+            || parsed.data.projectId !== source.projectId || parsed.data.requestId !== source.requestId
+            || JSON.stringify(parsed.data.sourceRef) !== JSON.stringify(source.sourceRef)) {
             throw new NativeConversationIntakeClientError('invalid_turn_permit');
           }
         } finally { if (timer !== undefined) clearTimeout(timer); }

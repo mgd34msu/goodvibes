@@ -1,5 +1,5 @@
 import { checkEachFixture, decisionHeader, fixtureCheck, type NamedDecision } from '../batteries/decision.ts';
-import { choice, type JudgmentPort, type JudgmentResult, type Questions } from '../port/types.ts';
+import { choice, type ChoiceResponse, type JudgmentPort, type JudgmentResult, type Questions } from '../port/types.ts';
 import { assertChoiceBand, type ChoiceBand, type Outcome } from '../readings/bands.ts';
 import { readChoice, type ChoiceReading } from '../readings/readings.ts';
 import { askAs, recordAction, recordReadings, type CallOptions, type PatternHeader } from '../batteries/asking.ts';
@@ -47,8 +47,19 @@ export interface FidelityResult {
   recordAction(action: string): void;
 }
 
+export interface FidelityClaim {
+  readonly claim: string;
+  readonly quote?: string;
+}
+
 export interface FidelityChecker extends NamedDecision {
   check(port: JudgmentPort, claim: string, source: string, quote?: string, options?: CallOptions): Promise<FidelityResult>;
+  /**
+   * Several claims against one source in a single reading: the source is sent
+   * once and every claim gets its own question. Results are in claim order; a
+   * claim whose quote is missing is settled as fabricated without asking.
+   */
+  checkAll(port: JudgmentPort, claims: readonly FidelityClaim[], source: string, options?: CallOptions): Promise<readonly FidelityResult[]>;
 }
 
 /** Whitespace collapsed and curly quotes folded, so a quote matches across line wraps. */
@@ -85,6 +96,35 @@ export function defineFidelityChecker(spec: FidelitySpec): FidelityChecker {
         usage: result.usage,
         recordAction: (action) => recordAction(port, result.decisionId, action),
       };
+    },
+    async checkAll(port, claims, source, options = {}) {
+      const normalizedSource = normalizeForMatch(source);
+      const fabricated = claims.map((item) => {
+        const needle = item.quote === undefined ? undefined : normalizeForMatch(item.quote);
+        return needle !== undefined && (needle === '' || !normalizedSource.includes(needle));
+      });
+      const asked = claims.flatMap((item, index) => (fabricated[index] ? [] : [{ index, claim: item.claim }]));
+      const settled = (): FidelityResult => ({ fidelity: 'fabricated', reading: undefined, outcome: 'act', decisionId: undefined, usage: undefined, recordAction: () => {} });
+      if (asked.length === 0) return claims.map(settled);
+      const questions: Questions = Object.fromEntries(asked.map((_item, position) =>
+        [`relation_${position}`, choice(`How does \`source\` relate to \`claims[${position}]\`?`, RELATIONS)]));
+      const result = await askAs(port, spec, 'fidelity', { claims: asked.map((item) => item.claim), source }, questions, options);
+      const readings = asked.map((_item, position) =>
+        readChoice(result.answers[`relation_${position}`] as ChoiceResponse, spec.band as ChoiceBand) as ChoiceReading<Relation>);
+      recordReadings(port, result, { relations: readings.map((reading) => ({ fidelity: TO_FIDELITY[reading.choice], relation: reading })) });
+      const byIndex = new Map(asked.map((item, position) => [item.index, readings[position]!] as const));
+      return claims.map((_item, index): FidelityResult => {
+        const reading = byIndex.get(index);
+        if (!reading) return settled();
+        return {
+          fidelity: TO_FIDELITY[reading.choice],
+          reading,
+          outcome: reading.outcome,
+          decisionId: result.decisionId,
+          usage: result.usage,
+          recordAction: (action) => recordAction(port, result.decisionId, action),
+        };
+      });
     },
     checkFixtures: (port, options = {}) =>
       checkEachFixture(spec.fixtures, options, async (fixture, run) => {

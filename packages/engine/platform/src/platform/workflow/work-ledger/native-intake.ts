@@ -294,7 +294,7 @@ export function createNativeConversationIntakeHost(deps: {
             const attemptNumber = record.proposalsSpent + 1;
             let proposed: unknown;
             try { proposed = await deps.proposer.propose({ text: record.text, sourceRevision: record.sourceRevision,
-              attempt: attemptNumber, previous, ...(record.continuation ? { continuation: record.continuation } : {}), signal, assertCurrent }); }
+              attempt: attemptNumber, previous, signal, assertCurrent }); }
             catch (error) {
               if (!(error instanceof NativeRequirementProposalUnreadable)) throw error;
               assertCurrent();

@@ -87,6 +87,10 @@ interface RecordedRead { readonly id: string; readonly stateHash: string; readon
 interface RouteOwnership { readonly text: string; readonly sourceRevision: string; readonly sourceIssues: string; readonly continuation: string; readonly binding: JevDecisionBinding; readonly records: readonly RecordedRead[]; readonly assertCurrent: () => void; }
 const applyRouteOwner = Reflect.apply, getRouteOwner = WeakMap.prototype.get, setRouteOwner = WeakMap.prototype.set;
 const routeOwners = new WeakMap<NativeIntakeRouteEvidence, RouteOwnership>();
+/** A captured transcript is named by its session and revision; the capture's source revision commits its content. */
+function continuationRef(continuation: NativeConversationContinuation | undefined): string {
+  return continuation ? JSON.stringify({ version: continuation.version ?? 1, sessionId: continuation.sessionId, revision: continuation.revision }) : 'null';
+}
 function assertRecorded(log: Pick<DecisionLog, 'get'>, record: Omit<RecordedRead, 'stateHash'> & { readonly stateHash: string | (() => string) }): string {
   const entry = log.get(record.id);
   // The independently recorded entry must first be a possible consumer of the
@@ -108,8 +112,14 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
   const { port: basePort, decisionLog, assertCurrent, signal: ownerSignal, onRetry } = input;
   if (typeof text !== 'string' || text.trim().length === 0 || typeof sourceRevision !== 'string' || !sourceRevision) return invalidProposal();
   const continuation = input.continuation ? captureNativeConversationContinuation(input.continuation) : undefined;
-  const conversationContext = snapshotJudgmentInput(continuation?.messages ?? null) as EntryType;
-  const selectedDiffContext = continuation?.selectedDiff ? nativeSelectedDiffEvidence(continuation.selectedDiff) as EntryType : undefined;
+  // The transcript goes to the route reading only: the final decision carries it
+  // once in its own state, and the requirement and coverage readings judge the
+  // input text alone. It is screened on the way to the one reading that sends it.
+  let transcript: Record<string, EntryType> | undefined;
+  const transcriptSource = (): Record<string, EntryType> => transcript ??= {
+    conversationContext: snapshotJudgmentInput(continuation?.messages ?? null) as EntryType,
+    ...(continuation?.selectedDiff ? { selectedDiffContext: nativeSelectedDiffEvidence(continuation.selectedDiff) as EntryType } : {}),
+  };
   const sourceIssues = snapshotJudgmentInput(input.sourceIssues ?? null) as EntryType;
   snapshotJudgmentInput({ text });
   const metadata = captureJevDecisionContext({ decisionId: 'native-intake', binding: input.binding, judgmentDecisionIds: [], evidence: [], continuations: [], resumeConditions: [] });
@@ -130,7 +140,8 @@ function readSession(input: NativeIntakeReadInput, records: RecordedRead[] = [],
     const signal = ownerSignal === undefined ? request.signal : request.signal === undefined ? ownerSignal : AbortSignal.any([ownerSignal, request.signal]);
     // decideAutonomous is the screen for the final decision's state; every other request is screened here.
     const checked = request.context?.site === finalSite ? request.state : snapshotJudgmentInput(request.state);
-    const state = captureStrictJudgmentJson({ input: checked, originalSource: { text, sourceRevision, sourceIssues, ...(continuation ? { conversationContext, ...(selectedDiffContext ? { selectedDiffContext } : {}) } : {}) }, binding: metadata.binding } as unknown as EntryType, () => new JudgmentError('invalid-request', 'Native intake requires plain original request data'));
+    const withTranscript = continuation !== undefined && request.context?.site === NATIVE_INTAKE_ROUTE_SITE;
+    const state = captureStrictJudgmentJson({ input: checked, originalSource: { text, sourceRevision, sourceIssues, ...(withTranscript ? transcriptSource() : {}) }, binding: metadata.binding } as unknown as EntryType, () => new JudgmentError('invalid-request', 'Native intake requires plain original request data'));
     // This compares the exact actual wire request to DecisionLog.stateHash;
     // a borrowed port cannot merely supply somebody else's recorded id.
     const expected = { context: canonicalJson(request.context as unknown as EntryType), questions: canonicalJson(request.questions as unknown as EntryType) };
@@ -185,7 +196,7 @@ export async function readNativeIntakeRoute(input: NativeIntakeReadInput): Promi
     { yes: STAKES_BANDS.medium.confidence, no: STAKES_BANDS.high.confidence }));
   const settled = result.route === 'contract' ? reading.outcome === 'act' : ordinaryTurnReading.verdict === 'yes' && ordinaryTurnReading.outcome === 'act';
   const evidence = Object.freeze({ route: result.route, settled, reading, ordinaryTurnReading, decisionId: result.decisionId });
-  applyRouteOwner(setRouteOwner, routeOwners, [evidence, { text: session.text, sourceRevision: session.sourceRevision, sourceIssues: canonicalJson(session.sourceIssues), continuation: JSON.stringify(session.continuation ?? null), binding: session.binding, records: Object.freeze([...session.records]), assertCurrent: session.active }]);
+  applyRouteOwner(setRouteOwner, routeOwners, [evidence, { text: session.text, sourceRevision: session.sourceRevision, sourceIssues: canonicalJson(session.sourceIssues), continuation: continuationRef(session.continuation), binding: session.binding, records: Object.freeze([...session.records]), assertCurrent: session.active }]);
   return evidence;
 }
 
@@ -268,7 +279,7 @@ export async function decideNativeIntake(request: NativeIntakeDecisionInput): Pr
   const owned = applyRouteOwner(getRouteOwner, routeOwners, [input.routeEvidence]) as RouteOwnership | undefined;
   if (!owned || owned.text !== input.text || owned.sourceRevision !== input.sourceRevision
     || owned.sourceIssues !== canonicalJson(input.sourceIssues as EntryType ?? null)
-    || owned.continuation !== JSON.stringify(input.continuation ?? null)
+    || owned.continuation !== continuationRef(input.continuation)
     || Object.keys(owned.binding).some(key => key !== 'actionRevision' && owned.binding[key as keyof JevDecisionBinding] !== input.binding[key as keyof JevDecisionBinding])) {
     throw new JudgmentError('invalid-request', 'Native intake route evidence is not bound to this request');
   }
@@ -282,13 +293,16 @@ export async function decideNativeIntake(request: NativeIntakeDecisionInput): Pr
   const traces: NativeRequirementFidelity[] = [];
   let coverage: NativeCoverageResult | undefined;
   if (route === 'work' && requirements && requirements.criteria.length > 0) {
-    for (const [criterionIndex, criterion] of requirements.criteria.entries()) {
-      const result = await criterionTrace.check(session.port, traceClaim(criterion), input.text, criterion, { site: NATIVE_INTAKE_TRACE_SITE });
-      session.active();
+    // Every criterion is traced in one reading, alongside the coverage reading.
+    const [results, read] = await Promise.all([
+      criterionTrace.checkAll(session.port, requirements.criteria.map(criterion => ({ claim: traceClaim(criterion), quote: criterion })), input.text, { site: NATIVE_INTAKE_TRACE_SITE }),
+      nativeIntakeCoverage.read(session.port, { text: input.text, requirements }, { site: NATIVE_INTAKE_COVERAGE_SITE }),
+    ]);
+    session.active();
+    for (const [criterionIndex, result] of results.entries()) {
       traces.push(Object.freeze({ criterionIndex, fidelity: result.fidelity, outcome: result.outcome, decisionId: result.decisionId }));
     }
-    coverage = await nativeIntakeCoverage.read(session.port, { text: input.text, requirements }, { site: NATIVE_INTAKE_COVERAGE_SITE });
-    session.active();
+    coverage = read;
   }
   const requirementsSettled = route === 'turn' || (route === 'work' && requirements !== undefined && requirements.criteria.length > 0
     && traces.every(trace => trace.fidelity === 'supported' && trace.outcome === 'act') && coverage?.settled === true);

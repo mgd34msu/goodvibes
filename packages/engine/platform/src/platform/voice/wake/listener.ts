@@ -900,12 +900,6 @@ export class WakeListener {
     this.#clearFrameGapWatchdog();
     const captureError = error ?? new AudioCaptureError('stream-ended', 'the capture stream ended');
     this.#lastError = captureError.message;
-    if (captureError.reason === 'failure-reading-unavailable') {
-      this.#waitingForDevice = false;
-      this.#setPhase('idle');
-      this.#options.handlers?.onFailure?.(captureError, false, captureError.message);
-      return;
-    }
     if (captureError.reason === 'device-missing') {
       this.#waitForDevice(captureError);
       return;

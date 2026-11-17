@@ -9,13 +9,13 @@
  * unsupported with a reason). `voice.local.install` starts the one-act setup and answers at
  * once; the run's receipt is read from voice.local.status as `lastInstall`. The receipt
  * carries a FINER per-engine terminal state than status's resting enum (e.g.
- * checksum-mismatch, bundle-unavailable, sideload-mismatch) because it describes what
- * THIS attempt did, not just where things stand.
+ * download-failed, checksum-mismatch) because it describes what THIS attempt did,
+ * not just where things stand.
  *
  * Progress is read, not streamed: while a run is active voice.local.status carries
  * `installInProgress`, and the surface polls it. The engine states rendered are the
- * wire's own enums (`bundle-unavailable` for a pinned bundle not yet hosted,
- * `unsupported-platform` with a reason where no pinned build exists).
+ * wire's own enums (`unsupported-platform` with a reason where no pinned build
+ * exists).
  */
 
 export type VoiceLocalRuntimeState = 'not-provisioned' | 'partial' | 'provisioned' | 'unsupported-platform';
@@ -102,9 +102,7 @@ export type VoiceLocalInstallEngineState =
   | 'provisioned'
   | 'unsupported-platform'
   | 'download-failed'
-  | 'checksum-mismatch'
-  | 'bundle-unavailable'
-  | 'sideload-mismatch';
+  | 'checksum-mismatch';
 
 export interface VoiceLocalInstallEngineOutcome {
   readonly engine: string;
@@ -138,7 +136,7 @@ const RUNTIME_STATES: readonly VoiceLocalRuntimeState[] = [
 ];
 
 const INSTALL_ENGINE_STATES: readonly VoiceLocalInstallEngineState[] = [
-  'provisioned', 'unsupported-platform', 'download-failed', 'checksum-mismatch', 'bundle-unavailable', 'sideload-mismatch',
+  'provisioned', 'unsupported-platform', 'download-failed', 'checksum-mismatch',
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -317,16 +315,13 @@ export function voiceLocalInstallStateLabel(state: VoiceLocalInstallEngineState)
     case 'unsupported-platform': return 'Not supported on this platform';
     case 'download-failed': return 'Download failed';
     case 'checksum-mismatch': return 'Checksum mismatch';
-    case 'bundle-unavailable': return 'Not yet published for this platform';
-    case 'sideload-mismatch': return 'Sideloaded file does not match the pinned build';
   }
 }
 
 /** True when retrying the SAME one-act install (the only retry surface that exists,
  * there is no per-engine retry verb) is a genuinely useful action for this terminal
  * state: a download or checksum failure may well succeed on a fresh attempt. A
- * platform gap, an unpublished bundle, or a mismatched sideloaded file will not be
- * fixed by clicking the same button again. */
+ * platform gap will not be fixed by clicking the same button again. */
 export function voiceLocalInstallIsRetriable(state: VoiceLocalInstallEngineState): boolean {
   return state === 'download-failed' || state === 'checksum-mismatch';
 }

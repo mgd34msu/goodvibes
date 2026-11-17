@@ -149,10 +149,6 @@ export function voiceEngineOutcomeLine(engine: string, state: string, reason: st
       return `  ${engine}: download failed${reason ? `; ${reason}` : ''} (completed parts are kept; /voice setup fetches the rest)`;
     case 'checksum-mismatch':
       return `  ${engine}: checksum mismatch; the downloaded file did not match its pinned checksum and was discarded${reason ? ` (${reason})` : ''}`;
-    case 'bundle-unavailable':
-      return `  ${engine}: not yet published for this platform${reason ? `; ${reason}` : ''}`;
-    case 'sideload-mismatch':
-      return `  ${engine}: a sideloaded bundle was present but did not match the pinned checksum${reason ? `; ${reason}` : ''}`;
     case 'unsupported-platform':
       return `  ${engine}: unsupported on this platform${reason ? `; ${reason}` : ''}`;
     default:

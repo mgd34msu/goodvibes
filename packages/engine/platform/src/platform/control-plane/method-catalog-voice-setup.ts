@@ -55,17 +55,13 @@ const INSTALL_IN_PROGRESS_SCHEMA = objectSchema({
 }, ['startedAt', 'components']);
 
 const INSTALL_RESULT_SCHEMA = objectSchema({
-  operationProvenance: { type: 'string', enum: ['classic'] },
-  semanticAssessment: { type: 'string', enum: ['not-evaluated'] },
   proof: objectSchema({
     proved: BOOLEAN_SCHEMA,
     stage: { type: 'string', enum: ['synthesize', 'transcribe', 'compare'] },
     phrase: STRING_SCHEMA,
     transcript: STRING_SCHEMA,
     wordOverlap: NUMBER_SCHEMA,
-    comparison: { type: 'string', enum: ['yes', 'no', 'uncertain', 'unavailable', 'classic-exact-match', 'classic-mismatch'] },
-    operationProvenance: { type: 'string', enum: ['classic'] },
-    semanticAssessment: { type: 'string', enum: ['not-evaluated'] },
+    comparison: { type: 'string', enum: ['yes', 'no'] },
     proofBasis: { type: 'string', enum: ['native-word-sequence'] },
     error: STRING_SCHEMA,
     summary: STRING_SCHEMA,
@@ -82,7 +78,7 @@ const INSTALL_RESULT_SCHEMA = objectSchema({
   }, ['engine', 'state']),
   stt: objectSchema({
     engine: STRING_SCHEMA,
-    state: { type: 'string', enum: ['provisioned', 'unsupported-platform', 'download-failed', 'checksum-mismatch', 'bundle-unavailable', 'sideload-mismatch'] },
+    state: { type: 'string', enum: ['provisioned', 'unsupported-platform', 'download-failed', 'checksum-mismatch'] },
     binaryPath: STRING_SCHEMA,
     modelPath: STRING_SCHEMA,
     reason: STRING_SCHEMA,
@@ -253,7 +249,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
     id: 'voice.local.install',
     title: 'Install the Managed Local-Voice Runtime',
     description:
-      'Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The physical round trip reports its actual transcript and comparison basis; Classic uses native ordered word tokens without semantic verification. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
+      'Starts the one-act setup and answers at once with the run it started (or the run already in progress it joined); the install runs on in the daemon, voice.local.status serves its live progress as installInProgress and, when it ends, its receipt as lastInstall. The setup: download + checksum-verify the piper TTS engine, a default voice, and (where a pinned goodvibes-built bundle exists) the whisper.cpp STT engine with its default model into the goodvibes-managed directory, then point the voice.local.* config keys at the managed install, never overwriting a key you already set to a custom value (skipped keys are reported). The install ends by speaking a test phrase and reading it back: the transcript is compared word by word in code, allowing one differing word, and the receipt carries the transcript and the comparison. Downloads only when you ask; a failed or checksum-mismatched download keeps nothing.',
     category: 'health',
     scopes: ['write:config'],
     // Downloads and installs executables and rewrites voice.* config: admin, like config.set.

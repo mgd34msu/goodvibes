@@ -98,21 +98,10 @@ registry.register(googleSignInPage);
 registry.register(googleTwoStepPage);
 registry.register(googleAppPasswordPage);
 
-// Managed local voice round-trip semantic proof.
-import { voiceRoundTripReading } from '../voice/provisioning/round-trip-reading.js';
-registry.register(voiceRoundTripReading);
-
 // Occasion meaning; closed dates and delivery authority remain mechanical.
 import { occasionInterest, occasionSubject } from '../occasions/readings.js';
 registry.register(occasionInterest);
 registry.register(occasionSubject);
-// Recorder diagnostic semantics shared by Agent and TUI capture.
-import { recorderFailureReading } from '../voice/capture/recorder-failure-reading.js';
-registry.register(recorderFailureReading);
-
-import { localEngineFailureReading } from '../voice/providers/local-failure-reading.js';
-registry.register(localEngineFailureReading);
-
 // Owner profile: named People prose, never read/disclosure authority.
 import { profilePersonLine } from '../owner-profile/person-reading.js';
 registry.register(profilePersonLine);

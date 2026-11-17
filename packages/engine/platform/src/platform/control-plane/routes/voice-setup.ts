@@ -21,8 +21,6 @@ import type { VoiceSetupOutcome, VoiceSetupRequest } from '../../runtime/voice-s
 
 /** One-act install outcome served by voice.local.install. */
 export interface VoiceLocalInstallResult {
-  readonly operationProvenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated';
   readonly proof?: VoiceRoundTripProof | undefined;
   readonly notes?: readonly string[];
   readonly provisioned: boolean;

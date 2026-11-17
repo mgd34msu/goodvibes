@@ -123,7 +123,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     completeModelSelectionSideEffect,
   } = options;
 
-  const hydrateSessionUsage = (): void => hydrateConversationUsage(conversation, orchestrator);
+  const hydrateSessionUsage = (): void => hydrateConversationUsage(conversation, orchestrator, services.providerRegistry);
   // All Agent restore paths (resume, picker, recovery and rewind) replace
   // history through fromJSON. Bind once so no path can leave stale counters.
   conversation.setUsageHydrator(hydrateSessionUsage);

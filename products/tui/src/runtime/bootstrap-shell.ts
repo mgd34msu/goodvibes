@@ -110,7 +110,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   // (platform gap, Orchestrator.usage is never persisted/reseeded). Recompute it
   // from the replayed history so the footer doesn't show Input: 0 post-resume.
   const hydrateSessionUsage = (): void => {
-    hydrateConversationUsage(conversation, orchestrator);
+    hydrateConversationUsage(conversation, orchestrator, services.providerRegistry);
   };
   // Picker/import/rewind paths also replace history through fromJSON. The
   // canonical resume callback still runs after the restore.

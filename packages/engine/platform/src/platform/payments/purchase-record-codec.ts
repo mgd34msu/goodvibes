@@ -30,7 +30,8 @@ export function capturePurchaseRecord(value: unknown): PurchaseRecord | null {
     || !['answeredBy', 'refusalReason', 'merchantOrderId', 'refundedAt', 'merchantQualifier'].every(key => nullableText(entry[key]))
     || (entry['refundedAt'] !== null && (typeof entry['refundedAt'] !== 'string' || !Number.isFinite(Date.parse(entry['refundedAt']))))
     || typeof entry['merchantRecognised'] !== 'boolean'
-    || (entry['merchantDiscovered'] !== undefined && typeof entry['merchantDiscovered'] !== 'boolean')) return null;
+    || (entry['merchantDiscovered'] !== undefined && typeof entry['merchantDiscovered'] !== 'boolean')
+    || (entry['standingAuthorizationId'] !== undefined && !text(entry['standingAuthorizationId']))) return null;
   // Records predating the discovery field retain the documented owner-named
   // posture; no amount, identity, outcome or receipt time receives a default.
   return Object.freeze({ ...entry, merchantDiscovered: entry['merchantDiscovered'] === true }) as unknown as PurchaseRecord;

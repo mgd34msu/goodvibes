@@ -40,6 +40,10 @@ export { DurableCheckoutJournal, PaymentCheckoutJournalUnavailableError } from '
 
 export { CHECKOUT_APPROVAL_ACTION, checkoutApprovalContent } from './checkout-handlers.js';
 
+export { DaemonStandingAuthorizations, StandingAuthorizationError, MAX_STANDING_AUTHORIZATIONS } from './standing-store.js';
+export type { StandingAuthorization, StandingAuthorizationInput, StandingAuthorizationUse } from './standing-store.js';
+export { describeStandingAuthorization } from './standing-handlers.js';
+
 export { configBackedAddressStore } from './address-store.js';
 
 export { channelBackedPaymentNotifier, withOwnerInbox } from './notifier.js';

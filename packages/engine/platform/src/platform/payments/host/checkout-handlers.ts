@@ -47,9 +47,8 @@ import type { PaymentNotifier } from '../payment-ports.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import { PaymentsGatewayServiceImpl } from '../payments-gateway-service.js';
 import { readConfirmEveryPurchase, readCvvHandling, readDefaultCardId, readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
-import { minorUnitExponent, parseRequestedMaximum } from '../money-parsing.js';
+import { parseRequestedMaximum } from '../money-parsing.js';
 import { readPurchaseOutcome } from '../operation-view.js';
-import { registrableDomain } from '../../security/public-suffix.js';
 import { paymentHostStop, PaymentHostStoppedError, type PaymentStoreHealth, type PaymentStoreStop } from '../payment-host-health.js';
 import type { CurrencyCode } from '../types.js';
 import type { SecurityCodeRequests } from '../security-code-requests.js';
@@ -62,6 +61,8 @@ import type { TypedHandler } from './handler-plumbing.js';
 import { PaymentApprovalStoreError, type DaemonApprovalStore } from './approval-store.js';
 import type { DaemonCardStore } from './card-store.js';
 import type { PaymentsHandlerDeps } from './register.js';
+import { plainAmount, plainAmountExample, readOwnerAmount, standingItem, standingMerchant, StandingAuthorizationError, type DaemonStandingAuthorizations } from './standing-store.js';
+import { standingUseCounter } from './standing-handlers.js';
 
 /**
  * Everything the checkout pair needs beyond what the other five verbs use.
@@ -101,6 +102,12 @@ export interface CheckoutComposition {
    * one is consumed.
    */
   readonly approvals: DaemonApprovalStore;
+  /**
+   * The owner's standing authorisations (standing-store.ts): what lets a
+   * scheduled or triggered run begin a purchase without the owner asking in the
+   * moment. Absent, such a begin is refused as before.
+   */
+  readonly standing?: DaemonStandingAuthorizations | undefined;
   /**
    * The journal the shared service's in-flight registry writes through. The
    * real daemon composes `DurableCheckoutJournal`
@@ -277,9 +284,14 @@ function parseBeginCheckoutInput(params: Record<string, unknown>, settings: Begi
   };
 }
 
-function plainAmountExample(currency: CurrencyCode): string {
-  const exponent = minorUnitExponent(currency);
-  return exponent === 0 ? '2500' : `25 or 25.${'0'.repeat(exponent)}`;
+/** The standing authorisation a scheduled begin names, read beside the begin input (it is not part of what the purchase runs on). */
+function readStandingId(params: Record<string, unknown>): string | undefined {
+  const value = params['standingId'];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !/^standing-[0-9a-f]{8}$/.test(value.trim())) {
+    throw invalid('standingId', 'must be an id from payments.standing.list, such as standing-1a2b3c4d.');
+  }
+  return value.trim();
 }
 
 /**
@@ -472,9 +484,18 @@ export class CheckoutServiceHolder {
     const cardWithheldByCvvPrompt = !usableCard && !securityCodePrompt && readCvvHandling(this.deps.config) === 'prompt'
       && input.cardId.length > 0 && (await this.deps.cards.metadata(input.cardId)) !== null;
     owner.assertCurrent();
+    // A purchase admitted under a standing authorisation was not asked for in
+    // the moment; it passes the origin gate only while that entry is live, so
+    // a purchase a restart interrupted is not resumed once the owner removed it.
+    const standingId = input.standingAuthorizationId;
+    let standingLive = false;
+    if (standingId !== undefined) {
+      try { standingLive = this.deps.checkout.standing?.isLive(standingId) === true; } catch { standingLive = false; }
+    }
     return {
       enabled: readPaymentsEnabled(this.deps.config), isPaymentsLeader: this.deps.isPaymentsLeader(),
-      hasUsableCard: usableCard, hasShippingAddress: shippingAddress, isOwnerDirectRequest: true,
+      hasUsableCard: usableCard, hasShippingAddress: shippingAddress, isOwnerDirectRequest: standingId === undefined,
+      ...(standingId !== undefined && standingLive ? { standingAuthorizationId: standingId } : {}),
       ...(securityCodePrompt ? { securityCodePrompt } : {}),
       ...(cardWithheldByCvvPrompt ? { cardWithheldByCvvPrompt } : {}),
     };
@@ -570,21 +591,8 @@ export function checkoutApprovalContent(input: {
   readonly item: string;
   readonly amountMinorUnits: number | undefined;
 }): Readonly<Record<string, string | undefined>> {
-  return { merchant: approvalMerchant(input.merchantDomain), item: approvalItem(input.item),
+  return { merchant: standingMerchant(input.merchantDomain), item: standingItem(input.item),
     amount: input.amountMinorUnits === undefined ? undefined : String(input.amountMinorUnits) };
-}
-function approvalMerchant(value: string): string {
-  let host = value.trim().toLowerCase();
-  try { if (/^[a-z][a-z0-9+.-]*:\/\//.test(host)) host = new URL(host).hostname; } catch { /* Compared as typed. */ }
-  return registrableDomain(host) ?? host;
-}
-function approvalItem(value: string): string {
-  return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-/** An approval amount as the owner may type it: a plain amount, optionally with the budget currency's code or a currency sign. */
-function approvalAmount(raw: string, currency: CurrencyCode): number | null {
-  const plain = raw.trim().replace(new RegExp(`^${currency}\\s*|\\s*${currency}$`, 'i'), '').replace(/^[$€£¥]\s*/, '').trim();
-  return parseRequestedMaximum(plain, currency);
 }
 
 /** How a begin call names the approve verb when it refuses, per mismatch. */
@@ -652,11 +660,9 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
     const typed = requireString(params['amount'], 'amount');
     const currency = readPaymentsServiceConfig(deps.config).budgetCurrency;
     // Refused here, not at begin: an approval no begin could ever match is not recorded.
-    const amountMinorUnits = approvalAmount(typed, currency);
+    const amountMinorUnits = readOwnerAmount(typed, currency);
     if (amountMinorUnits === null) throw invalid('amount', `must be one amount in ${currency} such as ${plainAmountExample(currency)}; nothing was approved.`);
-    const exponent = minorUnitExponent(currency);
-    const amount = exponent === 0 ? String(amountMinorUnits)
-      : `${String(Math.floor(amountMinorUnits / 10 ** exponent))}.${String(amountMinorUnits % 10 ** exponent).padStart(exponent, '0')}`;
+    const amount = plainAmount(amountMinorUnits, currency);
     let approval;
     try {
       approval = deps.checkout.approvals.grant({
@@ -702,6 +708,15 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
  * final total within it needs no window. With `payments.confirmEveryPurchase`
  * on, a begin with no matching approval is refused naming `/payments approve`.
  *
+ * A begin that names a `standingId` is a purchase the owner authorised in
+ * advance (standing-store.ts) and needs no explicit request in the moment: a
+ * scheduled or triggered run makes it. The entry must be live and its item and
+ * merchants must match; the purchase is bound to the entry's item text and may
+ * come to at most the smaller of the entry's per-purchase maximum and what is
+ * left of its period, which becomes its `requestedMax`. The use is written
+ * immediately before the durable admission and given back if admission fails.
+ * The entry is the owner's answer for `payments.confirmEveryPurchase` too.
+ *
  * Before any of that, one health read: a payment store that stopped itself
  * refuses the purchase with the sentence that names it, approval unspent.
  *
@@ -718,24 +733,48 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
     const spentNote = (message: string): string => (approvalSpent
       ? `${message} The owner's approval for this purchase was spent: ask the owner to approve it again (payments.checkout.approve) and begin with a new requestId.`
       : message);
+    // Set once a standing authorisation holds a use for this purchase, so a
+    // failed admission gives it back.
+    const standingHeld: { current?: { readonly store: DaemonStandingAuthorizations; readonly standingId: string; readonly purchaseId: string } } = {};
+    let admittedOperation = false;
     try {
       const config = readPaymentsServiceConfig(deps.config), confirmEvery = readConfirmEveryPurchase(deps.config);
       const params = asRecord(body), id = checkoutRequestId(params['requestId']);
       const input = parseBeginCheckoutInput(params, { budgetCurrency: config.budgetCurrency, defaultCardId: readDefaultCardId(deps.config) });
-      if (confirmEvery && input.requestedMax === undefined) {
+      const standingId = readStandingId(params);
+      const standing = standingId === undefined ? undefined : deps.checkout.standing;
+      if (standingId !== undefined && !standing) {
+        throw new HandlerError('Standing purchase authorisations are not kept on this payment host, so a purchase nobody asked for in the moment cannot start here.', 'FAILED_PRECONDITION', 409);
+      }
+      if (confirmEvery && standingId === undefined && input.requestedMax === undefined) {
         throw invalid('requestedMax', 'is required while payments.confirmEveryPurchase is on: it is the amount the owner approved.');
       }
       const seam = deps.checkout.seam();
       if (!seam) throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
-      const source = retainDetachedCheckout(deps, seam, context);
+      const source = retainDetachedCheckout(deps, seam, context, { ownerRequest: standingId === undefined });
       const admission = retainCheckoutInvocation(deps, seam, context);
       // One health read, before any approval is spent: a stopped store names
       // itself here instead of failing later with its own sentence.
-      const stop = holder.hostStop({ approvals: confirmEvery });
+      const stop = holder.hostStop({ approvals: confirmEvery && standingId === undefined });
       if (stop) throw new PaymentHostStoppedError(stop);
       const amountMinorUnits = input.requestedMax === undefined ? undefined : parseRequestedMaximum(input.requestedMax, config.budgetCurrency) ?? undefined;
       const content = checkoutApprovalContent({ merchantDomain: input.merchantDomain, item: input.item, amountMinorUnits });
       const operation = await holder.admit(id, input, source, admission.assertCurrent, admitted => {
+        if (standingId !== undefined && standing) {
+          let reserved: ReturnType<DaemonStandingAuthorizations['reserve']>;
+          try {
+            reserved = standing.reserve({ id: standingId, purchaseId: id, merchantDomain: admitted.merchantDomain, item: admitted.item,
+              requestedMaxMinorUnits: amountMinorUnits, currency: config.budgetCurrency }, standingUseCounter(deps.checkout.operations));
+          } catch (error) {
+            if (error instanceof StandingAuthorizationError) throw new HandlerError(`Not started: ${error.message}`, 'FAILED_PRECONDITION', 409);
+            throw error;
+          }
+          if (!reserved.ok) throw new HandlerError(`Not started: ${reserved.reason}`, 'FORBIDDEN', 403);
+          standingHeld.current = { store: standing, standingId, purchaseId: id };
+          // The owner's own words and maximum, not the caller's spelling of them.
+          return { ...admitted, item: reserved.entry.item, requestedMax: plainAmount(reserved.capMinorUnits, config.budgetCurrency),
+            standingAuthorizationId: reserved.entry.id };
+        }
         // An approval binds an amount, so a begin without one cannot match any.
         if (amountMinorUnits === undefined) return admitted;
         let taken: ReturnType<typeof takeCheckoutApproval>;
@@ -748,9 +787,17 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
         approvalSpent = true;
         return { ...admitted, ownerApprovedMaxMinorUnits: amountMinorUnits };
       });
+      admittedOperation = true;
       return { outcome: 'accepted', purchaseId: operation.purchaseId, reason: null, merchantOrderId: null,
         totalMinorUnits: null, currency: null, shippingTierUsed: null, steppedDown: false, challengeStep: null };
     } catch (error) {
+      // A use whose purchase was never written counts against nothing. One
+      // whose operation exists, or cannot be read, stays: it may still spend.
+      const held = standingHeld.current;
+      if (held && !admittedOperation) {
+        try { if (deps.checkout.operations.get(held.purchaseId) === null) held.store.release(held.standingId, held.purchaseId); }
+        catch { /* Kept, and counted at its maximum until its period passes. */ }
+      }
       if (error instanceof HandlerError) throw error;
       if (error instanceof PaymentHostStoppedError) throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
       if (error instanceof PaymentOperationStoreError && error.kind === 'invalid') throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);

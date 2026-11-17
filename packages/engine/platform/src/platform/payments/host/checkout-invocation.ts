@@ -50,16 +50,26 @@ export function retainCheckoutInvocation(deps: PaymentsHandlerDeps, seam: Browse
 
 /** Explicit handoff to a daemon-owned operation. Only the paired authority and
  * copied host facts cross this factory scope; the request/context/signal do not.
- * The initiating request must still be current at durable admission. */
-export function retainDetachedCheckout(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam, context: HandlerContextEnvelope) {
+ * The initiating request must still be current at durable admission.
+ *
+ * `ownerRequest: false` is a begin under the owner's standing authorisation
+ * (standing-store.ts): it is made by a scheduled or triggered run, so it needs
+ * no explicit request in the moment, and the entry it names is checked at
+ * admission instead. Every other requirement, the paired administrative
+ * principal with write:payments and continuation authority, still holds. */
+export function retainDetachedCheckout(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam, context: HandlerContextEnvelope,
+  options: { readonly ownerRequest: boolean } = { ownerRequest: true }) {
   const native = context.nativeExecutionAuthority, authorized = context.isAuthorized;
   const paired = native?.current();
   if (!native || !native.issueContinuation || !native.revokeContinuation || !authorized || !paired || paired.kind !== 'pairing-token' || !context.admin || context.principalKind !== 'token'
-    || !context.explicitUserRequest || context.principalId !== paired.principalId
+    || (options.ownerRequest && !context.explicitUserRequest) || context.principalId !== paired.principalId
     || !(context.scopes.includes('*') || context.scopes.includes('write:payments'))
     || !(paired.scopes.includes('*') || paired.scopes.includes('write:payments'))
     || authorized?.(['write:payments']) !== true) {
-    throw new HandlerError('Checkout admission requires an explicit request from the current paired administrative owner with write:payments.', 'FORBIDDEN', 403);
+    throw new HandlerError(options.ownerRequest
+      ? 'Checkout admission requires an explicit request from the current paired administrative owner with write:payments. '
+        + 'A purchase a schedule or trigger starts names the owner\'s standing authorisation instead (standingId from payments.standing.list).'
+      : 'Checkout admission under a standing authorisation requires the current paired administrative principal with write:payments.', 'FORBIDDEN', 403);
   }
   return detachedSource(deps, seam, native, authorized, paired);
 }

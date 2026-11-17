@@ -63,7 +63,7 @@ import { createCardEntryPrompter, createPaymentCardHost, createPaymentCardComman
  */
 
 import type { CommandContext } from '../command-registry.ts';
-import { openPendingPaymentWindows } from './payments-pending.ts';
+import { approvePurchaseInAdvance, manageStandingAuthorizations, openPendingPaymentWindows } from './payments-pending.ts';
 import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, routeDaemonOwnedConfigWrite } from '../../config/daemon-config-routing.ts';
 import type { ConfigKey } from '../../config/index.ts';
@@ -313,9 +313,11 @@ export const { startCardEntryFlow, runPaymentsCommand, registerPaymentCardComman
   promptFields: promptCardFields,
   status: renderStatus,
   pending: openPendingPaymentWindows,
+  approve: approvePurchaseInAdvance,
+  standing: manageStandingAuthorizations,
   remove: (ctx, id) => cardHost.remove(ctx, id),
   address: startAddressEntryFlow,
-  description: 'Payment card/address setup and pending purchase approval/veto windows',
-  usage: '/payments [card [remove <id>]|address <billing|shipping>|status|pending]',
-  argsHint: '[card|address|status|pending]',
+  description: 'Payment card/address setup, pending purchase approval/veto windows, purchases approved in advance and standing authorisations for scheduled purchases',
+  usage: '/payments [card [remove <id>]|address <billing|shipping>|status|pending|approve <merchant> <item> <maximum>|standing [list|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]|remove <id>]]',
+  argsHint: '[card|address|status|pending|approve|standing]',
 });

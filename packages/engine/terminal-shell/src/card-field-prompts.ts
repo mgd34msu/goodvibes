@@ -325,6 +325,10 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
   readonly status: (context: Context) => string[] | Promise<string[]>;
   readonly address?: ((context: Context, kind: 'billing' | 'shipping') => void) | undefined;
   readonly pending?: ((context: Context) => Promise<void>) | undefined;
+  /** `/payments approve <merchant> <item> <maximum>`: approve one purchase in advance. */
+  readonly approve?: ((context: Context, args: readonly string[]) => Promise<void>) | undefined;
+  /** `/payments standing ...`: purchases a scheduled or triggered run may make. */
+  readonly standing?: ((context: Context, args: readonly string[]) => Promise<void>) | undefined;
   /** Delete one card from the selected daemon; present on surfaces that can reach a host. */
   readonly remove?: ((context: Context, id: string) => Promise<{ readonly deleted: boolean }>) | undefined;
   readonly description: string;
@@ -381,6 +385,8 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
   function runPaymentsCommand(args: readonly string[], context: Context): void | Promise<void> {
     const sub = (args[0] ?? '').toLowerCase();
     if (sub === 'pending' && policy.pending) return policy.pending(context);
+    if (sub === 'approve' && policy.approve) return policy.approve(context, args.slice(1));
+    if (sub === 'standing' && policy.standing) return policy.standing(context, args.slice(1));
     if (!sub || sub === 'status') {
       const lines = policy.status(context);
       if (Array.isArray(lines)) {
@@ -406,7 +412,8 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
       policy.address(context, kind);
       return;
     }
-    context.print('Usage: /payments [' + (policy.address ? 'card|address <billing|shipping>|status' : 'card|status') + (policy.pending ? '|pending' : '') + ']');
+    context.print('Usage: /payments [' + (policy.address ? 'card|address <billing|shipping>|status' : 'card|status') + (policy.pending ? '|pending' : '')
+      + (policy.approve ? '|approve <merchant> <item> <maximum>' : '') + (policy.standing ? '|standing [list|add|remove]' : '') + ']');
   }
   function registerPaymentCardCommands(registry: Pick<import('./command-registry.js').TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({

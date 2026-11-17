@@ -50,6 +50,8 @@ export interface PaymentPurchaseView {
   readonly merchantQualifier: string | null;
   /** Whether the owner named the storefront or it was found while browsing. */
   readonly merchantDiscovered: boolean;
+  /** The owner's standing authorisation a scheduled or triggered purchase ran under; absent otherwise. */
+  readonly standingAuthorizationId?: string;
 }
 
 export interface PaymentsBudgetView {

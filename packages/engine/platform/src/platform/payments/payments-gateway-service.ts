@@ -160,6 +160,8 @@ export interface BeginCheckoutInput {
   readonly merchantDiscovered?: boolean | undefined;
   /** Host-set from a spent owner approval, never read from the wire; see PurchaseRequest. */
   readonly ownerApprovedMaxMinorUnits?: number | undefined;
+  /** Host-set once the owner's standing authorisation was matched, never read from the wire; see PurchaseRequest. */
+  readonly standingAuthorizationId?: string | undefined;
 }
 
 /** Host-only invocation facts; never read from the checkout's wire input. */
@@ -297,6 +299,7 @@ export class PaymentsGatewayServiceImpl {
       requestedMax: input.requestedMax,
       merchantDiscovered: input.merchantDiscovered ?? false,
       ...(input.ownerApprovedMaxMinorUnits === undefined ? {} : { ownerApprovedMaxMinorUnits: input.ownerApprovedMaxMinorUnits }),
+      ...(input.standingAuthorizationId === undefined ? {} : { standingAuthorizationId: input.standingAuthorizationId }),
     };
 
     const cardFields: CardFieldTarget[] = [];

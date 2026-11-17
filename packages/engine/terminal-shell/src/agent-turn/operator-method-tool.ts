@@ -374,7 +374,7 @@ export function createAgentOperatorMethodTool(
       if (operatorMethodIsOwnerOnly(method.id)) {
         return {
           success: false,
-          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, /payments approve <merchant> <item> <maximum> approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here.`,
+          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, /payments approve <merchant> <item> <maximum> approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with /payments standing add; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
         };
       }
       if (PROFILE_TOOL_ONLY_METHOD_IDS.has(method.id)) {
@@ -450,7 +450,10 @@ export function createAgentOperatorMethodTool(
         // The Agent's call: its delegated credential for a write it makes for the owner, its ordinary one otherwise.
         const { delegated } = await agentCallConnection(connection, methodSnapshot.id, 'agent', shellPaths.homeDirectory, options?.signal);
         const bearer = delegated?.token ?? connection.token;
-        const ownerRequest = AGENT_PURCHASE_METHOD_IDS.has(methodSnapshot.id);
+        // A begin naming the owner's standing authorisation is a purchase nobody asked for now (a
+        // scheduled or triggered run): the entry is its authority, so it claims no owner request.
+        const ownerRequest = AGENT_PURCHASE_METHOD_IDS.has(methodSnapshot.id)
+          && !(methodSnapshot.id === 'payments.checkout.begin' && typeof wirePayload.standingId === 'string');
         // A read-only HTTP method carries its input in the query, so the query is built from the
         // same payload that is screened below, not from the pre-projection one.
         const requestPath = readOnlyHttp ? appendOperatorQuery(route.path, wirePayload) : route.path;

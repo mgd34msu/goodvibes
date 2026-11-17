@@ -30,6 +30,7 @@ import {
   DaemonApprovalStore,
   DaemonCardStore,
   DaemonPurchaseLedger,
+  DaemonStandingAuthorizations,
   DurableBudgetLedger,
   DurableCheckoutJournal,
   DurablePaymentOperations,
@@ -289,6 +290,11 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     // grant cannot remain spendable in this composition's memory.
     approvals: new DaemonApprovalStore(
       controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-approvals.json'),
+    ),
+    // The owner's standing authorisations, which let a scheduled or triggered
+    // run begin a purchase he authorised in advance (/payments standing).
+    standing: new DaemonStandingAuthorizations(
+      controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-standing.json'),
     ),
     // The durable in-flight checkout journal. Every phase write the registry
     // makes, the `submit-pending` flush before the merchant submit included,

@@ -2255,7 +2255,9 @@ verb.
 | `payments.cards.delete` | admin, `write:payments` | Deletes the card's metadata row and every derived secret, reporting how many were cleared. | yes |
 | `payments.purchases.list` | `read:payments` | Audit records. | yes |
 | `payments.checkout.approve` | paired admin owner, `write:payments`, explicit confirmation | Approves one merchant, item and amount in advance, for five minutes, once. Required before every purchase only when `payments.confirmEveryPurchase` is on. | yes |
-| `payments.checkout.begin` | paired admin owner, `write:payments`, explicit request | Persists one stable `requestId` and returns `accepted` with its purchase ID. The daemon owns subsequent processing. `cardId` may be omitted to pay with `payments.defaultCardId`; `merchantDiscovered` is read as sent. | yes |
+| `payments.checkout.begin` | paired admin owner, `write:payments`, explicit request, or a `standingId` naming the owner's standing authorisation | Persists one stable `requestId` and returns `accepted` with its purchase ID. The daemon owns subsequent processing. `cardId` may be omitted to pay with `payments.defaultCardId`; `merchantDiscovered` is read as sent. | yes |
+| `payments.standing.list` | `read:payments` | The owner's standing authorisations: id, item, shops, per-purchase and per-period maximums, what the current period has spent or holds and what is left, expiry, and a one-line summary. | yes |
+| `payments.standing.create` / `.delete` | paired admin owner, `write:payments`, explicit confirmation; owner-only | Adds or withdraws one standing authorisation. An agent cannot call either. | yes |
 | `payments.purchase.approve` / `.deny` | paired admin owner, `write:payments`, explicit confirmation | Answers the exact live window; approve acknowledges an in-budget veto too. | live windows |
 | `payments.purchase.cancel` | paired admin owner, `write:payments`, explicit confirmation | Objects to a live window, or requests stopping the exact admitted operation. Does not undo an order. | yes |
 | `payments.purchase.status` | `read:payments` | Durable operation status and live windows, optionally for one original purchase ID, and `stopped` while a payment store has stopped itself. | yes |
@@ -2388,6 +2390,54 @@ timezone picker, shipping preference, channel order), a card entry form that
 posts to `payments.cards.create` through a masked input and never echoes or logs,
 the approval and veto prompts, and a purchase list backed by the audit ledger.
 No surface computes a budget, a ladder step, or a window outcome.
+
+### Standing authorisations for scheduled purchases
+
+A purchase nobody asks for in the moment, "order dog food every month", a gift
+a scheduled routine buys, has no explicit owner request, so gate 0 refuses it
+(`not-owner-request`). The owner authorises such purchases in advance with
+`/payments standing add` in either terminal app (`payments.standing.create`):
+
+```
+/payments standing add <shops> <item> <per-purchase> <per-period> <days> [<last day>]
+/payments standing add shop.example dog food 60.00 120.00 30 2027-06-30
+```
+
+Each entry holds the item in the owner's words, one or more shop domains, the
+most one purchase may come to, the most all purchases under it may come to over
+the last `<days>` days, and an optional last day. `/payments standing` lists
+them with what is left in the current period; `/payments standing remove <id>`
+withdraws one. Adding and removing are confirmed in a picker and sent with the
+owner's confirmation; both verbs are owner-only, so an agent can read the list
+(`payments.standing.list`) but never write it.
+
+A scheduled or triggered run begins the purchase with `standingId` set to the
+entry's id and no explicit-user-request claim. Admission then checks, in code:
+the entry exists and has not expired, it was written in the budget currency,
+the merchant's registrable domain is one of its shops, and the item matches its
+item by meaning (case and spacing folded). The purchase is bound to the entry's
+item text, and its `requestedMax` becomes the smaller of the entry's per-purchase
+maximum, what is left of its period, and any maximum the begin stated. The use
+is written immediately before the durable admission and given back if admission
+fails. Because the item, the maximum and the merchant are the owner's own text
+bound in code, the taint step does not compare them with content read since the
+last boundary; link validation still binds the checkout url to that merchant.
+
+Everything after the origin gate is unchanged: the daily budgets, the
+per-purchase ceiling, the shipping ladder, the recourse grading and the veto or
+approval window. A total above the purchase's maximum opens an approval window
+that silence denies. The entry is also the owner's advance answer under
+`payments.confirmEveryPurchase`. The purchase record carries
+`standingAuthorizationId`.
+
+Spend per period is counted from the payment operations store, the one owner of
+what each purchase came to: a purchase that ended unbought counts nothing, a
+completed one counts its total, and one still running or uncertain counts the
+most it may come to. Removing an entry stops new purchases under it at once,
+and a purchase under it that a restart interrupted is not resumed; a purchase
+already running keeps its window, where the owner can still stop it. The
+entries live in `payments-standing.json` beside the other payment stores; at
+most 32 are kept.
 
 ### 10.1 Settings do not go over the operator RPC
 

@@ -355,3 +355,162 @@ export function createPaymentApproveCommand<Context extends PaymentWindowCommand
     }
   };
 }
+
+/** What `/payments standing add` sends: `payments.standing.create`'s fields. */
+export interface StandingAddRequest {
+  readonly merchants: string[];
+  readonly item: string;
+  readonly maxPerPurchase: string;
+  readonly maxPerPeriod: string;
+  readonly periodDays: number;
+  readonly expires?: string;
+}
+
+/**
+ * `/payments standing add <shops> <item> <per-purchase> <per-period> <days> [<last day>]`:
+ * the shops are the first word (comma separated), the optional last day a
+ * trailing `YYYY-MM-DD`, the three numbers before it, and the item everything between.
+ */
+export function parseStandingAddArgs(args: readonly string[]): StandingAddRequest | null {
+  const words = args.map(word => word.trim()).filter(Boolean);
+  let end = words.length;
+  const last = words[end - 1];
+  const expires = last !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(last) ? last : undefined;
+  if (expires !== undefined) end -= 1;
+  if (end < 5) return null;
+  const days = (words[end - 1] ?? '').replace(/d(?:ays?)?$/i, '');
+  if (!/^\d{1,3}$/.test(days)) return null;
+  const merchants = (words[0] ?? '').split(',').map(merchant => merchant.trim()).filter(Boolean);
+  if (merchants.length === 0) return null;
+  return {
+    merchants, item: words.slice(1, end - 3).join(' '),
+    maxPerPurchase: words[end - 3] ?? '', maxPerPeriod: words[end - 2] ?? '', periodDays: Number(days),
+    ...(expires === undefined ? {} : { expires }),
+  };
+}
+
+function readStandingRows(value: unknown): readonly { readonly id: string; readonly summary: string; readonly live: boolean }[] | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const rows = (value as Record<string, unknown>)['authorizations'];
+  if (!Array.isArray(rows)) return null;
+  const read: { id: string; summary: string; live: boolean }[] = [];
+  for (const row of rows) {
+    if (typeof row !== 'object' || row === null) return null;
+    const { id, summary, live } = row as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof summary !== 'string' || typeof live !== 'boolean') return null;
+    read.push({ id, summary, live });
+  }
+  return read;
+}
+
+const STANDING_USAGE = '/payments standing [list | add <shops> <item> <per-purchase> <per-period> <days> [<last day YYYY-MM-DD>] | remove <id>]';
+
+/**
+ * The owner's standing authorisations: purchases a schedule or trigger may
+ * start without asking him, within the shops, item and maximums he sets here.
+ * Adding and removing are his own acts, confirmed in a picker and sent with
+ * the owner's confirmation; a model-run command cannot do either. Every other
+ * purchase limit still applies to each purchase made under one.
+ */
+export function createPaymentStandingCommand<Context extends PaymentWindowCommandContext>(policy: PaymentWindowCommandPolicy<Context>) {
+  return async function manageStandingAuthorizations(context: Context, args: readonly string[]): Promise<void> {
+    const sub = (args[0] ?? 'list').toLowerCase();
+    if (!policy.isOwner(context)) {
+      context.print('[payments] Type /payments standing in the owner terminal to see, add or remove standing purchase authorisations.');
+      return;
+    }
+    if (sub !== 'list' && sub !== 'add' && sub !== 'remove') {
+      context.print(`[payments] Usage: ${STANDING_USAGE}`);
+      return;
+    }
+    const added = sub === 'add' ? parseStandingAddArgs(args.slice(1)) : null;
+    if (sub === 'add' && !added) {
+      context.print(`[payments] Usage: ${STANDING_USAGE}. For example /payments standing add shop.example dog food 60.00 120.00 30 2027-06-30 lets a scheduled run buy "dog food" from shop.example, at most 60.00 a purchase and 120.00 every 30 days, until 30 June 2027. Nothing was added.`);
+      return;
+    }
+    const removeId = sub === 'remove' ? (args[1] ?? '').trim() : '';
+    if (sub === 'remove' && removeId.length === 0) {
+      context.print('[payments] Usage: /payments standing remove <id>. /payments standing lists each one with its id. Nothing was removed.');
+      return;
+    }
+    const ownerAbort = new AbortController();
+    let connection: RetainedOperatorConnection;
+    try {
+      connection = new RetainedOperatorConnection({
+        owner: () => policy.owner(context), home: () => policy.home(context),
+        read: observation => policy.read(context, observation), files: policy.files,
+        environment: policy.environment, fetchImpl: policy.fetchImpl, signal: ownerAbort.signal,
+      });
+    } catch (error) {
+      context.print(`[payments] ${describeRetainedConnectionFailure(error, 'run /payments standing again')}`);
+      return;
+    }
+    const finish = () => { ownerAbort.abort(); void connection.close(); };
+    const report = (message: string) => { context.print(message); context.renderRequest(); };
+    const ownerCheck = async () => {
+      const auth = await connection.run((operator, signal) => operator.control.auth.current({}, { signal }));
+      if (!isPairedOperatorPrincipal(auth, ['read:payments', 'write:payments'], connection.expectedPrincipalId)) {
+        throw new Error('A current paired administrative payment owner is required.');
+      }
+    };
+    // A refusal from the daemon names what was wrong; a transport error is not echoed.
+    const refusal = (error: unknown) => (error instanceof Error && /standing|amount|merchant|item|period|expire|payments\./i.test(error.message) ? ` ${text(error.message)}` : '');
+    if (sub === 'list') {
+      try {
+        const rows = readStandingRows(await connection.run((operator, signal) => operator.invoke('payments.standing.list', {}, { signal })));
+        if (!rows) throw new Error('Unexpected standing authorisation list.');
+        report(rows.length === 0
+          ? `[payments] No standing purchase authorisations. A scheduled run can buy only what you authorise here: ${STANDING_USAGE}.`
+          : ['[payments] Standing purchase authorisations:', ...rows.map(row => `  ${text(row.id)}${row.live ? '' : ' (expired)'}: ${text(row.summary)}`),
+            'Remove one with /payments standing remove <id>.'].join('\n'));
+      } catch (error) {
+        report(`[payments] The standing authorisations could not be read.${refusal(error)} Check the selected host and its pairing, then try /payments standing again.`);
+      } finally { finish(); }
+      return;
+    }
+    const open = context.openSelection;
+    if (!open) { report('[payments] This needs the picker, which this surface does not have. Use the terminal app.'); finish(); return; }
+    const send = async () => {
+      try {
+        await ownerCheck();
+        if (added) {
+          const result: unknown = await connection.run((operator, signal) => operator.invoke('payments.standing.create', { ...added, confirm: true },
+            { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } }));
+          const authorization = typeof result === 'object' && result !== null ? (result as Record<string, unknown>)['authorization'] : undefined;
+          const row = readStandingRows({ authorizations: authorization === undefined ? [] : [authorization] })?.[0];
+          if (!row) throw new Error('Unexpected standing authorisation answer.');
+          report(`[payments] Added ${text(row.id)}: ${text(row.summary)} A scheduled run names it as standingId; every other purchase limit still applies.`);
+        } else {
+          const result: unknown = await connection.run((operator, signal) => operator.invoke('payments.standing.delete', { id: removeId, confirm: true },
+            { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } }));
+          const removed = typeof result === 'object' && result !== null && (result as Record<string, unknown>)['deleted'] === true;
+          report(removed ? `[payments] Removed ${text(removeId)}. No new purchase starts under it.`
+            : `[payments] The daemon has no standing authorisation ${text(removeId)}; nothing was removed. /payments standing lists them.`);
+        }
+      } catch (error) {
+        report(`[payments] That was not confirmed.${refusal(error)} Check /payments standing and the paired owner credential, then try again.`);
+      } finally { finish(); }
+    };
+    const summary = added
+      ? `Shops: ${text(added.merchants.join(', '))}\nItem: ${text(added.item)}\nAt most a purchase: ${text(added.maxPerPurchase)}\nAt most every ${String(added.periodDays)} days: ${text(added.maxPerPeriod)}\n`
+        + `Until: ${added.expires === undefined ? 'you remove it' : text(added.expires)}\n\n`
+        + 'A scheduled or triggered run may buy this without asking you, within these numbers. Your budgets, ceiling and purchase windows still apply to every purchase.'
+      : `Standing authorisation: ${text(removeId)}\n\nNo new purchase will start under it.`;
+    try {
+      open.call(context, added ? 'Authorise this purchase in advance?' : 'Remove this standing authorisation?', [
+        { id: 'yes', label: added ? 'Authorise it' : 'Remove it', detail: summary },
+        { id: 'back', label: 'Go back without changing anything', detail: summary },
+      ], { allowSearch: false, primaryVerbLabel: 'Choose', signal: connection.signal }, result => {
+        if (result === null || result.action !== 'select' || result.item.id !== 'yes') {
+          report('[payments] Nothing was changed.');
+          finish();
+          return;
+        }
+        void send();
+      });
+    } catch {
+      report('[payments] The picker could not open. Nothing was changed.');
+      finish();
+    }
+  };
+}

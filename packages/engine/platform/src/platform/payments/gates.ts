@@ -42,6 +42,14 @@ export interface GateInput {
    */
   readonly isOwnerDirectRequest: boolean;
   /**
+   * The owner's live standing authorisation this purchase was admitted under
+   * (payments/host/standing-store.ts), when nobody asked for it in the moment.
+   * Set only by the host after it matched the item, merchant and amount to the
+   * entry; it is what lets a scheduled or triggered purchase past the origin
+   * gate, and nothing else.
+   */
+  readonly standingAuthorizationId?: string | undefined;
+  /**
    * This daemon may serve payments: it is not part of a cluster.
    *
    * Required, never defaulted. Config replication carries the LIMITS to every
@@ -74,12 +82,13 @@ export function checkPaymentGates(input: GateInput): GateRefusal | null {
         + 'before I can buy anything.',
     };
   }
-  if (!input.isOwnerDirectRequest) {
+  if (!input.isOwnerDirectRequest && input.standingAuthorizationId === undefined) {
     return {
       code: 'not-owner-request',
       reason:
-        'Refused: this purchase was not asked for by you directly. A schedule, a trigger, or a '
-        + 'message from a channel cannot authorize spending, only you can, in your own words.',
+        'Refused: this purchase was not asked for by you directly and no live standing authorisation of '
+        + 'yours covers it. A schedule, a trigger, or a message from a channel cannot authorize spending '
+        + 'on its own; you can, in your own words, or in advance with /payments standing add.',
     };
   }
   if (!input.isPaymentsLeader) {

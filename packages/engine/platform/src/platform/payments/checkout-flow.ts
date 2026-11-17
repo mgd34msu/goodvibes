@@ -171,6 +171,13 @@ export interface PurchaseRequest {
    * at or below it is the owner's answer given in advance: no window opens.
    */
   readonly ownerApprovedMaxMinorUnits?: number | undefined;
+  /**
+   * The owner's standing authorisation this purchase runs under, when nobody
+   * asked for it in the moment. Set by the host after it bound the item,
+   * merchant and maximum to the entry, never read from the wire; recorded on
+   * the purchase.
+   */
+  readonly standingAuthorizationId?: string | undefined;
 }
 
 export type { PurchaseRecord } from './purchase-record.js';
@@ -452,23 +459,33 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // merchant discovery exempts only those two fields. The merchant's quoted
   // NUMBERS are deliberately not checked, they are read from the merchant by
   // definition, and their defence is the budget. See taint-gate.ts.
-  const intent: OwnerOriginIntent = {
-    // `runCheckout` is only ever reached from an owner-direct turn, gate 0
-    // above refuses anything else, so the origin is 'owner' by construction.
-    // A content-initiated purchase cannot build this value at all:
-    // ContentOriginIntent has no merchantDiscovered and is refused with no
-    // approval path. See taint-gate.ts.
-    origin: 'owner',
-    merchantDiscovered: request.merchantDiscovered ?? false,
-    merchant: request.merchantDomain,
-    checkoutUrl: request.checkoutUrl,
-    item: request.item,
-    requestedMax: request.requestedMax,
-  };
-  const taint = await evaluatePaymentTaint({ intent, ledger: deps.untrusted, evidence: deps.taintEvidence, signal });
-  current();
-  if (!taint.allowed) {
-    return refused('derived-from-untrusted-content', taint.reason ?? 'Refused: this purchase derives from page content.');
+  //
+  // A purchase under the owner's standing authorisation skips this step: the
+  // host bound its item and maximum to the entry's own text and its merchant
+  // to the entry's domains in code (host/standing-store.ts), so none of them
+  // can have come from content, and step 0c binds the checkout url to that
+  // merchant. Gate 0 admitted it only while that same entry is live.
+  const standing = request.standingAuthorizationId !== undefined
+    && deps.gates.standingAuthorizationId === request.standingAuthorizationId;
+  if (!standing) {
+    const intent: OwnerOriginIntent = {
+      // `runCheckout` is only ever reached from an owner-direct turn, gate 0
+      // above refuses anything else, so the origin is 'owner' by construction.
+      // A content-initiated purchase cannot build this value at all:
+      // ContentOriginIntent has no merchantDiscovered and is refused with no
+      // approval path. See taint-gate.ts.
+      origin: 'owner',
+      merchantDiscovered: request.merchantDiscovered ?? false,
+      merchant: request.merchantDomain,
+      checkoutUrl: request.checkoutUrl,
+      item: request.item,
+      requestedMax: request.requestedMax,
+    };
+    const taint = await evaluatePaymentTaint({ intent, ledger: deps.untrusted, evidence: deps.taintEvidence, signal });
+    current();
+    if (!taint.allowed) {
+      return refused('derived-from-untrusted-content', taint.reason ?? 'Refused: this purchase derives from page content.');
+    }
   }
 
   // ── 0c. The checkout url must resolve, and must be the domain claimed ───
@@ -1235,6 +1252,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     merchantRecognised: merchantVerdict.isMajor,
     merchantQualifier: merchantVerdict.basis,
     merchantDiscovered: request.merchantDiscovered ?? false,
+    ...(request.standingAuthorizationId === undefined ? {} : { standingAuthorizationId: request.standingAuthorizationId }),
   };
   await deps.purchases.record(record);
   await registry.advance(request.purchaseId, 'submitted', {}, now());

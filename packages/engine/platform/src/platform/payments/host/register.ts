@@ -50,6 +50,7 @@ import { CheckoutServiceHolder, checkoutApproveHandler, checkoutBeginHandler } f
 import { purchaseWindowStatusHandler, purchaseWindowAnswerHandler, purchaseSecurityCodeHandler } from './window-handlers.js';
 import { paymentHostStopSentence, paymentHostStopView } from '../payment-host-health.js';
 import { purchaseReconciliationHandler } from './reconciliation-handler.js';
+import { standingCreateHandler, standingListHandler, standingDeleteHandler } from './standing-handlers.js';
 import type { CheckoutComposition } from './checkout-handlers.js';
 import { CardStoreUnreadableError } from './card-store.js';
 import type { DaemonCardStore } from './card-store.js';
@@ -73,6 +74,9 @@ export const ATTACHED_PAYMENTS_METHOD_IDS: readonly string[] = [
   'payments.purchase.cancel',
   'payments.purchase.reconcile',
   'payments.purchase.securityCode',
+  'payments.standing.list',
+  'payments.standing.create',
+  'payments.standing.delete',
 ];
 
 /**
@@ -239,6 +243,7 @@ function purchaseView(row: StoredPurchase): PaymentPurchaseView {
     merchantRecognised: row.merchantRecognised === true,
     merchantQualifier: row.merchantQualifier ?? null,
     merchantDiscovered: row.merchantDiscovered === true,
+    ...(row.standingAuthorizationId === undefined ? {} : { standingAuthorizationId: row.standingAuthorizationId }),
   };
 }
 
@@ -513,6 +518,10 @@ export function registerPaymentsMethods(
         () => checkoutServiceHolder.hostStop({ approvals: readConfirmEveryPurchase(deps.config) })) },
       { id: 'payments.purchase.reconcile', handler: purchaseReconciliationHandler(checkoutServiceHolder.reconciliations), options: { confirm: true } },
       { id: 'payments.purchase.securityCode', handler: purchaseSecurityCodeHandler(deps.checkout), options: { confirm: true } },
+      // Adding and withdrawing a standing authorisation are the owner's own acts, behind the same confirmation gate.
+      { id: 'payments.standing.list', handler: standingListHandler(deps, deps.checkout.operations) as TypedHandler<unknown, unknown> },
+      { id: 'payments.standing.create', handler: standingCreateHandler(deps, deps.checkout.operations) as TypedHandler<unknown, unknown>, options: { confirm: true } },
+      { id: 'payments.standing.delete', handler: standingDeleteHandler(deps) as TypedHandler<unknown, unknown>, options: { confirm: true } },
       ...(['approve', 'deny', 'cancel'] as const).map(action => ({
         id: `payments.purchase.${action}`, handler: purchaseWindowAnswerHandler(deps.checkout, action, checkoutServiceHolder.operations), options: { confirm: true },
       })),

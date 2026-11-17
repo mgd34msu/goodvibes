@@ -58,4 +58,6 @@ export interface PurchaseRecord {
    * which safeguard path (taint check vs judge) the purchase went through.
    */
   readonly merchantDiscovered: boolean;
+  /** The owner's standing authorisation a scheduled or triggered purchase ran under; absent for one he asked for in the moment. */
+  readonly standingAuthorizationId?: string | undefined;
 }

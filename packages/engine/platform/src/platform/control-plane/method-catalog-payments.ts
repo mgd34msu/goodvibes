@@ -48,6 +48,12 @@ import {
   PAYMENTS_PURCHASE_RECONCILE_OUTPUT_SCHEMA,
   PAYMENTS_PURCHASE_SECURITY_CODE_INPUT_SCHEMA,
   PAYMENTS_PURCHASE_SECURITY_CODE_OUTPUT_SCHEMA,
+  PAYMENTS_STANDING_CREATE_INPUT_SCHEMA,
+  PAYMENTS_STANDING_CREATE_OUTPUT_SCHEMA,
+  PAYMENTS_STANDING_LIST_INPUT_SCHEMA,
+  PAYMENTS_STANDING_LIST_OUTPUT_SCHEMA,
+  PAYMENTS_STANDING_DELETE_INPUT_SCHEMA,
+  PAYMENTS_STANDING_DELETE_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-payments.js';
 
 export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
@@ -156,10 +162,49 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     }, ['approved', 'action', 'merchantDomain', 'item', 'amount', 'expiresAt']),
   }),
   methodDescriptor({
+    id: 'payments.standing.list',
+    title: 'Standing Purchase Authorisations',
+    description:
+      'The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in his words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.',
+    category: 'payments',
+    scopes: ['read:payments'],
+    http: { method: 'GET', path: '/api/payments/standing' },
+    inputSchema: PAYMENTS_STANDING_LIST_INPUT_SCHEMA,
+    outputSchema: PAYMENTS_STANDING_LIST_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'payments.standing.create',
+    title: 'Authorise a Purchase in Advance',
+    description:
+      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments standing add sends both. The owner\'s own act: an agent cannot add one.',
+    category: 'payments',
+    scopes: ['write:payments'],
+    access: 'admin',
+    dangerous: true,
+    ownerOnly: true,
+    http: { method: 'POST', path: '/api/payments/standing' },
+    inputSchema: PAYMENTS_STANDING_CREATE_INPUT_SCHEMA,
+    outputSchema: PAYMENTS_STANDING_CREATE_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'payments.standing.delete',
+    title: 'Withdraw a Standing Authorisation',
+    description:
+      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments standing remove sends both. The owner\'s own act.',
+    category: 'payments',
+    scopes: ['write:payments'],
+    access: 'admin',
+    dangerous: true,
+    ownerOnly: true,
+    http: { method: 'POST', path: '/api/payments/standing/delete' },
+    inputSchema: PAYMENTS_STANDING_DELETE_INPUT_SCHEMA,
+    outputSchema: PAYMENTS_STANDING_DELETE_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
     id: 'payments.checkout.begin',
     title: 'Buy What Is In This Checkout',
     description:
-      "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
+      "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. A purchase the owner asked for now carries the explicit-user-request context; one a schedule or trigger starts names standingId (payments.standing.list) instead and is bound to that entry's item, shops and maximums. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
     category: 'payments',
     scopes: ['write:payments'],
     access: 'admin',

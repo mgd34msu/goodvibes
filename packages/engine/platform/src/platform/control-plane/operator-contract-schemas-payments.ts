@@ -246,6 +246,8 @@ const PURCHASE_RECORD_SCHEMA = objectSchema(
     merchantQualifier: nullableSchema(STRING_SCHEMA),
     /** Whether the owner named the storefront or it was found while browsing. */
     merchantDiscovered: BOOLEAN_SCHEMA,
+    /** The owner's standing authorisation a scheduled or triggered purchase ran under; absent otherwise. */
+    standingAuthorizationId: STRING_SCHEMA,
   },
   [
     'purchaseId', 'atUtc', 'dayKey', 'timezone', 'merchantDomain', 'item', 'currency',
@@ -364,6 +366,7 @@ export const PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA = objectSchema(
     preferredTier: enumSchema(['normal', 'fast', 'fastest']),
     expirySeparator: STRING_SCHEMA,
     twoDigitYear: BOOLEAN_SCHEMA,
+    standingId: { type: 'string', pattern: '^standing-[0-9a-f]{8}$', description: 'For a purchase a schedule or trigger starts, with nobody asking in the moment: the id of the owner\'s standing authorisation from payments.standing.list. The item must be that entry\'s item and the merchant one of its shops; the purchase may come to at most the smaller of its per-purchase maximum and what is left of its period. Omit it for a purchase the owner asked for now.' },
     requestedMax: { ...STRING_SCHEMA, pattern: '^\\d+(?:\\.\\d{1,3})?$', description: 'Owner-requested maximum for the entire purchase, including tax, mandatory fees and delivery. Supply one non-negative decimal amount in the configured budget currency, such as 20.00, without grouping, currency symbols or prose. Precision must fit that currency. Exceeding it requires a new explicit approval; silence never raises it. Required while payments.confirmEveryPurchase is on: it is the amount the owner approved.' },
   },
   [
@@ -392,4 +395,57 @@ export const PAYMENTS_CHECKOUT_BEGIN_OUTPUT_SCHEMA = objectSchema(
     challengeStep: nullableSchema(STRING_SCHEMA),
   },
   ['outcome', 'purchaseId', 'reason', 'merchantOrderId', 'totalMinorUnits', 'currency', 'shippingTierUsed', 'steppedDown', 'challengeStep'],
+);
+
+/** One standing authorisation: amounts are minor units of `currency`; `summary` is the line a surface shows. */
+const STANDING_AUTHORIZATION_SCHEMA = objectSchema(
+  {
+    id: STRING_SCHEMA,
+    item: STRING_SCHEMA,
+    merchants: arraySchema(STRING_SCHEMA),
+    currency: STRING_SCHEMA,
+    maxPerPurchaseMinorUnits: NUMBER_SCHEMA,
+    maxPerPeriodMinorUnits: NUMBER_SCHEMA,
+    periodDays: NUMBER_SCHEMA,
+    spentMinorUnits: NUMBER_SCHEMA,
+    leftMinorUnits: NUMBER_SCHEMA,
+    createdAt: STRING_SCHEMA,
+    expiresAt: nullableSchema(STRING_SCHEMA),
+    live: BOOLEAN_SCHEMA,
+    summary: STRING_SCHEMA,
+  },
+  ['id', 'item', 'merchants', 'currency', 'maxPerPurchaseMinorUnits', 'maxPerPeriodMinorUnits', 'periodDays',
+    'spentMinorUnits', 'leftMinorUnits', 'createdAt', 'expiresAt', 'live', 'summary'],
+);
+
+export const PAYMENTS_STANDING_LIST_INPUT_SCHEMA = objectSchema({}, []);
+export const PAYMENTS_STANDING_LIST_OUTPUT_SCHEMA = objectSchema(
+  { authorizations: arraySchema(STANDING_AUTHORIZATION_SCHEMA) },
+  ['authorizations'],
+);
+
+export const PAYMENTS_STANDING_CREATE_INPUT_SCHEMA = objectSchema(
+  {
+    confirm: BOOLEAN_SCHEMA,
+    item: { ...STRING_SCHEMA, description: 'The owner\'s words for what may be bought; a scheduled purchase must name exactly this item.' },
+    merchants: { type: 'array', items: STRING_SCHEMA, minItems: 1, description: 'The shop domains it may be bought from.' },
+    maxPerPurchase: { ...STRING_SCHEMA, description: 'The most one purchase may come to, in the budget currency, such as 60.00.' },
+    maxPerPeriod: { ...STRING_SCHEMA, description: 'The most all purchases under it may come to within periodDays, in the budget currency.' },
+    periodDays: { type: 'integer', minimum: 1, maximum: 366 },
+    expires: { ...STRING_SCHEMA, description: 'Optional last day, such as 2027-06-30; absent, it lasts until removed.' },
+  },
+  ['confirm', 'item', 'merchants', 'maxPerPurchase', 'maxPerPeriod', 'periodDays'],
+);
+export const PAYMENTS_STANDING_CREATE_OUTPUT_SCHEMA = objectSchema(
+  { created: BOOLEAN_SCHEMA, authorization: STANDING_AUTHORIZATION_SCHEMA },
+  ['created', 'authorization'],
+);
+
+export const PAYMENTS_STANDING_DELETE_INPUT_SCHEMA = objectSchema(
+  { confirm: BOOLEAN_SCHEMA, id: STRING_SCHEMA },
+  ['confirm', 'id'],
+);
+export const PAYMENTS_STANDING_DELETE_OUTPUT_SCHEMA = objectSchema(
+  { id: STRING_SCHEMA, deleted: BOOLEAN_SCHEMA },
+  ['id', 'deleted'],
 );

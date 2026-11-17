@@ -43,7 +43,7 @@ import { createCardEntryPrompter, createPaymentCardHost, createPaymentCardComman
  */
 
 import type { CommandContext } from '../command-registry.ts';
-import { openPendingPaymentWindows } from './payments-pending.ts';
+import { approvePurchaseInAdvance, manageStandingAuthorizations, openPendingPaymentWindows } from './payments-pending.ts';
 import { ownerOperatorConnectionPolicy } from './operator-connection-policy.ts';
 
 import '@goodvibes-jev/engine/platform/platform/payments';
@@ -91,8 +91,10 @@ export const { startCardEntryFlow, runPaymentsCommand, registerPaymentCardComman
   promptFields: promptCardFields,
   status: renderCardStatus,
   pending: openPendingPaymentWindows,
+  approve: approvePurchaseInAdvance,
+  standing: manageStandingAuthorizations,
   remove: (ctx, id) => cardHost.remove(ctx, id),
-  description: 'Payment card setup and pending purchase approval/veto windows',
-  usage: '/payments [card [remove <id>]|status|pending]',
-  argsHint: '[card|status|pending]',
+  description: 'Payment card setup, pending purchase approval/veto windows, purchases approved in advance and standing authorisations for scheduled purchases',
+  usage: '/payments [card [remove <id>]|status|pending|approve <merchant> <item> <maximum>|standing [list|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]|remove <id>]]',
+  argsHint: '[card|status|pending|approve|standing]',
 });

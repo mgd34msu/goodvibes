@@ -374,7 +374,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/payments` | None | `/payments [card [remove <id>]\|status\|pending]` | Payment card setup and pending purchase approval/veto windows |
+| `/payments` | None | `/payments [card [remove <id>]\|status\|pending\|approve <merchant> <item> <maximum>\|standing [list\|add <shops> <item> <per-purchase> <per-period> <days> [<last day>]\|remove <id>]]` | Payment card setup, pending purchase approval/veto windows, purchases approved in advance, and standing authorisations that let a scheduled or triggered run buy within the shops, item and maximums you set |
 
 ## Permissions
 

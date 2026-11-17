@@ -93,6 +93,9 @@ export function renderSubscribedSection(occurrences: readonly SubscribedOccurren
   const lines = occurrences.map((o) => {
     const when = o.allDay ? o.start : o.start.slice(0, 16).replace('T', ' ');
     const loc = o.location ? `  at ${o.location}` : '';
+    if (o.repeatsNotShown) {
+      return `  [${o.subscription}] repeats since ${when}, dates not shown (the feed's repeat rule is not supported)  ${o.title}${loc}  (read-only)`;
+    }
     const marker = o.recurrenceNotFullyExpanded ? '  [recurrence not fully expanded]' : '';
     return `  [${o.subscription}] ${when}  ${o.title}${loc}${marker}  (read-only)`;
   });

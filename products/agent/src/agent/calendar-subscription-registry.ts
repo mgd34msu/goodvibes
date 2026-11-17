@@ -3,7 +3,7 @@ import type { ShellPathService } from '@/runtime/index.ts';
 import { readJsonStore, runStoreFileUpdate, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes-jev/engine/terminal-shell/agent-turn/store-file';
 import {
   SubscriptionStore,
-  expandEvent,
+  expandEvents,
   maskFeedUrl,
   recordCalendarEventIngest,
   DEFAULT_REFRESH_INTERVAL_MS,
@@ -21,7 +21,7 @@ import type { SecretScope } from '../config/secrets.ts';
  * feeds, Google "secret address", Outlook published .ics, or any .ics URL).
  *
  * The parse/RRULE/fetch-status engine is the platform's `platform/calendar`
- * (SubscriptionStore + expandEvent). This class owns the two things the platform
+ * (SubscriptionStore + expandEvents). This class owns the two things the platform
  * deliberately leaves to the consumer:
  *  - PERSISTENCE. Feed events are cached to a JSON store next to the local
  *    calendar so `/calendar list` merges them with no network call; subscription
@@ -132,6 +132,12 @@ export interface SubscribedOccurrence {
   readonly tzid?: string;
   /** True when the source RRULE was not fully expanded, shown as a marker. */
   readonly recurrenceNotFullyExpanded: boolean;
+  /**
+   * True on a window row for a repeating series whose rule could not be
+   * expanded and that began before the window: it may repeat inside the window,
+   * but no occurrence can be shown. `start` is when the series began.
+   */
+  readonly repeatsNotShown?: boolean;
 }
 
 export type SubscribeResult =
@@ -599,28 +605,31 @@ export class CalendarSubscriptionRegistry {
   /**
    * All subscribed occurrences within [fromDate, toDate] (inclusive, 'YYYY-MM-DD'),
    * flattened and source-labeled for a merged read-only view. Recurring events are
-   * expanded through the platform; an unsupported RRULE surfaces its seed with a marker.
+   * expanded through the platform; an unsupported RRULE surfaces its seed with a marker
+   * when the seed is in the window, and otherwise one `repeatsNotShown` row, so a series
+   * that began earlier does not vanish from the agenda.
    */
   public occurrencesInWindow(fromDate: string, toDate: string): readonly SubscribedOccurrence[] {
     const file = this.readStore();
     const out: SubscribedOccurrence[] = [];
     for (const s of file.subscriptions) {
       this.recordReadOfFeedContent(s);
-      for (const event of s.events) {
-        const occ = expandEvent(event, { from: fromDate, to: toDate });
-        const notExpanded = event.recurrence?.expansion === 'unsupported';
-        for (const o of occ) {
-          out.push({
-            id: `sub:${s.name}:${event.uid}`,
-            subscription: s.name,
-            title: event.summary,
-            start: o.start,
-            allDay: event.start.kind === 'date',
-            ...(event.location !== undefined ? { location: event.location } : {}),
-            ...(event.start.zone === 'tzid' && event.start.tzid !== undefined ? { tzid: event.start.tzid } : {}),
-            recurrenceNotFullyExpanded: notExpanded,
-          });
-        }
+      const row = (event: CalendarEvent, start: string): SubscribedOccurrence => ({
+        id: `sub:${s.name}:${event.uid}`,
+        subscription: s.name,
+        title: event.summary,
+        start,
+        allDay: event.start.kind === 'date',
+        ...(event.location !== undefined ? { location: event.location } : {}),
+        ...(event.start.zone === 'tzid' && event.start.tzid !== undefined ? { tzid: event.start.tzid } : {}),
+        recurrenceNotFullyExpanded: event.recurrence?.expansion === 'unsupported',
+      });
+      const { occurrences, unexpandedSeries } = expandEvents(s.events, { from: fromDate, to: toDate });
+      for (const o of occurrences) out.push(row(o.event, o.start));
+      // A series whose seed is in the window already shows as that seed; one that began earlier gets its own row.
+      const shown = new Set(occurrences.map((o) => o.event));
+      for (const series of unexpandedSeries) {
+        if (!shown.has(series)) out.push({ ...row(series, series.start.value), repeatsNotShown: true });
       }
     }
     return out.sort((a, b) => a.start.localeCompare(b.start));

@@ -197,28 +197,18 @@ function assertKnowledgeWriteCurrent(assertCurrent: (() => void) | undefined): v
   assertSynchronousJudgmentGuard(assertCurrent, () => new KnowledgeNodeActivationHeldError('stale'));
 }
 
-const nativePublicationApply = Reflect.apply;
-const nativePublicationGet = WeakMap.prototype.get, nativePublicationSet = WeakMap.prototype.set;
-const nativePublicationHas = WeakSet.prototype.has, nativePublicationAdd = WeakSet.prototype.add;
-const nativePredecessorDeref = WeakRef.prototype.deref;
-
+/**
+ * A store's SQL handle, path and node map for the module functions below that
+ * act on one store. Only a constructed store has an entry, so a copied object
+ * presenting the same path gets nothing.
+ */
 interface NativeArtifactReferenceStore {
   readonly sqlite: SQLiteStore;
   readonly path: string;
   readonly nodes: ReadonlyMap<string, KnowledgeNodeRecord>;
-  readonly sqliteSlot: PropertyDescriptor;
-  readonly pathSlot: PropertyDescriptor;
-  readonly nodesSlot: PropertyDescriptor;
+  readonly closed: () => boolean;
 }
 const nativeArtifactReferenceStores = new WeakMap<KnowledgeStore, NativeArtifactReferenceStore>();
-const nativeHomeGraphSourceRead = SQLiteStore.prototype.readHomeGraphSourceCandidates;
-const nativeHomeGraphNodeRead = SQLiteStore.prototype.readHomeGraphNodeCandidates;
-const nativeSemanticFactIdentityRead = SQLiteStore.prototype.readSemanticFactIdentityCandidates;
-const nativeRecordGenerationRead = SQLiteStore.prototype.readPersistedRecordGenerations;
-const nativeEdgeGenerationRead = SQLiteStore.prototype.readPersistedEdgeGenerations;
-const nativeNodeMapGet = Map.prototype.get;
-const nativeArtifactReferenceRead = SQLiteStore.prototype.withArtifactReferenceReads;
-const nativeArtifactReferenceSubscribe = SQLiteStore.prototype.subscribeArtifactReferenceClean;
 const homeGraphSnapshotGroupWriters = new WeakMap<KnowledgeStore,
   (original: KnowledgeNodeRecord, groups: readonly string[], assertCurrent: () => void) => Promise<KnowledgeNodeRecord>>();
 
@@ -234,10 +224,10 @@ const nativeNodePublications = new WeakMap<KnowledgeNodeRecord, NativeNodePublic
 /** Only actual native commits populate this registry; no serialized receipt can do so. */
 export function hasKnowledgeNodePublication(store: KnowledgeStore, record: KnowledgeNodeRecord,
   previous: KnowledgeNodeRecord | undefined): boolean {
-  const publication: NativeNodePublication | undefined = nativePublicationApply(nativePublicationGet, nativeNodePublications, [record]);
+  const publication: NativeNodePublication | undefined = nativeNodePublications.get(record);
   if (!publication || publication.store !== store) return false;
   return publication.previous === undefined ? previous === undefined
-    : previous !== undefined && nativePublicationApply(nativePredecessorDeref, publication.previous, []) === previous;
+    : previous !== undefined && publication.previous.deref() === previous;
 }
 
 /** The actual native SQL publication image, including a pending batch write.
@@ -246,7 +236,7 @@ export function hasKnowledgeNodePublication(store: KnowledgeStore, record: Knowl
 export function knowledgeNodePublicationGeneration(store: KnowledgeStore, record: KnowledgeNodeRecord,
   previous: KnowledgeNodeRecord | undefined): string | null {
   if (!hasKnowledgeNodePublication(store, record, previous)) return null;
-  const publication: NativeNodePublication | undefined = nativePublicationApply(nativePublicationGet, nativeNodePublications, [record]);
+  const publication: NativeNodePublication | undefined = nativeNodePublications.get(record);
   const snapshot = publication?.snapshot;
   return snapshot?.raw && snapshot.record && sameKnowledgeRecord(record, snapshot.record) ? snapshot.generation : null;
 }
@@ -342,15 +332,10 @@ export class KnowledgeStore {
     };
     this.declareSemanticSourceFormat = declareNativeData ? () => declareNativeData('knowledge-semantic-source-revisions-v2') : undefined;
     this.sqlite = new SQLiteStore(this.dbPath, { beforePersist: () => declareNativeData?.('knowledge-schema-v17'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
-    nativePublicationApply(nativePublicationSet, nativeArtifactReferenceStores, [this, Object.freeze({
-      sqlite: this.sqlite, path: this.dbPath, nodes: this.nodes,
-      sqliteSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'sqlite')!),
-      pathSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'dbPath')!),
-      nodesSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'nodes')!),
-    })]);
-    nativePublicationApply(nativePublicationSet, homeGraphSnapshotGroupWriters, [this,
-      (original: KnowledgeNodeRecord, groups: readonly string[], assertCurrent: () => void) => this.#updateHomeGraphSnapshotGroups(original, groups, assertCurrent)]);
-    nativePublicationApply(nativePublicationAdd, nativeNodePublicationOwners, [this]);
+    nativeArtifactReferenceStores.set(this, Object.freeze({ sqlite: this.sqlite, path: this.dbPath, nodes: this.nodes, closed: () => this.closed }));
+    homeGraphSnapshotGroupWriters.set(this,
+      (original: KnowledgeNodeRecord, groups: readonly string[], assertCurrent: () => void) => this.#updateHomeGraphSnapshotGroups(original, groups, assertCurrent));
+    nativeNodePublicationOwners.add(this);
     void this.init().catch((error: unknown) => {
       logger.error('[knowledge-store] initialization failed', {
         path: this.dbPath,
@@ -446,14 +431,8 @@ export class KnowledgeStore {
 
   /** Native snapshot bookkeeping only. No source/body/status is observed anew. */
   async #updateHomeGraphSnapshotGroups(original: KnowledgeNodeRecord, groups: readonly string[], assertMembershipCurrent: () => void): Promise<KnowledgeNodeRecord> {
-    const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [this]);
     const assertOwner = () => {
-      if (!core || this.closed) throw new KnowledgeNodeActivationHeldError('stale');
-      for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot]] as const) {
-        const actual = Object.getOwnPropertyDescriptor(this, name);
-        if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
-          || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new KnowledgeNodeActivationHeldError('stale');
-      }
+      if (this.closed) throw new KnowledgeNodeActivationHeldError('stale');
     };
     assertOwner(); assertKnowledgeWriteCurrent(assertMembershipCurrent); assertOwner();
     await this.init();
@@ -818,23 +797,13 @@ export class KnowledgeStore {
   /** Current native tuple/ID bookkeeping, including original pending rows.
    * This lookup cannot issue persisted support or record-admission evidence. */
   getSemanticFactIdentityCandidates(selector: SemanticFactSelector): readonly KnowledgeNodeRecord[] {
-    const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [this]);
-    if (!core || this.closed) throw new SemanticIdentityHeldError('stale');
-    const check = () => {
-      for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot], ['nodes', core.nodesSlot]] as const) {
-        const actual = Object.getOwnPropertyDescriptor(this, name);
-        if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
-          || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new SemanticIdentityHeldError('stale');
-      }
-      if (this.closed || Object.hasOwn(core.sqlite, 'readSemanticFactIdentityCandidates')
-        || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'readSemanticFactIdentityCandidates')?.value !== nativeSemanticFactIdentityRead) throw new SemanticIdentityHeldError('stale');
-    };
-    check(); const result = (nativePublicationApply(nativeSemanticFactIdentityRead, core.sqlite, [selector]) as ReturnType<SQLiteStore['exec']>)[0]; check();
+    const check = () => { if (this.closed) throw new SemanticIdentityHeldError('stale'); };
+    check(); const result = this.sqlite.readSemanticFactIdentityCandidates(selector)[0];
     const candidates: KnowledgeNodeRecord[] = [];
     for (const values of result?.values ?? []) {
       if (!result) throw new SemanticIdentityHeldError('stale');
       const snapshot = knowledgeRecordSnapshotFromRows('node', [{ columns: result.columns, values: [values] }]);
-      const record = snapshot.record ? nativePublicationApply(nativeNodeMapGet, core.nodes, [snapshot.record.id]) as KnowledgeNodeRecord | undefined : undefined;
+      const record = snapshot.record ? this.nodes.get(snapshot.record.id) : undefined;
       if (!record || !snapshot.record || snapshot.generation === null || !sameKnowledgeRecord(record, snapshot.record)) throw new SemanticIdentityHeldError('stale');
       candidates.push(record);
     }
@@ -862,17 +831,8 @@ export class KnowledgeStore {
   /** Actual current owned tuples for mutation bookkeeping, including pending
    * native writes. It cannot issue persisted semantic evidence or permissions. */
   getHomeGraphNodeCandidates(selector: HomeGraphNodeSelector): readonly KnowledgeNodeRecord[] {
-    const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [this]);
-    if (!core || this.closed) throw new HomeGraphIdentityHeldError('stale');
-    const check = () => {
-      for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot]] as const) {
-        const actual = Object.getOwnPropertyDescriptor(this, name);
-        if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
-          || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new HomeGraphIdentityHeldError('stale');
-      }
-      if (this.closed || Object.hasOwn(core.sqlite, 'readHomeGraphNodeCandidates') || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'readHomeGraphNodeCandidates')?.value !== nativeHomeGraphNodeRead) throw new HomeGraphIdentityHeldError('stale');
-    };
-    check(); const result = (nativePublicationApply(nativeHomeGraphNodeRead, core.sqlite, [selector]) as ReturnType<SQLiteStore['exec']>)[0]; check();
+    const check = () => { if (this.closed) throw new HomeGraphIdentityHeldError('stale'); };
+    check(); const result = this.sqlite.readHomeGraphNodeCandidates(selector)[0];
     const candidates: KnowledgeNodeRecord[] = [];
     for (const values of result?.values ?? []) {
       if (!result) throw new HomeGraphIdentityHeldError('stale');
@@ -887,17 +847,8 @@ export class KnowledgeStore {
   /** Actual owned prefix source tuples, including pending native writes.
    * This cannot mint persisted semantic/execution evidence or permissions. */
   getHomeGraphSourceCandidates(selector: HomeGraphSourceSelector): readonly KnowledgeSourceRecord[] {
-    const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [this]);
-    if (!core || this.closed) throw new HomeGraphIdentityHeldError('stale');
-    const check = () => {
-      for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot]] as const) {
-        const actual = Object.getOwnPropertyDescriptor(this, name);
-        if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
-          || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new HomeGraphIdentityHeldError('stale');
-      }
-      if (this.closed || Object.hasOwn(core.sqlite, 'readHomeGraphSourceCandidates') || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'readHomeGraphSourceCandidates')?.value !== nativeHomeGraphSourceRead) throw new HomeGraphIdentityHeldError('stale');
-    };
-    check(); const result = (nativePublicationApply(nativeHomeGraphSourceRead, core.sqlite, [selector]) as ReturnType<SQLiteStore['exec']>)[0]; check();
+    const check = () => { if (this.closed) throw new HomeGraphIdentityHeldError('stale'); };
+    check(); const result = this.sqlite.readHomeGraphSourceCandidates(selector)[0];
     const candidates: KnowledgeSourceRecord[] = [];
     for (const values of result?.values ?? []) {
       if (!result) throw new HomeGraphIdentityHeldError('stale');
@@ -1037,11 +988,11 @@ export class KnowledgeStore {
   }
 
   getRecordGenerations(selectors: readonly PersistedKnowledgeRecordSelector[]): readonly (string | null)[] {
-    return nativePublicationApply(nativeRecordGenerationRead, this.sqlite, [selectors]);
+    return this.sqlite.readPersistedRecordGenerations(selectors);
   }
 
   getEdgeGenerations(ids: readonly string[]): readonly (string | null)[] {
-    return nativePublicationApply(nativeEdgeGenerationRead, this.sqlite, [ids]);
+    return this.sqlite.readPersistedEdgeGenerations(ids);
   }
 
   getNodeActivationCache(nodeId: string) {
@@ -1315,13 +1266,13 @@ export class KnowledgeStore {
 
   private async applyPreparedIngestOwned(input: KnowledgeImportInput, prepareGraph: PrepareKnowledgeImportGraph,
     options: KnowledgeNodeActivationOptions = {}, onCommitted?: () => void): Promise<KnowledgeImportReceipt> {
-    if (!nativePublicationApply(nativePublicationHas, nativeNodePublicationOwners, [this])) throw new KnowledgeNodeActivationHeldError('stale');
+    if (!nativeNodePublicationOwners.has(this)) throw new KnowledgeNodeActivationHeldError('stale');
     input = copyKnowledgeRepresentation(input, captureKnowledgeStoreInput(input));
     await this.init();
     return applyKnowledgeImport(this, { sqlite: this.sqlite, sources: this.sources, extractions: this.extractions, nodes: this.nodes,
       nodeRevisions: this.nodeRevisions, edges: this.edges, issues: this.issues, beforeNodeWrite: this.beforeSemanticNodeWrite, beforeIssueWrite: this.beforeIssueWrite,
       nodePublished: (record, previous, snapshot) => {
-        nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: previous ? new WeakRef(previous) : undefined, snapshot })]);
+        nativeNodePublications.set(record, Object.freeze({ store: this, previous: previous ? new WeakRef(previous) : undefined, snapshot }));
       } }, input,
     (node, original) => this.prepareNodeMutation(node, undefined, original),
     this.nodeActivationConfidenceFloor, this.nodeActivationScope, options, prepareGraph, onCommitted);
@@ -1330,7 +1281,7 @@ export class KnowledgeStore {
   assertPreparedNodeWrites(prepared: KnowledgePreparedNodeWrites): void { assertPreparedNodeWrites(this, prepared, this.nodeActivationScope); }
 
   async upsertPreparedNode(prepared: KnowledgePreparedNodeWrites, index: number): Promise<KnowledgeNodeRecord> {
-    if (!nativePublicationApply(nativePublicationHas, nativeNodePublicationOwners, [this])) throw new KnowledgeNodeActivationHeldError('stale');
+    if (!nativeNodePublicationOwners.has(this)) throw new KnowledgeNodeActivationHeldError('stale');
     await this.init();
     const { existing, record, now, observationEvidence } = preparedNodeWrite(this, prepared, index, this.nodeActivationScope);
     if (record === existing) {
@@ -1351,7 +1302,7 @@ export class KnowledgeStore {
       retainKnowledgeNodeObservation(existing, record, observationEvidence);
       staged.commit();
       if (staged.cacheChanged) await this.save();
-      nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot, current })]);
+      nativeNodePublications.set(record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot, current }));
       return record;
     }
     // Everything after the final guard and before save is synchronous.
@@ -1379,7 +1330,7 @@ export class KnowledgeStore {
     this.nodes.set(record.id, record);
     staged.commit();
     await this.save();
-    nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot, current })]);
+    nativeNodePublications.set(record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot, current }));
     return record;
   }
 
@@ -2139,18 +2090,12 @@ export class KnowledgeStore {
 export function captureKnowledgePendingNode(store: KnowledgeStore, record: KnowledgeNodeRecord): {
   readonly generation: string; readonly state: () => 'pending' | 'published';
 } | undefined {
-  const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [store]);
-  const publication: NativeNodePublication | undefined = nativePublicationApply(nativePublicationGet, nativeNodePublications, [record]);
+  const core = nativeArtifactReferenceStores.get(store);
+  const publication: NativeNodePublication | undefined = nativeNodePublications.get(record);
   if (!core || !publication?.current || publication.store !== store || !publication.snapshot.generation
     || !publication.snapshot.record || !sameKnowledgeRecord(record, publication.snapshot.record)) return undefined;
   const check = () => {
-    for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot], ['nodes', core.nodesSlot]] as const) {
-      const actual = Object.getOwnPropertyDescriptor(store, name);
-      if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
-        || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new KnowledgeNodeActivationHeldError('stale');
-    }
-    if (Object.getOwnPropertyDescriptor(store, 'closed')?.value !== false
-      || nativePublicationApply(nativeNodeMapGet, core.nodes, [record.id]) !== record
+    if (core.closed() || core.nodes.get(record.id) !== record
       || !sameKnowledgeRecord(record, publication.snapshot.record)) throw new KnowledgeNodeActivationHeldError('stale');
     return publication.current!();
   };
@@ -2158,37 +2103,27 @@ export function captureKnowledgePendingNode(store: KnowledgeStore, record: Knowl
   return Object.freeze({ generation: publication.snapshot.generation, state: check });
 }
 
-const nativeArtifactReferenceInit = KnowledgeStore.prototype.init;
-/** Actual native store only: a copied object or replacement database slot cannot
- * acquire a reference-reader capability by presenting an equal filesystem path. */
+/** A constructed store only: a copied object cannot acquire a reference-reader
+ * capability by presenting an equal filesystem path. */
 export function captureKnowledgeArtifactReferenceOwner(store: KnowledgeStore): KnowledgeArtifactReferenceOwner {
-  const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [store]);
+  const core = nativeArtifactReferenceStores.get(store);
   if (!core) throw new Error('Knowledge artifact reference owner is unavailable.');
   const current = () => {
-    for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot]] as const) {
-      const actual = Object.getOwnPropertyDescriptor(store, name);
-      if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
-        || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new Error('Knowledge artifact reference owner changed.');
-    }
-    const closed = Object.getOwnPropertyDescriptor(store, 'closed');
-    if (!closed || !('value' in closed) || closed.value !== false
-      || Object.getOwnPropertyDescriptor(KnowledgeStore.prototype, 'init')?.value !== nativeArtifactReferenceInit || Object.hasOwn(store, 'init')
-      || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'withArtifactReferenceReads')?.value !== nativeArtifactReferenceRead || Object.hasOwn(core.sqlite, 'withArtifactReferenceReads')
-      || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'subscribeArtifactReferenceClean')?.value !== nativeArtifactReferenceSubscribe || Object.hasOwn(core.sqlite, 'subscribeArtifactReferenceClean')) throw new Error('Knowledge artifact reference owner is closed or changed.');
+    if (core.closed()) throw new Error('Knowledge artifact reference owner is closed.');
   };
   current();
   return Object.freeze({
     path: core.path,
     subscribeClean(listener: () => void): () => void {
       current();
-      return nativePublicationApply(nativeArtifactReferenceSubscribe, core.sqlite, [listener]) as () => void;
+      return core.sqlite.subscribeArtifactReferenceClean(listener);
     },
     async withReads<T>(ids: readonly string[], operation: (referenced: readonly string[], assertCurrent: () => void) => Promise<T>) {
-      current(); await nativePublicationApply(nativeArtifactReferenceInit, store, []); current();
-      const result = await nativePublicationApply(nativeArtifactReferenceRead, core.sqlite, [ids, async (referenced: readonly string[], sqliteCurrent: () => void) => {
+      current(); await store.init(); current();
+      const result = await core.sqlite.withArtifactReferenceReads(ids, async (referenced: readonly string[], sqliteCurrent: () => void) => {
         const assertCurrent = () => { current(); sqliteCurrent(); };
         assertCurrent(); const value = await operation(referenced, assertCurrent); assertCurrent(); return value;
-      }]) as { readonly kind: 'local-changes' } | { readonly kind: 'completed'; readonly value: T };
+      });
       current(); return result;
     },
   });
@@ -2199,8 +2134,7 @@ export function captureKnowledgeArtifactReferenceOwner(store: KnowledgeStore): K
  * exports and operator methods. Caller-built store objects cannot issue it. */
 export function updateHomeGraphSnapshotGroups(store: KnowledgeStore, original: KnowledgeNodeRecord,
   groups: readonly string[], assertCurrent: () => void): Promise<KnowledgeNodeRecord> {
-  const write: ((record: KnowledgeNodeRecord, groups: readonly string[], assertCurrent: () => void) => Promise<KnowledgeNodeRecord>) | undefined =
-    nativePublicationApply(nativePublicationGet, homeGraphSnapshotGroupWriters, [store]);
+  const write = homeGraphSnapshotGroupWriters.get(store);
   if (!write) throw new KnowledgeNodeActivationHeldError('stale');
   return write(original, groups, assertCurrent);
 }

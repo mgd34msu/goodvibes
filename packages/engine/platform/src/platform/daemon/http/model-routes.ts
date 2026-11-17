@@ -147,8 +147,6 @@ export interface ModelRouteContext {
   readonly configManager: ConfigManager;
   readonly runtimeBus: RuntimeEventBus;
   readonly parseJsonBody: (req: Request) => Promise<Record<string, unknown> | Response>;
-  /** Admin gate for the route that changes the model for every surface. Reads stay open to any authenticated caller. */
-  readonly requireAdmin?: ((req: Request) => Response | null) | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,10 +319,8 @@ async function handlePatchCurrentModel(
   req: Request,
   context: ModelRouteContext,
 ): Promise<Response> {
+  // Admin only: `models.current.set` is an admin method in the catalog, which the gateway binding enforces before this runs.
   const { providerRegistry, configManager } = context;
-
-  const adminError = context.requireAdmin?.(req) ?? null;
-  if (adminError) return adminError;
 
   const bodyOrErr = await context.parseJsonBody(req);
   if (bodyOrErr instanceof Response) return bodyOrErr;

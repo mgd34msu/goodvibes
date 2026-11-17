@@ -122,9 +122,10 @@ export const builtinGatewayModelMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'models.current.set',
     title: 'Switch the Current Model',
-    description: 'Switch the daemon\'s current model live, by the registry key `models.list` returns. The switch applies to the next turn on every surface this daemon serves and is persisted, so it survives a restart; `persisted` says whether the write to settings succeeded. An unknown key is refused with MODEL_NOT_FOUND and a provider with no usable credentials with PROVIDER_NOT_CONFIGURED, naming the environment variables it looked for, a caller must not have to guess which of the two happened. An optional `effort` persists a reasoning level with the selection: it is validated against the known severity ladder here, and each turn maps it onto the active model\'s real options, snapping down and never promoting.',
+    description: 'Switch the daemon\'s current model live, by the registry key `models.list` returns. The switch applies to the next turn on every surface this daemon serves and is persisted, so it survives a restart; `persisted` says whether the write to settings succeeded. An unknown key is refused with MODEL_NOT_FOUND and a provider with no usable credentials with PROVIDER_NOT_CONFIGURED, naming the environment variables it looked for, a caller must not have to guess which of the two happened. An optional `effort` persists a reasoning level with the selection: it is validated against the known severity ladder here, and each turn maps it onto the active model\'s real options, snapping down and never promoting. It changes the model for every surface, so it needs an admin.',
     category: 'providers',
     scopes: ['write:providers'],
+    access: 'admin',
     dangerous: true,
     http: { method: 'PATCH', path: '/api/models/current' },
     inputSchema: objectSchema({ registryKey: STRING_SCHEMA, effort: { anyOf: [STRING_SCHEMA, { type: 'null' }] } }, ['registryKey']),

@@ -122,7 +122,6 @@ export const REVIEW_PACKET_PRESET_PURPOSE = 'agent-review-packet-preset';
 export const REVIEW_PACKET_PRESET_SCHEMA = 'goodvibes-agent.review-packet-preset';
 export const DEFAULT_LIST_LIMIT = 20;
 export const MAX_LIST_LIMIT = 100;
-export const MAX_RELATED_ARTIFACTS = 30;
 export const MAX_FRESHNESS_ARTIFACT_SCAN = 500;
 export const PURPOSE_DOCUMENT_EXPORT = 'agent-document-export';
 export const PURPOSE_MODEL_COMPARE = 'agent-model-compare';
@@ -158,10 +157,6 @@ export function readStringList(value: unknown): readonly string[] {
     if (!entry || seen.has(entry)) continue;
     seen.add(entry);
     result.push(entry);
-  }
-  // Cutting the list would drop evidence without a word, so an over-long one is refused.
-  if (result.length > MAX_RELATED_ARTIFACTS) {
-    throw new Error(`relatedArtifactIds accepts at most ${MAX_RELATED_ARTIFACTS} distinct ids; ${result.length} were given. Nothing was saved. Save the packet with the ${MAX_RELATED_ARTIFACTS} that matter most, or split it into two presets.`);
   }
   return result;
 }

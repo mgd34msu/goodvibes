@@ -6,7 +6,7 @@ import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
-import { captureNativeConversationInput, type NativeConversationInput, type ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
+import type { NativeConversationInput, ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import { formatRefusal, refusal } from '@goodvibes-jev/engine/errors';
 import { routeNativeConversationInput, dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
@@ -35,8 +35,7 @@ import './input/command-registry.ts';
 import './input/commands.ts';
 import '@goodvibes-jev/engine/platform/platform/tools';
 import './input/input-history.ts';
-import { ShellContextHold, ShellPassthrough, SHELL_USAGE_HINT, withShellContext } from './input/shell-passthrough.ts';
-import { applyComposerCapture, readComposerMarker, shouldSendAfterCapture } from '@goodvibes-jev/engine/terminal-shell/submission-router';
+import { ShellContextHold, ShellPassthrough, withShellContext } from './input/shell-passthrough.ts';
 import { buildShellFooter, estimateShellFooterHeight } from './renderer/shell-surface.ts';
 import { HEADER_GAP_ROWS, withHeaderGap } from './renderer/header-line.ts';
 import { TranscriptScroll, mainBackToBottom, transcriptEscape } from './shell/transcript-scroll.ts';
@@ -78,6 +77,7 @@ import { applyInitialTuiCliState, getInteractiveTerminalLaunchError, reportFatal
 import { writeFatalLine } from './utils/fatal-boot-write.ts';
 import { wireSpokenTurnRuntime } from './audio/spoken-turn-wiring.ts';
 import { installVoiceCapture } from './shell/voice-capture-shell.ts';
+import { createOwnerSubmission } from './shell/owner-submission.ts';
 import { createProcessFaultHandlers } from './runtime/process-fault-capture.ts';
 import { attachSpokenTurnModelRouting, createSpokenTurnInputOptions } from './audio/spoken-turn-model-routing.ts';
 import { bindOwnerInput } from '@goodvibes-jev/engine/terminal-shell/companion-input';
@@ -601,12 +601,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     transcript.toBottom(); // Re-lock on user input
   };
 
-  /**
-   * The composer's own grammar, applied only to what was typed into it:
-   * `@model:` at either end switches the model, `!#` pins a memory, `# ` saves a
-   * note without sending, `!` runs a shell command. Everything else is sent
-   * through `sendTurn` as typed.
-   */
   // A conversation turn carries text. `!@file` and `@path`/URL references are
   // already text by the time the composer submits (the composer expands them,
   // each file capped with the cut stated), and held `!` output goes in front of
@@ -627,10 +621,13 @@ async function main(prepared: PreparedShellCliRuntime) {
     return true;
   };
 
-  const submitComposerText = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
-    prepareSubmission();
-    const draft = options.source?.text ?? text;
-    let processedText = applyAtModelSwitches(text, {
+  // Typed composer text has a grammar (`@model:`, `!`, `!#`, `# `); text sent as given and speech do not.
+  const submission = createOwnerSubmission({
+    shellPassthrough,
+    workingDir,
+    sessionMemoryStore: ctx.services.sessionMemoryStore,
+    prepare: prepareSubmission,
+    applyModelSwitches: (text) => applyAtModelSwitches(text, {
       providerRegistry,
       configManager,
       onModelChanged: (model) => {
@@ -638,63 +635,16 @@ async function main(prepared: PreparedShellCliRuntime) {
         runtime.provider = model.provider;
       },
       notify: (message) => systemMessageRouter.high(message),
-    });
-    // The one reading of the composer's markers, the same one that labels the composer.
-    const marker = readComposerMarker(processedText);
-    if (marker.kind === 'shell') {
-      const command = marker.body;
-      if (!command) {
-        systemMessageRouter.high(SHELL_USAGE_HINT);
-        render();
-        return;
-      }
-      systemMessageRouter.high(`[Shell] $ ${command}`);
-      render();
-      shellCommandsRunning += 1;
-      void shellPassthrough
-        .run(command, workingDir)
-        .then((result) => systemMessageRouter.high(result.display))
-        .catch((shellErr: unknown) => systemMessageRouter.high(`[Shell] Failed to run: ${summarizeError(shellErr)}`, 'error'))
-        .finally(() => { shellCommandsRunning -= 1; render(); });
-      return;
-    }
-    if (refuseUnsendable(draft, options.source, content)) return;
-    if (marker.kind === 'memory-pin' || marker.kind === 'note') {
-      // `!#` pins and sends; `# ` saves a note and sends nothing.
-      const capture = applyComposerCapture(processedText, {
-        sessionMemoryStore: ctx.services.sessionMemoryStore,
-        notify: (message) => systemMessageRouter.high(message),
-      });
-      if (!shouldSendAfterCapture(capture, false)) {
-        render();
-        return;
-      }
-      processedText = capture.text;
-    }
-    // Model directives and the memory markers are the composer's own grammar; what remains is what the user sent.
-    // A typed message answers the contract question on offer, unless it was dismissed.
-    const answer: { readonly answersContractQuestion?: string } = options.spokenOutput ? {} : contractQuestions.answerOptions();
-    // A refused message goes back to the composer as typed, not with its references expanded
-    // into file text; a `!#` pin already saved is not repeated on the resend.
-    const expandedReferences = options.source?.unsupportedSources.some((part) => part.kind === 'file' || part.kind === 'context') === true;
-    const resendable = (unsent: string): string => !expandedReferences ? unsent
-      : marker.kind === 'memory-pin' ? draft.replace(/^\s*!#\s*/, '') : draft;
-    void sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined, {
-      notSent: (unsent) => restoreDraft(resendable(unsent)),
-      attachShellOutput: true,
-    });
-  };
-
-  /**
-   * Send text as a turn exactly as given. Forms, speech and the commands that
-   * submit a prompt use this, so text a person wrote into a field or said aloud
-   * is never read as composer syntax.
-   */
-  const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
-    prepareSubmission();
-    if (refuseUnsendable(text, options.source, content)) return;
-    void sendTurn(text, options, undefined, { attachShellOutput: true });
-  };
+    }),
+    refuseUnsendable,
+    answerOptions: () => contractQuestions.answerOptions(),
+    sendTurn: (text, options, turnOptions, how) => sendTurn(text, options, turnOptions, how),
+    restoreDraft: (text) => restoreDraft(text),
+    onShellCommandsRunning: (running) => { shellCommandsRunning = running; },
+    notify: (message, level) => systemMessageRouter.high(message, level),
+    render: () => render(),
+  });
+  const { submitComposerText, submitTurn } = submission;
 
   /** The reason last shown for running turns in this process; cleared once the host takes a message. */
   let localTurnReason: string | undefined;
@@ -1071,7 +1021,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     sessionId: runtime.sessionId,
     unsubs,
     buffer: input,
-    submitTurn: (text) => submitTurn(text, undefined, { source: captureNativeConversationInput(text) }),
+    submitTurn: submission.submitSpeech,
     notify: (m) => {
       systemMessageRouter.high(m);
       render();

@@ -12,7 +12,7 @@ import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
 import type { HostPairingController } from './shell/host-pairing-controller.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
-import { captureNativeConversationInput, type ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
+import type { ProductInputContext } from '@goodvibes-jev/engine/terminal-shell/native';
 import { dispatchNativeConversationTurn, describeFailedNativeDispatch } from './runtime/native-conversation-ingress.ts';
 import { readTuiConfigValue, subscribeTuiConfigValue } from './config/host-settings.ts';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
@@ -93,6 +93,7 @@ import type { PreparedShellCliRuntime } from './cli/entrypoint.ts';
 import { applyInitialTuiCliState, reportFatalStartupError } from './cli/tui-startup.ts';
 import { applyConfiguredHitlMode, applyTerminalRuntimeConfigDefaults } from '@goodvibes-jev/engine/terminal-shell';
 import { installVoiceCapture } from './shell/voice-capture-shell.ts';
+import { createOwnerSubmission } from './shell/owner-submission.ts';
 import { allowTerminalWrite, installFullScreenTerminalOutputGuard } from '@goodvibes-jev/engine/terminal-shell/terminal-output-guard';
 import { installProcessLifecycle } from './runtime/process-lifecycle.ts';
 import { createRenderScheduler, installTerminalExitGuards } from '@goodvibes-jev/engine/terminal-shell';
@@ -106,9 +107,7 @@ import { wireTurnEventHandlers } from './core/turn-event-wiring.ts';
 import { createUserTurnOwner, type FailoverRetry } from './core/user-turn.ts';
 import { resolveContextStatusHint } from './renderer/context-status-hint.ts';
 import { isEffectiveDangerMode } from '@goodvibes-jev/engine/platform/platform/config';
-import { applyComposerCapture, splitAtModelDirectives, shouldSendAfterCapture } from './input/composer-capture.ts';
-import { readComposerMarker } from '@goodvibes-jev/engine/terminal-shell/submission-router';
-import { ShellPassthrough, SHELL_USAGE_HINT } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
+import { ShellPassthrough } from '@goodvibes-jev/engine/terminal-shell/shell-passthrough';
 import { makeComposerEditorOpener, makeFileEditorOpener } from './input/composer-editor.ts';
 import { evaluateSessionMaintenance } from '@/runtime/index.ts';
 import { createCancelGeneration, runOwnedTurnRetry } from './core/turn-cancellation.ts';
@@ -557,65 +556,19 @@ async function main(prepared: PreparedShellCliRuntime) {
     conversation.dismissSplash(); // owner rule: any submission retires the splash for the run
   };
 
-  /** Text typed into the composer: its grammar (`@model:`, `!`, `!#`, `# `) applies. */
-  const submitInput = (text: string, content?: ContentPart[], options: ProductInputContext = {}) => {
-    beginSubmission();
-    const directives = splitAtModelDirectives(text);
-    if (directives.models.length > 0) {
-      void switchThenSubmit(directives.models, directives.text, content, options);
-      return;
-    }
-    submitCaptured(text, content, options);
-  };
-
-  // Composer markers, read once by the shared router that also labels the composer:
-  // `!` runs a shell command (typed input only, never speech), `!#` pins + sends,
-  // `# ` saves a note without sending.
-  const submitCaptured = (text: string, content: ContentPart[] | undefined, options: ProductInputContext): void => {
-    const marker = readComposerMarker(text);
-    if (marker.kind === 'shell' && !options.spokenOutput) {
-      runShellCommand(marker.body);
-      return;
-    }
-    const capture = applyComposerCapture(text, {
-      sessionMemoryStore: ctx.services.sessionMemoryStore,
-      notify: (message) => systemMessageRouter.high(message),
-    });
-    if (shouldSendAfterCapture(capture, Boolean(content))) {
-      // A typed message answers the contract question on offer, unless it was dismissed.
-      const answer: { readonly answersContractQuestion?: string } = options.spokenOutput ? {} : contractQuestions.answerOptions();
-      const inputOptions = options.spokenOutput ? createSpokenTurnInputOptions() : answer.answersContractQuestion ? answer : undefined;
-      // The output of `!` commands run since the last message goes with this one.
-      sendOwnerTurn(shellPassthrough.consumeContext(capture.text), content, inputOptions);
-    } else {
-      render();
-    }
-  };
-
-  /**
-   * Send text as a turn exactly as given: skill bodies, retries, templates,
-   * forms and speech. Only text typed into the composer is read for its grammar.
-   */
-  const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
-    beginSubmission();
-    // The output of `!` commands run since the last message goes with this one.
-    sendOwnerTurn(shellPassthrough.consumeContext(text), content, options.spokenOutput ? createSpokenTurnInputOptions() : undefined);
-  };
-
-  const runShellCommand = (command: string): void => {
-    if (!command) {
-      systemMessageRouter.high(SHELL_USAGE_HINT);
-      render();
-      return;
-    }
-    systemMessageRouter.high(`[Shell] $ ${command}`);
-    render();
-    void shellPassthrough
-      .run(command, workingDir)
-      .then((result) => systemMessageRouter.high(result.display))
-      .catch((error: unknown) => systemMessageRouter.high(`[Shell] Failed to run: ${summarizeError(error)}`, 'error'))
-      .finally(() => render());
-  };
+  // Typed composer text has a grammar (`@model:`, `!`, `!#`, `# `); text sent as given and speech do not.
+  const submission = createOwnerSubmission({
+    shellPassthrough,
+    workingDir,
+    sessionMemoryStore: ctx.services.sessionMemoryStore,
+    begin: beginSubmission,
+    switchModels: (models, rest, content, options) => { void switchThenSubmit(models, rest, content, options); },
+    answerOptions: () => contractQuestions.answerOptions(),
+    sendTurn: (text, content, inputOptions) => sendOwnerTurn(text, content, inputOptions),
+    notify: (message, level) => systemMessageRouter.high(message, level),
+    render: () => render(),
+  });
+  const { submitInput, submitTurn } = submission;
 
   /**
    * `@model:<id> prompt`: switch through `/model <id>` (the one switch path), then
@@ -649,7 +602,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       render();
       return;
     }
-    submitCaptured(rest, content, options);
+    submission.submitCaptured(rest, content, options);
   };
 
   /**
@@ -909,7 +862,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     unsubs,
     buffer: input,
     // Speech is sent as said; only typed composer text has a grammar.
-    submitInput: (text) => submitTurn(text, undefined, { source: captureNativeConversationInput(text) }),
+    submitInput: submission.submitSpeech,
     notify: (m) => {
       systemMessageRouter.high(m);
       render();

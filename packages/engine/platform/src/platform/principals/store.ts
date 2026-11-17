@@ -1,44 +1,39 @@
 /**
  * principals/store.ts
  *
- * Durable JSON-snapshot persistence for the principal registry, following the
- * exact PersistentStore snapshot pattern the automation stores use
- * (automation/store/jobs.ts): a versioned document, atomic write, and a
- * validate step that treats a missing file as an empty registry but a corrupt
- * document as a loud error.
+ * Durable persistence for the principal registry: one versioned JSON document,
+ * opened once with `readDocument` (a missing file is an empty registry; an
+ * unreadable one is moved aside with a receipt) and written whole with
+ * `writeDocument` on each change.
  */
-import { PersistentStore } from '../state/persistent-store.js';
+import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 import type { PrincipalRecord } from './types.js';
 
-interface PrincipalsSnapshot extends Record<string, unknown> {
+interface PrincipalsSnapshot {
   version: 1;
   principals: PrincipalRecord[];
 }
 
-function defaultSnapshot(): PrincipalsSnapshot {
-  return { version: 1, principals: [] };
-}
-
-function validateSnapshot(snapshot: PrincipalsSnapshot | null): PrincipalsSnapshot {
-  if (!snapshot) return defaultSnapshot();
-  if (snapshot.version !== 1 || !Array.isArray(snapshot.principals)) {
+function validateSnapshot(parsed: unknown): PrincipalsSnapshot {
+  const snapshot = parsed as Partial<PrincipalsSnapshot> | null;
+  if (typeof snapshot !== 'object' || snapshot === null || snapshot.version !== 1 || !Array.isArray(snapshot.principals)) {
     throw new Error('Principal registry store snapshot is invalid.');
   }
   return { version: 1, principals: snapshot.principals };
 }
 
 export class PrincipalStore {
-  private readonly store: PersistentStore<PrincipalsSnapshot>;
+  constructor(private readonly path: string) {}
 
-  constructor(path: string) {
-    this.store = new PersistentStore<PrincipalsSnapshot>(path);
+  load(): PrincipalRecord[] {
+    return readDocument(this.path, {
+      label: 'principals',
+      validate: validateSnapshot,
+      recovery: 'The principal registry starts empty: every channel sender resolves as an unknown principal until principals are created again.',
+    })?.principals ?? [];
   }
 
-  async load(): Promise<PrincipalRecord[]> {
-    return validateSnapshot(await this.store.load()).principals;
-  }
-
-  async save(principals: readonly PrincipalRecord[]): Promise<void> {
-    await this.store.persist({ version: 1, principals: [...principals] });
+  save(principals: readonly PrincipalRecord[]): void {
+    writeDocument(this.path, { version: 1, principals: [...principals] }, { mode: 0o600 });
   }
 }

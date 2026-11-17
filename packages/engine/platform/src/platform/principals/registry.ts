@@ -12,7 +12,6 @@
  * it, reattaching an identity must be a deliberate delete-then-recreate.
  */
 import { randomUUID } from 'node:crypto';
-import { StoreWriteQueue } from '../state/store-write-queue.js';
 import type { PrincipalStore } from './store.js';
 import {
   PrincipalRegistryError,
@@ -77,59 +76,34 @@ function normalizeIdentities(identities: readonly PrincipalIdentity[] | undefine
 
 export class PrincipalRegistry {
   private records: PrincipalRecord[] | null = null;
-  private loading: Promise<PrincipalRecord[]> | null = null;
-  /** Whole-store writes run one at a time, in call order. See StoreWriteQueue. */
-  private readonly writes = new StoreWriteQueue();
 
   constructor(private readonly store: PrincipalStore) {}
 
   /**
-   * Apply one change to the principals and make it durable, one change at a time.
+   * Apply one change to the principals and make it durable.
    *
    * `change` builds the NEXT array from the current one and never edits the
    * current one. The next array is saved first and becomes live only after the
    * save succeeded, so a failed write leaves memory and disk agreeing on the old
    * state (a retry of a failed `create` must not meet a CONFLICT with a
    * principal the caller was told was not created, and a failed `delete` must
-   * not leave a person unmapped until the next restart).
-   *
-   * Changes run through the write queue as a whole, load included. `PrincipalStore.save`
-   * replaces the file atomically but says nothing about ORDER, and two changes
-   * that both started from the same array would each save a list missing the
-   * other's principal. A principal is what channel intake resolves a sender
-   * identity against, so a lost or resurrected one is a person attributed to the
-   * wrong identity.
+   * not leave a person unmapped until the next restart). Load, change, save and
+   * swap run synchronously, so two changes can never start from the same array.
    */
-  private async mutate<T>(
+  private mutate<T>(
     change: (records: readonly PrincipalRecord[]) => { readonly next: PrincipalRecord[] | null; readonly result: T },
-  ): Promise<T> {
-    let outcome: T | undefined;
-    await this.writes.run(async () => {
-      const { next, result } = change(await this.all());
-      outcome = result;
-      if (next === null) return;
-      await this.store.save(next);
+  ): T {
+    const { next, result } = change(this.all());
+    if (next !== null) {
+      this.store.save(next);
       this.records = next;
-    });
-    return outcome as T;
+    }
+    return result;
   }
 
-  private async all(): Promise<readonly PrincipalRecord[]> {
-    if (this.records === null) {
-      // One shared load: two first callers must end up holding the same array.
-      this.loading ??= this.store.load().then(
-        (loaded) => {
-          this.records ??= loaded;
-          return loaded;
-        },
-        (error: unknown) => {
-          this.loading = null;
-          throw error;
-        },
-      );
-      await this.loading;
-    }
-    return this.records!;
+  private all(): readonly PrincipalRecord[] {
+    this.records ??= this.store.load();
+    return this.records;
   }
 
   /** Throw CONFLICT if any of `identities` already belongs to a principal other than `exceptId`. */
@@ -155,11 +129,11 @@ export class PrincipalRegistry {
   }
 
   async list(): Promise<PrincipalRecord[]> {
-    return [...(await this.all())];
+    return [...this.all()];
   }
 
   async get(id: string): Promise<PrincipalRecord> {
-    const record = (await this.all()).find((r) => r.id === id);
+    const record = this.all().find((r) => r.id === id);
     if (!record) throw new PrincipalRegistryError(`No principal with id ${id}`, 'NOT_FOUND');
     return record;
   }
@@ -231,7 +205,7 @@ export class PrincipalRegistry {
       throw new PrincipalRegistryError('channel and value must be non-empty', 'INVALID_ARGUMENT');
     }
     const key = identityKey(normalized);
-    const record = (await this.all()).find((r) => r.identities.some((i) => identityKey(i) === key));
+    const record = this.all().find((r) => r.identities.some((i) => identityKey(i) === key));
     if (record) return { principal: record, known: true };
     return { principal: unknownPrincipal(normalized), known: false };
   }

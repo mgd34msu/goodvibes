@@ -113,11 +113,12 @@ export function memoryTierOrderRefusal(key: string, value: unknown, config: unkn
  * injectable so the check is deterministic.
  */
 export function memoryBudgetRefusal(
-  key: string, value: unknown, config: unknown, ceilingMb: number = resolveEffectiveSystemRamMb(),
+  key: string, value: unknown, config: unknown, ceilingMb?: number,
 ): string | null {
   if (key !== 'memory.budgetMb' && key !== 'memory.hardLimitPct' && key !== 'memory.tier.criticalPct') return null;
   if (typeof value !== 'number') return null;
-  const problem = validateMemoryPolicy(projectedMemoryPolicy(key, value, config), ceilingMb);
+  // The ceiling walks the process's cgroup files; only a memory write needs it.
+  const problem = validateMemoryPolicy(projectedMemoryPolicy(key, value, config), ceilingMb ?? resolveEffectiveSystemRamMb());
   return problem?.group === 'hard-limit' ? `would break the memory settings: ${problem.message}` : null;
 }
 

@@ -163,14 +163,18 @@ export class EventReplayQueue {
    * Events that exceed maxReplays are dropped (logged and removed from queue).
    * Acknowledged events are removed here too: an acknowledged event is never
    * replayed again, so keeping it (with its payload) would only grow the queue.
+   * `delivered` names events whose fact already reached the conversation by
+   * another path (a turn that waited for its delegates); they count as
+   * acknowledged.
    */
-  onTurnComplete(): QueuedEvent[] {
+  onTurnComplete(delivered?: (event: QueuedEvent) => boolean): QueuedEvent[] {
     this.currentTurn++;
 
     const toReplay: QueuedEvent[] = [];
     const toRemove: string[] = [];
 
     for (const event of this.queue) {
+      if (!event.acknowledged && delivered?.(event)) event.acknowledged = true;
       if (event.acknowledged) {
         toRemove.push(event.id);
         this.acknowledgedRemoved++;

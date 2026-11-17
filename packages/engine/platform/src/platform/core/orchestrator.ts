@@ -14,7 +14,7 @@ import { classifyFailure, JudgmentPortMissingError } from '@goodvibes-jev/engine
 import { inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
-import { ResponseCompletionError } from './response-completion.js';
+import { isDeliveredDelegateEvent, ResponseCompletionError } from './response-completion.js';
 import { completedContractEvidence } from './response-completion-contracts.js';
 import type { ConversationManager } from './conversation.js';
 import { resolveCompactionStrategy } from './conversation-compaction.js';
@@ -1381,7 +1381,7 @@ export class Orchestrator {
     // once (previously nothing ever acknowledged, so every event re-injected
     // maxReplays times with escalating [URGENT] tags, noise turns after the
     // agent had already finished).
-    const eventsToReplay = this.replayQueue.onTurnComplete();
+    const eventsToReplay = this.replayQueue.onTurnComplete((event) => isDeliveredDelegateEvent(this.conversation, event));
     if (eventsToReplay.length > 0) {
       const messages = this.replayQueue.formatReplays(eventsToReplay);
       for (const msg of messages) {

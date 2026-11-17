@@ -73,6 +73,8 @@ const { applyConfigOperation, buildConfigRollbackAction, validateConfigOperation
   reload: (deps) => deps.config.load(),
   get: (deps, key) => deps.config.get(key as never),
   set: (deps, key, value) => deps.config.setDynamic(key as never, value),
+  isUnset: (deps, key) => deps.config.describeConfigKeySource(key as never).effectiveOrigin === 'default',
+  unset: (deps, key) => deps.config.reset(key as never),
 });
 
 function applyAuthOperation(
@@ -217,4 +219,4 @@ const {
   buildSecretRollbackAction,
   validateAcknowledgementOperation,
   applyAcknowledgementOperation,
-} = createOnboardingApplyPrimitives({ readOnboardingRuntimeState, writeOnboardingAcknowledgementState }, restoreFile);
+} = createOnboardingApplyPrimitives({ readOnboardingRuntimeState, writeOnboardingAcknowledgementState });

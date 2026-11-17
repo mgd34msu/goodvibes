@@ -14,14 +14,9 @@ import type { RollbackAction } from './onboarding-file-helpers.js';
 import type { OnboardingVerificationResult } from './onboarding-verification.js';
 export interface OnboardingApplyPrimitiveDependencies {
   readonly clock?: (() => number) | undefined;
-  /**
-   * The scoped entry reads are what a rollback restores; the live secrets
-   * manager always has them (the optional typing lets a narrower host type
-   * through until it names them).
-   */
+  /** The scoped entry reads are what a rollback restores. */
   readonly secrets?:
-    | (Pick<SecretsManager, 'set' | 'get' | 'delete' | 'inspect'> &
-        Partial<Pick<SecretsManager, 'getWriteScopeEntry' | 'deleteWriteScopeEntry'>>)
+    | Pick<SecretsManager, 'set' | 'get' | 'delete' | 'inspect' | 'getWriteScopeEntry' | 'deleteWriteScopeEntry'>
     | undefined;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope | undefined;
@@ -43,8 +38,6 @@ export function getNow(deps: { readonly clock?: (() => number) | undefined }): n
 }
 export function createOnboardingApplyPrimitives(
   storage: Pick<ReturnType<typeof createOnboardingStateStorage>, 'readOnboardingRuntimeState' | 'writeOnboardingAcknowledgementState'>,
-  /** Unused: a stored key is undone through the secrets manager, never by rewriting its files. */
-  _restoreFile?: ((path: string, previous: string | null) => void) | undefined,
 ) {
   function validateSecretOperation(deps: OnboardingApplyPrimitiveDependencies, operation: OnboardingSecretOperation): void {
     if (!deps.secrets) throw new Error('Secret persistence is unavailable.');
@@ -91,9 +84,6 @@ export function createOnboardingApplyPrimitives(
     validateSecretOperation(deps, operation);
     const secrets = deps.secrets!;
     const scope = operation.scope ?? 'project';
-    if (!secrets.getWriteScopeEntry || !secrets.deleteWriteScopeEntry) {
-      throw new Error(`${operation.key} was not stored: this secret manager cannot read one scope's entry, so a failed setup could not be undone.`);
-    }
     const readEntry = secrets.getWriteScopeEntry.bind(secrets);
     const deleteEntry = secrets.deleteWriteScopeEntry.bind(secrets);
     // Only this key, in the scope the write targets: a key another window or a

@@ -1,4 +1,4 @@
-import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
+import { codeDecision, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { Ranked } from '@goodvibes-jev/judgment';
 import { laneById, liveRecordById, operationSummary, recordOperationSummary, workflowById, workflowExecutionPlan, workflowMissingFields } from './agent-harness-personal-ops-runner.ts';
 import type { PersonalOpsConnectorSignal, PersonalOpsConnectorTool, PersonalOpsIntakeCandidate, PersonalOpsLane, PersonalOpsLiveRecord, PersonalOpsWorkflowStatus } from './agent-harness-personal-ops-types.ts';
@@ -18,10 +18,14 @@ export async function selectConnectorTool(
     return tools.filter((tool) => tool.capability === capability && tool.effect === effect)
       .map((tool) => ({ signal, tool }));
   });
-  const ranked = await rankHarnessCatalog(candidates, request, ({ signal, tool }) => ({
-    id: `${signal.id}:${tool.qualifiedName ?? tool.name}`,
-    description: `${tool.description ?? tool.name}. Capability: ${tool.capability}. Effect: ${tool.effect}. Connector: ${signal.status}.`,
-  }), 'agent.personal-ops.connector', options);
+  const rowId = ({ signal, tool }: (typeof candidates)[number]) => `${signal.id}:${tool.qualifiedName ?? tool.name}`;
+  // The intake reading already chose the workflow; one tool with its capability and effect is the answer, no reading needed.
+  if (candidates.length === 1) return { ...candidates[0]!, judgment: codeDecision(rowId(candidates[0]!)) };
+  // Several connector tools fit: the request is prose, so its meaning is read once over them (a literal word match would leave the choice unmade).
+  const ranked = await rankHarnessCatalog(candidates, request, (candidate) => ({
+    id: rowId(candidate),
+    description: `${candidate.tool.description ?? candidate.tool.name}. Capability: ${candidate.tool.capability}. Effect: ${candidate.tool.effect}. Connector: ${candidate.signal.status}.`,
+  }), 'agent.personal-ops.connector', { ...options, semantic: true });
   // An uncertain match is not an operation selection. Readiness does not invent relevance.
   const selected = ranked.matches.find(({ judgment }) => judgment?.reading.outcome === 'act' && judgment?.reading.verdict === 'yes');
   return selected?.judgment ? { ...selected.entry, judgment: selected.judgment } : undefined;
@@ -153,8 +157,10 @@ export async function buildPersonalOpsIntakeCandidates(
   lanes: readonly PersonalOpsLane[],
   includeParameters: boolean,
   options: CatalogRankingOptions = {},
-): Promise<{ readonly candidates: readonly PersonalOpsIntakeCandidate[]; readonly judgments: readonly Ranked[] }> {
-  const ranking = await rankHarnessCatalog(INTAKE_ROUTES, request, (route) => route, 'agent.personal-ops.intake', options);
+): Promise<{ readonly candidates: readonly PersonalOpsIntakeCandidate[]; readonly judgments: readonly Ranked[]; readonly readingTaken: boolean; readonly unsettled: number }> {
+  // The request is prose: words like "inbox" or "reply" match several routes
+  // literally, so the routes are read for its meaning in one request.
+  const ranking = await rankHarnessCatalog(INTAKE_ROUTES, request, (route) => route, 'agent.personal-ops.intake', { ...options, semantic: true });
   const selected = new Set(ranking.matches.map(({ entry }) => entry.id));
   const confirmed = new Set(ranking.matches.filter(({ judgment }) => judgment?.reading.outcome === 'act' && judgment?.reading.verdict === 'yes').map(({ entry }) => entry.id));
   const inboxLane = laneById(lanes, 'inbox');
@@ -353,7 +359,7 @@ export async function buildPersonalOpsIntakeCandidates(
     }] : [];
   });
   options.signal?.throwIfAborted();
-  return { candidates: ordered, judgments: ranking.judgments };
+  return { candidates: ordered, judgments: ranking.judgments, readingTaken: ranking.provenance !== 'classic', unsettled: ranking.unsettled ?? 0 };
 }
 
 export function nextActions(lanes: readonly PersonalOpsLane[]): readonly string[] {

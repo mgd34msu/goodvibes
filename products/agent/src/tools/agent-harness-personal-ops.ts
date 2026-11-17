@@ -461,7 +461,18 @@ async function ownedPersonalOpsIntakeSummary(context: CommandContext, args: Agen
   return {
     status: preferred ? 'ready' : 'deferred',
     request: previewHarnessText(request, includeParameters ? 220 : 120),
-    ...(preferred ? { preferred } : { reason: candidates.length > 0 ? 'uncertain_intake_reading' : 'no_matching_intake_route' }),
+    // The reason says what happened: no reading could be taken (no decision
+    // model, or it was unavailable), the reading did not settle, or nothing matched.
+    ...(preferred ? { preferred } : {
+      reason: !ranking.readingTaken
+        ? 'no_reading_taken'
+        : candidates.length > 0 || ranking.unsettled > 0 ? 'uncertain_intake_reading' : 'no_matching_intake_route',
+      next: !ranking.readingTaken
+        ? 'No decision model reading was available, so any candidates are literal word matches only. Pick one and open its lane with personal_ops action:"lane" laneId:"<laneId>", or see personal_ops action:"status".'
+        : candidates.length > 0 || ranking.unsettled > 0
+          ? 'The reading did not settle on one route. Pick a candidate, or restate the request more specifically.'
+          : 'No intake route fits this request. See personal_ops action:"status" for the lanes.',
+    }),
     judgments: ranking.judgments,
     candidates,
     personalOpsRoute: 'personal_ops action:"status"',

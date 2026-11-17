@@ -65,8 +65,11 @@ const TOGETHER_DECISIONS: ReadonlySet<string> = new Set(['engine.tools.registry-
 /** Shared context is sent once and only when small; a large context is the caller's own data, not a clue. */
 const MAX_CONTEXT_CHARACTERS = 2_000;
 
-/** The row code selected: an exact id, or the only row carrying every query word. */
-function codeDecision(id: string): Ranked & { readonly decidedBy: 'code' } {
+/**
+ * The row code selected: an exact id, the only row carrying every query word,
+ * or for a caller, the only row its own structural filter left.
+ */
+export function codeDecision(id: string): Ranked & { readonly decidedBy: 'code' } {
   return { id, probability: 1, reading: { kind: 'yes-no', probability: 1, verdict: 'yes', outcome: 'act' }, decisionId: undefined, decidedBy: 'code' };
 }
 

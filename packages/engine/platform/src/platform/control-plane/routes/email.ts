@@ -391,6 +391,7 @@ async function refuseTaintedSend(
   description: string,
   replyToEnvelopeSenders: readonly string[] = [],
   ownerAddresses: ReadonlySet<string> = new Set(),
+  nextStep?: string,
 ): Promise<void> {
   // The one exemption: a send whose EVERY recipient is the owner alone.
   //
@@ -427,7 +428,7 @@ async function refuseTaintedSend(
   });
   if (decision.allowed) return;
   throw new GatewayVerbError(
-    `${decision.reason ?? 'Refused.'} ${decision.fix ?? ''}`.trim(),
+    [decision.reason ?? 'Refused.', decision.fix ?? '', nextStep ?? ''].filter((part) => part.length > 0).join(' '),
     'UNTRUSTED_CONTENT_DERIVED',
     403,
   );
@@ -500,12 +501,18 @@ export function createEmailSendHandler(
     // Before anything leaves the machine: does what is about to leave derive
     // from what was read? Recipient included, a redirected reply is as much
     // an injection outcome as a rewritten body.
+    const replySenders = inReplyTo === undefined ? [] : [...(service.replyEnvelopeSenders?.(inReplyTo) ?? [])];
     await refuseTaintedSend(
       ledger,
       { to, subject, body },
       `sending mail to ${to}`,
-      inReplyTo === undefined ? [] : [...(service.replyEnvelopeSenders?.(inReplyTo) ?? [])],
+      replySenders,
       typeof ownerAddresses === 'function' ? ownerAddresses() : ownerAddresses,
+      // The read evidence is kept in memory, so a daemon restart empties it: a
+      // reply refused for want of it is answered by reading the message again.
+      inReplyTo !== undefined && replySenders.length === 0
+        ? 'No verified read of that message in this run; read it again with email.inbox.read, then send the reply.'
+        : undefined,
     );
     const sent = await service.send({
       to,

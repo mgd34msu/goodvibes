@@ -101,15 +101,12 @@ export function createAgentOperatorActionTool(
         if (!requestPolicy) throw new Error('Connected operator source policy is unavailable.');
         await requestPolicy.screen({ toolName: 'agent_operator_action', methodId: request.descriptor.action,
           endpoint: `${connection.baseUrl}${renderOperatorActionPath(request.descriptor, request.targetId)}`, payload: wireBody }, { signal: options?.signal, assertCurrent });
-        // postOperatorAction checks currency before sending, again once the response arrived and again
-        // after the body was read; a second check therefore means the host has already answered.
-        let currencyChecks = 0;
-        const result = await postOperatorAction(connection, wireRequest, { signal: options?.signal,
-          assertCurrent: () => { currencyChecks++; assertCurrent(); } });
+        const result = await postOperatorAction(connection, wireRequest, { signal: options?.signal, assertCurrent });
         posted = { methodId: result.methodId, ok: result.ok };
-        if (!result.ok && result.kind === 'connected_host_unavailable') {
+        // The client says whether the host may have acted; a refusal or an unsent call ('no') is reported as such below.
+        if (!result.ok && result.applied === 'unknown') {
           return { success: false, error: [
-            `outcome_unknown: ${result.methodId} ${currencyChecks >= 2 ? 'was sent and the host answered' : 'may have been sent, but no usable answer arrived'}, then it failed (${result.error}).`,
+            `outcome_unknown: ${result.methodId} was sent, but no answer showed whether the host applied it (${result.error}).`,
             'The daemon may have applied it. Read the current state with a list or status method before retrying, and do not repeat the call blindly.',
           ].join(' ') };
         }

@@ -326,6 +326,8 @@ export function formatOperatorActionFailure(result: OperatorActionFailure): stri
     `  route: ${result.httpMethod} ${result.path}`,
     `  error: ${result.error}`,
     ...(result.applied === 'unknown' ? ['  outcome: unknown; the host may have applied it, so read the current state before repeating it'] : []),
+    ...(result.applied === 'no' ? ['  outcome: not applied; nothing changed on the host'] : []),
+    ...(result.applied === 'yes' ? ['  outcome: applied; the host acted on it but its answer could not be read, so do not repeat it'] : []),
   ].join('\n');
 }
 

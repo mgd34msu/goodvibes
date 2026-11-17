@@ -10,6 +10,7 @@
  * process holding the store open (the terminal app, the Agent, the daemon)
  * stays on the same file and sees the restored records on its next read.
  */
+import { closeSync, openSync, unlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename } from 'node:path';
 import type { Database } from 'bun:sqlite';
@@ -132,6 +133,54 @@ function requireFileStore(dbPath: string | null): string {
     throw new MemorySnapshotError('MEMORY_SNAPSHOT_UNAVAILABLE', 'This memory store lives in memory only, so it keeps no copies; nothing was changed.');
   }
   return dbPath;
+}
+
+/** The read side of a connection, as SQLiteStore's statement surface offers it. */
+export interface MemoryCopySource {
+  exec(sql: string): Array<{ columns: string[]; values: unknown[][] }>;
+}
+
+const quoteName = (name: string): string => `"${name.replace(/"/g, '""')}"`;
+
+/**
+ * Write a complete copy of the memory store as `source` sees it to a new file
+ * at `path`: the same schema (tables, then the rows, then indexes and
+ * triggers, so every stamped revision is kept as stored), the same
+ * `user_version`, one file with no sidecars. The format every store snapshot
+ * has, so `listStoreSnapshots`, `restoreStoreSnapshot` and a later restore
+ * read it. Synchronous, so it can run inside the restoring connection's write
+ * transaction and copy exactly what that lock holds still. A failure removes
+ * the partial file and throws.
+ */
+export function writeMemoryCopy(source: MemoryCopySource, path: string, mode: number): void {
+  const schema = source.exec("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'")[0]?.values ?? [];
+  const version = source.exec('PRAGMA user_version')[0]?.values[0]?.[0];
+  closeSync(openSync(path, 'wx', mode));
+  let copy: Database | undefined;
+  try {
+    copy = new (bunDatabase())(path, { readwrite: true });
+    copy.run('BEGIN');
+    const tables = schema.filter((row) => row[0] === 'table');
+    for (const row of tables) copy.run(String(row[2]));
+    for (const row of tables) {
+      const name = String(row[1]);
+      const result = source.exec(`SELECT * FROM ${quoteName(name)}`)[0];
+      if (!result || result.values.length === 0) continue;
+      const insert = copy.prepare(`INSERT INTO ${quoteName(name)} (${result.columns.map(quoteName).join(', ')}) VALUES (${result.columns.map(() => '?').join(', ')})`);
+      try {
+        for (const values of result.values) insert.run(...(values as Array<string | number | bigint | boolean | Uint8Array | null>));
+      } finally { insert.finalize(); }
+    }
+    for (const row of schema) if (row[0] !== 'table') copy.run(String(row[2]));
+    copy.run(`PRAGMA user_version = ${typeof version === 'number' && Number.isSafeInteger(version) ? version : 0}`);
+    copy.run('COMMIT');
+    copy.close();
+    copy = undefined;
+  } catch (error) {
+    try { copy?.close(); } catch { /* the original error is the diagnostic */ }
+    try { unlinkSync(path); } catch { /* nothing was kept */ }
+    throw error;
+  }
 }
 
 /** Every copy of the store at `dbPath`, newest first, with its record count (one read-only open each). */

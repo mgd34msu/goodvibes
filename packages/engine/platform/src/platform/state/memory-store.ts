@@ -27,7 +27,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { MemoryUsageChange, MemoryUsageEntry, MemoryUsageTopEntry } from './memory-usage-stats.js';
 import type { MemoryConsolidationProposal } from './memory-consolidation.js';
-import { MEMORY_SNAPSHOT_TABLES, type MemorySnapshotImage } from './memory-snapshots.js';
+import { MEMORY_SNAPSHOT_TABLES, MemorySnapshotError, writeMemoryCopy, type MemorySnapshotImage } from './memory-snapshots.js';
 import {
   assertValidMemoryBundle,
   assertValidMemoryFields,
@@ -734,14 +734,19 @@ export class MemoryStore {
 
   /**
    * Make the store hold exactly the copy's records, links, proposals and store
-   * facts, in one immediate write transaction: another process cannot commit
-   * between the clear and the inserts, and a failure part way rolls the whole
-   * restore back. Each record keeps the revision it had in the copy, so the
-   * vector index re-embeds only the records whose text differs from what it
-   * holds. Other processes see the restored rows on their next read (SQLite
+   * facts, in one immediate write transaction. Under that lock, first the
+   * store as it stands is written to `undo.path` (a complete copy, read through
+   * this same connection), then it is cleared and filled from the image, then
+   * the transaction commits. A writer in another process therefore either
+   * committed before the lock (and is in the undo copy) or waits for it and
+   * lands after the restore (and is in the store), never in neither. A failure
+   * at any step rolls the whole restore back; a failed undo copy changes
+   * nothing. Each record keeps the revision it had in the copy, so the vector
+   * index re-embeds only the records whose text differs from what it holds.
+   * Other processes see the restored rows on their next read (SQLite
    * `data_version`); nothing is reopened.
    */
-  async replaceFromSnapshot(image: MemorySnapshotImage, options?: MemoryOperationOptions): Promise<{ readonly recordsBefore: number; readonly recordsAfter: number; readonly linksAfter: number; readonly vectorIndex: 'updating' | 'off' }> {
+  async replaceFromSnapshot(image: MemorySnapshotImage, undo: { readonly path: string; readonly mode: number }, options?: MemoryOperationOptions): Promise<{ readonly recordsBefore: number; readonly recordsAfter: number; readonly linksAfter: number; readonly vectorIndex: 'updating' | 'off' }> {
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) throw new Error('MemoryStore: not initialized');
@@ -757,6 +762,12 @@ export class MemoryStore {
         const value = db.exec(`SELECT count(*) FROM ${table}`)[0]?.values[0]?.[0];
         return typeof value === 'number' ? value : 0;
       };
+      try {
+        writeMemoryCopy(db, undo.path, undo.mode);
+      } catch (error) {
+        throw new MemorySnapshotError('MEMORY_SNAPSHOT_UNAVAILABLE',
+          `A copy of the current records could not be written first (${summarizeError(error)}), so the restore was not started; nothing was changed.`);
+      }
       const recordsBefore = count('memory_records');
       // Links first: they name records (foreign keys are on).
       for (const table of [...MEMORY_SNAPSHOT_TABLES].reverse()) db.run(`DELETE FROM ${table}`);

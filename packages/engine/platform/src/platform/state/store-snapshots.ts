@@ -122,6 +122,23 @@ function timestampSlug(at: number): string {
 }
 
 /**
+ * A free path for a new snapshot of `dbPath` taken at `at` for `reason`, its
+ * directory made: the name `listStoreSnapshots` and `restoreStoreSnapshot` read.
+ * Timestamp slugs are millisecond-granular: two snapshots requested within the
+ * same millisecond (fast successive sweeps on tmpfs) must not silently
+ * overwrite each other, so the name is made unique instead of clobbering.
+ */
+export function newStoreSnapshotPath(dbPath: string, reason: string, at: number = Date.now()): string {
+  const dir = storeSnapshotDir(dbPath);
+  mkdirSync(dir, { recursive: true });
+  let snapshotPath = join(dir, `${timestampSlug(at)}.${reason}${SNAPSHOT_SUFFIX}`);
+  for (let counter = 1; existsSync(snapshotPath); counter += 1) {
+    snapshotPath = join(dir, `${timestampSlug(at)}-${counter}.${reason}${SNAPSHOT_SUFFIX}`);
+  }
+  return snapshotPath;
+}
+
+/**
  * Snapshot the store into the snapshot dir: one consistent SQLite copy, or,
  * when SQLite cannot take one, a copy of the file and its WAL. Returns the
  * snapshot path, or null when there is nothing to snapshot (in-memory store,
@@ -135,15 +152,7 @@ export function snapshotStoreFile(
   if (!isRealDbPath(dbPath) || !existsSync(dbPath)) return null;
   if (statSync(dbPath).size === 0) return null;
   const at = (options.now ?? Date.now)();
-  const dir = storeSnapshotDir(dbPath);
-  mkdirSync(dir, { recursive: true });
-  // Timestamp slugs are millisecond-granular: two snapshots requested within
-  // the same millisecond (fast successive sweeps on tmpfs) must not silently
-  // overwrite each other, uniquify instead of clobbering.
-  let snapshotPath = join(dir, `${timestampSlug(at)}.${reason}${SNAPSHOT_SUFFIX}`);
-  for (let counter = 1; existsSync(snapshotPath); counter += 1) {
-    snapshotPath = join(dir, `${timestampSlug(at)}-${counter}.${reason}${SNAPSHOT_SUFFIX}`);
-  }
+  const snapshotPath = newStoreSnapshotPath(dbPath, reason, at);
   if (!hasSqliteHeader(dbPath)) throw new Error(`store snapshot source is not a SQLite database: ${dbPath}`);
   if (!vacuumInto(dbPath, snapshotPath)) {
     copyFileSync(dbPath, snapshotPath);
@@ -338,12 +347,7 @@ export async function snapshotStoreFileAsync(
   if (!isRealDbPath(dbPath) || !existsSync(dbPath)) return null;
   if (statSync(dbPath).size === 0) return null;
   const at = (options.now ?? Date.now)();
-  const dir = storeSnapshotDir(dbPath);
-  mkdirSync(dir, { recursive: true });
-  let snapshotPath = join(dir, `${timestampSlug(at)}.${reason}${SNAPSHOT_SUFFIX}`);
-  for (let counter = 1; existsSync(snapshotPath); counter += 1) {
-    snapshotPath = join(dir, `${timestampSlug(at)}-${counter}.${reason}${SNAPSHOT_SUFFIX}`);
-  }
+  const snapshotPath = newStoreSnapshotPath(dbPath, reason, at);
   if (!hasSqliteHeader(dbPath)) throw new Error(`store snapshot source is not a SQLite database: ${dbPath}`);
   // Threadpool copies keep the event loop free on a stalled disk; the WAL
   // goes with the file so committed changes are not lost. The shared-memory

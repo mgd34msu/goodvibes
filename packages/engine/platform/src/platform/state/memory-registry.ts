@@ -18,8 +18,9 @@ const STANDING_DECISIONS_LIMIT = 2_000;
 function consolidationProposalId(proposal: Pick<MemoryConsolidationProposal, 'kind' | 'ids'>): string {
   return `${proposal.kind}:${[...proposal.ids].sort().join(',')}`;
 }
+import { statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { snapshotStoreFileAsync } from './store-snapshots.js';
+import { newStoreSnapshotPath } from './store-snapshots.js';
 import { listMemorySnapshots, MemorySnapshotError, readMemorySnapshotImage, resolveMemorySnapshot, type MemoryRestoreResult, type MemorySnapshotInfo } from './memory-snapshots.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -185,21 +186,21 @@ export class MemoryRegistry {
 
   /**
    * Put the records of one copy back (see MemoryStore.replaceFromSnapshot).
-   * The copy is read and checked first, then a copy of the records being
-   * replaced is taken, so the restore can itself be undone by restoring that
-   * copy; nothing is changed when either step fails. The owner's act only:
-   * callers reach it through a confirmed command or the confirmed operator verb.
+   * The copy is read and checked first; then, under one write lock, the
+   * records being replaced are copied to a `pre-restore` copy and replaced,
+   * so the restore can itself be undone by restoring that copy and no other
+   * writer's change falls between the two. Nothing is changed when any step
+   * fails. The owner's act only: callers reach it through a confirmed command
+   * or the confirmed operator verb.
    */
   async restoreSnapshot(selector: string, options?: MemoryOperationOptions): Promise<MemoryRestoreResult> {
     const store = this.store, dbPath = store.dbPath;
     const chosen = resolveMemorySnapshot(dbPath, selector);
     const image = readMemorySnapshotImage(chosen);
-    const undo = dbPath ? await snapshotStoreFileAsync(dbPath, 'pre-restore') : null;
-    if (!undo) {
-      throw new MemorySnapshotError('MEMORY_SNAPSHOT_UNAVAILABLE', 'A copy of the current records could not be taken first, so the restore was not started; nothing was changed.');
-    }
-    if (this.store !== store) throw new Error('Memory store changed during the restore; nothing was changed.');
-    const replaced = await store.replaceFromSnapshot(image, options);
+    if (!dbPath) throw new MemorySnapshotError('MEMORY_SNAPSHOT_UNAVAILABLE', 'This memory store lives in memory only, so it keeps no copies; nothing was changed.');
+    // The undo copy keeps the store's own permissions (memory is private to its owner).
+    const undo = { path: newStoreSnapshotPath(dbPath, 'pre-restore'), mode: statSync(dbPath).mode & 0o777 };
+    const replaced = await store.replaceFromSnapshot(image, undo, options);
     this.notify();
     return {
       restored: image.name,
@@ -208,7 +209,7 @@ export class MemoryRegistry {
       recordsBefore: replaced.recordsBefore,
       recordsAfter: replaced.recordsAfter,
       linksAfter: replaced.linksAfter,
-      undoSnapshot: basename(undo),
+      undoSnapshot: basename(undo.path),
       vectorIndex: replaced.vectorIndex,
     };
   }

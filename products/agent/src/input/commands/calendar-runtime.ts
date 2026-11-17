@@ -45,7 +45,7 @@ function withSubscribedSection(localBlock: string, subscribed: string): string {
 const CALENDAR_USAGE_MESSAGE = [
   'Usage: /calendar <command>',
   '  Viewing         list | upcoming [--days N]',
-  '  Connecting      connect <google|outlook> [--device] | disconnect <google|outlook> | accounts',
+  '  Connecting      connect <google|outlook> [--device | --code <address>] | disconnect <google|outlook> | accounts',
   '  Subscriptions   subscribe <ics-url> [--name N] [--every MIN] [--yes] | unsubscribe <name> --yes | subscriptions | refresh [name]',
   '  Local events    add --title <title> --start <ISO> --yes | delete <id> --yes | import <path> [--yes] | export [--dest <path>] [--yes]',
 ].join('\n');
@@ -337,7 +337,7 @@ export function registerCalendarRuntimeCommands(registry: CommandRegistry): void
     effect: 'mixed',
     aliases: ['cal'],
     description: 'Manage local calendar events, external calendar subscriptions, and connected calendar accounts',
-    usage: '[list|upcoming [--days N]|connect <google|outlook> [--device]|disconnect <google|outlook>|accounts|import <path> [--yes]|export [--dest <path>] [--yes]|add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes|delete <id> --yes|subscribe <ics-url> [--name N] [--every MIN] [--yes]|unsubscribe <name> --yes|subscriptions|refresh [name]]',
+    usage: '[list|upcoming [--days N]|connect <google|outlook> [--device | --code <address>]|disconnect <google|outlook>|accounts|import <path> [--yes]|export [--dest <path>] [--yes]|add --title <title> --start <ISO> [--end <ISO>] [--location <loc>] [--notes <notes>] --yes|delete <id> --yes|subscribe <ics-url> [--name N] [--every MIN] [--yes]|unsubscribe <name> --yes|subscriptions|refresh [name]]',
     // A feed address can be a private one that grants read access; account sign-in takes no typed secret.
     secretArgs: { select: (args) => calendarFeedAddressPositions(args) },
     handler: async (args: readonly string[], ctx: CommandContext) => {

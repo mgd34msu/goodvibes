@@ -99,7 +99,7 @@ function connectGuideMessage(): string {
 
 /** An unrecognized provider word (not a missing one) keeps the short usage form. */
 function unknownProviderMessage(word: string): string {
-  return `Unknown calendar provider '${word}'. Usage: /calendar connect <google|outlook> [--device]`;
+  return `Unknown calendar provider '${word}'. Usage: /calendar connect <google|outlook> [--device | --code <address>]`;
 }
 
 /** Best-effort browser open; never throws, never blocks the flow. */

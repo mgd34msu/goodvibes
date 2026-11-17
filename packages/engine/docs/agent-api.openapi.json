@@ -598,7 +598,7 @@
           "denialCount": {
            "type": "number"
           },
-          "cachedChecks": {
+          "promptCount": {
            "type": "number"
           },
           "totalChecks": {
@@ -616,7 +616,7 @@
           "mode",
           "approvalCount",
           "denialCount",
-          "cachedChecks",
+          "promptCount",
           "totalChecks",
           "approvals"
          ],
@@ -8166,6 +8166,15 @@
           },
           "definitionAfter": {
            "type": "string"
+          },
+          "root": {
+           "type": "string"
+          },
+          "scope": {
+           "type": "array",
+           "items": {
+            "type": "string"
+           }
           }
          },
          "required": [

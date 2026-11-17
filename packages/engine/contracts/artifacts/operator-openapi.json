@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodVibes Operator API",
     "version": "3.3.0",
-    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 599 cataloged methods: 503 with dedicated REST bindings, 96 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
+    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 608 cataloged methods: 509 with dedicated REST bindings, 99 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
     {
@@ -2722,7 +2722,7 @@
                     "denialCount": {
                       "type": "number"
                     },
-                    "cachedChecks": {
+                    "promptCount": {
                       "type": "number"
                     },
                     "totalChecks": {
@@ -3167,7 +3167,7 @@
                     "mode",
                     "approvalCount",
                     "denialCount",
-                    "cachedChecks",
+                    "promptCount",
                     "totalChecks",
                     "approvals"
                   ],
@@ -27178,6 +27178,145 @@
         }
       }
     },
+    "/api/channels/inbox/labels": {
+      "post": {
+        "operationId": "channels.inbox.applyLabels",
+        "summary": "Apply Inbox Labels",
+        "description": "Write triage labels to inbox messages at their provider: an IMAP keyword on mail, a reaction on Slack, a reaction or forum tag on Discord. `itemIds` are ids from channels.inbox.list (up to 100); `labels` are GoodVibes/Spam, GoodVibes/Priority or GoodVibes/Normal (writing one takes the other two off), or a custom label name. Writes only for accounts whose owner switch is on (surfaces.slack.inboxTagging, surfaces.discord.inboxTagging, surfaces.email.inboxTagging). Returns one result per message: `applied` (every label is on it now), `refused` (nothing was written, with the reason and what to do) or `failed` (the provider did not take a label; `effects` says which mark was written or not).",
+        "tags": [
+          "channels"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "itemId": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "applied": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "effects": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "tag": {
+                                  "type": "string"
+                                },
+                                "action": {
+                                  "type": "string"
+                                },
+                                "outcome": {
+                                  "type": "string"
+                                },
+                                "reason": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "tag",
+                                "action",
+                                "outcome"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "changedDuringWrite": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "itemId",
+                          "state",
+                          "applied"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "applied": {
+                      "type": "number"
+                    },
+                    "refused": {
+                      "type": "number"
+                    },
+                    "failed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "results",
+                    "applied",
+                    "refused",
+                    "failed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "admin",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "write:channels"
+        ],
+        "x-effect": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "itemIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "itemIds",
+                  "labels"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/channels/inbox": {
       "get": {
         "operationId": "channels.inbox.list",
@@ -35919,6 +36058,159 @@
         }
       }
     },
+    "/config/many": {
+      "post": {
+        "operationId": "config.setMany",
+        "summary": "Set Several Config Values",
+        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.",
+        "tags": [
+          "config"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "revision": {
+                      "type": "number"
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              }
+                            ]
+                          },
+                          "persistedTo": {
+                            "type": "string"
+                          },
+                          "tier": {
+                            "type": "string"
+                          },
+                          "daemonOwned": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "key"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "revision",
+                    "entries"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "admin",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "write:config"
+        ],
+        "x-dangerous": true,
+        "x-effect": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "entries"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/config/credentials": {
       "get": {
         "operationId": "credentials.get",
@@ -39980,6 +40272,15 @@
                                           },
                                           "definitionAfter": {
                                             "type": "string"
+                                          },
+                                          "root": {
+                                            "type": "string"
+                                          },
+                                          "scope": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
                                           }
                                         },
                                         "required": [
@@ -40857,6 +41158,15 @@
                                           },
                                           "definitionAfter": {
                                             "type": "string"
+                                          },
+                                          "root": {
+                                            "type": "string"
+                                          },
+                                          "scope": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
                                           }
                                         },
                                         "required": [
@@ -42149,6 +42459,15 @@
                                                 },
                                                 "definitionAfter": {
                                                   "type": "string"
+                                                },
+                                                "root": {
+                                                  "type": "string"
+                                                },
+                                                "scope": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
                                                 }
                                               },
                                               "required": [
@@ -43438,6 +43757,15 @@
                                     },
                                     "definitionAfter": {
                                       "type": "string"
+                                    },
+                                    "root": {
+                                      "type": "string"
+                                    },
+                                    "scope": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
                                     }
                                   },
                                   "required": [
@@ -48028,6 +48356,15 @@
                                                 },
                                                 "definitionAfter": {
                                                   "type": "string"
+                                                },
+                                                "root": {
+                                                  "type": "string"
+                                                },
+                                                "scope": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
                                                 }
                                               },
                                               "required": [
@@ -48905,6 +49242,15 @@
                                                 },
                                                 "definitionAfter": {
                                                   "type": "string"
+                                                },
+                                                "root": {
+                                                  "type": "string"
+                                                },
+                                                "scope": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
                                                 }
                                               },
                                               "required": [
@@ -50197,6 +50543,15 @@
                                                       },
                                                       "definitionAfter": {
                                                         "type": "string"
+                                                      },
+                                                      "root": {
+                                                        "type": "string"
+                                                      },
+                                                      "scope": {
+                                                        "type": "array",
+                                                        "items": {
+                                                          "type": "string"
+                                                        }
                                                       }
                                                     },
                                                     "required": [
@@ -51486,6 +51841,15 @@
                                           },
                                           "definitionAfter": {
                                             "type": "string"
+                                          },
+                                          "root": {
+                                            "type": "string"
+                                          },
+                                          "scope": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
                                           }
                                         },
                                         "required": [
@@ -56072,6 +56436,15 @@
                                               },
                                               "definitionAfter": {
                                                 "type": "string"
+                                              },
+                                              "root": {
+                                                "type": "string"
+                                              },
+                                              "scope": {
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
                                               }
                                             },
                                             "required": [
@@ -56949,6 +57322,15 @@
                                               },
                                               "definitionAfter": {
                                                 "type": "string"
+                                              },
+                                              "root": {
+                                                "type": "string"
+                                              },
+                                              "scope": {
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
                                               }
                                             },
                                             "required": [
@@ -58241,6 +58623,15 @@
                                                     },
                                                     "definitionAfter": {
                                                       "type": "string"
+                                                    },
+                                                    "root": {
+                                                      "type": "string"
+                                                    },
+                                                    "scope": {
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "string"
+                                                      }
                                                     }
                                                   },
                                                   "required": [
@@ -59530,6 +59921,15 @@
                                         },
                                         "definitionAfter": {
                                           "type": "string"
+                                        },
+                                        "root": {
+                                          "type": "string"
+                                        },
+                                        "scope": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
                                         }
                                       },
                                       "required": [
@@ -68963,34 +69363,42 @@
                     "symbolSearchStatus": {
                       "type": "string"
                     },
-                    "completionsStatus": {
-                      "type": "string"
-                    },
                     "hoverStatus": {
                       "type": "string"
+                    },
+                    "languageServers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "language": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "language",
+                          "state"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
                     "errorCount": {
                       "type": "number"
                     },
                     "warningCount": {
                       "type": "number"
-                    },
-                    "totalRequests": {
-                      "type": "number"
-                    },
-                    "avgLatencyMs": {
-                      "type": "number"
                     }
                   },
                   "required": [
                     "diagnosticsStatus",
                     "symbolSearchStatus",
-                    "completionsStatus",
                     "hoverStatus",
+                    "languageServers",
                     "errorCount",
-                    "warningCount",
-                    "totalRequests",
-                    "avgLatencyMs"
+                    "warningCount"
                   ],
                   "additionalProperties": false
                 }
@@ -69027,322 +69435,6 @@
               "application/json": {
                 "schema": {
                   "anyOf": [
-                    {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "protocolVersion": {
-                              "type": "number",
-                              "enum": [
-                                1
-                              ]
-                            },
-                            "requestId": {
-                              "type": "string"
-                            },
-                            "battery": {
-                              "type": "string",
-                              "enum": [
-                                "webui.voice.speech-seams"
-                              ]
-                            },
-                            "batteryVersion": {
-                              "type": "number",
-                              "enum": [
-                                2
-                              ]
-                            },
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "settled"
-                              ]
-                            },
-                            "value": {
-                              "type": "object",
-                              "properties": {
-                                "endOffsets": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "integer",
-                                    "minimum": 1,
-                                    "maximum": 32768
-                                  },
-                                  "maxItems": 64
-                                },
-                                "nextCursor": {
-                                  "anyOf": [
-                                    {
-                                      "type": "integer",
-                                      "minimum": 64,
-                                      "maximum": 4095
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "endOffsets",
-                                "nextCursor"
-                              ],
-                              "additionalProperties": false
-                            },
-                            "readings": {
-                              "type": "object",
-                              "additionalProperties": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                      "yes-no"
-                                    ]
-                                  },
-                                  "probability": {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1
-                                  },
-                                  "verdict": {
-                                    "type": "string",
-                                    "enum": [
-                                      "yes",
-                                      "no",
-                                      "uncertain"
-                                    ]
-                                  },
-                                  "outcome": {
-                                    "type": "string",
-                                    "enum": [
-                                      "act",
-                                      "confirm",
-                                      "escalate"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "probability",
-                                  "verdict",
-                                  "outcome"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "outcome": {
-                              "type": "string",
-                              "enum": [
-                                "act",
-                                "confirm",
-                                "escalate"
-                              ]
-                            },
-                            "evidence": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "decisionId": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "requestedModel": {
-                                    "type": "string"
-                                  },
-                                  "usage": {
-                                    "type": "object",
-                                    "properties": {
-                                      "inputTokens": {
-                                        "type": "number"
-                                      },
-                                      "outputTokens": {
-                                        "type": "number"
-                                      }
-                                    },
-                                    "required": [
-                                      "inputTokens",
-                                      "outputTokens"
-                                    ],
-                                    "additionalProperties": false
-                                  },
-                                  "latencyMs": {
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "decisionId",
-                                  "model",
-                                  "requestedModel",
-                                  "usage",
-                                  "latencyMs"
-                                ],
-                                "additionalProperties": false
-                              }
-                            }
-                          },
-                          "required": [
-                            "protocolVersion",
-                            "requestId",
-                            "battery",
-                            "batteryVersion",
-                            "status",
-                            "value",
-                            "readings",
-                            "outcome",
-                            "evidence"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "protocolVersion": {
-                              "type": "number",
-                              "enum": [
-                                1
-                              ]
-                            },
-                            "requestId": {
-                              "type": "string"
-                            },
-                            "battery": {
-                              "type": "string",
-                              "enum": [
-                                "webui.voice.speech-seams"
-                              ]
-                            },
-                            "batteryVersion": {
-                              "type": "number",
-                              "enum": [
-                                2
-                              ]
-                            },
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "held"
-                              ]
-                            },
-                            "reason": {
-                              "type": "string",
-                              "enum": [
-                                "uncertain"
-                              ]
-                            },
-                            "readings": {
-                              "type": "object",
-                              "additionalProperties": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                      "yes-no"
-                                    ]
-                                  },
-                                  "probability": {
-                                    "type": "number",
-                                    "minimum": 0,
-                                    "maximum": 1
-                                  },
-                                  "verdict": {
-                                    "type": "string",
-                                    "enum": [
-                                      "yes",
-                                      "no",
-                                      "uncertain"
-                                    ]
-                                  },
-                                  "outcome": {
-                                    "type": "string",
-                                    "enum": [
-                                      "act",
-                                      "confirm",
-                                      "escalate"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "probability",
-                                  "verdict",
-                                  "outcome"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "outcome": {
-                              "type": "string",
-                              "enum": [
-                                "confirm",
-                                "escalate"
-                              ]
-                            },
-                            "evidence": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "decisionId": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  },
-                                  "requestedModel": {
-                                    "type": "string"
-                                  },
-                                  "usage": {
-                                    "type": "object",
-                                    "properties": {
-                                      "inputTokens": {
-                                        "type": "number"
-                                      },
-                                      "outputTokens": {
-                                        "type": "number"
-                                      }
-                                    },
-                                    "required": [
-                                      "inputTokens",
-                                      "outputTokens"
-                                    ],
-                                    "additionalProperties": false
-                                  },
-                                  "latencyMs": {
-                                    "type": "number"
-                                  }
-                                },
-                                "required": [
-                                  "decisionId",
-                                  "model",
-                                  "requestedModel",
-                                  "usage",
-                                  "latencyMs"
-                                ],
-                                "additionalProperties": false
-                              }
-                            }
-                          },
-                          "required": [
-                            "protocolVersion",
-                            "requestId",
-                            "battery",
-                            "batteryVersion",
-                            "status",
-                            "reason",
-                            "readings",
-                            "outcome",
-                            "evidence"
-                          ],
-                          "additionalProperties": false
-                        }
-                      ]
-                    },
                     {
                       "anyOf": [
                         {
@@ -69682,85 +69774,6 @@
                       "battery": {
                         "type": "string",
                         "enum": [
-                          "webui.voice.speech-seams"
-                        ]
-                      },
-                      "batteryVersion": {
-                        "type": "number",
-                        "enum": [
-                          2
-                        ]
-                      },
-                      "input": {
-                        "type": "object",
-                        "properties": {
-                          "sessionId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 256
-                          },
-                          "messageId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 256
-                          },
-                          "start": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "end": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 1000000
-                          },
-                          "contentRevision": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 256
-                          },
-                          "cursor": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 4095,
-                            "multipleOf": 64
-                          }
-                        },
-                        "required": [
-                          "sessionId",
-                          "messageId",
-                          "start",
-                          "end",
-                          "contentRevision",
-                          "cursor"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "required": [
-                      "protocolVersion",
-                      "requestId",
-                      "battery",
-                      "batteryVersion",
-                      "input"
-                    ],
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "protocolVersion": {
-                        "type": "number",
-                        "enum": [
-                          1
-                        ]
-                      },
-                      "requestId": {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      "battery": {
-                        "type": "string",
-                        "enum": [
                           "webui.models.catalog-provider-match"
                         ]
                       },
@@ -69913,7 +69926,7 @@
         "x-scopes": [
           "read:knowledge"
         ],
-        "x-effect": "read",
+        "x-effect": "outward",
         "requestBody": {
           "required": true,
           "content": {
@@ -74563,7 +74576,7 @@
         "x-scopes": [
           "write:knowledge"
         ],
-        "x-effect": "write",
+        "x-effect": "outward",
         "requestBody": {
           "required": true,
           "content": {
@@ -109359,7 +109372,7 @@
       "post": {
         "operationId": "payments.checkout.begin",
         "summary": "Buy What Is In This Checkout",
-        "description": "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
+        "description": "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. A purchase the owner asked for now carries the explicit-user-request context; one a schedule or trigger starts names standingId (payments.standing.list) instead and is bound to that entry's item, shops and maximums. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
         "tags": [
           "payments"
         ],
@@ -109710,6 +109723,11 @@
                   },
                   "twoDigitYear": {
                     "type": "boolean"
+                  },
+                  "standingId": {
+                    "type": "string",
+                    "pattern": "^standing-[0-9a-f]{8}$",
+                    "description": "For a purchase a schedule or trigger starts, with nobody asking in the moment: the id of the owner's standing authorisation from payments.standing.list. The item must be that entry's item and the merchant one of its shops; the purchase may come to at most the smaller of its per-purchase maximum and what is left of its period. Omit it for a purchase the owner asked for now."
                   },
                   "requestedMax": {
                     "type": "string",
@@ -110868,6 +110886,9 @@
                           },
                           "merchantDiscovered": {
                             "type": "boolean"
+                          },
+                          "standingAuthorizationId": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -110995,6 +111016,358 @@
             }
           }
         ]
+      }
+    },
+    "/api/payments/standing": {
+      "post": {
+        "operationId": "payments.standing.create",
+        "summary": "Authorise a Purchase in Advance",
+        "description": "The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments standing add sends both. The owner's own act: an agent cannot add one.",
+        "tags": [
+          "payments"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "authorization": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "item": {
+                          "type": "string"
+                        },
+                        "merchants": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "maxPerPurchaseMinorUnits": {
+                          "type": "number"
+                        },
+                        "maxPerPeriodMinorUnits": {
+                          "type": "number"
+                        },
+                        "periodDays": {
+                          "type": "number"
+                        },
+                        "spentMinorUnits": {
+                          "type": "number"
+                        },
+                        "leftMinorUnits": {
+                          "type": "number"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "live": {
+                          "type": "boolean"
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "item",
+                        "merchants",
+                        "currency",
+                        "maxPerPurchaseMinorUnits",
+                        "maxPerPeriodMinorUnits",
+                        "periodDays",
+                        "spentMinorUnits",
+                        "leftMinorUnits",
+                        "createdAt",
+                        "expiresAt",
+                        "live",
+                        "summary"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "created",
+                    "authorization"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "admin",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "write:payments"
+        ],
+        "x-dangerous": true,
+        "x-effect": "write",
+        "x-owner-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirm": {
+                    "type": "boolean"
+                  },
+                  "item": {
+                    "type": "string",
+                    "description": "The owner's words for what may be bought; a scheduled purchase must name exactly this item."
+                  },
+                  "merchants": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "description": "The shop domains it may be bought from."
+                  },
+                  "maxPerPurchase": {
+                    "type": "string",
+                    "description": "The most one purchase may come to, in the budget currency, such as 60.00."
+                  },
+                  "maxPerPeriod": {
+                    "type": "string",
+                    "description": "The most all purchases under it may come to within periodDays, in the budget currency."
+                  },
+                  "periodDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 366
+                  },
+                  "expires": {
+                    "type": "string",
+                    "description": "Optional last day, such as 2027-06-30; absent, it lasts until removed."
+                  }
+                },
+                "required": [
+                  "confirm",
+                  "item",
+                  "merchants",
+                  "maxPerPurchase",
+                  "maxPerPeriod",
+                  "periodDays"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "payments.standing.list",
+        "summary": "Standing Purchase Authorisations",
+        "description": "The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in his words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.",
+        "tags": [
+          "payments"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "authorizations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "item": {
+                            "type": "string"
+                          },
+                          "merchants": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "maxPerPurchaseMinorUnits": {
+                            "type": "number"
+                          },
+                          "maxPerPeriodMinorUnits": {
+                            "type": "number"
+                          },
+                          "periodDays": {
+                            "type": "number"
+                          },
+                          "spentMinorUnits": {
+                            "type": "number"
+                          },
+                          "leftMinorUnits": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "expiresAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "live": {
+                            "type": "boolean"
+                          },
+                          "summary": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "item",
+                          "merchants",
+                          "currency",
+                          "maxPerPurchaseMinorUnits",
+                          "maxPerPeriodMinorUnits",
+                          "periodDays",
+                          "spentMinorUnits",
+                          "leftMinorUnits",
+                          "createdAt",
+                          "expiresAt",
+                          "live",
+                          "summary"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "authorizations"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "read:payments"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/payments/standing/delete": {
+      "post": {
+        "operationId": "payments.standing.delete",
+        "summary": "Withdraw a Standing Authorisation",
+        "description": "Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments standing remove sends both. The owner's own act.",
+        "tags": [
+          "payments"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "deleted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "admin",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "write:payments"
+        ],
+        "x-dangerous": true,
+        "x-effect": "write",
+        "x-owner-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "confirm": {
+                    "type": "boolean"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "confirm",
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
       }
     },
     "/api/principals": {
@@ -116395,6 +116768,221 @@
         }
       }
     },
+    "/api/remote/peers/{peerId}": {
+      "get": {
+        "operationId": "remote.peers.get",
+        "summary": "Get Remote Peer",
+        "description": "Return one remote peer by id; 404 when no peer has that id.",
+        "tags": [
+          "remote"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "peer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "node",
+                            "device"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "requestedId": {
+                          "type": "string"
+                        },
+                        "platform": {
+                          "type": "string"
+                        },
+                        "deviceFamily": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string"
+                        },
+                        "clientMode": {
+                          "type": "string"
+                        },
+                        "capabilities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "commands": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "permissions": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "boolean"
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "paired",
+                            "connected",
+                            "idle",
+                            "disconnected",
+                            "revoked"
+                          ]
+                        },
+                        "pairedAt": {
+                          "type": "number"
+                        },
+                        "verifiedAt": {
+                          "type": "number"
+                        },
+                        "lastSeenAt": {
+                          "type": "number"
+                        },
+                        "lastConnectedAt": {
+                          "type": "number"
+                        },
+                        "lastDisconnectedAt": {
+                          "type": "number"
+                        },
+                        "lastRemoteAddress": {
+                          "type": "string"
+                        },
+                        "activeTokenId": {
+                          "type": "string"
+                        },
+                        "tokens": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "scopes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "issuedAt": {
+                                "type": "number"
+                              },
+                              "lastUsedAt": {
+                                "type": "number"
+                              },
+                              "rotatedAt": {
+                                "type": "number"
+                              },
+                              "revokedAt": {
+                                "type": "number"
+                              },
+                              "fingerprint": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label",
+                              "scopes",
+                              "issuedAt",
+                              "fingerprint"
+                            ],
+                            "additionalProperties": true
+                          }
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "label",
+                        "requestedId",
+                        "capabilities",
+                        "commands",
+                        "status",
+                        "pairedAt",
+                        "tokens",
+                        "metadata"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "required": [
+                    "peer"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "read:remote"
+        ],
+        "x-effect": "read",
+        "parameters": [
+          {
+            "name": "peerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/remote/peers/{peerId}/invoke": {
       "post": {
         "operationId": "remote.peers.invoke",
@@ -117558,9 +118146,6 @@
                         "isRunning": {
                           "type": "boolean"
                         },
-                        "reconnectAttempts": {
-                          "type": "number"
-                        },
                         "runningJobCount": {
                           "type": "number"
                         },
@@ -117571,7 +118156,6 @@
                       "required": [
                         "transportState",
                         "isRunning",
-                        "reconnectAttempts",
                         "runningJobCount"
                       ],
                       "additionalProperties": true
@@ -129704,14 +130288,62 @@
                               "configuration"
                             ]
                           },
-                          "featureId": {
-                            "type": "string"
-                          },
                           "defaultState": {
                             "type": "string"
                           },
                           "currentState": {
                             "type": "string"
+                          },
+                          "value": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              }
+                            ]
+                          },
+                          "defaultValue": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              }
+                            ]
+                          },
+                          "insecure": {
+                            "type": "boolean"
                           },
                           "securityRelevant": {
                             "type": "boolean"
@@ -129741,9 +130373,9 @@
                         "required": [
                           "key",
                           "type",
-                          "featureId",
                           "defaultState",
                           "currentState",
+                          "insecure",
                           "securityRelevant",
                           "summary",
                           "insecureWhen",
@@ -132889,40 +133521,31 @@
                         "sessionStatus": {
                           "type": "string"
                         },
-                        "traceContext": {
+                        "traceExport": {
                           "type": "object",
                           "properties": {
-                            "traceId": {
-                              "type": "string"
-                            },
-                            "rootSpanId": {
-                              "type": "string"
-                            },
-                            "exportActive": {
+                            "recording": {
                               "type": "boolean"
                             },
-                            "endpoint": {
-                              "type": "string"
+                            "endpoints": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "unreachable": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
                             }
                           },
                           "required": [
-                            "traceId",
-                            "rootSpanId",
-                            "exportActive"
+                            "recording",
+                            "endpoints",
+                            "unreachable"
                           ],
                           "additionalProperties": false
-                        },
-                        "sessionCorrelationId": {
-                          "type": "string"
-                        },
-                        "currentTurnCorrelationId": {
-                          "type": "string"
-                        },
-                        "dbAvailable": {
-                          "type": "boolean"
-                        },
-                        "dbPath": {
-                          "type": "string"
                         },
                         "tasks": {
                           "type": "object",
@@ -132980,8 +133603,7 @@
                       "required": [
                         "sessionId",
                         "sessionStatus",
-                        "sessionCorrelationId",
-                        "dbAvailable",
+                        "traceExport",
                         "tasks",
                         "agents",
                         "approvals"
@@ -133908,40 +134530,31 @@
                         "sessionStatus": {
                           "type": "string"
                         },
-                        "traceContext": {
+                        "traceExport": {
                           "type": "object",
                           "properties": {
-                            "traceId": {
-                              "type": "string"
-                            },
-                            "rootSpanId": {
-                              "type": "string"
-                            },
-                            "exportActive": {
+                            "recording": {
                               "type": "boolean"
                             },
-                            "endpoint": {
-                              "type": "string"
+                            "endpoints": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "unreachable": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
                             }
                           },
                           "required": [
-                            "traceId",
-                            "rootSpanId",
-                            "exportActive"
+                            "recording",
+                            "endpoints",
+                            "unreachable"
                           ],
                           "additionalProperties": false
-                        },
-                        "sessionCorrelationId": {
-                          "type": "string"
-                        },
-                        "currentTurnCorrelationId": {
-                          "type": "string"
-                        },
-                        "dbAvailable": {
-                          "type": "boolean"
-                        },
-                        "dbPath": {
-                          "type": "string"
                         },
                         "tasks": {
                           "type": "object",
@@ -133999,8 +134612,7 @@
                       "required": [
                         "sessionId",
                         "sessionStatus",
-                        "sessionCorrelationId",
-                        "dbAvailable",
+                        "traceExport",
                         "tasks",
                         "agents",
                         "approvals"
@@ -135082,6 +135694,12 @@
                     },
                     "resumedFrom": {
                       "type": "string"
+                    },
+                    "gap": {
+                      "type": "boolean"
+                    },
+                    "truncated": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -159597,12 +160215,6 @@
                         "kept": {
                           "type": "number"
                         },
-                        "discard": {
-                          "type": "number"
-                        },
-                        "pendingCleanup": {
-                          "type": "number"
-                        },
                         "sessionAttached": {
                           "type": "number"
                         },
@@ -159624,8 +160236,6 @@
                         "active",
                         "paused",
                         "kept",
-                        "discard",
-                        "pendingCleanup",
                         "sessionAttached",
                         "taskAttached",
                         "agentOwned",
@@ -159655,9 +160265,7 @@
                             "enum": [
                               "active",
                               "paused",
-                              "kept",
-                              "discard",
-                              "pending-cleanup"
+                              "kept"
                             ]
                           },
                           "ownerId": {
@@ -159851,9 +160459,12 @@
           "fleet.conflicts.list",
           "fleet.conflicts.resolve",
           "fleet.conflicts.retry",
+          "fleet.interrupt",
           "fleet.list",
           "fleet.observed.steer",
+          "fleet.resume",
           "fleet.snapshot",
+          "fleet.stop",
           "fleet.unarchive",
           "inbox.answer",
           "inbox.delivery",
@@ -161047,6 +161658,14 @@
       "outputSchemaCoverage": "typed"
     },
     {
+      "id": "channels.inbox.applyLabels",
+      "category": "channels",
+      "access": "admin",
+      "rest": "POST /api/channels/inbox/labels",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
       "id": "channels.inbox.list",
       "category": "channels",
       "access": "authenticated",
@@ -161567,6 +162186,14 @@
       "outputSchemaCoverage": "typed"
     },
     {
+      "id": "config.setMany",
+      "category": "config",
+      "access": "admin",
+      "rest": "POST /config/many",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
       "id": "credentials.delete",
       "category": "config",
       "access": "admin",
@@ -162039,6 +162666,14 @@
       "outputSchemaCoverage": "typed"
     },
     {
+      "id": "fleet.interrupt",
+      "category": "fleet",
+      "access": "admin",
+      "rest": null,
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
       "id": "fleet.list",
       "category": "fleet",
       "access": "authenticated",
@@ -162055,9 +162690,25 @@
       "outputSchemaCoverage": "typed"
     },
     {
+      "id": "fleet.resume",
+      "category": "fleet",
+      "access": "admin",
+      "rest": null,
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
       "id": "fleet.snapshot",
       "category": "fleet",
       "access": "authenticated",
+      "rest": null,
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "fleet.stop",
+      "category": "fleet",
+      "access": "admin",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -163575,6 +164226,30 @@
       "outputSchemaCoverage": "typed"
     },
     {
+      "id": "payments.standing.create",
+      "category": "payments",
+      "access": "admin",
+      "rest": "POST /api/payments/standing",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "payments.standing.delete",
+      "category": "payments",
+      "access": "admin",
+      "rest": "POST /api/payments/standing/delete",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "payments.standing.list",
+      "category": "payments",
+      "access": "authenticated",
+      "rest": "GET /api/payments/standing",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
       "id": "permissions.rules.delete",
       "category": "permissions",
       "access": "authenticated",
@@ -163891,6 +164566,14 @@
       "category": "remote",
       "access": "admin",
       "rest": "POST /api/remote/peers/{peerId}/disconnect",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "remote.peers.get",
+      "category": "remote",
+      "access": "authenticated",
+      "rest": "GET /api/remote/peers/{peerId}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
     },

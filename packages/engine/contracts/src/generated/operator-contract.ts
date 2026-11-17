@@ -3065,7 +3065,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "denialCount": {
               "type": "number"
             },
-            "cachedChecks": {
+            "promptCount": {
               "type": "number"
             },
             "totalChecks": {
@@ -3510,7 +3510,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "mode",
             "approvalCount",
             "denialCount",
-            "cachedChecks",
+            "promptCount",
             "totalChecks",
             "approvals"
           ],
@@ -28068,6 +28068,128 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "channels.inbox.applyLabels",
+        "title": "Apply Inbox Labels",
+        "description": "Write triage labels to inbox messages at their provider: an IMAP keyword on mail, a reaction on Slack, a reaction or forum tag on Discord. `itemIds` are ids from channels.inbox.list (up to 100); `labels` are GoodVibes/Spam, GoodVibes/Priority or GoodVibes/Normal (writing one takes the other two off), or a custom label name. Writes only for accounts whose owner switch is on (surfaces.slack.inboxTagging, surfaces.discord.inboxTagging, surfaces.email.inboxTagging). Returns one result per message: `applied` (every label is on it now), `refused` (nothing was written, with the reason and what to do) or `failed` (the provider did not take a label; `effects` says which mark was written or not).",
+        "category": "channels",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:channels"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/channels/inbox/labels"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "itemIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "itemIds",
+            "labels"
+          ],
+          "additionalProperties": true
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "itemId": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "applied": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "effects": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "tag": {
+                          "type": "string"
+                        },
+                        "action": {
+                          "type": "string"
+                        },
+                        "outcome": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "tag",
+                        "action",
+                        "outcome"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "changedDuringWrite": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "itemId",
+                  "state",
+                  "applied"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "applied": {
+              "type": "number"
+            },
+            "refused": {
+              "type": "number"
+            },
+            "failed": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "results",
+            "applied",
+            "refused",
+            "failed"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
         "id": "channels.inbox.list",
         "title": "List Channel Inbox",
         "description": "Return the merged inbound message feed (Slack DMs, Discord messages, email threads) from the host's synced provider mirror, newest first. Read-only; no provider write. Every known provider reports its own state in `providers`, including the unconfigured and the failing ones, so a short list is never ambiguous, and `partial` is true whenever a configured provider's items are missing because its last sync failed. Page with ?limit and ?cursor (opaque, from nextCursor); ?since=<epoch-ms> returns only items newer than a previous answer's `cursor` watermark; ?provider=<id> narrows to one provider.",
@@ -31987,6 +32109,26 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               },
               "required": [
                 "error",
+                "at"
+              ],
+              "additionalProperties": false
+            },
+            "historyTrimmed": {
+              "type": "object",
+              "properties": {
+                "count": {
+                  "type": "number"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "count",
+                "reason",
                 "at"
               ],
               "additionalProperties": false
@@ -36893,6 +37035,142 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "config.setMany",
+        "title": "Set Several Config Values",
+        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set.",
+        "category": "config",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:config"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/config/many"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "key",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "entries"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "number"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  },
+                  "persistedTo": {
+                    "type": "string"
+                  },
+                  "tier": {
+                    "type": "string"
+                  },
+                  "daemonOwned": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "key"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "success",
+            "revision",
+            "entries"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "effect": "write",
+        "invokable": true
+      },
+      {
         "id": "credentials.delete",
         "title": "Delete Credential",
         "description": "Remove a credential: the stored secret first, then the config reference pointing at it. That order is deliberate, clearing the config first would strand a secret nothing points at and nothing reaps, while this order leaves, for an instant, a reference resolving to nothing, which every reader already treats as configured-but-broken (the honest state for a credential mid-removal). `cleared: false` means nothing was stored under that key: a miss, not an error, because asking for a credential to be gone when it already is has succeeded. ws-only invoke verb; no REST binding. Mutating, so a relay call is covered by relay.requireStepUpForMutations exactly as config.set is.",
@@ -41142,6 +41420,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       },
                                       "definitionAfter": {
                                         "type": "string"
+                                      },
+                                      "root": {
+                                        "type": "string"
+                                      },
+                                      "scope": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
                                       }
                                     },
                                     "required": [
@@ -42019,6 +42306,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       },
                                       "definitionAfter": {
                                         "type": "string"
+                                      },
+                                      "root": {
+                                        "type": "string"
+                                      },
+                                      "scope": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
                                       }
                                     },
                                     "required": [
@@ -43311,6 +43607,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             },
                                             "definitionAfter": {
                                               "type": "string"
+                                            },
+                                            "root": {
+                                              "type": "string"
+                                            },
+                                            "scope": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
                                             }
                                           },
                                           "required": [
@@ -44600,6 +44905,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "definitionAfter": {
                                   "type": "string"
+                                },
+                                "root": {
+                                  "type": "string"
+                                },
+                                "scope": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
                                 }
                               },
                               "required": [
@@ -49190,6 +49504,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   },
                                   "definitionAfter": {
                                     "type": "string"
+                                  },
+                                  "root": {
+                                    "type": "string"
+                                  },
+                                  "scope": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
                                   }
                                 },
                                 "required": [
@@ -50067,6 +50390,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   },
                                   "definitionAfter": {
                                     "type": "string"
+                                  },
+                                  "root": {
+                                    "type": "string"
+                                  },
+                                  "scope": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
                                   }
                                 },
                                 "required": [
@@ -51359,6 +51691,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         },
                                         "definitionAfter": {
                                           "type": "string"
+                                        },
+                                        "root": {
+                                          "type": "string"
+                                        },
+                                        "scope": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
                                         }
                                       },
                                       "required": [
@@ -52648,6 +52989,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "definitionAfter": {
                               "type": "string"
+                            },
+                            "root": {
+                              "type": "string"
+                            },
+                            "scope": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
                             }
                           },
                           "required": [
@@ -57222,6 +57572,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         },
                                         "definitionAfter": {
                                           "type": "string"
+                                        },
+                                        "root": {
+                                          "type": "string"
+                                        },
+                                        "scope": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
                                         }
                                       },
                                       "required": [
@@ -58099,6 +58458,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         },
                                         "definitionAfter": {
                                           "type": "string"
+                                        },
+                                        "root": {
+                                          "type": "string"
+                                        },
+                                        "scope": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
                                         }
                                       },
                                       "required": [
@@ -59391,6 +59759,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                               },
                                               "definitionAfter": {
                                                 "type": "string"
+                                              },
+                                              "root": {
+                                                "type": "string"
+                                              },
+                                              "scope": {
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
                                               }
                                             },
                                             "required": [
@@ -60680,6 +61057,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   },
                                   "definitionAfter": {
                                     "type": "string"
+                                  },
+                                  "root": {
+                                    "type": "string"
+                                  },
+                                  "scope": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
                                   }
                                 },
                                 "required": [
@@ -65516,6 +65902,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       },
                                       "definitionAfter": {
                                         "type": "string"
+                                      },
+                                      "root": {
+                                        "type": "string"
+                                      },
+                                      "scope": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
                                       }
                                     },
                                     "required": [
@@ -66393,6 +66788,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       },
                                       "definitionAfter": {
                                         "type": "string"
+                                      },
+                                      "root": {
+                                        "type": "string"
+                                      },
+                                      "scope": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
                                       }
                                     },
                                     "required": [
@@ -67685,6 +68089,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                             },
                                             "definitionAfter": {
                                               "type": "string"
+                                            },
+                                            "root": {
+                                              "type": "string"
+                                            },
+                                            "scope": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
                                             }
                                           },
                                           "required": [
@@ -68974,6 +69387,15 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 },
                                 "definitionAfter": {
                                   "type": "string"
+                                },
+                                "root": {
+                                  "type": "string"
+                                },
+                                "scope": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
                                 }
                               },
                               "required": [
@@ -77185,6 +77607,60 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "fleet.interrupt",
+        "title": "Interrupt a Fleet Node",
+        "description": "Gracefully interrupt one fleet node: an agent ends its current turn, a trigger or schedule is paused. Answers the node ids acted on. A node whose capabilities do not include interruptible is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.",
+        "category": "fleet",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:fleet"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "cascade": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "affected": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "action",
+            "affected"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
         "id": "fleet.list",
         "title": "List Fleet Processes",
         "description": "Paginated, filtered (kinds/states) query over the live process registry. Cursor pagination returns disjoint pages that union to the full matching set at query time.",
@@ -77687,6 +78163,60 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "fleet.resume",
+        "title": "Resume a Fleet Node",
+        "description": "Re-arm one paused trigger or schedule (for a trigger with an open breaker, this is the reset the breaker waits for). Answers the node ids acted on. A node whose capabilities do not include resumable is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.",
+        "category": "fleet",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:fleet"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "cascade": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "affected": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "action",
+            "affected"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true
+      },
+      {
         "id": "fleet.snapshot",
         "title": "Fleet Snapshot",
         "description": "Return a point-in-time capture of every live/completed runtime process (agents, contracts with their groups and units, workflow FSMs/triggers/schedules, watchers, background processes) as a flat, parentId-linked node list. Capped at 2000 nodes (truncated:true + totalCount when the live fleet exceeds the cap), use fleet.list to page through a larger fleet.",
@@ -78114,6 +78644,60 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "fleet.stop",
+        "title": "Stop a Fleet Node",
+        "description": "Hard-stop one fleet node through its owning manager (agent cancel, background process stop, watcher stop, workflow cancel, trigger or schedule remove, contract cancel, hosted ACP agent stop). `cascade: true` stops its descendants first. Answers the node ids actually acted on. A node whose capabilities do not include killable is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.",
+        "category": "fleet",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "ws"
+        ],
+        "scopes": [
+          "write:fleet"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "cascade": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "affected": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "action",
+            "affected"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
         "invokable": true
       },
       {
@@ -82981,34 +83565,42 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "symbolSearchStatus": {
               "type": "string"
             },
-            "completionsStatus": {
-              "type": "string"
-            },
             "hoverStatus": {
               "type": "string"
+            },
+            "languageServers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "language",
+                  "state"
+                ],
+                "additionalProperties": false
+              }
             },
             "errorCount": {
               "type": "number"
             },
             "warningCount": {
               "type": "number"
-            },
-            "totalRequests": {
-              "type": "number"
-            },
-            "avgLatencyMs": {
-              "type": "number"
             }
           },
           "required": [
             "diagnosticsStatus",
             "symbolSearchStatus",
-            "completionsStatus",
             "hoverStatus",
+            "languageServers",
             "errorCount",
-            "warningCount",
-            "totalRequests",
-            "avgLatencyMs"
+            "warningCount"
           ],
           "additionalProperties": false
         },
@@ -83034,85 +83626,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "inputSchema": {
           "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "protocolVersion": {
-                  "type": "number",
-                  "enum": [
-                    1
-                  ]
-                },
-                "requestId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "battery": {
-                  "type": "string",
-                  "enum": [
-                    "webui.voice.speech-seams"
-                  ]
-                },
-                "batteryVersion": {
-                  "type": "number",
-                  "enum": [
-                    2
-                  ]
-                },
-                "input": {
-                  "type": "object",
-                  "properties": {
-                    "sessionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    },
-                    "messageId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    },
-                    "start": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "end": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 1000000
-                    },
-                    "contentRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    },
-                    "cursor": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 4095,
-                      "multipleOf": 64
-                    }
-                  },
-                  "required": [
-                    "sessionId",
-                    "messageId",
-                    "start",
-                    "end",
-                    "contentRevision",
-                    "cursor"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "protocolVersion",
-                "requestId",
-                "battery",
-                "batteryVersion",
-                "input"
-              ],
-              "additionalProperties": false
-            },
             {
               "type": "object",
               "properties": {
@@ -83177,322 +83690,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         },
         "outputSchema": {
           "anyOf": [
-            {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.voice.speech-seams"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        2
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "settled"
-                      ]
-                    },
-                    "value": {
-                      "type": "object",
-                      "properties": {
-                        "endOffsets": {
-                          "type": "array",
-                          "items": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 32768
-                          },
-                          "maxItems": 64
-                        },
-                        "nextCursor": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "minimum": 64,
-                              "maximum": 4095
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "required": [
-                        "endOffsets",
-                        "nextCursor"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "yes-no"
-                            ]
-                          },
-                          "probability": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1
-                          },
-                          "verdict": {
-                            "type": "string",
-                            "enum": [
-                              "yes",
-                              "no",
-                              "uncertain"
-                            ]
-                          },
-                          "outcome": {
-                            "type": "string",
-                            "enum": [
-                              "act",
-                              "confirm",
-                              "escalate"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "probability",
-                          "verdict",
-                          "outcome"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "act",
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "value",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "protocolVersion": {
-                      "type": "number",
-                      "enum": [
-                        1
-                      ]
-                    },
-                    "requestId": {
-                      "type": "string"
-                    },
-                    "battery": {
-                      "type": "string",
-                      "enum": [
-                        "webui.voice.speech-seams"
-                      ]
-                    },
-                    "batteryVersion": {
-                      "type": "number",
-                      "enum": [
-                        2
-                      ]
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "held"
-                      ]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "uncertain"
-                      ]
-                    },
-                    "readings": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "object",
-                        "properties": {
-                          "kind": {
-                            "type": "string",
-                            "enum": [
-                              "yes-no"
-                            ]
-                          },
-                          "probability": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1
-                          },
-                          "verdict": {
-                            "type": "string",
-                            "enum": [
-                              "yes",
-                              "no",
-                              "uncertain"
-                            ]
-                          },
-                          "outcome": {
-                            "type": "string",
-                            "enum": [
-                              "act",
-                              "confirm",
-                              "escalate"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "kind",
-                          "probability",
-                          "verdict",
-                          "outcome"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "outcome": {
-                      "type": "string",
-                      "enum": [
-                        "confirm",
-                        "escalate"
-                      ]
-                    },
-                    "evidence": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "decisionId": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "requestedModel": {
-                            "type": "string"
-                          },
-                          "usage": {
-                            "type": "object",
-                            "properties": {
-                              "inputTokens": {
-                                "type": "number"
-                              },
-                              "outputTokens": {
-                                "type": "number"
-                              }
-                            },
-                            "required": [
-                              "inputTokens",
-                              "outputTokens"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "decisionId",
-                          "model",
-                          "requestedModel",
-                          "usage",
-                          "latencyMs"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "protocolVersion",
-                    "requestId",
-                    "battery",
-                    "batteryVersion",
-                    "status",
-                    "reason",
-                    "readings",
-                    "outcome",
-                    "evidence"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            },
             {
               "anyOf": [
                 {
@@ -83930,7 +84127,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ],
           "additionalProperties": true
         },
-        "effect": "read",
+        "effect": "outward",
         "invokable": true
       },
       {
@@ -88333,7 +88530,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           ],
           "additionalProperties": true
         },
-        "effect": "write",
+        "effect": "outward",
         "invokable": true
       },
       {
@@ -120941,7 +121138,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.revokeShared",
         "title": "Revoke The Legacy Shared Token",
-        "description": "Turn off the legacy single shared operator token. After this, only per-device pairing tokens (and user sessions) authenticate; the shared token stops working immediately. Idempotent.",
+        "description": "Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Idempotent.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -121624,7 +121821,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "payments.checkout.begin",
         "title": "Buy What Is In This Checkout",
-        "description": "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
+        "description": "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. Inside the owner's limits no prior approval is needed; with payments.confirmEveryPurchase on, a begin must state requestedMax and spend a matching payments.checkout.approve. cardId may be omitted to pay with payments.defaultCardId, and merchantDiscovered is read as sent. A purchase the owner asked for now carries the explicit-user-request context; one a schedule or trigger starts names standingId (payments.standing.list) instead and is bound to that entry's item, shops and maximums. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
         "category": "payments",
         "source": "builtin",
         "access": "admin",
@@ -121868,6 +122065,11 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "twoDigitYear": {
               "type": "boolean"
+            },
+            "standingId": {
+              "type": "string",
+              "pattern": "^standing-[0-9a-f]{8}$",
+              "description": "For a purchase a schedule or trigger starts, with nobody asking in the moment: the id of the owner's standing authorisation from payments.standing.list. The item must be that entry's item and the merchant one of its shops; the purchase may come to at most the smaller of its per-purchase maximum and what is left of its period. Omit it for a purchase the owner asked for now."
             },
             "requestedMax": {
               "type": "string",
@@ -123038,6 +123240,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "merchantDiscovered": {
                     "type": "boolean"
+                  },
+                  "standingAuthorizationId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -123128,6 +123333,321 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "required": [
             "purchases",
             "total"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
+        "id": "payments.standing.create",
+        "title": "Authorise a Purchase in Advance",
+        "description": "The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Requires confirm: true and the explicit-user-request context; /payments standing add sends both. The owner's own act: an agent cannot add one.",
+        "category": "payments",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:payments"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/payments/standing"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "confirm": {
+              "type": "boolean"
+            },
+            "item": {
+              "type": "string",
+              "description": "The owner's words for what may be bought; a scheduled purchase must name exactly this item."
+            },
+            "merchants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "The shop domains it may be bought from."
+            },
+            "maxPerPurchase": {
+              "type": "string",
+              "description": "The most one purchase may come to, in the budget currency, such as 60.00."
+            },
+            "maxPerPeriod": {
+              "type": "string",
+              "description": "The most all purchases under it may come to within periodDays, in the budget currency."
+            },
+            "periodDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 366
+            },
+            "expires": {
+              "type": "string",
+              "description": "Optional last day, such as 2027-06-30; absent, it lasts until removed."
+            }
+          },
+          "required": [
+            "confirm",
+            "item",
+            "merchants",
+            "maxPerPurchase",
+            "maxPerPeriod",
+            "periodDays"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "created": {
+              "type": "boolean"
+            },
+            "authorization": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "item": {
+                  "type": "string"
+                },
+                "merchants": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "maxPerPurchaseMinorUnits": {
+                  "type": "number"
+                },
+                "maxPerPeriodMinorUnits": {
+                  "type": "number"
+                },
+                "periodDays": {
+                  "type": "number"
+                },
+                "spentMinorUnits": {
+                  "type": "number"
+                },
+                "leftMinorUnits": {
+                  "type": "number"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "live": {
+                  "type": "boolean"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "item",
+                "merchants",
+                "currency",
+                "maxPerPurchaseMinorUnits",
+                "maxPerPeriodMinorUnits",
+                "periodDays",
+                "spentMinorUnits",
+                "leftMinorUnits",
+                "createdAt",
+                "expiresAt",
+                "live",
+                "summary"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "created",
+            "authorization"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "effect": "write",
+        "ownerOnly": true,
+        "invokable": true
+      },
+      {
+        "id": "payments.standing.delete",
+        "title": "Withdraw a Standing Authorisation",
+        "description": "Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Requires confirm: true and the explicit-user-request context; /payments standing remove sends both. The owner's own act.",
+        "category": "payments",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:payments"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/payments/standing/delete"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "confirm": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "confirm",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "deleted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "deleted"
+          ],
+          "additionalProperties": false
+        },
+        "dangerous": true,
+        "effect": "write",
+        "ownerOnly": true,
+        "invokable": true
+      },
+      {
+        "id": "payments.standing.list",
+        "title": "Standing Purchase Authorisations",
+        "description": "The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in his words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.",
+        "category": "payments",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:payments"
+        ],
+        "http": {
+          "method": "GET",
+          "path": "/api/payments/standing"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "authorizations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "item": {
+                    "type": "string"
+                  },
+                  "merchants": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "maxPerPurchaseMinorUnits": {
+                    "type": "number"
+                  },
+                  "maxPerPeriodMinorUnits": {
+                    "type": "number"
+                  },
+                  "periodDays": {
+                    "type": "number"
+                  },
+                  "spentMinorUnits": {
+                    "type": "number"
+                  },
+                  "leftMinorUnits": {
+                    "type": "number"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "expiresAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "live": {
+                    "type": "boolean"
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "item",
+                  "merchants",
+                  "currency",
+                  "maxPerPurchaseMinorUnits",
+                  "maxPerPeriodMinorUnits",
+                  "periodDays",
+                  "spentMinorUnits",
+                  "leftMinorUnits",
+                  "createdAt",
+                  "expiresAt",
+                  "live",
+                  "summary"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "authorizations"
           ],
           "additionalProperties": false
         },
@@ -128847,6 +129367,213 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "invokable": true
       },
       {
+        "id": "remote.peers.get",
+        "title": "Get Remote Peer",
+        "description": "Return one remote peer by id; 404 when no peer has that id.",
+        "category": "remote",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:remote"
+        ],
+        "http": {
+          "method": "GET",
+          "path": "/api/remote/peers/{peerId}"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "peerId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "peerId"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "peer": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "node",
+                    "device"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "requestedId": {
+                  "type": "string"
+                },
+                "platform": {
+                  "type": "string"
+                },
+                "deviceFamily": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "clientMode": {
+                  "type": "string"
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "commands": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "permissions": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "paired",
+                    "connected",
+                    "idle",
+                    "disconnected",
+                    "revoked"
+                  ]
+                },
+                "pairedAt": {
+                  "type": "number"
+                },
+                "verifiedAt": {
+                  "type": "number"
+                },
+                "lastSeenAt": {
+                  "type": "number"
+                },
+                "lastConnectedAt": {
+                  "type": "number"
+                },
+                "lastDisconnectedAt": {
+                  "type": "number"
+                },
+                "lastRemoteAddress": {
+                  "type": "string"
+                },
+                "activeTokenId": {
+                  "type": "string"
+                },
+                "tokens": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "scopes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "issuedAt": {
+                        "type": "number"
+                      },
+                      "lastUsedAt": {
+                        "type": "number"
+                      },
+                      "rotatedAt": {
+                        "type": "number"
+                      },
+                      "revokedAt": {
+                        "type": "number"
+                      },
+                      "fingerprint": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "scopes",
+                      "issuedAt",
+                      "fingerprint"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "label",
+                "requestedId",
+                "capabilities",
+                "commands",
+                "status",
+                "pairedAt",
+                "tokens",
+                "metadata"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "peer"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read",
+        "invokable": true
+      },
+      {
         "id": "remote.peers.invoke",
         "title": "Invoke Remote Peer",
         "description": "Invoke a method on a connected remote peer.",
@@ -129936,9 +130663,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "isRunning": {
                   "type": "boolean"
                 },
-                "reconnectAttempts": {
-                  "type": "number"
-                },
                 "runningJobCount": {
                   "type": "number"
                 },
@@ -129949,7 +130673,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "required": [
                 "transportState",
                 "isRunning",
-                "reconnectAttempts",
                 "runningJobCount"
               ],
               "additionalProperties": true
@@ -138929,7 +139652,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.hosted.create",
         "title": "Create a Daemon-Hosted Session",
-        "description": "Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.",
+        "description": "Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and permission gate a terminal runs, hosted here so the conversation does not depend on the client that started it staying open. `workspaceRoot` must be absolute, a relative path would resolve against the daemon's own directory, which is never what the caller meant, and must be the daemon's working directory or a registered workspace (or inside one); anything else is refused with the allowed folders named (sessions.hosted.workspaces lists them). `modelId` is resolved against this daemon's live model registry when given, so an unknown or ambiguous id is refused here rather than at the first turn; omitted, the session follows the daemon's current selection. `detachPolicy` overrides the `hostedSessions.detachPolicy` setting for this session alone. `originSurface` names the app the session is for (`agent`, `tui`, `webui`); its client-owned settings are that app's, and with `agent` the session answers as the GoodVibes Agent: the Agent's prompt and its tools that need no terminal, the others refused and named. `initialPrompt` is submitted as the first user message and the call does NOT wait for that turn, watch the `turn` and `tools` event domains filtered on the returned session id. Refused with the live count and the setting named when `hostedSessions.maxSessions` is already reached. ws-only invoke verb; no REST binding.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -143865,14 +144588,62 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "configuration"
                     ]
                   },
-                  "featureId": {
-                    "type": "string"
-                  },
                   "defaultState": {
                     "type": "string"
                   },
                   "currentState": {
                     "type": "string"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  },
+                  "defaultValue": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "array",
+                        "items": {}
+                      }
+                    ]
+                  },
+                  "insecure": {
+                    "type": "boolean"
                   },
                   "securityRelevant": {
                     "type": "boolean"
@@ -143902,9 +144673,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "required": [
                   "key",
                   "type",
-                  "featureId",
                   "defaultState",
                   "currentState",
+                  "insecure",
                   "securityRelevant",
                   "summary",
                   "insecureWhen",
@@ -146798,40 +147569,31 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "sessionStatus": {
                   "type": "string"
                 },
-                "traceContext": {
+                "traceExport": {
                   "type": "object",
                   "properties": {
-                    "traceId": {
-                      "type": "string"
-                    },
-                    "rootSpanId": {
-                      "type": "string"
-                    },
-                    "exportActive": {
+                    "recording": {
                       "type": "boolean"
                     },
-                    "endpoint": {
-                      "type": "string"
+                    "endpoints": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unreachable": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
-                    "traceId",
-                    "rootSpanId",
-                    "exportActive"
+                    "recording",
+                    "endpoints",
+                    "unreachable"
                   ],
                   "additionalProperties": false
-                },
-                "sessionCorrelationId": {
-                  "type": "string"
-                },
-                "currentTurnCorrelationId": {
-                  "type": "string"
-                },
-                "dbAvailable": {
-                  "type": "boolean"
-                },
-                "dbPath": {
-                  "type": "string"
                 },
                 "tasks": {
                   "type": "object",
@@ -146889,8 +147651,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "required": [
                 "sessionId",
                 "sessionStatus",
-                "sessionCorrelationId",
-                "dbAvailable",
+                "traceExport",
                 "tasks",
                 "agents",
                 "approvals"
@@ -147533,40 +148294,31 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "sessionStatus": {
                   "type": "string"
                 },
-                "traceContext": {
+                "traceExport": {
                   "type": "object",
                   "properties": {
-                    "traceId": {
-                      "type": "string"
-                    },
-                    "rootSpanId": {
-                      "type": "string"
-                    },
-                    "exportActive": {
+                    "recording": {
                       "type": "boolean"
                     },
-                    "endpoint": {
-                      "type": "string"
+                    "endpoints": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unreachable": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
-                    "traceId",
-                    "rootSpanId",
-                    "exportActive"
+                    "recording",
+                    "endpoints",
+                    "unreachable"
                   ],
                   "additionalProperties": false
-                },
-                "sessionCorrelationId": {
-                  "type": "string"
-                },
-                "currentTurnCorrelationId": {
-                  "type": "string"
-                },
-                "dbAvailable": {
-                  "type": "boolean"
-                },
-                "dbPath": {
-                  "type": "string"
                 },
                 "tasks": {
                   "type": "object",
@@ -147624,8 +148376,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "required": [
                 "sessionId",
                 "sessionStatus",
-                "sessionCorrelationId",
-                "dbAvailable",
+                "traceExport",
                 "tasks",
                 "agents",
                 "approvals"
@@ -148635,6 +149386,12 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             },
             "resumedFrom": {
               "type": "string"
+            },
+            "gap": {
+              "type": "boolean"
+            },
+            "truncated": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -172591,12 +173348,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "kept": {
                   "type": "number"
                 },
-                "discard": {
-                  "type": "number"
-                },
-                "pendingCleanup": {
-                  "type": "number"
-                },
                 "sessionAttached": {
                   "type": "number"
                 },
@@ -172618,8 +173369,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "active",
                 "paused",
                 "kept",
-                "discard",
-                "pendingCleanup",
                 "sessionAttached",
                 "taskAttached",
                 "agentOwned",
@@ -172649,9 +173398,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "enum": [
                       "active",
                       "paused",
-                      "kept",
-                      "discard",
-                      "pending-cleanup"
+                      "kept"
                     ]
                   },
                   "ownerId": {
@@ -175200,10 +175947,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 599,
-      "typedInputs": 594,
+      "methods": 608,
+      "typedInputs": 603,
       "genericInputs": 5,
-      "typedOutputs": 597,
+      "typedOutputs": 606,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -175212,8 +175959,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 599,
-      "validated": 592,
+      "methods": 608,
+      "validated": 601,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

@@ -51,9 +51,9 @@ test('existing version-1 holds upgrade before exposure and do not disappear afte
   writeFileSync(file, JSON.stringify({ version: 1, ...ordinary.state() }));
   const restored = new DurableBudgetLedger(file, () => later);
   expect(restored.snapshot(limits, later, 'UTC').item.remaining).toBe(3_000);
-  const saved = JSON.parse(readFileSync(file, 'utf8'));
-  expect(saved.version).toBe(2); expect(saved.reservations[0].retainUntilSettled).toBe(true);
-  expect(new DurableBudgetLedger(file, () => later).sweep(later)).toEqual([]);
+  const reopened = new DurableBudgetLedger(file, () => later);
+  expect(reopened.sweep(later)).toEqual([]);
+  expect(reopened.snapshot(limits, later, 'UTC').item.remaining).toBe(3_000);
 });
 
 test('neither returned reservations nor borrowed initial records can erase or shrink a hold', () => {

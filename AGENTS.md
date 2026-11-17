@@ -45,6 +45,18 @@ bun packages/engine/scripts/typecheck.ts --project agent         # also tui, dae
 
 The other names are `judgment`, `judgment-tests`, `type-tests` and `installer`; an unknown name lists them. A scoped run trusts file times, so it can report nothing for a tree whose times were restored; it is not a substitute for the full run before a merge.
 
+## Speed budgets
+
+`packages/engine/scripts/measure/` measures what each product path costs: decision-model and model requests, file reads, writes, fsyncs, bytes written and SQL statements per scenario, and start-up time. Every scenario checks that its operation succeeded; a failed one reports why instead of numbers.
+
+```sh
+bun run measure                              # every scenario, as a table; add -- --only <name>[,<name>] for some
+bun run measure:check                        # the same, compared with packages/engine/scripts/measure/budgets.json
+MEASURE_TRACE=stats,fileWrites bun run measure -- --only <name>   # each counted call; MEASURE_TRACE_STACK=1 adds its callers
+```
+
+`measure:check` fails on a count above its budget, bytes written more than 10% above, slow reads adding more than twice the slowest read to `turn-8-slow-reads` (its time minus `turn-8-reads`), a start-up over 1.5 times its recorded multiple of `startup-bun-floor`, a failed scenario, a scenario without a budget, or a budget without a scenario. Wall time is never compared as an absolute number. A count that grew is a regression to fix, not a budget to raise. When a change costs more on purpose, a cost falls, or a scenario is added, rewrite the budgets from a run and commit the diff with the reason: `bun run measure -- --write-budgets packages/engine/scripts/measure/budgets.json` (with `--only <names>`, only those entries change). The start-up scenarios run the products from source with bun, so nothing needs building first.
+
 ## Gates: if you touch X, run Y
 
 `bun run validate` runs all of these in order. When a step fails it prints the step and the command; continue with `bun run validate --from <step>` or repeat one with `bun run validate --only <step>`.

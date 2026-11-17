@@ -4,8 +4,8 @@ import {
   askAs, checkAnswers, defineBattery, estimateTokens, LIMITS, mapLimit, noul, readYesNo, recordAction, recordReadings,
   STAKES_BANDS, toJson, yesNo, type CallOptions, type EntryType, type JudgmentPort, type NoulQuestion, type NoulResponse,
 } from '@goodvibes-jev/judgment';
-import { captureJudgmentPort, DecisionModelsDisabledError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { activateClassicFallback, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { captureJudgmentPort, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { ProfileLine } from './types.js';
 
@@ -107,10 +107,9 @@ export async function readProfilePerson(
     current();
     if (retain) synchronous(() => retain(sourceCurrent));
     current();
-    // Only negative structural guards remain local; no positive name matching.
+    // Only negative structural guards remain local before the reading.
     if (typeof captured.name !== 'string' || !/[\p{L}\p{N}]/u.test(captured.name) || captured.lines.length === 0) return [];
-    requireDecisionFeature('attributing private profile prose to a named person');
-    try {
+    const semantic = async (): Promise<readonly ProfileLine[]> => { try {
       const owner = captureJudgmentPort('engine.owner-profile.person-line', { signal, assertCurrent: current });
       if (retain) {
         // The retained restriction must not call the consumer that retains it:
@@ -154,8 +153,49 @@ export async function readProfilePerson(
       });
     } catch (error) {
       current();
-      if (activateClassicFallback(error)) throw new DecisionModelsDisabledError('attributing private profile prose to a named person');
       throw error;
-    }
+    } };
+    // Without a decision model, code attributes a line only by the name it opens with.
+    return decisionOrClassic(semantic, () => { current(); const named = namedPersonLines(captured.name, captured.lines); current(); return named; });
   });
+}
+
+const NAME_WORD = /^[\p{Lu}][\p{L}\p{M}'’.-]*$/u;
+const ALIAS = /\((?:goes by|aka|a\.k\.a\.|also called|known as|called)\s+([^)]+)\)/giu;
+const fold = (text: string): string => text.normalize('NFC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase();
+
+/**
+ * The names a People line is about, read by code: the run of capitalised words
+ * it opens with ("- Sarah Lee, sister." is about Sarah Lee) and any alias it
+ * states ("(goes by Jo)"). A line opening with a possessive ("Jo's friend Lee")
+ * or not opening with a name is about no one here.
+ */
+function lineSubjects(text: string): readonly string[] {
+  const body = text.replace(/^\s*(?:[-*+]|\d+[.)])\s+/u, '');
+  const head = body.split(/[,;:(\u2013\u2014]| - /u)[0] ?? '';
+  const words: string[] = [];
+  for (const raw of head.trim().split(/\s+/u)) {
+    const word = raw.replace(/[.!?]+$/u, '');
+    if (!NAME_WORD.test(word)) break;
+    words.push(word);
+  }
+  const subjects = words.length > 0 && !/['’]s$/u.test(words.at(-1)!) ? [fold(words.join(' '))] : [];
+  for (const match of body.matchAll(ALIAS)) subjects.push(fold(match[1]!));
+  return subjects;
+}
+
+/**
+ * The no-model attribution: a line whose opening name or stated alias is the
+ * asked name, or, for a one-word name, whose opening name starts with it when
+ * every such line names the same person ("Alex" with both "Alex Lee" and "Alex
+ * Jones" listed matches neither). Incidental mentions are never matched, the
+ * safe direction for disclosure.
+ */
+function namedPersonLines(name: string, lines: readonly ProfileLine[]): readonly ProfileLine[] {
+  const asked = fold(name);
+  const subjects = lines.map(line => lineSubjects(line.text));
+  const exact = subjects.map(names => names.includes(asked));
+  const byFirst = asked.includes(' ') ? [] : subjects.map(names => names.find(subject => subject.split(' ')[0] === asked));
+  const fullNames = new Set(byFirst.filter((subject): subject is string => subject !== undefined));
+  return lines.filter((_line, index) => exact[index] || (fullNames.size === 1 && byFirst[index] !== undefined));
 }

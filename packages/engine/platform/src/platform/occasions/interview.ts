@@ -24,14 +24,22 @@
  * third case work.
  */
 import { occasionInterest, occasionEntry, OccasionReadingHeldError, OccasionReadingWork } from './readings.js';
+import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
 import type { ProfileLine } from '../owner-profile/types.js';
 import type { IsoDate } from './dates.js';
 import type { GiftRecord, Interview, InterviewStep, Occasion } from './types.js';
 
-/** Choose from every supplied line; none (or an unsettled choice) opens without one, never a keyword fallback. */
+/**
+ * Choose from every supplied line; none (or an unsettled choice) opens without one, never a keyword fallback.
+ * With no decision model in use nothing reads which line is a current interest, so it is none.
+ */
 export async function interestLine(lines: readonly ProfileLine[], context: { readonly title?: string; readonly person?: string } = {}, work = new OccasionReadingWork()): Promise<string> {
   const source = work.snapshot({ lines, context });
   if (source.lines.length === 0) return '';
+  return decisionOrClassic(() => readInterestLine(source, work), () => '');
+}
+
+async function readInterestLine(source: { readonly lines: readonly ProfileLine[]; readonly context: { readonly title?: string; readonly person?: string } }, work: OccasionReadingWork): Promise<string> {
   const candidates = source.lines.map((line, index) => ({ id: `line_${index}`, content: occasionEntry(line) }));
   const result = await work.wait(() => occasionInterest.select(work.port, occasionEntry(source.context), candidates, { ...(work.signal ? { signal: work.signal } : {}), site: 'engine.occasions.interest-line' }));
   const index = candidates.findIndex(candidate => candidate.id === result.chosen);
@@ -44,7 +52,17 @@ export async function interestLine(lines: readonly ProfileLine[], context: { rea
   }
   result.recordAction(index < 0 ? 'no grounded interest line' : 'selected an offered interest line');
   work.assertCurrent();
-  return index < 0 ? '' : source.lines[index]!.text.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();
+  return index < 0 ? '' : withoutBullet(source.lines[index]!.text);
+}
+
+function withoutBullet(text: string): string {
+  return text.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();
+}
+
+/** Up to three of the person's profile lines, shown as they are when no decision model read them for interests. */
+function unreadNotes(lines: readonly ProfileLine[]): string {
+  const notes = lines.map(line => withoutBullet(line.text)).filter(text => text.length > 0).slice(0, 3);
+  return notes.length === 0 ? '' : ` Your notes (not read for interests: no decision model is in use): ${notes.map(note => `"${note}"`).join('; ')}.`;
 }
 
 export interface OpenInterviewInput {
@@ -92,7 +110,7 @@ export async function interviewSteps(input: InterviewContentInput, work = new Oc
     }
     : {
       id: 'direction',
-      prompt: `What has ${subject} been into lately?`,
+      prompt: `What has ${subject} been into lately?${isClassicOperation() ? unreadNotes(input.personLines) : ''}`,
       opensFrom: '',
     });
 

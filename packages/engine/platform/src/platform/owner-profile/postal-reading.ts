@@ -2,9 +2,9 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 /** One exact closed-tier field; no shared address cache and no heuristic fallback. */
 import { checkAnswers, defineExtractionVerifier, type JsonValue, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
-import { activateClassicFallback, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { POSTAL_PARTS, PostalAddressHeldError, type PostalParts, type ProfilePostalReader } from '../config/postal-address.js';
+import { POSTAL_PARTS, PostalAddressHeldError, type PostalParts, type PreparedPostalAddress, type ProfilePostalReader } from '../config/postal-address.js';
 import { capturePostalProposer, type PostalProviders } from './postal-proposer.js';
 import type { OwnerProfileStore } from './store.js';
 
@@ -31,6 +31,17 @@ export const postalAddressExtraction = defineExtractionVerifier({
       record: { name: null, line1: null, line2: null, city: null, region: null, postalCode: null, country: null }, expect: { escalate: true } },
   ],
 });
+
+/**
+ * Without a decision model a prose profile address is not interpreted for an
+ * order: an unchecked reading could ship a purchase to the wrong place. The
+ * owner's stored address fields stay the address, and the result says the
+ * profile prose was not read; when those fields are missing, the checkout names
+ * the fields to set.
+ */
+function notInterpreted(assertCurrent: () => void): PreparedPostalAddress {
+  return Object.freeze({ provenance: 'classic' as const, profileAssessment: 'not-evaluated' as const, value: null, assertCurrent });
+}
 
 export function createProfilePostalReader(
   source: Pick<OwnerProfileStore, 'get' | 'captureRead' | 'status'>,
@@ -60,7 +71,7 @@ export function createProfilePostalReader(
         if (!fallbackEnabled || !valid || !value.trim()) return Object.freeze({ value: null, assertCurrent: check });
         // Privacy-screen even when no provider is configured; never hash or log a raw rejected field.
         snapshotJudgmentInput({ source: value });
-        requireDecisionFeature('interpreting a prose profile address; configure the individual address fields to use them without a decision model');
+        if (isClassicOperation()) return notInterpreted(check);
         if (!providers) throw new PostalAddressHeldError();
         let providerCurrent = () => {};
         decisionPhase = true;
@@ -94,7 +105,7 @@ export function createProfilePostalReader(
         try { nativeCurrent(); } catch { throw new PostalAddressHeldError(); }
         if (error instanceof DecisionModelsDisabledError) throw error;
         // A content-proposal provider outage is not decision-chain exhaustion.
-        if (decisionPhase && activateClassicFallback(error)) throw new DecisionModelsDisabledError('interpreting a prose profile address; use explicitly configured address fields');
+        if (decisionPhase && activateClassicFallback(error)) return notInterpreted(nativeCurrent);
         throw new PostalAddressHeldError();
       }
     });

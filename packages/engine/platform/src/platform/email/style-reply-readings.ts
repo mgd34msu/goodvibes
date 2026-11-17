@@ -3,7 +3,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import { types as nodeTypes } from 'node:util';
 import { defineBattery, defineSelector, LIMITS, oneOf, STAKES_BANDS, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, DecisionModelsDisabledError, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { activateClassicFallback, decisionOrClassic, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { prepareJudgmentResult, retainStrictJudgmentJson } from '../gate/judgment-result.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
@@ -122,15 +122,15 @@ function retainSlots(subject: object, keys: readonly string[]) {
 }
 
 /** Screen the complete native DTO through cleanup. Work is read/draft-only:
- * it must not send, write a mailbox, or publish effects. Classic-enabled work
- * must accept absent readings and return explicitly unassessed native output.
+ * it must not send, write a mailbox, or publish effects. With no decision model
+ * in use (none set, No Decision Model, or Hybrid after the model failed) the
+ * work receives no readings and returns explicitly unassessed native output.
  */
 export async function withEmailStyleSource<T, R>(
   source: T, options: StyleReplyReadingOptions,
   needsReading: (captured: T) => boolean,
   work: (captured: T, readings: StyleReplyReadings | undefined) => Promise<R>,
   assertPrivate?: ((captured: T) => void) | undefined,
-  classicAllowed = false,
 ): Promise<R> {
   return withConfiguredDecisionModelPolicy(async () => {
     let release: (() => Promise<void>) | undefined;
@@ -158,7 +158,6 @@ export async function withEmailStyleSource<T, R>(
         retain?.(() => { optionsCurrent(); retained.assertCurrent(); if (signal?.aborted) throw new StyleReplyReadingError(); });
         current(); return result;
       }
-      if (!classicAllowed) requireDecisionFeature('semantic email style, sentence or salutation assessment');
       if (!owner) throw new StyleReplyReadingError();
       const methodsCurrent = retainSlots(owner, ['capture', 'screen', 'project', 'release']);
       const capture = owner.capture, screen = owner.screen, project = owner.project, originalRelease = owner.release;
@@ -193,7 +192,6 @@ export async function withEmailStyleSource<T, R>(
         retain?.(() => { sourceRestriction(); portRestriction.assertCurrent(); });
         return result;
       };
-      if (!classicAllowed) return await semantic();
       return await decisionOrClassic(semantic, async () => {
         // Drop only the failed semantic observation. Source admission, privacy,
         // original DTO ownership and cancellation still fence this native draft.
@@ -207,10 +205,6 @@ export async function withEmailStyleSource<T, R>(
       });
     } catch (error) {
       if (error instanceof DecisionModelsDisabledError) throw error;
-      if (activateClassicFallback(error)) {
-        installed = undefined;
-        throw new DecisionModelsDisabledError('semantic email style, sentence or salutation assessment');
-      }
       throw new StyleReplyReadingError();
     }
     finally {

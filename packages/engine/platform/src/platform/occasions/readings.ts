@@ -2,7 +2,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 /** Occasion meaning is an observation, never delivery or closed-date authority. */
 import { checkAnswers, oneOf, defineBattery, defineSelector, STAKES_BANDS, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, decisionModelPolicyState, JudgmentPortMissingError, type JudgmentPortCapture, type JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
-import { activateClassicFallback, isClassicOperation, requireDecisionFeature } from '../runtime/decision-policy.js';
+import { activateClassicFallback, isClassicOperation } from '../runtime/decision-policy.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 
@@ -76,7 +76,7 @@ export class OccasionReadingWork {
   get signal(): AbortSignal | undefined { return isClassicOperation() ? this.options.signal : this.owner?.signal ?? this.options.signal; }
   get port(): JudgmentPort {
     this.assertCurrent();
-    requireDecisionFeature('gift planning');
+    // Asked only while a decision model is in use; without one, callers take their plain path first.
     const owner = this.owner;
     if (!owner) throw new OccasionReadingHeldError();
     return { ...owner.port, ask: async request => {

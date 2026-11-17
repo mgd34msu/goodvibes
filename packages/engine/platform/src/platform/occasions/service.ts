@@ -13,7 +13,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes-jev/judgment/decision
 import type { OccasionMutationOptions } from './operation.js';
 import { captureOccasionOperation, captureSettingsRevision, retainOccasionStateReceipts } from './operation.js';
 import { OccasionReadingWork, OccasionReadingHeldError } from './readings.js';
-import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { assertCurrent as assertRevisionsCurrent } from '../utils/revision.js';
 import type { AuthoritySurface } from '../security/untrusted-content.js';
 import { isIsoDate, nextOccurrence, todayInZone, minutesOfDayInZone, type IsoDate } from './dates.js';
@@ -540,7 +540,6 @@ export class OccasionsService {
     const existing = await this.deps.state.activeInterview(occasion.id, occurrence);
     work.assertCurrent();
     if (existing !== undefined) return existing;
-    requireDecisionFeature('planning a new gift interview from inferred profile interests');
     const policy = this.policy();
     const subject = occasion.person.trim().length > 0 ? occasion.person : occasion.title;
     const personLines = await work.wait(async () => this.deps.profile.person(subject, { signal: work.signal, assertCurrent: work.assertCurrent, retain: check => work.retain(check) }));

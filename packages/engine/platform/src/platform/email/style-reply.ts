@@ -86,7 +86,7 @@ export async function extractStyleProfile(sentMessages: readonly StyleSentMessag
       isDefault: false,
       ...(templateFields.length > 0 ? { templateFields } : {}),
     };
-  }, undefined, true);
+  });
 }
 
 export interface DraftReplyResult {
@@ -183,17 +183,21 @@ export async function composeDraftReply(
       if (value && typeof value === 'object') for (const child of Object.values(value)) visit(child);
     };
     visit(source);
-  }, true);
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Internal composition helpers
 // ---------------------------------------------------------------------------
 
-/** Select an exact supported personal-name span; bare local parts do not establish names. */
+/**
+ * Select an exact supported personal-name span; bare local parts do not establish names.
+ * With no decision model in use no name is read: '' (the greeting then carries no name),
+ * the same answer a reading that cannot settle a name gives, as `composeDraftReply` does.
+ */
 export async function extractSenderName(from: string, options: StyleReplyReadingOptions = {}): Promise<string> {
-  return withEmailStyleSource({ from }, options, source => { if (typeof source.from !== 'string') throw new StyleReplyReadingError(); return Boolean(source.from.trim()); }, async (source, readings) => {
-    if (!source.from.trim()) return '';
+  return withEmailStyleSource({ from }, options, source => { if (typeof source.from !== 'string') throw new StyleReplyReadingError(); return Boolean(source.from.trim()) && !isClassicOperation(); }, async (source, readings) => {
+    if (!source.from.trim() || isClassicOperation()) return '';
     if (!readings) throw new StyleReplyReadingError();
     return readStyleSenderName(source.from, readings);
   });

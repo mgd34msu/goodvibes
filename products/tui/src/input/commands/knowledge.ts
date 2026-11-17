@@ -41,6 +41,16 @@ export const knowledgeCommand: SlashCommand = {
   aliases: ['know'],
   description: 'Structured knowledge graph: ingest URLs/bookmarks, inspect issues, and build compact prompt packets',
   usage: '<subcommand> [args]',
+  // Letting an ingest fetch from private hosts loosens the network guard, so that line asks once.
+  confirm(args) {
+    const sub = (args[0] ?? '').toLowerCase();
+    if ((sub !== 'ingest-url' && sub !== 'import-urls' && sub !== 'import-bookmarks') || !args.includes('--allow-private-hosts')) return undefined;
+    return {
+      title: 'Let this import fetch from private network hosts?',
+      detail: `${sub === 'ingest-url' ? 'The address' : 'Every address in the list'} may then be fetched from addresses on your local network or this machine, which ingests normally refuse.`,
+      confirmLabel: 'Allow',
+    };
+  },
   argsHint:
     'status|ask|ingest-url|import-bookmarks|import-urls|list|search|get|queue|review-issue|candidates|reports|schedules|lint|packet|explain|reindex|consolidate|cancel-run',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
@@ -135,9 +145,9 @@ export const knowledgeCommand: SlashCommand = {
             'Usage: /knowledge <subcommand>',
             '  status',
             '  ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]',
-            '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]',
-            '  import-bookmarks <path>',
-            '  import-urls <path>',
+            '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] [--allow-private-hosts]',
+            '  import-bookmarks <path> [--allow-private-hosts]',
+            '  import-urls <path> [--allow-private-hosts]',
             '  list [--kind <sources|nodes|issues>] [--limit <n>]',
             '  search <query> [--limit <n>]',
             '  get <id>',

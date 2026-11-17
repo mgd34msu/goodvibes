@@ -7,6 +7,7 @@ import { commandRefusal, requireYesFlag, stripYesFlag } from './confirmation.ts'
 import { parseBrowserImportScope } from './knowledge-browser-flags.ts';
 import { formatKnowledgeMap, renderKnowledgeAskResult } from './knowledge-format.ts';
 import { readRefusal } from '@goodvibes-jev/engine/errors';
+import { OUTWARD_VERB, ownerOnlyVerb, withCommandVerbs, type CommandVerbPolicy, type CommandVerbs } from './command-verbs.ts';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -67,7 +68,27 @@ function parseConnectorInputFlag(args: string[]): unknown {
   return trimmed;
 }
 
-export const knowledgeCommand: SlashCommand = {
+/** The ingest lines that take `--allow-private-hosts`, which loosens the network guard for that fetch. */
+const PRIVATE_HOST_INGEST_VERBS: ReadonlySet<string> = new Set(['ingest-url', 'import-urls', 'import-bookmarks', 'ingest-connector']);
+
+function privateHostIngestVerb(rest: readonly string[]): CommandVerbPolicy {
+  return rest.includes('--allow-private-hosts')
+    ? ownerOnlyVerb('outward', 'lets the ingest fetch from addresses on your local network or this machine, which ingests normally refuse')
+    : OUTWARD_VERB;
+}
+
+/**
+ * Every /knowledge line keeps the one admission it has always had (it reaches
+ * Agent Knowledge on the connected host); a line that allows private hosts is
+ * the owner's to type, so a model-run one is refused before any admission.
+ */
+const KNOWLEDGE_VERBS: CommandVerbs = {
+  defaultVerb: 'status',
+  verbs: Object.fromEntries([...PRIVATE_HOST_INGEST_VERBS].map((verb) => [verb, privateHostIngestVerb])),
+  otherwise: OUTWARD_VERB,
+};
+
+export const knowledgeCommand: SlashCommand = withCommandVerbs({
   name: 'knowledge',
   effect: 'mixed',
   aliases: ['know'],
@@ -76,12 +97,16 @@ export const knowledgeCommand: SlashCommand = {
   hidden: true,
   usage: '<subcommand> [args]',
   // Ingests, imports, review, reindex, consolidation and cancelling a run are
-  // recoverable and run at once. Letting a connector fetch from private hosts
+  // recoverable and run at once. Letting an ingest fetch from private hosts
   // loosens the network guard, so that line asks once.
   confirm(args) {
-    if ((args[0] ?? '').toLowerCase() !== 'ingest-connector' || !args.includes('--allow-private-hosts')) return undefined;
-    return { title: 'Let this connector fetch from private network hosts?', detail: 'The connector input may then be fetched from addresses on your local network or this machine, which ingests normally refuse.', confirmLabel: 'Allow' };
+    const sub = (args[0] ?? '').toLowerCase();
+    if (!PRIVATE_HOST_INGEST_VERBS.has(sub) || !args.includes('--allow-private-hosts')) return undefined;
+    const what = sub === 'ingest-connector' ? 'The connector input' : sub === 'ingest-url' ? 'The address' : 'Every address in the list';
+    return { title: `Let this ${sub === 'ingest-connector' ? 'connector' : 'import'} fetch from private network hosts?`, detail: `${what} may then be fetched from addresses on your local network or this machine, which ingests normally refuse.`, confirmLabel: 'Allow' };
   },
+  // No secret is typed on a /knowledge line.
+  secretArgs: {},
   argsHint:
     'status|ask|search|list|get|map|connectors|ingest-url|ingest-file|ingest-artifact|import-urls|import-bookmarks|import-browser-history --yes|ingest-connector|review-issue|reindex|consolidate|cancel-run',
   handler: async (args: string[], context: CommandContext): Promise<void> => {
@@ -388,12 +413,12 @@ export const knowledgeCommand: SlashCommand = {
               'Usage: /knowledge <subcommand>',
               '  status',
               '  ask <query> [--limit <n>] [--mode <concise|standard|detailed>]',
-              '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]',
+              '  ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] [--allow-private-hosts]',
               '  ingest-file <path> [--title <title>] [--tags <a,b>] [--folder <path>]',
               '  ingest-artifact <artifactId> [--title <title>] [--tags <a,b>] [--folder <path>]',
-              '  ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>]',
-              '  import-bookmarks <path>',
-              '  import-urls <path>',
+              '  ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] [--allow-private-hosts]',
+              '  import-bookmarks <path> [--allow-private-hosts]',
+              '  import-urls <path> [--allow-private-hosts]',
               '  import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] [--limit <n>] [--since-days <n>] --yes',
               '  list [--kind <sources|nodes|issues>] [--limit <n>]',
               '  search <query> [--limit <n>]',
@@ -419,4 +444,4 @@ export const knowledgeCommand: SlashCommand = {
       throw commandRefusal(`[knowledge] ${error instanceof Error ? error.message : String(error)}`);
     }
   },
-};
+}, KNOWLEDGE_VERBS);

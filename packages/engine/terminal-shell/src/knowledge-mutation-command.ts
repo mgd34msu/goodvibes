@@ -30,6 +30,16 @@ export function printKnowledgeIngestResult(
   print(`[knowledge] Ingested ${source.id} ${subject}`);
 }
 
+/**
+ * `--allow-private-hosts` lets an ingest fetch from the owner's own network or
+ * this machine, which every ingest refuses by default. Each product's
+ * /knowledge registration asks the owner once for such a line, and the Agent
+ * refuses it from a model, so by the time a line reaches here it is his.
+ */
+function remoteFetchMode(rest: readonly string[]): 'allow-private-hosts' | 'public-only' {
+  return rest.includes('--allow-private-hosts') ? 'allow-private-hosts' : 'public-only';
+}
+
 /** Parsing and mutation dispatch share code; supplied ports retain product authority and exact segment. */
 export async function handleKnowledgeMutationCommand(
   sub: string,
@@ -66,7 +76,7 @@ async function dispatchKnowledgeMutation(
       const [url] = positionalArgs(rest, ['--title', '--tags', '--folder']);
       if (!url) {
         print(
-          '[knowledge] Usage: /knowledge ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>]',
+          '[knowledge] Usage: /knowledge ingest-url <url> [--title <title>] [--tags <a,b>] [--folder <path>] [--allow-private-hosts]',
         );
         return true;
       }
@@ -78,6 +88,7 @@ async function dispatchKnowledgeMutation(
         sessionId: ports.sessionId(),
         sourceType: 'url',
         connectorId: 'url',
+        fetchMode: remoteFetchMode(rest),
       });
       printKnowledgeIngestResult(print, result.source, url);
       if (result.source.summary) print(`  ${result.source.summary}`);
@@ -87,9 +98,9 @@ async function dispatchKnowledgeMutation(
     case 'import-bookmarks': {
       const [path] = positionalArgs(rest);
       if (!path) {
-        throw commandRefusal('[knowledge] Usage: /knowledge import-bookmarks <path>');
+        throw commandRefusal('[knowledge] Usage: /knowledge import-bookmarks <path> [--allow-private-hosts]');
       }
-      const result = await ports.bookmarksFile({ path, sessionId: ports.sessionId() });
+      const result = await ports.bookmarksFile({ path, sessionId: ports.sessionId(), fetchMode: remoteFetchMode(rest) });
       print(`[knowledge] Imported bookmarks${presentation.fieldSeparator}${result.imported} ok, ${result.failed} failed`);
       if (result.errors.length > 0) {
         for (const error of result.errors.slice(0, 10)) print(`  error${presentation.fieldSeparator}${error}`);
@@ -99,9 +110,9 @@ async function dispatchKnowledgeMutation(
     case 'import-urls': {
       const [path] = positionalArgs(rest);
       if (!path) {
-        throw commandRefusal('[knowledge] Usage: /knowledge import-urls <path>');
+        throw commandRefusal('[knowledge] Usage: /knowledge import-urls <path> [--allow-private-hosts]');
       }
-      const result = await ports.urlsFile({ path, sessionId: ports.sessionId() });
+      const result = await ports.urlsFile({ path, sessionId: ports.sessionId(), fetchMode: remoteFetchMode(rest) });
       print(`[knowledge] Imported URL list${presentation.fieldSeparator}${result.imported} ok, ${result.failed} failed`);
       if (result.errors.length > 0) {
         for (const error of result.errors.slice(0, 10)) print(`  error${presentation.fieldSeparator}${error}`);

@@ -106,7 +106,7 @@ export async function readFactUsefulnessBatches(input: FactUsefulnessBatchInput,
     const outcome = await judge({
       site: enrichmentFactUsefulness.name, battery: enrichmentFactUsefulness, only: [...only], state, deadlineMs: FACT_USEFULNESS_DEADLINE_MS,
       ...(signal ? { signal } : {}),
-      settle: (readings): readonly ('yes' | 'no' | 'unsettled')[] => only.map((name) => {
+      settle: (readings): readonly ('yes' | 'no' | 'unsettled')[] | null => only.map((name) => {
         const reading = readings[name];
         return reading?.outcome === 'act' && (reading.verdict === 'yes' || reading.verdict === 'no') ? reading.verdict : 'unsettled';
       }),

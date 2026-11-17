@@ -22,7 +22,8 @@ import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../control-plane/index.js';
 import type { GatewayMethodInvocationContext } from '../control-plane/method-catalog-shared.js';
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
-import { isRuntimeEventDomain } from '../runtime/events/index.js';
+import { isRuntimeEventDomain, RUNTIME_EVENT_DOMAINS } from '../runtime/events/index.js';
+import { readRequestedDomains } from '../control-plane/gateway-utils.js';
 import type { DistributedRuntimeManager } from '../runtime/remote/index.js';
 import { extractForwardedClientIp } from '../runtime/network/index.js';
 import { clientAddressOf, isLocalOrigin, resolveClientAddress } from './client-address.js';
@@ -73,6 +74,8 @@ export interface ControlPlaneWebSocketData {
   admin: boolean;
   scopes: readonly string[];
   readonly domains: readonly RuntimeEventDomain[];
+  /** `?domains=` names that are not runtime event domains; the `ready` frame names them back. */
+  readonly unrecognisedDomains?: readonly string[] | undefined;
   readonly clientKind:
     | 'tui'
     | 'web'
@@ -739,8 +742,9 @@ export class DaemonControlPlaneHelper {
         state: `the origin ${origin ?? '(none)'} is not on the allowed list`, next: ['Open the web UI from the daemon address, or add this origin to controlPlane.cors.allowedOrigins'] }, { status: 403 });
     }
     const rawDomains = url.searchParams.get('domains');
-    const domains = parseRuntimeDomains(rawDomains);
-    if (domains instanceof Response) return domains;
+    const requested = parseRuntimeDomains(rawDomains);
+    if (requested instanceof Response) return requested;
+    const { domains, unrecognised } = requested;
     const requestedKind = url.searchParams.get('clientKind');
     const clientKind = requestedKind === 'tui'
       || requestedKind === 'web'
@@ -761,6 +765,7 @@ export class DaemonControlPlaneHelper {
         scopes: principal.scopes,
         admin: principal.admin,
         domains,
+        ...(unrecognised.length > 0 ? { unrecognisedDomains: unrecognised } : {}),
         clientKind,
         remoteAddress: this.clientAddress(req),
         localOrigin: isLocalOrigin(req),
@@ -782,6 +787,7 @@ export class DaemonControlPlaneHelper {
       clientKind: ws.data.clientKind,
       transport: 'ws',
       domains: ws.data.authenticated ? ws.data.domains : [],
+      ...(ws.data.authenticated && ws.data.unrecognisedDomains ? { unrecognisedDomains: ws.data.unrecognisedDomains } : {}),
       ...(ws.data.principalId ? { principalId: ws.data.principalId } : {}),
       ...(ws.data.principalKind ? { principalKind: ws.data.principalKind } : {}),
       scopes: ws.data.scopes,
@@ -1379,9 +1385,24 @@ function hasDotSegment(path: string): boolean {
   });
 }
 
-function parseRuntimeDomains(rawDomains: string | null): RuntimeEventDomain[] | Response {
-  if (!rawDomains) return [];
-  return normalizeFrameDomains(rawDomains.split(',').map((value) => value.trim()).filter(Boolean));
+/**
+ * The `?domains=` list of an upgrade: the known domains, and the names that are
+ * not domains (named back in the `ready` frame). A list naming no known domain
+ * at all is refused, the same rule the SSE stream follows.
+ */
+function parseRuntimeDomains(rawDomains: string | null): { readonly domains: RuntimeEventDomain[]; readonly unrecognised: string[] } | Response {
+  if (!rawDomains) return { domains: [], unrecognised: [] };
+  const requested = readRequestedDomains(rawDomains.split(','));
+  if (requested.unrecognised.length > 0 && requested.domains.length === 0) {
+    return Response.json({
+      error: `No runtime event domain is named ${requested.unrecognised.join(', ')}.`,
+      code: 'UNKNOWN_EVENT_DOMAIN',
+      invalid: requested.unrecognised,
+      unrecognisedDomains: requested.unrecognised,
+      next: [`Connect with domains from: ${RUNTIME_EVENT_DOMAINS.join(', ')}.`],
+    }, { status: 400 });
+  }
+  return requested;
 }
 
 function normalizeFrameDomains(values: readonly unknown[]): RuntimeEventDomain[] | Response {

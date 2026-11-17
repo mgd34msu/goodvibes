@@ -1,5 +1,5 @@
 import type { DaemonControlRouteHandlers, GatewayRestVerbInvocation } from './context.js';
-import { isRuntimeEventDomain, type RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
+import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { EngineErrorCodes } from '@goodvibes-jev/engine/errors';
 import { authenticationRequiredResponse, jsonErrorResponse } from './error-response.js';
 import { GATEWAY_METHOD_INVOKE_PATH } from './operator.js';
@@ -462,15 +462,15 @@ export function createDaemonControlRouteHandlers(
     createControlPlaneEventStream: (req) => {
       const url = new URL(req.url);
       const rawDomains = url.searchParams.get('domains');
-      // filter unknown domains at the platform boundary instead of casting unchecked input.
-      const domains = (rawDomains ? rawDomains.split(',').map((v) => v.trim()).filter(Boolean) : [])
-        .filter(isRuntimeEventDomain) as RuntimeEventDomain[];
+      // The gateway owns which names are domains: it subscribes the known ones
+      // and names the rest back in the ready frame.
+      const requestedDomains = rawDomains ? rawDomains.split(',').map((v) => v.trim()).filter(Boolean) : [];
       const principal = context.resolveAuthenticatedPrincipal(req);
       if (!principal) return authenticationRequiredResponse();
       return context.controlPlaneGateway.createEventStream(req, {
         clientKind: 'web',
         transport: 'sse',
-        domains,
+        requestedDomains,
         principalId: principal.principalId,
         principalKind: principal.principalKind,
         scopes: principal.scopes,

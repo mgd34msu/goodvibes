@@ -211,7 +211,7 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
   eventDescriptor({
     id: 'control.ready',
     title: 'Ready Handshake',
-    description: 'Initial SSE/WebSocket handshake event emitted after a control-plane subscription is opened.',
+    description: 'Initial SSE/WebSocket handshake event emitted after a control-plane subscription is opened. `domains` is what the stream delivers; `withheldDomains` names requested domains this credential may not read; `unrecognisedDomains` names requested `?domains=` values that are not runtime event domains, so nothing will arrive for them (a request naming only unknown domains is refused with 400 UNKNOWN_EVENT_DOMAIN).',
     category: 'transport',
     transport: ['sse', 'ws'],
     scopes: ['read:events'],
@@ -220,6 +220,8 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
       clientId: STRING_SCHEMA,
       domains: arraySchema(STRING_SCHEMA),
       transport: STRING_SCHEMA,
+      withheldDomains: arraySchema(STRING_SCHEMA),
+      unrecognisedDomains: arraySchema(STRING_SCHEMA),
     }, ['clientId', 'domains', 'transport']),
   }),
   eventDescriptor({

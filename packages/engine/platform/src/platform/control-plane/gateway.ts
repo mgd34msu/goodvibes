@@ -3,6 +3,7 @@ import { logger } from '../utils/logger.js';
 import { createDomainDispatch } from '../runtime/store/index.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
 import type { AnyRuntimeEvent, RuntimeEventBus, RuntimeEventDomain, RuntimeEventEnvelope } from '../runtime/events/index.js';
+import { RUNTIME_EVENT_DOMAINS } from '../runtime/events/index.js';
 import type { ControlPlaneClientRecord } from '../runtime/store/domains/control-plane.js';
 import {
   emitControlPlaneAuthGranted,
@@ -40,6 +41,7 @@ import {
   hasReplayScope,
   normalizeRuntimeDomains,
   pruneDisconnectedClientRecords,
+  readRequestedDomains,
   replayRecentTraffic,
   resolveReplayResume,
   serializeEnvelope,
@@ -64,6 +66,15 @@ export interface ControlPlaneEventStreamOptions {
   readonly transport?: 'local' | 'http' | 'sse' | 'ws' | 'webhook' | undefined;
   readonly label?: string | undefined;
   readonly domains?: readonly RuntimeEventDomain[] | undefined;
+  /**
+   * The domain names a client asked for, unchecked (the `?domains=` list).
+   * When given it replaces `domains`: known names are subscribed, and names
+   * that are not runtime event domains are named back in the `ready` frame
+   * (all of them unknown is refused).
+   */
+  readonly requestedDomains?: readonly string[] | undefined;
+  /** Requested names a caller already found are not domains; the `ready` frame names them back. */
+  readonly unrecognisedDomains?: readonly string[] | undefined;
   readonly principalId?: string | undefined;
   readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | undefined;
   readonly scopes?: readonly string[] | undefined;
@@ -566,7 +577,12 @@ export class ControlPlaneGateway {
     // Initial default subscriptions retain the historical broadcast-all mode.
     // Later explicit subscription changes narrow to the live subscription set.
     if (!explicitDomains) this.liveClients.get(clientId)!.domains = null;
-    send('ready', { clientId, domains: selectedDomains, transport: 'websocket' });
+    send('ready', {
+      clientId,
+      domains: selectedDomains,
+      transport: 'websocket',
+      ...(options.unrecognisedDomains?.length ? { unrecognisedDomains: [...options.unrecognisedDomains] } : {}),
+    });
     replayRecentTraffic(this.recentEventsFor(grant), send, { ...options, clientId, domains: selectedDomains }, explicitDomains ? wsDomains : null);
     return { clientId, domains: selectedDomains };
   }
@@ -720,6 +736,22 @@ export class ControlPlaneGateway {
       return Response.json({ error: 'Runtime event bus unavailable' }, { status: 503 });
     }
 
+    const asked = options.requestedDomains !== undefined
+      ? readRequestedDomains(options.requestedDomains)
+      : { domains: [...(options.domains ?? [])], unrecognised: [] as string[] };
+    if (asked.unrecognised.length > 0 && asked.domains.length === 0) {
+      // Nothing asked for exists; opening the default set instead would answer a different question.
+      return Response.json({
+        error: `No runtime event domain is named ${asked.unrecognised.join(', ')}.`,
+        code: 'UNKNOWN_EVENT_DOMAIN',
+        category: 'bad_request',
+        status: 400,
+        state: 'the event stream was not opened',
+        next: [`Open the stream with domains from: ${RUNTIME_EVENT_DOMAINS.join(', ')}.`],
+        unrecognisedDomains: asked.unrecognised,
+      }, { status: 400 });
+    }
+    options = { ...options, domains: asked.domains };
     const grant = resolveEventGrant({ admin: options.admin, scopes: options.scopes });
     const requestedDomains = normalizeRuntimeDomains(options.domains);
     const selectedDomains = requestedDomains.filter((domain) => grantAllowsDomain(grant, domain));
@@ -938,7 +970,10 @@ export class ControlPlaneGateway {
         rawSend('ready', {
           clientId,
           domains: selectedDomains,
+          transport: 'sse',
           ...(withheld.length > 0 ? { withheldDomains: withheld } : {}),
+          // Names the client asked for that are not domains: nothing will arrive for them.
+          ...(asked.unrecognised.length > 0 ? { unrecognisedDomains: asked.unrecognised } : {}),
           resume: resolveReplayResume(replayable, lastEventId),
         });
         replayRecentTraffic(replayable, send, { ...options, clientId, domains: selectedDomains }, sseLiveDomains, lastEventId, scoped.mayDeliverPayload);

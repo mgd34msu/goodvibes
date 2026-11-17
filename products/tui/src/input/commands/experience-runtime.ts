@@ -14,7 +14,8 @@ import {
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import { terminalWakeCapabilities } from '../../core/wake-provision-status.ts';
 import { printWakeStatus, runWakeProvision } from '../../core/wake-provision-runner.ts';
-import { wakeProvisionStatus } from '@goodvibes-jev/engine/platform/platform/voice';
+import { planVoiceSetupChain, renderVoiceSetupChain, wakeProvisionStatus } from '@goodvibes-jev/engine/platform/platform/voice';
+import type { ConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 
 export function registerExperienceRuntimeCommands(registry: CommandRegistry): void {
   registry.register({
@@ -195,8 +196,8 @@ const approvalMatrixCommand = createApprovalMatrixCommand<CommandContext>({
 const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   description:
     'Review or toggle always-speak mode, provision the managed local voice runtime and the wake-word models (setup/status), and export or import the voice settings',
-  usage: '[review|status|setup|enable|disable|wake status|wake setup|bundle export <path>|bundle inspect <path>|bundle import <path>]',
-  help: 'Usage: /voice [review|status|setup|enable|disable|wake status|wake setup|bundle export <path>|bundle inspect <path>|bundle import <path>]',
+  usage: '[review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
+  help: 'Usage: /voice [review|status|setup|enable|disable|wake status|wake setup [yes]|bundle export <path>|bundle inspect <path>|bundle import <path>]',
   confirmMutations: false,
   reportFailure: false,
   paths: requireShellPaths,
@@ -220,7 +221,48 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       print: (block: string) => ctx.print(block),
     };
     if (wakeSub === 'setup') {
+      // The literal ask: this terminal listens for the wake word. Both rows are
+      // needed (the feature and this surface's row), so both are set.
+      const config = ctx.platform.configManager;
+      const surfaceKey = 'voice.wake.surfaces.tui' as ConfigKey;
+      const wakeWasOn = config.get('voice.wake.enabled') === true;
+      const surfaceWasOn = config.get(surfaceKey) === true;
+      if (!wakeWasOn) config.setDynamic('voice.wake.enabled', true);
+      if (!surfaceWasOn) config.setDynamic(surfaceKey, true);
       await runWakeProvision(runner);
+      // The goal behind it: what is said after the wake word becomes text. The
+      // daemon's voice status says whether speech-to-text is there; a daemon
+      // that cannot be read counts as not having it.
+      const resolution = createVoiceProvisionGateway({
+        configManager: config,
+        homeDirectory: () => requireShellPaths(ctx).homeDirectory,
+      });
+      let sttReady = false;
+      if (resolution.available) {
+        try { sttReady = (await resolution.gateway.fetchStatus()).stt.state === 'provisioned'; } catch { sttReady = false; }
+      }
+      const chain = planVoiceSetupChain('wake', {
+        surface: 'tui',
+        wakeEnabled: wakeWasOn,
+        surfaceEnabled: surfaceWasOn,
+        // The receipt above already reports the models, fetched or not.
+        wakeProvisioned: true,
+        sttReady,
+        ttsReady: true,
+        inputDevice: String(config.get('voice.wake.inputDevice') ?? ''),
+      });
+      const proposesStt = chain.steps.some((step) => step.kind === 'propose' && step.subject === 'stt');
+      if (proposesStt && args[2]?.toLowerCase() === 'yes' && resolution.available) {
+        ctx.print(chain.steps.filter((step) => step.kind === 'do').map((step) => step.message).join('\n'));
+        ctx.print(VOICE_SETUP_ANNOUNCEMENT);
+        await runVoiceSetupWithProgress(resolution, { print: (block) => ctx.print(block) });
+        return;
+      }
+      ctx.print(['Wake-Word Setup', renderVoiceSetupChain(chain), ...(proposesStt
+        ? [resolution.available
+          ? '(yes: /voice wake setup yes installs it now)'
+          : `(speech-to-text is installed through the daemon, which is not reachable here: ${resolution.reason})`]
+        : [])].join('\n'));
       return;
     }
     if (wakeSub === 'status') {

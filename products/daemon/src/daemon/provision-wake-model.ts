@@ -71,7 +71,7 @@ export async function runProvisionWakeModelCommand(
   }
   const outcome = await provision({
     managedRoot,
-    recoveryHint: '/voice wake setup',
+    // The default hint says what the platform does next: the daemon fetches the model at its next start.
     ...(deps.env !== undefined ? { env: deps.env } : {}),
   });
   return {

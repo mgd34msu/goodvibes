@@ -89,7 +89,7 @@ export const { wakeArtifactLine, describeWakeBlockers, describeWakeLimitations, 
     ],
     download: (status) => [
       `  a fresh provision would download ${formatVoiceBytes(status.downloadBytes)}. Installing goodvibes normally does this,`,
-      '  and a running daemon retries at boot; run /voice wake setup to fetch it now (nothing downloads on its own).',
+      '  and a running daemon retries at every boot; /voice wake setup fetches it now and turns the wake word on (nothing downloads otherwise).',
     ],
     extraSettings: () => [],
     receiptHeader: (result) => [

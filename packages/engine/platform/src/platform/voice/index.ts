@@ -35,7 +35,6 @@ export {
   planVoiceSetupChain,
   renderVoiceSetupChain,
   voiceSetupChainStrings,
-  voiceSetupStepMentionsUserCommand,
   voiceSetupStepsOfKind,
 } from './setup-chain.js';
 export type {

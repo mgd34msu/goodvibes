@@ -30,7 +30,8 @@
  *
  * Nobody can list every service and every edge case in advance, and a platform
  * that tries ships a maze for the one nobody listed. Setups generalise into a
- * few SHAPES ({@link SETUP_SOLUTION_SHAPES}); the job is to pick or compose the
+ * few SHAPES ({@link SetupSolutionShape}, stated to the model in
+ * {@link SETUP_INTENT_CONTRACT_PROMPT}); the job is to pick or compose the
  * ones that fit, then execute them:
  *
  *   1. a guided walkthrough the PLATFORM executes, step by step;
@@ -42,11 +43,9 @@
  *
  * AND NEVER A COMMAND. No reply tells the user to type anything. Slash commands
  * exist for self-service; they are never the platform's answer to a stated
- * want. The platform does the thing and reports what it did.
- * {@link mentionsUserTypedCommand} reads a drafted reply for exactly that.
+ * want. The platform does the thing and reports what it did. The strings a
+ * setup flow ships are fixed text, so this is held where they are written.
  */
-
-import { replyInstructsTyping } from './batteries/setup-reply-command.js';
 
 /** The shapes a setup can take. Composed, not chosen from a menu of services. */
 export type SetupSolutionShape =
@@ -54,22 +53,6 @@ export type SetupSolutionShape =
   | 'browser-automation'
   | 'official-cli'
   | 'question-driven';
-
-/** Each shape, and when it is the right one. */
-export const SETUP_SOLUTION_SHAPES: Readonly<Record<SetupSolutionShape, string>> = {
-  'guided-walkthrough':
-    'The platform executes the steps itself, in order, reporting each as it completes. The default when every '
-    + 'step is something this process can perform.',
-  'browser-automation':
-    'The platform drives a real browser through the parts that must happen on the web, and hands the user only '
-    + 'the pages that are genuinely theirs, signing in, granting consent. Everything either side of those is driven.',
-  'official-cli':
-    'The platform installs the service\'s own command-line tool and configures through it. The right shape when '
-    + 'the vendor\'s tool is the supported path and reimplementing its API would drift.',
-  'question-driven':
-    'The platform asks its way to the answer, a few questions, or a full interview when the desired end state is '
-    + 'itself what has to be discovered before anything can be built.',
-};
 
 /** What one step of a setup is: performed, proposed, or asked. */
 export type SetupStepKind = 'do' | 'propose' | 'ask';
@@ -113,15 +96,6 @@ export function setupPlanStrings(plan: SetupPlan): readonly string[] {
     step.message,
     ...(step.options ?? []).flatMap((option) => [option.label, option.trade]),
   ]);
-}
-
-/**
- * Does this reply tell the user to type a slash command or edit a config key
- * themselves? Read by Jev (engine.runtime.setup-reply-command), so setup
- * replies can be held to the contract above; a weak reading is no.
- */
-export function mentionsUserTypedCommand(text: string): Promise<boolean> {
-  return replyInstructsTyping(text, 'runtime.setup-contract.mentions-user-typed-command');
 }
 
 /** Render a plan as the reply a surface prints. */

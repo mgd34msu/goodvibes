@@ -102,7 +102,7 @@ export function voiceStatusLines(status: VoiceRuntimeStatusResult): string[] {
   }
 
   if (status.offerBytes !== null && status.offerBytes !== undefined && voiceRuntimeNeedsSetup(status)) {
-    lines.push(`  setup download: ${formatVoiceBytes(status.offerBytes)}; run /voice setup to install`);
+    lines.push(`  setup download: ${formatVoiceBytes(status.offerBytes)}; /voice setup installs it`);
   }
   return lines;
 }
@@ -142,7 +142,7 @@ export function voiceEngineOutcomeLine(engine: string, state: string, reason: st
     case 'provisioned':
       return `  ${engine}: installed`;
     case 'download-failed':
-      return `  ${engine}: download failed${reason ? `; ${reason}` : ''} (re-run /voice setup to retry; completed parts are kept)`;
+      return `  ${engine}: download failed${reason ? `; ${reason}` : ''} (completed parts are kept; /voice setup fetches the rest)`;
     case 'checksum-mismatch':
       return `  ${engine}: checksum mismatch; the downloaded file did not match its pinned checksum and was discarded${reason ? ` (${reason})` : ''}`;
     case 'bundle-unavailable':

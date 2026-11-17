@@ -216,7 +216,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 | `/remote-setup` | None | `[review\|export <path>]` | Dedicated front-door for remote setup review and portable setup bundles |
 | `/runner-pool` | `/pool` | `[list\|show <id>\|create <id> <label...>\|assign <pool> <runner>\|unassign <pool> <runner>]` | Dedicated front-door for remote runner pool review and assignment flows |
 | `/tunnel` | None | `[review\|export <path>]` | Dedicated front-door for remote tunnel review and export flows |
-| `/voice` | None | `[review\|status\|setup\|enable\|disable\|wake status\|wake setup\|bundle export <path>\|bundle inspect <path>\|bundle import <path>]` | Review or toggle always-speak mode (same switch and rule as `/tts on\|off`), provision the managed local voice runtime and the wake-word models (setup/status), and export, inspect or import the voice settings (`ui.voiceEnabled`, `tts.*`, `voice.wake.*`) |
+| `/voice` | None | `[review\|status\|setup\|enable\|disable\|wake status\|wake setup [yes]\|bundle export <path>\|bundle inspect <path>\|bundle import <path>]` | Review or toggle always-speak mode (same switch and rule as `/tts on\|off`), provision the managed local voice runtime and the wake-word models (setup/status; `wake setup` also turns wake detection on for this terminal and offers speech-to-text when it is missing, `wake setup yes` installs it), and export, inspect or import the voice settings (`ui.voiceEnabled`, `tts.*`, `voice.wake.*`) |
 
 ## Git
 

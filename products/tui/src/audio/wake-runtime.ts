@@ -16,7 +16,7 @@ export const { wireWakeRuntime, startWakeRuntime } = createTerminalWakeRuntime({
   missingModels: (reason) =>
     `[Wake] voice.wake.enabled is on, but the wake models are not provisioned (${reason}), ` +
     'so nothing is listening. Installing goodvibes provisions them and a running daemon retries at boot, so this ' +
-    'means the download has not succeeded yet; run /voice wake setup to fetch and verify them now.',
+    'means the download has not succeeded yet. The daemon tries again at its next start; /voice wake setup fetches and verifies them now.',
   draftNotice: '[Wake] Transcript placed in the composer (voice.wake.autoSubmit is off: press Enter to send it).',
   captureFailure: (error, detail) => `[Wake] The capture stream ended (${error}): ${detail}.`,
   describeBlockers: describeWakeBlockers,

@@ -293,7 +293,6 @@ async function installWakeWordModel() {
       await import('@goodvibes-jev/engine/platform/platform/voice');
     const outcome = await provisionWakeWordModelsAtInstall({
       managedRoot: resolveManagedVoiceRoot(home),
-      recoveryHint: '/voice wake setup',
     });
     console.log(`postinstall: ${outcome.message}`);
   } catch (error) {

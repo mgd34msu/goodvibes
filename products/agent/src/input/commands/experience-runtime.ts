@@ -13,7 +13,6 @@ import { handleApprovalOperatorAction } from './operator-actions-runtime.ts';
 import { resolveWakeRuntimeSettings } from '@goodvibes-jev/engine/platform/platform/voice/wake/runtime';
 import {
   agentWakeCapabilities,
-  wakeProvisionReceiptLines,
   wakeStatusLines,
   WAKE_SETUP_ANNOUNCEMENT,
 } from '../../core/wake-provision-status.ts';
@@ -80,8 +79,8 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
   description:
     'Review or toggle always-speak mode, manage the managed local-voice runtime and the wake-word models, and export or import the voice settings',
   usage:
-    '[review|status|setup --yes|enable|disable|wake status|wake setup --yes|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
-  help: 'Usage: /voice [review|status|setup --yes|enable|disable|wake status|wake setup --yes|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
+    '[review|status|setup --yes|enable|disable|wake status|wake setup --yes [yes]|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
+  help: 'Usage: /voice [review|status|setup --yes|enable|disable|wake status|wake setup --yes [yes]|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
   confirmMutations: true,
   reportFailure: true,
   paths: requireShellPaths,
@@ -112,14 +111,18 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
         requireYesFlag(ctx, 'download the pinned wake-word classifier and speech-embedding front end (~3.7 MB)', '/voice wake setup --yes');
         return;
       }
-      // The command ends when the download does, so whoever ran it (the owner
-      // or the model) gets the receipt; the owner's composer is not held by it.
+      // The platform's voice setup: this surface listens for the wake word,
+      // the models are fetched, and speech-to-text (what makes a wake word
+      // useful) is proposed, or installed when the answer `yes` was given.
+      // The command ends when the work does, so whoever ran it (the owner or
+      // the model) gets the outcome; the owner's composer is not held by it.
       ctx.print(WAKE_SETUP_ANNOUNCEMENT);
       try {
-        const result = await voiceSetup.wakeProvision();
-        ctx.print(['Wake-Word Setup, receipt', ...wakeProvisionReceiptLines(result)].join('\n'));
+        const outcome = await voiceSetup.setup({ intent: 'wake', surface: 'agent', acceptProposals: args[2]?.toLowerCase() === 'yes' });
+        const proposesStt = outcome.plan.steps.some((step) => step.kind === 'propose' && step.subject === 'stt');
+        ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt ? ['(yes: /voice wake setup --yes yes installs it now)'] : [])].join('\n'));
       } catch (error) {
-        ctx.print(`Wake-Word Setup\n  provisioning failed: ${error instanceof Error ? error.message : String(error)}`);
+        ctx.print(`Wake-Word Setup\n  setup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       return;
     }

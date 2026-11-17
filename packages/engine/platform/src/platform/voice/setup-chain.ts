@@ -17,7 +17,6 @@
  */
 import type { WakeSurface } from './wake/settings.js';
 import {
-  mentionsUserTypedCommand,
   renderSetupPlan,
   setupPlanStrings,
   setupStepsOfKind,
@@ -170,16 +169,6 @@ export function planVoiceSetupChain(intent: VoiceSetupIntent, context: VoiceSetu
   }
 
   return { intent, shapes: ['guided-walkthrough'], steps };
-}
-
-/**
- * Does this setup text tell the user to type a command or edit a config key?
- * The platform's own reading (runtime/setup-contract.ts), so voice replies are
- * held to the same contract as every other setup: the platform does the
- * thing, then says what it did.
- */
-export function voiceSetupStepMentionsUserCommand(text: string): Promise<boolean> {
-  return mentionsUserTypedCommand(text);
 }
 
 /** Every user-facing string in a chain, for assertions and rendering. */

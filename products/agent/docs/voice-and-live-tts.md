@@ -60,8 +60,11 @@ What happens when both enablement rows are on:
    them, checksum-verified, before the detector starts; that is the one network
    fetch wake detection makes. Run `/voice wake status` to see what is on disk
    (verified by content, so a truncated file reads as corrupt rather than present)
-   and `/voice wake setup --yes` to download them ahead of time, without enabling
-   anything. The same provision also fetches the speech gate
+   and `/voice wake setup --yes` to set the wake word up for this surface: it turns
+   wake detection and this surface's row on, fetches any missing models, and,
+   when speech-to-text is not installed, says so and offers to install it (a wake
+   word is only useful if what follows it becomes text); `/voice wake setup --yes yes`
+   accepts and installs it. The same provision also fetches the speech gate
    `voice.wake.vadThreshold` uses, reported separately because the detector runs
    without it. If the download fails, the detector says so instead of
    pretending to listen.

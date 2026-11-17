@@ -33,12 +33,10 @@ registry.register(compactionRetention);
 registry.register(recommendationFit);
 registry.register(descriptionQuality);
 
-// Runtime: session return, setup contract, system messages.
+// Runtime: session return, system messages.
 import { pendingApproval } from './batteries/pending-approval.js';
-import { setupReplyCommand } from './batteries/setup-reply-command.js';
 import { systemMessagePriority } from './batteries/system-message-priority.js';
 registry.register(pendingApproval);
-registry.register(setupReplyCommand);
 registry.register(systemMessagePriority);
 
 // State: code index.

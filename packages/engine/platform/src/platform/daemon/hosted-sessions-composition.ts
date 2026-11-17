@@ -236,6 +236,8 @@ export function composeHostedSessionsForFacade(
   runtimeServices.ownerInbox?.usePresence(hostedSessionPresence(manager));
   // The contracts.* methods read and act across the hosted floors' runners too.
   runtimeServices.contractOperator.attachHosted(manager.contractRunners());
+  // So does the fleet: a hosted session's workers are listed, stopped and steered with the daemon's own.
+  runtimeServices.attachHostedFleetAgents(() => manager.fleetAgentManagers());
   // Dispatched contract work (the external work seam) runs in a hosted session:
   // a new one in the daemon's working directory unless the request names a
   // workspace the manager allows. Every floor's runner publishes on the daemon bus, so

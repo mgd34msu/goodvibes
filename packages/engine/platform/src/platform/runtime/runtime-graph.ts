@@ -141,7 +141,7 @@ import { wireIdlePowerAndLiveTurn } from './idle-power-services.js';
 import { wireVoiceSetup } from './voice-setup-services.js';
 import { MemorySpineClient, createLocalMemoryAccess } from './memory-spine/index.js';
 import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from './notification-privacy.js';
-import type { ComposedRuntimeServices, MemoryStoreChoice, ProductComposition } from './services.js';
+import type { ComposedRuntimeServices, HostedFleetAgentManager, MemoryStoreChoice, ProductComposition } from './services.js';
 
 type AgentToolDependencies = Parameters<AgentOrchestrator['setDependencies']>[0];
 
@@ -714,8 +714,21 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // The live process registry over every source manager: archive-aware, folding
   // scheduled jobs, hosted ACP sessions and (when asked) observed host agents.
   const { priceUsage, priceProvenance } = buildPricingSeams(providerRegistry);
+  // Workers of daemon-hosted sessions run on each workspace floor's own agent
+  // manager; once a host attaches them the fleet lists, cancels and steers them
+  // with this runtime's own.
+  let hostedFleetAgents: () => readonly HostedFleetAgentManager[] = () => [];
+  const fleetAgentManager: HostedFleetAgentManager = {
+    list: () => [...agentManager.list(), ...hostedFleetAgents().flatMap((manager) => manager.list())],
+    cancel: (id, kind) => agentManager.cancel(id, kind) || hostedFleetAgents().some((manager) => manager.cancel(id, kind)),
+    wakeWithSteer: (id, steer, options) => {
+      const owner = agentManager.list().some((record) => record.id === id) ? agentManager
+        : hostedFleetAgents().find((manager) => manager.list().some((record) => record.id === id));
+      return owner?.wakeWithSteer ? owner.wakeWithSteer(id, steer, options) : { woke: false, reason: `No agent ${id} is known to this fleet.` };
+    },
+  };
   const baseProcessRegistry = createProcessRegistry({
-    agentManager,
+    agentManager: fleetAgentManager,
     contractRunner,
     processManager,
     watcherRegistry,
@@ -1035,6 +1048,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     sessionLiveTurnControls,
     contractRunner,
     contractOperator,
+    attachHostedFleetAgents: (source) => { hostedFleetAgents = source ?? (() => []); },
     sessionSnapshot: (sessionId, conversation) => ({ ...conversation, contracts: contractRunner.list({ sessionId, includeTerminal: true }) }),
     processManager,
     processRegistry,

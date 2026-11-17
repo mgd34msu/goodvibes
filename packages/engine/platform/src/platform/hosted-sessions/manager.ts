@@ -61,7 +61,7 @@ import type { SessionLiveTurnControls } from '../control-plane/routes/session-ru
 import { resolveHostedModelDefinition } from './model-route.js';
 import { createHostedSessionRuntime, newHostedSessionId, type HostedSessionContractSink, type HostedSessionRuntime } from './session-runtime.js';
 import type { HostedContractRunners } from '../contract/operator-service.js';
-import { HostedWorkspaceFloors, type HostedWorkspaceFloorFactory, type HostedWorkspaceFloorLease } from './workspace-floor.js';
+import { HostedWorkspaceFloors, type HostedWorkspaceFloor, type HostedWorkspaceFloorFactory, type HostedWorkspaceFloorLease } from './workspace-floor.js';
 import type { HostedDaemonRequestPath, HostedSurfaceTurn, HostedSurfaceTurns } from './surface-turn.js';
 import { hostedLifecycleCallbacks } from './lifecycle-callbacks.js';
 import { HostedSessionStore, type HostedSessionLoadReport } from './store.js';
@@ -453,6 +453,11 @@ export class HostedSessionManager {
       started: (contractId) => change((record) => ({ ...record, contractIds: [...record.contractIds, contractId] }), 'hosted-session-contract-started', contractId),
       said: (line) => change((record) => ({ ...record, messageCount: this.sessions.get(sessionId)?.runtime?.conversation.getMessageCount() ?? record.messageCount }), 'hosted-session-contract-notice', line),
     };
+  }
+
+  /** The agent managers of the live workspace floors: their workers, for the daemon's fleet. */
+  fleetAgentManagers(): readonly HostedWorkspaceFloor['services']['agentManager'][] {
+    return this.floors.floors().map((floor) => floor.services.agentManager);
   }
 
   /** The contracts operator surface's view of this engine (contract/operator-service.ts): every floor's runner, and a live session's. */

@@ -15,6 +15,9 @@ import type { HomeGraphService, KnowledgeService, KnowledgeStore, ProjectPlannin
 import type { MediaProviderRegistry } from '../media/index.js';
 import type { MultimodalService } from '../multimodal/index.js';
 import type { AgentFleetOwnership, AgentManager } from '../tools/agent/index.js';
+
+/** The part of an agent manager the fleet reads and acts through. */
+export type HostedFleetAgentManager = Pick<AgentManager, 'list' | 'cancel'> & Partial<Pick<AgentManager, 'wakeWithSteer'>>;
 import type { AgentMessageBus } from '../agents/message-bus.js';
 import type { AgentOrchestrator } from '../agents/orchestrator.js';
 import type { ArchetypeLoader } from '../agents/archetypes.js';
@@ -475,6 +478,8 @@ export interface RuntimeServices {
   readonly contractRunner: ContractRunner;
   /** The contracts operator surface over this runner and, once attached, the hosted-session floors' runners. */
   readonly contractOperator: ContractOperatorService;
+  /** Joins the hosted-session floors' agent managers into this runtime's fleet (null takes them out), as contractOperator.attachHosted does for their contracts. */
+  attachHostedFleetAgents(source: (() => readonly HostedFleetAgentManager[]) | null): void;
   /** A session's snapshot for saving, with the trees of the contracts started in the session filled from the runner. */
   sessionSnapshot(sessionId: string, conversation: Omit<SessionSnapshot, 'contracts'>): SessionSnapshot;
   readonly processManager: ProcessManager;

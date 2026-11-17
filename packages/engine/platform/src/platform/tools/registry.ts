@@ -1117,10 +1117,9 @@ export class ToolRegistry {
             // second one see its own configuration write as a foreign change. The configuration is still published first:
             // a failure between the two leaves an orphan credential, never configuration that points at a deleted one.
             const deletion = mutation.secretDeletion;
+            // One pass: the callbacks that can reenter run first, so the owned-data checks after them see the final state.
             const assertAfterConfig = () => {
-              assertProjectionCurrent(callerCurrent); assertPlanSource();
-              if (configMutation) mutation.owner.assertCompletedMutation(configMutation);
-              this.assertExecuting(call, record); assertProjectionSignal(signal); assertAdmissionCurrent(); assertEffect('write');
+              assertProjectionCurrent(callerCurrent); assertAdmissionCurrent(); assertEffect('write');
               assertPlanSource();
               if (configMutation) mutation.owner.assertCompletedMutation(configMutation);
               this.assertExecuting(call, record); assertProjectionSignal(signal);

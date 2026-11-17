@@ -694,7 +694,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'channels.routing.list',
     title: 'List Channel Routing Rules',
-    description: 'Return the daemon-persisted channel-to-profile routing table.',
+    description: 'Return the daemon-persisted channel-to-profile routing table. The profileId a rule names is stamped on inbox items from that channel (their routeId) so the surface owning the profile picks them up; it sets no model, provider or permission mode. Those come from channels.profiles.*, the one table the daemon applies to sessions a channel originates.',
     category: 'channels',
     scopes: ['read:channels'],
     http: { method: 'GET', path: '/api/channels/routing' },

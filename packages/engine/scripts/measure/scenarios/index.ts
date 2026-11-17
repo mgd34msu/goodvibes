@@ -6,11 +6,23 @@ const tools: Loader = async () => (await import('./tools.ts')).scenarios;
 const stores: Loader = async () => (await import('./stores.ts')).scenarios;
 const agent: Loader = async () => (await import('./agent.ts')).scenarios;
 const inbound: Loader = async () => (await import('./inbound.ts')).scenarios;
+const state: Loader = async () => (await import('./state.ts')).scenarios;
+const mail: Loader = async () => (await import('./mail.ts')).scenarios;
+const hosted: Loader = async () => (await import('./hosted.ts')).scenarios;
 
-export const SCENARIOS: ReadonlyArray<{ readonly name: string; readonly load: Loader }> = [
+export interface ScenarioEntry {
+  readonly name: string;
+  readonly load: Loader;
+  /** Scenario-specific counts (returned by its op) held to its budget like the standard counts: at or below the recorded figure. */
+  readonly budgeted?: readonly string[];
+  /** Scenario-specific byte totals held to its budget like bytes written: at most 10% above the recorded figure. */
+  readonly budgetedBytes?: readonly string[];
+}
+
+export const SCENARIOS: readonly ScenarioEntry[] = [
   { name: 'tool-read', load: tools },
   { name: 'tool-exec-remembered', load: tools },
-  { name: 'turn-0-tools', load: tools },
+  { name: 'turn-0-tools', load: tools, budgeted: ['toolDefinitionsSent'], budgetedBytes: ['toolDefinitionBytesSent'] },
   { name: 'turn-12-tools', load: tools },
   { name: 'turn-8-reads', load: tools },
   { name: 'turn-8-slow-reads', load: tools },
@@ -28,4 +40,11 @@ export const SCENARIOS: ReadonlyArray<{ readonly name: string; readonly load: Lo
   { name: 'config-set', load: stores },
   { name: 'agent-route-plan', load: agent },
   { name: 'agent-catalog-search', load: agent },
+  { name: 'contract-save-100-files', load: state },
+  { name: 'contract-save-5000-files', load: state },
+  { name: 'owner-inbox-question-answer', load: state },
+  { name: 'work-plan-edit-200', load: state },
+  { name: 'config-set-5-keys', load: state },
+  { name: 'mailbox-poll-nothing-new', load: mail, budgeted: ['imapCommands', 'imapLogins', 'imapConnections'] },
+  { name: 'hosted-agent-request', load: hosted, budgeted: ['toolDefinitionsSent', 'toolDefinitionsWithParameters'], budgetedBytes: ['toolDefinitionBytesSent'] },
 ];

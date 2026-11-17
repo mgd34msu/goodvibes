@@ -54,6 +54,7 @@ import { readNativeConversationTurnPermit, type NativeConversationTurnPermit } f
  */
 
 import { logger } from '../utils/logger.js';
+import { forgetVerificationJournal } from '../core/verification/store.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { AnyRuntimeEvent, RuntimeEventBus, RuntimeEventEnvelope, TurnEvent } from '../runtime/events/index.js';
 import type { SessionLiveTurnControls } from '../control-plane/routes/session-runtime.js';
@@ -782,6 +783,8 @@ export class HostedSessionManager {
     if (candidates.length === 0) return;
     const retired = await this.options.store.sweep(candidates.map((live) => live.record), this.now());
     for (const sessionId of retired) {
+      // The verification journal holds the session's tool output and file contents; it goes with the transcript.
+      forgetVerificationJournal(this.sessions.get(sessionId)?.record.workspaceRoot, sessionId);
       this.sessions.delete(sessionId);
       this.nativeCheckpoints.delete(sessionId);
       this.nativeCheckpointWrites.delete(sessionId);

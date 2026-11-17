@@ -88,6 +88,21 @@ export function removeVerificationJournal(root: string, sessionId: string): numb
   return removed;
 }
 
+/**
+ * {@link removeVerificationJournal} for a session being deleted or retired:
+ * a root that is not an absolute path or an id no journal can carry means no
+ * journal was ever written, and a removal that fails is logged rather than
+ * failing the deletion that called it.
+ */
+export function forgetVerificationJournal(root: string | undefined, sessionId: string): void {
+  if (!root || !isAbsolute(root) || !/^[A-Za-z0-9_:-]+$/.test(sessionId)) return;
+  try { removeVerificationJournal(root, sessionId); }
+  catch (error) {
+    logger.warn('A deleted session\'s verification journal could not be removed; remove it from .goodvibes/verification by hand', {
+      root, sessionId, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 /** A journal is rewritten from its live records on open once superseded records are more than half of it, and it is at least this big. */
 const COMPACT_JOURNAL_MIN_BYTES = 256 * 1024;
 /** Record kinds in the order a rewritten journal holds them: every record after the ones it names. */

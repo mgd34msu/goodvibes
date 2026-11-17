@@ -2,6 +2,7 @@ import type { SharedSessionInputRecord } from './session-intents.js';
 import type { SharedSessionMessage, SharedSessionRecord } from './session-types.js';
 import { withSessionCloseReason } from './session-broker-sessions.js';
 import { logger } from '../utils/logger.js';
+import { forgetVerificationJournal } from '../core/verification/store.js';
 
 export interface SharedSessionGcStore {
   readonly sessions: Map<string, SharedSessionRecord>;
@@ -64,6 +65,7 @@ export function sweepSharedSessions(store: SharedSessionGcStore, options: Shared
         store.sessions.delete(sessionId);
         store.messages.delete(sessionId);
         store.inputs.delete(sessionId);
+        forgetVerificationJournal(session.project, sessionId);
         anyChanged = true;
       }
       continue;

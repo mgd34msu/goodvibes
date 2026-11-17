@@ -9,6 +9,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import type { SessionSurface } from '../runtime/session-surface.js';
 import { digestNameStem, storedNameStem } from '../utils/stored-name.js';
+import { forgetVerificationJournal } from '../core/verification/store.js';
 
 /**
  * Metadata for a saved session (the first JSONL line).
@@ -184,6 +185,8 @@ export function sanitizeSessionName(name: string): string {
 
 export class SessionManager {
   private sessionsDir: string;
+  /** The workspace whose `.goodvibes/verification` holds the journals of the turns these sessions ran. */
+  private readonly workingDirectory: string;
   private readonly deletedListeners = new Set<(sessionId: string) => void>();
 
   constructor(
@@ -199,6 +202,7 @@ export class SessionManager {
       readonly surface?: SessionSurface | undefined;
     },
   ) {
+    this.workingDirectory = baseDir;
     this.sessionsDir = options?.surface?.sessionsDir
       ?? options?.sessionsDir
       ?? resolveScopedDirectory(baseDir, options?.surfaceRoot, 'sessions');
@@ -688,12 +692,14 @@ export class SessionManager {
     if (!name || !name.trim()) throw new Error('Session name cannot be empty');
     const filePath = this._resolveSessionFile(name);
     if (filePath === null) throw new Error(`Session not found: ${name}`);
+    const sessionId = basename(filePath).replace(/\.jsonl$/, '');
+    const journals = this._verificationJournalsOf(filePath, sessionId);
     try {
       unlinkSync(filePath);
     } catch (e) {
       throw new Error(`Failed to delete session: ${summarizeError(e)}`);
     }
-    const sessionId = basename(filePath).replace(/\.jsonl$/, '');
+    this._forgetVerificationJournals(journals);
     for (const listener of [...this.deletedListeners]) {
       try {
         listener(sessionId);
@@ -701,6 +707,47 @@ export class SessionManager {
         logger.warn('SessionManager: a session-deleted listener failed', { sessionId, error: summarizeError(err) });
       }
     }
+  }
+
+  /**
+   * The ids whose verification journals hold this saved session's tool output
+   * and file contents: the conversation it records (its file name and its
+   * recorded conversation) and every agent run in it. Read once, at deletion.
+   */
+  private _verificationJournalsOf(filePath: string, stem: string): { readonly conversations: ReadonlySet<string>; readonly agents: readonly string[] } {
+    const conversations = new Set<string>([stem]);
+    const agents: string[] = [];
+    let raw: string;
+    try { raw = readFileSync(filePath, 'utf-8'); } catch { return { conversations, agents }; }
+    const lines = raw.split('\n');
+    try {
+      const meta = JSON.parse(lines[0] ?? '') as { conversationId?: unknown };
+      if (typeof meta.conversationId === 'string') conversations.add(meta.conversationId);
+    } catch { /* a file with no readable meta line names its conversation by its file name alone */ }
+    for (const line of lines) {
+      if (!line.includes('"agent_record"')) continue;
+      try {
+        const record = JSON.parse(line) as { type?: unknown; id?: unknown };
+        if (record.type === 'agent_record' && typeof record.id === 'string') agents.push(record.id);
+      } catch { /* a torn line names no agent */ }
+    }
+    return { conversations, agents };
+  }
+
+  /**
+   * Remove the verification journals of a deleted session, unless another
+   * saved session still holds the same conversation (a named save of it, or
+   * its automatic save): that one still owns them.
+   */
+  private _forgetVerificationJournals(journals: { readonly conversations: ReadonlySet<string>; readonly agents: readonly string[] }): void {
+    let files: string[];
+    try { files = readdirSync(this.sessionsDir).filter(file => file.endsWith('.jsonl')); } catch { files = []; }
+    for (const file of files) {
+      const stem = file.replace(/\.jsonl$/, '');
+      const conversation = this._readExistingMetaRecord(join(this.sessionsDir, file))?.conversationId;
+      if (journals.conversations.has(stem) || typeof conversation === 'string' && journals.conversations.has(conversation)) return;
+    }
+    for (const id of [...journals.conversations, ...journals.agents]) forgetVerificationJournal(this.workingDirectory, id);
   }
 
   /**

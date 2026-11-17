@@ -5,6 +5,7 @@ import { withChannelExecutionMode } from '../channel-profiles/install-inbound-in
 import type { GatePresetName } from '../gate/presets.js';
 import { summarizeError } from '../utils/error-display.js';
 import { sessionsActive } from '../runtime/metrics.js';
+import { forgetVerificationJournal } from '../core/verification/store.js';
 import type { PersistentStore } from '../state/persistent-store.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { RouteBindingManager } from '../channels/index.js';
@@ -714,6 +715,8 @@ export class SharedSessionBroker {
     this.deferred.delete(sessionId);
     this.historyTouchedAt.delete(sessionId);
     await this.persist();
+    // The session's verification journal holds its tool output and file contents; it goes with the session.
+    forgetVerificationJournal(session.project, sessionId);
     this.updateActiveSessionsGauge();
     this.publishUpdate('session-deleted', { sessionId });
     return 'deleted';

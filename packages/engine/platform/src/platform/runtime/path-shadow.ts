@@ -20,8 +20,8 @@
  * real install. The surfaces wire the real I/O:
  *   - a client's startup check reports a shadow before anything else renders;
  *   - the installer's shell implementation (scripts/install.sh) mirrors these
- *     same rules in POSIX sh: it runs before any of the binaries it installs
- *     can answer, and no compiled binary offers this scan as a subcommand.
+ *     same rules in POSIX sh, because no compiled binary offers this scan as a
+ *     subcommand the installer could call.
  *
  * Removal is deliberately conservative. A copy is only ever offered for
  * removal when it is recognisably one of OUR programs, a link into an

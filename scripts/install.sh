@@ -72,9 +72,7 @@ INSTALL_AGENT_CLAIM_ID=""
 # remove) apart from a hand-written one (never deleted, only reported). The
 # systemd unit carries it as a `# managed by goodvibes install.sh` comment; the
 # launchd plist carries it both as an XML comment and a GoodVibesManagedBy key —
-# a plain substring grep for this string matches either form. The daemon's
-# legacy-unit reconcile reads the same string (INSTALLER_UNIT_MARKER in the
-# engine's terminal shell); the installer tests require the two to be equal.
+# a plain substring grep for this string matches either form.
 INSTALLER_MARKER="managed by goodvibes install.sh"
 
 # Service unit / LaunchAgent identities. The systemd unit name is the SAME one
@@ -2161,8 +2159,7 @@ migrate_legacy_systemd_unit() {
   if [ "$legacy_state" = "unknown" ] || [ "$canonical_state" = "unknown" ]; then
     say ""
     say "NOTE: cannot determine the daemon units' state (user service manager unreachable from this"
-    say "  session?). Nothing was changed. Re-run the installer from a logged-in session, or migrate"
-    say "  deliberately with: goodvibes-daemon migrate-service"
+    say "  session?). Nothing was changed. Re-run the installer from a logged-in session."
     return 0
   fi
 
@@ -2184,7 +2181,8 @@ migrate_legacy_systemd_unit() {
       say ""
       say "NOTE: both $SYSTEMD_DAEMON_UNIT and $LEGACY_SYSTEMD_DAEMON_UNIT are currently running."
       say "  Stopping either one automatically could take down the endpoint your clients use, so"
-      say "  nothing was changed. Migrate deliberately with: goodvibes-daemon migrate-service"
+      say "  nothing was changed. Stop the one you do not use, then re-run the installer:"
+      say "    systemctl --user disable --now $LEGACY_SYSTEMD_DAEMON_UNIT"
       return 0
     fi
     # The canonical unit is serving (active with a live main process) and the
@@ -2235,8 +2233,7 @@ migrate_legacy_systemd_unit() {
           say "  NOTE: the existing $SYSTEMD_DAEMON_UNIT $transfer_stale_reason and is not"
           say "  recognizably platform-managed; transferring supervision onto it could run the daemon wrong."
           say "  The units were not changed; remove --hostname/--port and any --daemon-home from its launch line"
-          say "  yourself (an explicit --daemon-home turns off automatic updates), or migrate deliberately with:"
-          say "    goodvibes-daemon migrate-service"
+          say "  yourself (an explicit --daemon-home turns off automatic updates), then re-run the installer."
           # The restart path deferred the in-place restart to this transfer
           # ('the migration step below transfers it') — the promise must not
           # die with the refusal: restart the legacy unit here so the swapped
@@ -2266,10 +2263,10 @@ migrate_legacy_systemd_unit() {
         say "  NOTE: could not stop $LEGACY_SYSTEMD_DAEMON_UNIT: the transfer did not run and the daemon keeps"
         say "  running under the legacy unit. The only change made is the corrected launch form already written to"
         say "  $canonical_path (not started); its previous content is kept at $transfer_canonical_backup."
-        say "  Migrate later with: goodvibes-daemon migrate-service"
+        say "  Re-run the installer to try again."
       else
         say "  NOTE: could not stop $LEGACY_SYSTEMD_DAEMON_UNIT: nothing was changed; the daemon keeps"
-        say "  running under the legacy unit. Migrate later with: goodvibes-daemon migrate-service"
+        say "  running under the legacy unit. Re-run the installer to try again."
       fi
       [ "$wrote_canonical" = "1" ] && rm -f "$canonical_path"
       return 0

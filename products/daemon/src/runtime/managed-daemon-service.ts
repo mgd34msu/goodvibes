@@ -1,0 +1,2 @@
+/** The daemon's binding of the shared managed service definition. */
+export * from '@goodvibes-jev/engine/terminal-shell/managed-daemon-service';

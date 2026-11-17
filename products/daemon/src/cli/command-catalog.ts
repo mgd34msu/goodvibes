@@ -43,7 +43,6 @@ export type DaemonCommand =
   | 'install-service'
   | 'uninstall-service'
   | 'service-status'
-  | 'migrate-service'
   | 'start-service'
   | 'stop-service'
   | 'restart-service'
@@ -361,10 +360,6 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'Write the service definition for this platform, then start it, so the daemon',
       'comes back after a reboot without anyone logging in.',
       '',
-      'Refused when a unit from the older install script is still present, because',
-      'installing beside it would leave two daemons competing for one port. Take',
-      'that one over with `migrate-service` first.',
-      '',
       'Exit codes: 0 installed and running; 3 installed but not running (the start',
       'failed or the daemon exited at once; the receipt says why); 1 not installed.',
       ...SERVICE_DETAIL_TAIL,
@@ -409,25 +404,6 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       ...SERVICE_DETAIL_TAIL,
     ],
     flags: [JSON_FLAG],
-    passthrough: false,
-    subcommands: [],
-  },
-  {
-    name: 'migrate-service',
-    aliases: [],
-    summary: 'Take over a service unit left by the older install script.',
-    usage: 'goodvibes-daemon migrate-service [-y]',
-    detail: [
-      'Move from the install script\'s `goodvibes-daemon.service` unit to the one this',
-      'binary manages. Without -y it prints the exact plan and changes nothing.',
-      '',
-      'The new service is installed, started and verified healthy BEFORE the old one',
-      'is stopped or removed; a new service that does not come up rolls itself back',
-      'and leaves the working one alone. A process listening on the port with no unit',
-      'behind it is reported, never killed.',
-      ...SERVICE_DETAIL_TAIL,
-    ],
-    flags: [YES_FLAG],
     passthrough: false,
     subcommands: [],
   },
@@ -527,7 +503,7 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       '',
       'Because it changes state on a daemon that may not be this process\'s own, it',
       'states the plan and asks for confirmation before acting: -y (or --yes) is the',
-      'non-interactive answer, the same convention migrate-service uses. Without -y',
+      'non-interactive answer. Without -y',
       'nothing is changed. An unreachable daemon, a rejected token, and a daemon too',
       'old to serve the mint verb are each refused by name, never a stack trace.',
     ],

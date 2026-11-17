@@ -2017,15 +2017,10 @@
       "types": "./terminal-shell/dist/conversation-rewind-port.d.ts",
       "import": "./terminal-shell/dist/conversation-rewind-port.js"
     },
-    "./terminal-shell/legacy-daemon-migration": {
-      "bun": "./terminal-shell/src/legacy-daemon-migration.ts",
-      "types": "./terminal-shell/dist/legacy-daemon-migration.d.ts",
-      "import": "./terminal-shell/dist/legacy-daemon-migration.js"
-    },
-    "./terminal-shell/legacy-daemon-reconcile": {
-      "bun": "./terminal-shell/src/legacy-daemon-reconcile.ts",
-      "types": "./terminal-shell/dist/legacy-daemon-reconcile.d.ts",
-      "import": "./terminal-shell/dist/legacy-daemon-reconcile.js"
+    "./terminal-shell/managed-daemon-service": {
+      "bun": "./terminal-shell/src/managed-daemon-service.ts",
+      "types": "./terminal-shell/dist/managed-daemon-service.d.ts",
+      "import": "./terminal-shell/dist/managed-daemon-service.js"
     },
     "./terminal-shell/conversation-event-navigation": {
       "bun": "./terminal-shell/src/conversation-event-navigation.ts",

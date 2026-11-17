@@ -23,8 +23,8 @@
  * a fresh token, and every token that daemon already issued (its own shared
  * token included) is left exactly as it was. Because it changes state on a
  * daemon that may not be this process's own, it states the plan and asks for
- * confirmation before acting, `-y`/`--yes` satisfies that non-interactively,
- * the same convention `migrate-service` uses. An unreachable daemon, a
+ * confirmation before acting, `-y`/`--yes` satisfies that non-interactively.
+ * An unreachable daemon, a
  * rejected token, and a daemon too old to serve the verb are each refused by
  * name (see `callDaemonVerb`), never a stack trace.
  *

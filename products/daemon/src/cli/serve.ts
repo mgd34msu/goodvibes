@@ -19,7 +19,7 @@ import type { RuntimeServicesOptions } from '../runtime/services.js';
 import { runDaemonProcess, type DaemonProcessHandle, type DaemonProcessOptions } from '../daemon/process-lifecycle.js';
 import type { DaemonCliConfiguration } from './configuration.js';
 import type { DaemonCliFlags } from './types.js';
-import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, reconcileDaemonStartup, sweepDaemonWorktrees } from './startup-maintenance.js';
+import { persistDaemonStartupPublicUrl, pruneDaemonStartupTokens, sweepDaemonWorktrees } from './startup-maintenance.js';
 import { renderDaemonStartupPairing } from './startup-pairing.js';
 
 /** The launcher supplies real inbox composition and explicitly chooses host-only capabilities. */
@@ -133,16 +133,6 @@ export function runConfiguredDaemonCli(
         if (!daemon) throw new Error('Daemon listener unavailable after startup');
         const requireRunning = () => { if (!daemon.isRunning) throw new Error('Daemon listener unavailable after startup'); };
         // Boot can overlap a config-driven restart; observe its settled listener.
-        await daemon.waitForRestart();
-        if (closed) return undefined;
-        requireRunning();
-        const reconciled = await reconcileDaemonStartup(active, env, maintenance.signal)
-          .then((receipt) => ({ receipt }), () => ({ receipt: undefined, failed: true }));
-        if (closed) return undefined;
-        if ('failed' in reconciled) stderr('[goodvibes-daemon] warning: legacy-unit reconcile failed (non-fatal).');
-        else if (reconciled.receipt && reconciled.receipt.reason !== 'no-legacy-unit') {
-          stderr(`[goodvibes-daemon] legacy-unit reconcile: ${reconciled.receipt.action} (${reconciled.receipt.reason}).`);
-        }
         await daemon.waitForRestart();
         if (closed) return undefined;
         requireRunning();

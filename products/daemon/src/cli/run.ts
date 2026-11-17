@@ -1,7 +1,7 @@
 /** CLI dispatch without import-time startup. Adapted from the upstream daemon/cli. */
 import { homedir } from 'node:os';
 import { writeSync } from 'node:fs';
-import { runClusterCommand, resolveRuntimeEndpointBinding } from '@goodvibes-jev/engine/terminal-shell';
+import { runClusterCommand } from '@goodvibes-jev/engine/terminal-shell';
 import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { SecretsManager } from '../config/secrets.js';
@@ -72,7 +72,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     const cli = parseDaemonCli(argv);
     if (cli.errors.length) {
       // The unit carries no endpoint flags, so the parser refuses these before dispatch; name the supported route.
-      const endpointFlag = (cli.command === 'install-service' || cli.command === 'migrate-service')
+      const endpointFlag = cli.command === 'install-service'
         && cli.errors.some((error) => /^--(port|hostname) is not a flag/.test(error));
       return result({ exitCode: 2, lines: [...cli.errors,
         ...(endpointFlag ? ['The installed service reads controlPlane.host and controlPlane.port from settings each time it starts, so a flag here could never reach it.',
@@ -120,11 +120,11 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         },
       }));
     }
-    const needsRuntime = ['serve', 'install-service', 'start-service', 'restart-service', 'migrate-service'].includes(cli.command);
+    const needsRuntime = ['serve', 'install-service', 'start-service', 'restart-service'].includes(cli.command);
     const runtime = options.runtime ?? (needsRuntime ? await options.createRuntime?.() : undefined);
     if (cli.command === 'serve' && typeof runtime?.inboxFactory !== 'function') return refuse(PARTIAL);
     let serviceExecutable: ShippedServiceExecutable | undefined;
-    if (['install-service', 'start-service', 'restart-service', 'migrate-service'].includes(cli.command)) {
+    if (['install-service', 'start-service', 'restart-service'].includes(cli.command)) {
       if (typeof runtime?.inboxFactory !== 'function') return refuse(PARTIAL);
       serviceExecutable = options.resolveServiceExecutable?.();
       if (!serviceExecutable && !options.serviceBinaryPath) return refuse(`${PARTIAL} Service activation requires an explicitly composed executable.`);
@@ -195,11 +195,10 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       default: {
         if (!isDaemonServiceSubcommand(cli.command)) return refuse('This command has no migrated dispatcher.');
         const servicePlatform = config.get('service.platform');
-        if (configuration.isOverridden && ['install-service', 'start-service', 'restart-service', 'migrate-service'].includes(cli.command)
+        if (configuration.isOverridden && ['install-service', 'start-service', 'restart-service'].includes(cli.command)
           && servicePlatform !== 'systemd' && !(servicePlatform === 'auto' && process.platform === 'linux')) {
           return refuse('Service activation with selected tree or daemon homes currently requires systemd. No service was changed.');
         }
-        const binding = resolveRuntimeEndpointBinding(config, 'controlPlane');
         serviceExecutable?.assertCurrent();
         return result(await runDaemonServiceCli({ subcommand: cli.command,
           binaryPath: serviceExecutable?.binaryPath ?? options.serviceBinaryPath ?? resolveInstalledDaemonBinary({ moduleUrl: import.meta.url }),
@@ -207,7 +206,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
           configManager: config, homeDir: homeDirectory, daemonHomeDirectory, unitHomeDir: env.HOME?.trim() || homedir(), workingDirectory,
           requireInstalledDefinitionMatch: configuration.isOverridden || cli.flags.workingDir !== undefined
             || env.GOODVIBES_WORKING_DIR !== undefined, actionRunner: options.serviceActionRunner,
-          host: binding.host, port: binding.port, confirmMigration: cli.flags.yes, json: cli.flags.json,
+          json: cli.flags.json,
         }), stdout);
       }
     }

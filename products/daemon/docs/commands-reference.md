@@ -108,9 +108,7 @@ goodvibes-daemon install-service
 When admitted by an embedding launcher, write the platform service definition and start it.
 Login/boot behavior depends on the platform user-service setup; do not assume a system-wide
 service or Linux lingering was enabled. The shipped launcher lacks the required
-`serviceBinaryPath` and refuses install/start/restart/migrate before activation. Refused when a unit from the
-older install script is still present, since installing beside it would leave two daemons
-competing for one port. Take that one over with `migrate-service` first. Refuses an
+`serviceBinaryPath` and refuses install/start/restart before activation. Refuses an
 explicit `--hostname`/`--port` (the installed unit carries no endpoint flags; use
 `config set controlPlane.host` / `controlPlane.port` instead). Exits `0` when the
 service is installed and running, `3` when it was installed but is not running (the
@@ -138,30 +136,6 @@ Report the platform, the service name, the definition path, and whether the serv
 is installed and currently running (queried live, not inferred from a pid file). Exit
 codes: `0` installed and running, `3` installed but not running, `4` not installed,
 `1` the platform refused the query (the error is printed).
-
-### `migrate-service`
-
-```
-goodvibes-daemon migrate-service [-y]
-```
-
-Move from the older install script's `goodvibes-daemon.service` unit to the one this
-binary manages (`goodvibes.service`). Without `-y`/`--yes` (or `--non-interactive`) it
-prints the exact plan and changes nothing. This command does not migrate without its confirmation flag. The new service is installed,
-the old one is stopped (not yet disabled or removed) to free the port, and then the new
-service is started; it must answer on the configured address from its own running
-process within its start deadline (about 12 seconds: boot time plus one systemd restart
-delay). Only then is the old unit disabled and removed. If the new service does not
-start or answer, it is rolled back and the old unit is started again, so the working
-daemon is never retired. A process merely listening on the port with no unit behind it is
-reported, never killed.
-
-If retiring the old unit does not complete, the command exits non-zero, keeps the
-healthy new service and says which step was not confirmed. Run
-`goodvibes-daemon migrate-service -y` again to resume: when the managed unit is
-installed, running and identical to the definition this binary writes, the command
-skips installation and the health check and performs only the remaining retirement of
-the old unit. A managed unit that differs from that definition is still refused.
 
 ### `start-service` / `stop-service` / `restart-service`
 
@@ -222,7 +196,7 @@ pairing block for it. Minting is a different act than reprinting. It is a fresh 
 and every token that daemon already issued, its shared token included, is left
 untouched. Because it changes state on a daemon that may not be this process's own, it
 states the plan and asks for confirmation before acting; `-y`/`--yes`/`--non-interactive`
-answers non-interactively, the same convention `migrate-service` uses. Without `-y`
+answers non-interactively. Without `-y`
 nothing is called and nothing changes.
 
 An unreachable daemon, a rejected token, and a daemon too old to serve the mint verb are

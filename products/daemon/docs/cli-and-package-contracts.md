@@ -213,17 +213,6 @@ fails closed. Missing candidates are noops; failed removals produce a
 credential-free warning. Token overrides remain runtime-only and do not replace
 persistent identity.
 
-After listener boot and restart settlement, Linux startup invokes the existing
-`reconcileRedundantLegacyUnit`. It reads a fresh, read-only client configuration
-from the selected home/surface, excluding runtime overrides, honors the configured
-service name and uses the login home for unit paths. Relocated GoodVibes homes
-never enter automatic host service reconciliation. Existing canonical-active,
-live-mainpid, self-supervision, running-legacy, configured-endpoint, installer
-marker, timeout and retirement-outcome guards remain authoritative. The process
-owner aborts reconciliation on close; a late async endpoint probe cannot admit
-retirement. The process lifecycle awaits startup settlement and graph drainage.
-Refusals/failures have structural receipts; reconciliation failure is non-fatal.
-
 ### Empty-only stable public URL
 
 The original shared helper's **empty-only, stable-name-only** policy is retained.
@@ -283,35 +272,14 @@ refuses the whole transition instead of enabling with mismatched links.
 
 ## Service commands and recovery
 
-Canonical `PlatformServiceManager` owns service operations. Preserve all seven
-subcommand grammars, structured status codes, local service definitions,
-login-home versus state-home boundaries, legacy detection and explicit migration
-consent. A new unit must be healthy before retiring the old one; unsuccessful
-startup rolls back only the newly attempted target. An unidentified process
-occupying a port is reported without being killed. Unattended reconciliation
-retains canonical liveness, self-supervision, legacy-running, configured-endpoint
-and installer-marker guards, plus per-call and cumulative deadlines.
+Canonical `PlatformServiceManager` owns service operations: six subcommand
+grammars, structured status codes, local service definitions and login-home
+versus state-home boundaries. A unit left by an older install script is retired
+by the installer, not by the daemon.
 
 Compiled binary recognition compares the exact declared basename. An interpreter
 inside a daemon-named directory or similarly named helper executable is not the
 binary. Explicit environment override and packaged-launcher precedence remain.
-
-### Incomplete retirement
-
-Retirement stops when either command does not positively
-report success, including timeout or missing status. It retains the old
-definition, reports the new healthy unit and the unconfirmed legacy state,
-and asks the operator to verify before retrying. No diagnostic text is parsed
-to infer that an unsuccessful command meant the unit was already stopped.
-
-Failed/unknown stop or disable, thrown values including undefined, removal
-exceptions with empty/absent messages, and reload failures produce nonzero
-incomplete receipts. Preserve the healthy new unit once legacy retirement has
-begun; do not roll it back after completed retirement steps. A reload exception
-after removal must disclose that removal already completed. For unattended
-reconciliation, removal exceptions are `failed` / `remove-failed`; failed or
-thrown reload is `failed` / `reload-failed`, with completed removal explicit.
-No prose parsing may reinterpret an unsuccessful command as a successful stop.
 
 ### Read-only preparation and rollback
 
@@ -321,15 +289,7 @@ memory; configuration files and quarantine state are not written. Mutating
 config methods refuse in this mode.
 
 The service status query does not delete a stale PID file. Explicit stop and
-uninstall still own that cleanup. Migration refuses a managed target that already has a definition or reports
-an active runtime, before installation or rollback. The one exception is a
-resume: when the managed unit is installed, running and identical to the
-definition this tool renders while the legacy unit still exists, migration
-skips installation and the health check and runs only the retirement steps.
-Incomplete-retirement messages print `goodvibes-daemon migrate-service -y` as
-the retry command. Failed setup cleans up
-only the newly attempted target and retains recovery state when stop/disable
-cannot be confirmed. 
+uninstall still own that cleanup.
 ### Ordinary uninstall
 
 Ordinary uninstall requires both an error-free

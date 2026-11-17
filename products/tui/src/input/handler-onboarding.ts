@@ -5,7 +5,7 @@ import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/
 import { readAuthorizationInput } from '@goodvibes-jev/engine/terminal-shell/settings-subscriptions';
 import { collectOnboardingSnapshotForHandler } from './handler-interactions.ts';
 import { recordFeatureEnablement } from './onboarding/onboarding-feature-units.ts';
-import { handleConnectExistingDaemonForHandler, handleMigrateLegacyDaemonServiceForHandler } from './handler-onboarding-daemon-adopt.ts';
+import { handleConnectExistingDaemonForHandler } from './handler-onboarding-daemon-adopt.ts';
 import { OnboardingWizardController, type OnboardingWizardAction, type OnboardingWizardApplyFeedback } from './onboarding/onboarding-wizard.ts';
 import { handleCloudflareOnboardingActionForHandler, maybeProvisionCloudflareOnFinalApplyForHandler } from './handler-onboarding-cloudflare.ts';
 import { applyOnboardingRequest, deleteWizardProgress, verifyOnboardingRequest, writeOnboardingCheckMarker, writeWizardProgress } from '../runtime/onboarding/index.ts';
@@ -239,11 +239,6 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
     }
     if (action === 'connect-existing-daemon') {
       await handleConnectExistingDaemonForHandler(handler);
-      return;
-    }
-    if (action === 'migrate-legacy-daemon-service') {
-      const confirm = handler.onboardingWizard.getBooleanFieldValue('network.migrate-legacy-daemon-confirm', false);
-      await handleMigrateLegacyDaemonServiceForHandler(handler, confirm);
       return;
     }
     if (action === 'start-openai-subscription') {

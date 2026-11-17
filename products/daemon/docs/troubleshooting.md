@@ -16,7 +16,7 @@ journalctl --user -u goodvibes.service -n 100 --no-pager
 The journal command is for the default Linux systemd user unit. On macOS, inspect
 the selected launchd unit and its stdout/stderr paths; `service-status` names the
 platform/name/definition. A custom service name/path must be checked as configured.
-The shipped partial launcher refuses install/start/restart/migrate unless supplied
+The shipped partial launcher refuses install/start/restart unless supplied
 an explicitly composed installed executable and canonical, non-overridden homes.
 A refusal is not evidence of a failed service installation.
 
@@ -142,11 +142,8 @@ launchctl list | grep goodvibes
 ```
 
 Use the command matching your OS and configured service name. Do not kill an
-unidentified listener. The migration adapter's rule is new-up/healthy-before-old-down
-with rollback if the replacement fails; an unowned process is reported, not killed.
-Migration requires explicit `-y` and a qualified installed executable. A migration
-that started the new unit but did not finish retiring the old one is resumed by
-running `goodvibes-daemon migrate-service -y` again. Uninstall
+unidentified listener. A `goodvibes-daemon.service` unit left by an older install
+script is retired by running the installer again. Uninstall
 stops, unregisters and removes the managed definition, also for a service that is
 already stopped. See [service command details](commands-reference.md#install-service).
 

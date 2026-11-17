@@ -102,29 +102,6 @@ export interface OnboardingBindSettingsSnapshot {
   readonly connectedDaemonUrl?: string;
 }
 
-/**
- * Wizard wiring: read-only detection of a legacy `goodvibes-daemon.service`
- * systemd unit (see the shared `legacy-daemon-migration` engine's `LegacyUnitInfo`), carried
- * on the snapshot so the Network step can show the guided migration action only
- * when there is actually something to migrate. Never implies anything was
- * touched, detection only.
- */
-export interface OnboardingLegacyDaemonSnapshot {
-  readonly present: boolean;
-  readonly active: boolean;
-  readonly path: string;
-  /**
-   * Follow-up: the unit name this tool actually manages on this host,
-   * resolved from the `service.serviceName` config key at snapshot-collection
-   * time (`resolveConfiguredServiceName`, the shared `legacy-daemon-migration` engine),
-   * so the wizard's detection banner names the real unit instead of the
-   * hardcoded default. Optional so snapshots built without config access
-   * (fallbacks, older fixtures) stay valid; readers fall back to
-   * `MANAGED_SERVICE_NAME`.
-   */
-  readonly trackedServiceName?: string;
-}
-
 export type OnboardingProviderAccountRecord = TerminalOnboardingProviderAccount;
 
 export type OnboardingProviderAccountsSnapshot = TerminalOnboardingProviderAccountsSnapshot<OnboardingProviderAccountRecord>;
@@ -138,8 +115,7 @@ export type OnboardingSnapshotCollectionIssueArea =
   | 'secrets-records'
   | 'surfaces'
   | 'provider-accounts'
-  | 'acknowledgements'
-  | 'legacy-daemon';
+  | 'acknowledgements';
 
 export interface OnboardingSnapshotCollectionIssue {
   readonly area: OnboardingSnapshotCollectionIssueArea;
@@ -152,7 +128,6 @@ export interface OnboardingSnapshotState extends TerminalOnboardingSnapshotState
   OnboardingProviderAccountRecord
 > {
   readonly bindSettings: OnboardingBindSettingsSnapshot;
-  readonly legacyDaemon: OnboardingLegacyDaemonSnapshot;
 }
 
 export type OnboardingStep1CapabilityId =
@@ -215,10 +190,6 @@ export type OnboardingSurfaceReadHelper = TerminalOnboardingSurfaceReadHelper;
 
 export type OnboardingProviderAccountReadHelper = TerminalOnboardingProviderAccountReadHelper<OnboardingProviderAccountRecord>;
 
-export interface OnboardingLegacyDaemonReadHelper {
-  detect(): OnboardingLegacyDaemonSnapshot | Promise<OnboardingLegacyDaemonSnapshot>;
-}
-
 export type OnboardingShellPaths = Pick<ShellPathService, 'workingDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
 
 export interface OnboardingSnapshotDependencies {
@@ -230,7 +201,6 @@ export interface OnboardingSnapshotDependencies {
   readonly services: Pick<ServiceInspectionQuery, 'getAll' | 'inspect'>;
   readonly surfaces?: OnboardingSurfaceReadHelper;
   readonly providerAccounts?: OnboardingProviderAccountReadHelper;
-  readonly legacyDaemon?: OnboardingLegacyDaemonReadHelper;
   readonly shellPaths?: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope;
 }

@@ -14,7 +14,7 @@ import { buildFeatureUnitSteps, onboardingConfigBaseline } from './onboarding-fe
 import { countSelected, modelSelectionLabel, normalizeText } from './onboarding-wizard-helpers.ts';
 import { deriveProviderKeyCaptureTargets } from '../../runtime/onboarding/provider-key-capture.ts';
 import { buildProviderKeyInventoryField, buildProviderKeyMaskedFields, buildSubscriptionPosture } from './onboarding-provider-key-fields.ts';
-import { getDaemonSource, pushDaemonAdoptionFields, pushLegacyDaemonMigrationFields } from './onboarding-wizard-network-adopt.ts';
+import { getDaemonSource, pushDaemonAdoptionFields } from './onboarding-wizard-network-adopt.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 import type { OnboardingWizardAcknowledgementFieldDefinition, OnboardingWizardActionFieldDefinition, OnboardingWizardChecklistFieldDefinition, OnboardingWizardExternalSurfaceStepId, OnboardingWizardFieldDefinition, OnboardingWizardModelPickerFieldDefinition, OnboardingWizardRadioFieldDefinition, OnboardingWizardRadioOption, OnboardingWizardStepDefinition } from './onboarding-wizard-types.ts';
 
@@ -527,7 +527,6 @@ export function buildNetworkStep(controller: OnboardingWizardControllerLike): On
     // Recognize an adoptable already-running daemon (see onboarding-wizard-network-adopt.ts).
     const daemonSource = getDaemonSource(controller);
     pushDaemonAdoptionFields(fields, controller, daemonSource, bindSettings);
-    pushLegacyDaemonMigrationFields(fields, controller);
 
     if (custom) {
       const sharedIpField: OnboardingWizardChecklistFieldDefinition = {

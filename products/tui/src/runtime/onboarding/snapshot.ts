@@ -11,7 +11,6 @@ import { getProviderIdFromModel } from '@goodvibes-jev/engine/platform/platform/
 import { readOnboardingRuntimeState } from './state.ts';
 import type {
   OnboardingConfigSnapshot,
-  OnboardingLegacyDaemonSnapshot,
   OnboardingSnapshotCollectionIssueArea,
   OnboardingSnapshotDependencies,
   OnboardingSnapshotState,
@@ -39,10 +38,6 @@ function buildConfigSnapshot(config: OnboardingSnapshotDependencies['config']): 
   ]);
 }
 
-function buildFallbackLegacyDaemonSnapshot(): OnboardingLegacyDaemonSnapshot {
-  return { present: false, active: false, path: '' };
-}
-
 export async function collectOnboardingSnapshot(deps: OnboardingSnapshotDependencies): Promise<OnboardingSnapshotState> {
   const facts = captureOnboardingReadFacts(
     deps,
@@ -51,21 +46,12 @@ export async function collectOnboardingSnapshot(deps: OnboardingSnapshotDependen
     readOnboardingRuntimeState,
   );
   const { config } = facts;
-  const { state, extra } = await collectTerminalOnboardingSnapshot(
+  const { state } = await collectTerminalOnboardingSnapshot(
     deps,
     facts,
     { loadOptionalSnapshot, buildServicesSnapshot },
-    {
-      drainOnFailure: false,
-      readExtra: () =>
-        loadOptionalSnapshot(
-          'legacy-daemon',
-          deps.legacyDaemon ? () => Promise.resolve(deps.legacyDaemon!.detect()) : undefined,
-          buildFallbackLegacyDaemonSnapshot(),
-        ),
-    },
+    { drainOnFailure: false, readExtra: async () => undefined },
   );
-  if (extra.issue) state.collectionIssues.push(extra.issue);
   return {
     ...state,
     bindSettings: {
@@ -79,7 +65,6 @@ export async function collectOnboardingSnapshot(deps: OnboardingSnapshotDependen
       web: config.web,
       connectedDaemonUrl: String(deps.config.get('daemon.connectedHost.url') ?? ''),
     },
-    legacyDaemon: extra.value,
   };
 }
 

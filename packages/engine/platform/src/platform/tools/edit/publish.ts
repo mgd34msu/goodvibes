@@ -1,6 +1,7 @@
 import { noteSourceFilesWritten } from '../../intelligence/import-graph.js';
 import type { SessionChangeTracker } from '../../sessions/change-tracker.js';
 import type { FileUndoManager } from '../../state/file-undo.js';
+import { noteToolWrites } from '../../state/file-watcher.js';
 
 /** What the edit tool keeps about a file it changed, for text and notebook edits alike. */
 export interface EditPublishEnv {
@@ -18,6 +19,7 @@ export function announceWrites(paths: Iterable<string>, contents: ReadonlyMap<st
   const written = new Map<string, string | null>();
   for (const path of paths) written.set(path, contents.get(path) ?? null);
   noteSourceFilesWritten(written);
+  noteToolWrites(written.keys());
 }
 
 /** Most characters of one file's content a verbose result shows before and after. */

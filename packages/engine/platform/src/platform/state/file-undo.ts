@@ -1,6 +1,7 @@
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { noteToolWrites } from './file-watcher.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,6 +87,8 @@ function restore(path: string, content: string | Buffer | null): void {
   } else {
     writeFileSync(path, content);
   }
+  // An undo or redo is the product's own change, not one made outside it.
+  noteToolWrites([path]);
 }
 
 function entryOf(operations: FileOperation[]): FileUndoEntry {

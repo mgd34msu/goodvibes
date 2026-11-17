@@ -11,7 +11,7 @@ import { runValidators, capValidatorOutput, describeUndeclaredValidators, undecl
 import { FileStateCache } from '../../state/file-cache.js';
 import { ProjectIndex } from '../../state/project-index.js';
 import { FileUndoManager } from '../../state/file-undo.js';
-import { watchIndexedFile } from '../../state/file-watcher.js';
+import { noteToolWrites, watchIndexedFile } from '../../state/file-watcher.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ToolLLM } from '../../config/tool-llm.js';
 import { healToolFile, type CapturedAutoHealBackend } from '../shared/captured-auto-heal.js';
@@ -328,6 +328,7 @@ function atomicWrite(requestedPath: string, content: string | Buffer, encoding: 
   }
   // The import graph is patched with the new text instead of being rebuilt.
   noteSourceFilesWritten(new Map([[requestedPath, typeof content === 'string' ? content : content.toString('utf-8')]]));
+  noteToolWrites(requestedPath === targetPath ? [targetPath] : [requestedPath, targetPath]);
   return stampOf(statSync(targetPath, { bigint: true }));
 }
 
@@ -688,6 +689,7 @@ export function createWriteTool(options?: {
               // File was new - delete it, and the bookkeeping that named it.
               unlinkSync(written.resolved_path);
               noteSourceFilesWritten(new Map([[written.resolved_path, null]]));
+              noteToolWrites([written.resolved_path]);
               options?.fileCache?.invalidate(written.resolved_path);
               options?.projectIndex?.removeFile(written.resolved_path);
               removeCreatedDirectories(written);

@@ -12,6 +12,33 @@ export const FILE_WATCHER_MAX_PATHS = 500;
 
 /** The watcher that follows each project index, so a tool that indexes a file can have it watched without holding the watcher. */
 const watcherByIndex = new WeakMap<ProjectIndex, FileWatcher>();
+/** Watchers that are started, so a tool write is told only to those that could see it. */
+const liveWatchers = new Set<FileWatcher>();
+
+/** What a path holds now, precise enough to tell one write from the next: inode, size and nanosecond mtime, or 'absent'. */
+function fileStamp(absPath: string): string {
+  const stat = statSync(absPath, { bigint: true, throwIfNoEntry: false });
+  return stat ? `${stat.ino}:${stat.size}:${stat.mtimeNs}` : 'absent';
+}
+
+/**
+ * The product's own tools just wrote (or removed) these paths. A watcher that
+ * then sees the file in exactly that state knows the change is not an outside
+ * one and fires no `Change:file:external` hook for it. Free when nothing is
+ * watched; otherwise one `stat` per path.
+ */
+export function noteToolWrites(paths: Iterable<string>): void {
+  if (liveWatchers.size === 0) return;
+  for (const path of paths) {
+    const absPath = resolve(path);
+    let stamp: string | undefined;
+    for (const watcher of liveWatchers) {
+      if (!watcher.covers(absPath)) continue;
+      stamp ??= fileStamp(absPath);
+      watcher.noteOwnWrite(absPath, stamp);
+    }
+  }
+}
 
 /**
  * A tool just put `path` into `projectIndex` (a read or a write): watch it, so
@@ -38,8 +65,15 @@ export function watchIndexedFile(projectIndex: ProjectIndex, path: string): void
  * The file-state cache needs no notice: it compares the bytes a tool reads
  * with what the session last saw, so an outside change is a stale file there.
  *
- * Cost: one kernel watch per watched path; per outside change one timer, one
- * `stat` and one hook dispatch. Nothing on the tool path.
+ * The product's own writes are told apart by state, not by time: the write and
+ * edit tools report what they left (noteToolWrites), and a change that finds
+ * the file exactly so keeps the index current without firing the hook.
+ * A file replaced by rename (editors, git, atomic writes) is watched again on
+ * its new inode, so later changes and its deletion are still seen.
+ *
+ * Cost: one kernel watch per watched path; per change one timer, one or two
+ * `stat` calls and, for an outside change, one hook dispatch. Per tool write,
+ * one `stat` per watched path written.
  */
 export class FileWatcher {
   private readonly projectIndex: ProjectIndex;
@@ -55,6 +89,8 @@ export class FileWatcher {
 
   private watching = false;
   private capReported = false;
+  /** What the product's own tools last left at a path (see noteToolWrites); bounded by FILE_WATCHER_MAX_PATHS. */
+  private readonly ownWrites = new Map<string, string>();
 
   /** Debounce window in milliseconds */
   private static readonly DEBOUNCE_MS = 100;
@@ -82,6 +118,7 @@ export class FileWatcher {
   async start(): Promise<void> {
     if (this.watching) return;
     this.watching = true;
+    liveWatchers.add(this);
 
     const rootFiles = this.readRootFiles();
     for (const name of rootFiles) this.addPath(join(this.projectRoot, name));
@@ -162,6 +199,8 @@ export class FileWatcher {
   stop(): void {
     if (!this.watching) return;
     this.watching = false;
+    liveWatchers.delete(this);
+    this.ownWrites.clear();
 
     for (const timer of this.debounceTimers.values()) clearTimeout(timer);
     this.debounceTimers.clear();
@@ -233,6 +272,22 @@ export class FileWatcher {
     return new Set(this.watchedPaths);
   }
 
+  /** Whether a change at `absPath` could reach this watcher: a watched file, or a new file in the project root. */
+  covers(absPath: string): boolean {
+    if (this.watchedPaths.has(absPath)) return true;
+    return absPath.startsWith(this.projectRoot + sep) && !absPath.slice(this.projectRoot.length + 1).includes(sep) && !this.isPlatformState(absPath);
+  }
+
+  /** The product's own tools left `stamp` at `absPath`; a change that finds exactly that is not an outside one. */
+  noteOwnWrite(absPath: string, stamp: string): void {
+    this.ownWrites.delete(absPath);
+    if (this.ownWrites.size >= FILE_WATCHER_MAX_PATHS) {
+      const oldest = this.ownWrites.keys().next().value;
+      if (oldest !== undefined) this.ownWrites.delete(oldest);
+    }
+    this.ownWrites.set(absPath, stamp);
+  }
+
   private isPlatformState(absPath: string): boolean {
     const platformDir = join(this.projectRoot, '.goodvibes');
     return absPath === platformDir || absPath.startsWith(platformDir + sep);
@@ -241,7 +296,14 @@ export class FileWatcher {
   private _openWatcher(absPath: string): void {
     if (this.watchers.has(absPath) || !existsSync(absPath)) return;
     try {
-      const watcher = watch(absPath, { recursive: false }, () => this._scheduleChange(absPath));
+      const watcher = watch(absPath, { recursive: false }, (eventType: string) => {
+        // A rename means the name now points elsewhere (an editor's or git's
+        // replace, an atomic write) or nowhere: this watch follows the old
+        // inode and would see nothing more, so it is dropped and reopened on
+        // the path when the change is handled.
+        if (eventType === 'rename') this._dropWatcher(absPath, watcher);
+        this._scheduleChange(absPath);
+      });
       watcher.on('error', (err) => {
         logger.warn('FileWatcher: watcher error', { absPath, error: summarizeError(err) });
         // Closed and released, so the path can be opened again; the path stays registered.
@@ -252,6 +314,12 @@ export class FileWatcher {
     } catch (err) {
       logger.warn('FileWatcher: failed to open watcher', { absPath, error: summarizeError(err) });
     }
+  }
+
+  private _dropWatcher(absPath: string, watcher: FSWatcher): void {
+    if (this.watchers.get(absPath) !== watcher) return;
+    try { watcher.close(); } catch { /* already closed */ }
+    this.watchers.delete(absPath);
   }
 
   private _scheduleChange(absPath: string): void {
@@ -275,6 +343,8 @@ export class FileWatcher {
     try {
       // Rough heuristic: ~4 bytes per token (same as ReadTool/ProjectIndex)
       this.projectIndex.upsertFile(absPath, Math.ceil(statSync(absPath).size / 4));
+      // A file replaced by rename gets its watch back on the new inode.
+      if (this.watchedPaths.has(absPath)) this._openWatcher(absPath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         deleted = true;
@@ -286,6 +356,15 @@ export class FileWatcher {
       } else {
         this.projectIndex.upsertFile(absPath);
       }
+    }
+
+    // The product's own write, found exactly as the tool left it: the index is
+    // current and there is nothing outside to report. The note stays for
+    // further events of the same write; any other state retires it.
+    const own = this.ownWrites.get(absPath);
+    if (own !== undefined) {
+      if (own === fileStamp(absPath)) return;
+      this.ownWrites.delete(absPath);
     }
 
     if (this.hookDispatcher) {

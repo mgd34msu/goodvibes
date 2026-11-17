@@ -170,10 +170,8 @@ export function createHerdrSessionReporter(options: HerdrSessionReporterOptions 
       closing = enabled ? (async () => {
         // Abort settles the one active command; unsent historical updates never delay release.
         await draining;
-        const deadline = Date.now() + 900;
-        try { await releaseLegacy(300); } catch { notifyFailure(); }
         try {
-          await command(['pane', 'release-agent', pane!, '--source', SOURCE, '--agent', AGENT, '--seq', nextSequence()], Math.max(1, deadline - Date.now()));
+          await command(['pane', 'release-agent', pane!, '--source', SOURCE, '--agent', AGENT, '--seq', nextSequence()], 600);
         } catch { notifyFailure(); }
       })() : Promise.resolve();
       return closing;

@@ -164,18 +164,22 @@ async function scanContentQuery(
     if (discoveryCut) addDiscoveryCutWarning(diagnostics, files.length);
     const scan = new BatchedLineScan(regex);
     const textFiles: string[] = [];
-    for (const [fileIndex, file] of files.entries()) {
+    for (let start = 0; start < files.length; start += SEARCH_READ_CONCURRENCY) {
       if (options.shouldContinue?.() === false) {
-        addFindWarning(diagnostics, `Stopped at the time budget: checked ${fileIndex} of ${files.length} files, so the list of non-matching files is incomplete. `
+        addFindWarning(diagnostics, `Stopped at the time budget: checked ${start} of ${files.length} files, so the list of non-matching files is incomplete. `
           + "Narrow 'path' or 'glob', or pass a larger timeout_ms.");
         break;
       }
       // A binary file is not "text without the pattern": readSearchFile skips it.
-      const read = await readSearchFile(file, diagnostics, skips);
-      if (read === null) continue;
-      textFiles.push(file);
-      if (literal !== undefined && !literal.test(read.text)) continue;
-      await scan.add(file, read.text);
+      const chunk = files.slice(start, start + SEARCH_READ_CONCURRENCY);
+      const reads = await Promise.all(chunk.map((file) => readSearchFile(file, diagnostics, skips)));
+      for (const [offset, read] of reads.entries()) {
+        if (read === null) continue;
+        const file = chunk[offset]!;
+        textFiles.push(file);
+        if (literal !== undefined && !literal.test(read.text)) continue;
+        await scan.add(file, read.text);
+      }
     }
     const matched = new Set((await scan.finish()).map((hit) => hit.file));
     for (const file of textFiles) if (!matched.has(file)) nonMatchingFiles.push(file);
@@ -213,18 +217,24 @@ async function scanContentQuery(
     // from the bytes in hand) and its lines go to the isolated regex executor
     // in batches of many files, one round trip per batch.
     const scan = new BatchedLineScan(regex);
-    for (const [fileIndex, file] of files.entries()) {
+    for (let start = 0; start < files.length; start += SEARCH_READ_CONCURRENCY) {
       // The call's time budget ran out: stop with what was found and say how far the search got.
-      if (options.shouldContinue?.() === false) { scanStoppedAt = fileIndex; break; }
+      if (options.shouldContinue?.() === false) { scanStoppedAt = start; break; }
+      // A few files are stat-ed and read at once; the scan still receives them in walk order.
       // The mtime is taken by the stat before the read: a file that changes in between is cached as
       // old text under the old mtime, so the next call sees the newer mtime and rereads it.
-      const info = await statSearchFile(file);
-      fileMtimesForCache.set(file, info?.mtimeMs ?? 0);
-      const read = await readSearchFile(file, diagnostics, skips, info);
-      if (read === null) continue;
-      // A pattern with a required literal cannot match a file without it.
-      if (literal !== undefined && !literal.test(read.text)) continue;
-      await scan.add(file, read.text);
+      const chunk = files.slice(start, start + SEARCH_READ_CONCURRENCY);
+      const reads = await Promise.all(chunk.map(async (file) => {
+        const info = await statSearchFile(file);
+        return { file, info, read: await readSearchFile(file, diagnostics, skips, info) };
+      }));
+      for (const { file, info, read } of reads) {
+        fileMtimesForCache.set(file, info?.mtimeMs ?? 0);
+        if (read === null) continue;
+        // A pattern with a required literal cannot match a file without it.
+        if (literal !== undefined && !literal.test(read.text)) continue;
+        await scan.add(file, read.text);
+      }
     }
     for (const hit of await scan.finish()) {
       const lines = hit.searchable.split('\n');
@@ -402,6 +412,8 @@ async function scanContentQuery(
   return withFindWarnings(makeCountResult(totalMatches), diagnostics.warnings);
 }
 
+/** Files stat-ed and read at once during a content search (at most this many file texts are held before scanning). */
+const SEARCH_READ_CONCURRENCY = 16;
 /** Characters of file text sent to the regex executor in one message. */
 const SCAN_BATCH_CHARS = 4 * 1024 * 1024;
 /** Files sent to the regex executor in one message. */

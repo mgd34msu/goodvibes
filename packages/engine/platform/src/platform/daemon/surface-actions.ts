@@ -420,16 +420,6 @@ export class DaemonSurfaceActionHelper {
       if (offer.reason === 'recorded') return { ...decision, allowed: false, reason: 'payment-reply-recorded', consumed: { by: 'payment', answer: 'recorded' } };
       return undefined;
     };
-    let addressedPayment: PaymentReplyOffer | undefined;
-    if (typeof input.metadata?.['replyToMessageId'] === 'string') {
-      // An explicit provider reply names its notice before another pending
-      // dialogue can interpret the same short answer against different text.
-      addressedPayment = await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
-        { assertCurrent: assertReplyCurrent, signal: lifecycle, replyToOwner });
-      const consumed = paymentConsumed(addressedPayment);
-      if (consumed) return consumed;
-    }
-
     // Code decides which questions apply; one request asks them all.
     const text = input.text ?? '';
     const interactive = input.metadata?.['interactive'] === true;
@@ -448,8 +438,20 @@ export class DaemonSurfaceActionHelper {
         ...(ask ? { approval: approvalProposal(ask) } : {}),
       }, { signal: lifecycle });
 
+    // Card details are refused before any handler keeps the text: the payment
+    // reply inbox records a reply in its history.
     const cardTalk = reading ? await refuseCardTalk(cardDeps, input, reading) : null;
     if (cardTalk) return cardTalk;
+
+    let addressedPayment: PaymentReplyOffer | undefined;
+    if (typeof input.metadata?.['replyToMessageId'] === 'string') {
+      // An explicit provider reply names its notice before another pending
+      // dialogue can interpret the same short answer against different text.
+      addressedPayment = await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
+        { assertCurrent: assertReplyCurrent, signal: lifecycle, replyToOwner });
+      const consumed = paymentConsumed(addressedPayment);
+      if (consumed) return consumed;
+    }
 
     // An answer to a pending work proposal is consumed here, on the shared
     // ingress hook every surface adapter already calls, which is what makes

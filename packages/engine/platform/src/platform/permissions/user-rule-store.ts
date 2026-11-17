@@ -11,12 +11,10 @@
  * Storage: one JSON file per surface in the user's control-plane config dir
  * (shared by every project), atomic writes via PersistentStore; ':memory:' for
  * tests. A rule remembered from a prompt carries the project root it was made
- * in and matches only there; a rule with no project key (written before
- * rules were scoped, or by hand) matches in every project, as it always did.
+ * in and matches only there; a rule with no project key (written by hand)
+ * matches in every project.
  *
- * Every rule is written to `rules`, its project key with it. A file from a
- * release that kept project-scoped rules apart under `projectRules` is still
- * read, and the next write moves them into `rules`.
+ * Every rule is written to `rules`, its project key with it.
  *
  * Every change re-reads the file inside a process lock, so a second process
  * (another window on the same config directory) neither brings back a rule
@@ -61,8 +59,6 @@ function appliesIn(record: StoredUserPermissionRule, project: string | null | un
 interface UserRuleFile extends Record<string, unknown> {
   version: 1;
   rules: StoredUserPermissionRule[];
-  /** Project-scoped rules as an earlier release wrote them apart; read, never written. */
-  projectRules?: StoredUserPermissionRule[];
 }
 
 function isStoredRule(record: unknown): record is StoredUserPermissionRule {
@@ -73,13 +69,11 @@ function isStoredRule(record: unknown): record is StoredUserPermissionRule {
 function recordsOf(data: UserRuleFile | null): StoredUserPermissionRule[] {
   const out: StoredUserPermissionRule[] = [];
   const seen = new Set<unknown>();
-  for (const list of [data?.rules, data?.projectRules]) {
-    if (!Array.isArray(list)) continue;
-    for (const record of list) {
-      if (!isStoredRule(record) || seen.has(record.rule.id)) continue;
-      seen.add(record.rule.id);
-      out.push(record);
-    }
+  if (!Array.isArray(data?.rules)) return out;
+  for (const record of data.rules) {
+    if (!isStoredRule(record) || seen.has(record.rule.id)) continue;
+    seen.add(record.rule.id);
+    out.push(record);
   }
   return out;
 }
@@ -188,7 +182,7 @@ export class UserPermissionRuleStore {
   private async loadInitialRules(attempt: RuleLoadOutcome): Promise<void> {
     try {
       const data = await this.store.load();
-      if (data && (Array.isArray(data.rules) || Array.isArray(data.projectRules))) {
+      if (data && Array.isArray(data.rules)) {
         this.records = recordsOf(data);
       }
     } catch (error) {
@@ -234,7 +228,7 @@ export class UserPermissionRuleStore {
     if (signature === 'absent') { this.adoptDisk([]); return; }
     try {
       const data = JSON.parse(readFileSync(this.filePath, 'utf-8')) as UserRuleFile | null;
-      if (data && (Array.isArray(data.rules) || Array.isArray(data.projectRules))) this.adoptDisk(recordsOf(data));
+      if (data && Array.isArray(data.rules)) this.adoptDisk(recordsOf(data));
     } catch (error) {
       logger.warn('user permission rule store changed on disk but could not be read; keeping the rules already loaded', { error: summarizeError(error) });
     }

@@ -504,6 +504,16 @@ export class ConversationManager {
     return typeof content === 'string' ? content : undefined;
   }
 
+  /**
+   * The history itself, read in place: no copy. For a reader that walks the
+   * history on every frame (the transcript display). The caller must not
+   * change it and must not keep it past the step it is used in: any change
+   * moves `revisionSource`, and a caller that holds results compares that.
+   */
+  public readMessagesInPlace(): readonly ConversationMessageSnapshot[] {
+    return this.messages;
+  }
+
   /** True when a system message satisfies the test; scans in place so a per-check liveness probe does not deep-copy the history. */
   public hasSystemMessage(test: (message: Readonly<Extract<ConversationMessageSnapshot, { role: 'system' }>>) => boolean): boolean {
     return this.messages.some((message) => message.role === 'system' && test(message));

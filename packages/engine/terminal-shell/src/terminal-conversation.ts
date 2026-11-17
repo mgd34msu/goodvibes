@@ -76,6 +76,11 @@ export class TerminalConversationManager extends PlatformConversationManager {
     private lastRenderedWidth = 0;
     /** When true the buffer needs to be rebuilt before the next display. */
     private dirty = true;
+    /** The only reason for `dirty` is the live repaint tick (work-tree-focus.ts): units that drew nothing live are reused as drawn. */
+    private dirtyForLiveOnly = false;
+    /** The history revision and display start the buffer was last built from. */
+    private builtRevision = -1;
+    private builtDisplayStart = -1;
     /**
      * Per-message Line[] cache. rebuildHistory() reuses cached lines for
      * messages whose complete render inputs are unchanged, so appending one message
@@ -159,12 +164,12 @@ export class TerminalConversationManager extends PlatformConversationManager {
                     throw new JudgmentAuthorityRetiredError();
             } };
     }
-    /** `known` is a snapshot the caller already took, so a bulk restore deep-copies the history once, not once per message. */
-    private publishSystemNotice(index: number, restored: boolean, known?: ReturnType<PlatformConversationManager['getMessageSnapshot']>): void {
+    /** Reads the one message in place; nothing is copied. */
+    private publishSystemNotice(index: number, restored: boolean, known: readonly Message[] = this.readMessagesInPlace()): void {
         const sink = this.noticeSink;
         if (!sink)
             return;
-        const message = (known ?? this.getMessageSnapshot())[index];
+        const message = known[index];
         if (!message || message.role !== 'system')
             return;
         // The level stored with the line: the writer's declaration, else the
@@ -205,6 +210,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         blocks: () => { this.flushHistory(); return this.blockRegistry; },
         collapseState: () => this.collapseState,
         markDirty: () => this.markDirty(),
+        markLiveDirty: () => this.markLiveDirty(),
         noteUserTouch: (key) => this.searchExpansion.noteUserTouch(key),
         drewLive: () => this.lineCache.live,
     });
@@ -494,7 +500,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         }
         // A restored session's notices go back into the history (not toasted).
         if (this.noticeSink) {
-            const restored = this.getMessageSnapshot();
+            const restored = this.readMessagesInPlace();
             for (let index = 0; index < restored.length; index++)
                 this.publishSystemNotice(index, true, restored);
         }
@@ -542,11 +548,18 @@ export class TerminalConversationManager extends PlatformConversationManager {
         // messageKindRegistry is NOT cleared here: kind info is set at add-time
         // and must survive width-change rebuilds.
         const width = this._getWidth();
+        const revision = this.revisionSource.revision();
+        // Same history, same display start, same width, and only the repaint tick asked: settled units keep their rows.
+        const settled = this.dirtyForLiveOnly && revision === this.builtRevision && this._displayFromMessageIndex === this.builtDisplayStart && width === this.lastRenderedWidth;
         this.lastRenderedWidth = width;
         this.dirty = false;
+        this.dirtyForLiveOnly = false;
+        this.builtRevision = revision;
+        this.builtDisplayStart = this._displayFromMessageIndex;
         this.builtWhileActive = this.workTreeSources.turnActive?.() ?? false;
         this.displayOnly.resetTrailing();
-        const snapshot = this.getMessageSnapshot();
+        // Read in place: the display walks the history on every dirty frame, and a copy of it is what that walk used to cost.
+        const snapshot = this.readMessagesInPlace();
         // During streaming, the in-progress placeholder (always the last message) is
         // rendered here as EMPTY; the incremental streaming path (updateStreamingBlock)
         // owns its content. This keeps streamingStartLine valid across width-change
@@ -563,8 +576,8 @@ export class TerminalConversationManager extends PlatformConversationManager {
         const visibleSnapshot = displayStart > 0 ? renderSnapshot.slice(displayStart) : renderSnapshot;
         // Tool and system messages are not transcript content: a system message is
         // a notice (a toast and the notification history, see core/notices.ts).
-        const displayMessages = visibleSnapshot.filter((m) => m.role !== 'tool' && m.role !== 'system');
-        if (displayMessages.length === 0 && displayStart === 0 && !this.suppressSplash && !this.splashGate.dismissed && (this.presentation.stickySplash || this.displayOnly.count === 0)) {
+        const hasDisplayMessage = visibleSnapshot.some((m) => m.role !== 'tool' && m.role !== 'system');
+        if (!hasDisplayMessage && displayStart === 0 && !this.suppressSplash && !this.splashGate.dismissed && (this.presentation.stickySplash || this.displayOnly.count === 0)) {
             this.addSplashScreen(width);
             this.splashGate.enter();
             return;
@@ -580,7 +593,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         const kept = this.displayOnly.cursor(width);
         kept.through(displayStart - 1);
         this.appendMessages(visibleSnapshot, width, displayStart, streamingPlaceholderAbsIdx, (last, streaming) => { if (!streaming)
-            kept.through(last); });
+            kept.through(last); }, settled);
         if (!isStreaming)
             kept.through(Number.POSITIVE_INFINITY);
         if (isStreaming) {
@@ -598,7 +611,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
     }
     /** Keep a display-only draw and draw it now (below streamed text while streaming; over the splash, it retires the splash). */
     private recordDisplayOnly(draw: (width: number) => void): void {
-        const seq = this.displayOnly.keep(this.getMessageSnapshot().length, draw);
+        const seq = this.displayOnly.keep(this.getMessageCount(), draw);
         if (this.splashGate.showing) {
             if (!this.presentation.stickySplash)
                 return this.markDirty();
@@ -618,7 +631,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
     public flushHistory(): void {
         const currentWidth = this._getWidth();
         if ((this.workTreeSources.turnActive?.() ?? false) !== this.builtWhileActive)
-            this.dirty = true;
+            this.markDirty();
         if (!this.dirty && currentWidth === this.lastRenderedWidth)
             return;
         this.rebuildHistory();
@@ -626,6 +639,14 @@ export class TerminalConversationManager extends PlatformConversationManager {
     public invalidateRenderedLines(): void { this.markDirty(); }
     private markDirty(): void {
         this.dirty = true;
+        this.dirtyForLiveOnly = false;
+    }
+    /** The repaint tick: a rebuild is due, but nothing but the live rows moved unless something else marks the transcript dirty too. */
+    private markLiveDirty(): void {
+        if (this.dirty)
+            return;
+        this.dirty = true;
+        this.dirtyForLiveOnly = true;
     }
     private renderingContext() {
         return {
@@ -664,8 +685,8 @@ export class TerminalConversationManager extends PlatformConversationManager {
      *   the renderer can resolve messageKindRegistry keys (which are absolute)
      *   from its slice-relative loop counter.
      */
-    private appendMessages(messages: Message[], width: number, msgIndexOffset = 0, streamingPlaceholderAbsIdx = -1, afterUnit?: ((lastIndex: number, streaming: boolean) => void) | undefined): void {
-        this.lineCache.renderInto(this.renderingContext(), messages, width, this.messageLineRegistry, msgIndexOffset, streamingPlaceholderAbsIdx, afterUnit);
+    private appendMessages(messages: readonly Message[], width: number, msgIndexOffset = 0, streamingPlaceholderAbsIdx = -1, afterUnit?: ((lastIndex: number, streaming: boolean) => void) | undefined, settled = false): void {
+        this.lineCache.renderInto(this.renderingContext(), messages, width, this.messageLineRegistry, msgIndexOffset, streamingPlaceholderAbsIdx, afterUnit, settled);
     }
     // -------------------------------------------------------------------------
     // Work tree (see work-tree-model.ts / work-tree-focus.ts)
@@ -845,7 +866,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         // and their kind entries must still be present to suppress navigation.
         // Advance _displayFromMessageIndex to exclude all current messages from display.
         // rebuildHistory() will only render messages added AFTER this point.
-        this._displayFromMessageIndex = this.getMessageSnapshot().length;
+        this._displayFromMessageIndex = this.getMessageCount();
         this.dirty = false;
         // Do NOT re-render here, display stays blank until the next message is added.
         // The lastRenderedWidth is kept so subsequent appends use the correct width.

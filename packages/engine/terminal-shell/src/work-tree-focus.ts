@@ -129,6 +129,8 @@ export interface WorkTreeControllerDeps {
   readonly blocks: () => readonly BlockMeta[];
   readonly collapseState: () => Map<string, boolean>;
   readonly markDirty: () => void;
+  /** The repaint tick's mark: only live rows moved, so units that drew nothing live can be kept as drawn. Falls back to `markDirty`. */
+  readonly markLiveDirty?: (() => void) | undefined;
   /** Exempts a key from search's close-time auto re-collapse (a deliberate user act). */
   readonly noteUserTouch: (key: string) => void;
   /** Whether the last build drew something live. */
@@ -229,7 +231,7 @@ export class WorkTreeController {
     const frame = Math.floor(now / 150);
     if (frame === this.liveFrame) return;
     this.liveFrame = frame;
-    if (this.deps.drewLive()) this.deps.markDirty();
+    if (this.deps.drewLive()) (this.deps.markLiveDirty ?? this.deps.markDirty)();
   }
 
   /** Enter the work tree at the last row at or above `anchorLine`; false when there is nothing to focus. */

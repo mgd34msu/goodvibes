@@ -24,9 +24,13 @@
  *     while the turn has something live, and the semantic-summary generation
  *     while it draws an opened diff.
  *
- * The turn MODEL is rebuilt every pass (it is cheap: it reads messages and the
- * live sources); the DRAW (markdown, lane layout, painting) is what the cache
- * saves.
+ * The turn MODEL is rebuilt on a pass after the history changed (it reads
+ * messages and the live sources); the DRAW (markdown, lane layout, painting) is
+ * what the cache saves. A pass the caller marks `settled` (the history's
+ * revision, the display start and the shared inputs are what the last pass saw:
+ * the repaint tick of a running tool) reuses every unit that drew nothing live
+ * after one entry lookup and the focus and fold checks, and rebuilds only the
+ * live units.
  *
  * Correctness contract: a cache-served rebuild is BYTE-IDENTICAL to a cold
  * appendConversationMessages() rebuild. A miss renders through the same
@@ -83,6 +87,8 @@ interface CacheEntry {
    * build draws the real highlighting instead of keeping the placeholder.
    */
   readonly highlightGeneration?: number | undefined;
+  /** The unit drew something live (a running bead or lane, a working turn) and follows the spinner frame. */
+  readonly live?: boolean | undefined;
 }
 
 function sameParts(a: readonly Part[], b: readonly Part[]): boolean {
@@ -158,6 +164,7 @@ export class MessageLineCache<Context extends LineCacheContext> {
   private entries: Map<string, CacheEntry> = new Map();
   private _lastTail: TurnTail | null = null;
   private _live = false;
+  private lastCommon: readonly Part[] = [];
 
   /** Drop all cached entries (wholesale message replacement / reset). */
   public clear(): void {
@@ -190,7 +197,7 @@ export class MessageLineCache<Context extends LineCacheContext> {
    */
   public renderInto(
     context: Context,
-    messages: Message[],
+    messages: readonly Message[],
     width: number,
     messageLineRegistry: number[],
     msgIndexOffset: number,
@@ -202,6 +209,8 @@ export class MessageLineCache<Context extends LineCacheContext> {
      * after the messages it followed.
      */
     afterUnit?: (lastIndex: number, streaming: boolean) => void,
+    /** The history and display start are unchanged since the last pass (the caller compared the revision). */
+    settled = false,
   ): void {
     this.beadContentCache.begin();
     const config = context.configManager;
@@ -215,6 +224,8 @@ export class MessageLineCache<Context extends LineCacheContext> {
       context.treeGlyphSet ?? 'rounded',
     ];
     const focus = context.focusId ?? null;
+    const reuseSettled = settled && sameParts(this.lastCommon, common);
+    this.lastCommon = common;
     const touched = new Set<string>();
     this._lastTail = null;
     this._live = false;
@@ -222,6 +233,14 @@ export class MessageLineCache<Context extends LineCacheContext> {
     for (const unit of transcriptUnits(messages, msgIndexOffset)) {
       const id = unitId(unit);
       const base = context.history.getLineCount();
+      const lastIndex = unit.kind === 'turn' ? unit.end : unit.index;
+      const settledEntry = reuseSettled ? this.entries.get(id) : undefined;
+      if (settledEntry && settledEntry.live !== true && this.isCurrent(settledEntry, focus, context.collapseState)) {
+        this.apply(context, settledEntry, base, messageLineRegistry);
+        touched.add(id);
+        afterUnit?.(lastIndex, unit.kind === 'turn' && streamingPlaceholderAbsIdx >= unit.start && streamingPlaceholderAbsIdx <= unit.end);
+        continue;
+      }
       const readKeys = new Set<string>();
       const scratchCollapse = makeRecordingCollapseState(context.collapseState, readKeys);
       const scratchContext: Context = { ...context, collapseState: scratchCollapse, beadContentCache: this.beadContentCache };
@@ -246,7 +265,6 @@ export class MessageLineCache<Context extends LineCacheContext> {
       }
 
       const existing = this.entries.get(id);
-      const lastIndex = unit.kind === 'turn' ? unit.end : unit.index;
       if (existing && this.isValid(existing, key, focus, context.collapseState)) {
         this.apply(context, existing, base, messageLineRegistry);
         touched.add(id);
@@ -256,7 +274,10 @@ export class MessageLineCache<Context extends LineCacheContext> {
 
       const missesBefore = syntaxHighlightMisses();
       const drawn = this.renderScratch(scratchContext, unit, turnModel, messages, msgIndexOffset, width, key, readKeys, focus, streaming);
-      const entry: CacheEntry = syntaxHighlightMisses() !== missesBefore ? { ...drawn, highlightGeneration: syntaxHighlightGeneration() } : drawn;
+      const live = turnModel?.live === true;
+      const entry: CacheEntry = syntaxHighlightMisses() !== missesBefore
+        ? { ...drawn, live, highlightGeneration: syntaxHighlightGeneration() }
+        : { ...drawn, live };
       this.apply(context, entry, base, messageLineRegistry);
       this.entries.set(id, entry);
       touched.add(id);
@@ -273,7 +294,11 @@ export class MessageLineCache<Context extends LineCacheContext> {
   }
 
   private isValid(entry: CacheEntry, key: readonly Part[], focus: string | null, collapseState: Map<string, boolean>): boolean {
-    if (!sameParts(entry.key, key)) return false;
+    return sameParts(entry.key, key) && this.isCurrent(entry, focus, collapseState);
+  }
+
+  /** The checks that do not need the unit's key: highlighting, focus and the folds the draw read. */
+  private isCurrent(entry: CacheEntry, focus: string | null, collapseState: Map<string, boolean>): boolean {
     if (entry.highlightGeneration !== undefined && entry.highlightGeneration !== syntaxHighlightGeneration()) return false;
     const focusHere = focus !== null && entry.focusIds.has(focus) ? focus : null;
     if (focusHere !== entry.focusDrawn) return false;

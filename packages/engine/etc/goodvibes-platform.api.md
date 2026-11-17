@@ -3303,12 +3303,21 @@ export interface OperatorMethodInputMap {
                 kind: "sandbox-escalation";
                 sandbox: string;
                 escalations: readonly string[];
+            } | {
+                kind: "exec-prompt";
+                command: string;
+                prompt: string;
+            } | {
+                kind: "fetch-localhost";
+                host: string;
+                url: string;
             };
             rememberOptions?: readonly ({
                 tier: "command-class" | "exact" | "path" | "session" | "tool";
                 label: string;
                 detail: string;
             })[];
+            ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
         };
         sessionId?: string;
         routeId?: string;
@@ -8713,12 +8722,21 @@ export interface OperatorMethodOutputMap {
                     kind: "sandbox-escalation";
                     sandbox: string;
                     escalations: readonly string[];
+                } | {
+                    kind: "exec-prompt";
+                    command: string;
+                    prompt: string;
+                } | {
+                    kind: "fetch-localhost";
+                    host: string;
+                    url: string;
                 };
                 rememberOptions?: readonly ({
                     tier: "command-class" | "exact" | "path" | "session" | "tool";
                     label: string;
                     detail: string;
                 })[];
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -8803,12 +8821,21 @@ export interface OperatorMethodOutputMap {
                     kind: "sandbox-escalation";
                     sandbox: string;
                     escalations: readonly string[];
+                } | {
+                    kind: "exec-prompt";
+                    command: string;
+                    prompt: string;
+                } | {
+                    kind: "fetch-localhost";
+                    host: string;
+                    url: string;
                 };
                 rememberOptions?: readonly ({
                     tier: "command-class" | "exact" | "path" | "session" | "tool";
                     label: string;
                     detail: string;
                 })[];
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -8893,12 +8920,21 @@ export interface OperatorMethodOutputMap {
                     kind: "sandbox-escalation";
                     sandbox: string;
                     escalations: readonly string[];
+                } | {
+                    kind: "exec-prompt";
+                    command: string;
+                    prompt: string;
+                } | {
+                    kind: "fetch-localhost";
+                    host: string;
+                    url: string;
                 };
                 rememberOptions?: readonly ({
                     tier: "command-class" | "exact" | "path" | "session" | "tool";
                     label: string;
                     detail: string;
                 })[];
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -8983,12 +9019,21 @@ export interface OperatorMethodOutputMap {
                     kind: "sandbox-escalation";
                     sandbox: string;
                     escalations: readonly string[];
+                } | {
+                    kind: "exec-prompt";
+                    command: string;
+                    prompt: string;
+                } | {
+                    kind: "fetch-localhost";
+                    host: string;
+                    url: string;
                 };
                 rememberOptions?: readonly ({
                     tier: "command-class" | "exact" | "path" | "session" | "tool";
                     label: string;
                     detail: string;
                 })[];
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -9093,12 +9138,21 @@ export interface OperatorMethodOutputMap {
                     kind: "sandbox-escalation";
                     sandbox: string;
                     escalations: readonly string[];
+                } | {
+                    kind: "exec-prompt";
+                    command: string;
+                    prompt: string;
+                } | {
+                    kind: "fetch-localhost";
+                    host: string;
+                    url: string;
                 };
                 rememberOptions?: readonly ({
                     tier: "command-class" | "exact" | "path" | "session" | "tool";
                     label: string;
                     detail: string;
                 })[];
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -9177,12 +9231,21 @@ export interface OperatorMethodOutputMap {
                     kind: "sandbox-escalation";
                     sandbox: string;
                     escalations: readonly string[];
+                } | {
+                    kind: "exec-prompt";
+                    command: string;
+                    prompt: string;
+                } | {
+                    kind: "fetch-localhost";
+                    host: string;
+                    url: string;
                 };
                 rememberOptions?: readonly ({
                     tier: "command-class" | "exact" | "path" | "session" | "tool";
                     label: string;
                     detail: string;
                 })[];
+                ownerOnly?: "change-contract" | "channel-request" | "grant-access" | "irreversible-operator" | "loosen-security" | "new-recipient" | "payment-step" | "spend-over-limit" | "standing-ask" | "unrecoverable-delete" | "untrusted-derived-send";
             };
             createdAt: number;
             updatedAt: number;
@@ -39962,7 +40025,6 @@ export type ToolEventType = ToolEvent['type'];
 
 // @public
 export interface ToolResultSummary {
-    readonly autonomousDecision?: JevDecision | undefined;
     byteSize: number;
     kind: string;
     preview?: string | undefined;

@@ -650,6 +650,22 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                 ],
                 "additionalProperties": false
               }
+            },
+            "ownerOnly": {
+              "type": "string",
+              "enum": [
+                "spend-over-limit",
+                "payment-step",
+                "unrecoverable-delete",
+                "new-recipient",
+                "untrusted-derived-send",
+                "grant-access",
+                "loosen-security",
+                "change-contract",
+                "irreversible-operator",
+                "standing-ask",
+                "channel-request"
+              ]
             }
           },
           "required": [

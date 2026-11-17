@@ -931,6 +931,22 @@ Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals o
                 ],
                 "additionalProperties": false
               }
+            },
+            "ownerOnly": {
+              "type": "string",
+              "enum": [
+                "spend-over-limit",
+                "payment-step",
+                "unrecoverable-delete",
+                "new-recipient",
+                "untrusted-derived-send",
+                "grant-access",
+                "loosen-security",
+                "change-contract",
+                "irreversible-operator",
+                "standing-ask",
+                "channel-request"
+              ]
             }
           },
           "required": [
@@ -1430,23 +1446,6 @@ Cancel a pending approval. An approval that already ended is returned unchanged 
                     "escalations"
                   ],
                   "additionalProperties": false
-                }
-              ]
-            },
-            "rememberOptions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "tier": {
-                    "type": "string",
-                    "enum": [
-                      "session",
-                      "exact",
-                      "command-class",
-                      "path",
-                      "tool"
-                    ]
                 },
                 {
                   "type": "object",
@@ -1493,6 +1492,23 @@ Cancel a pending approval. An approval that already ended is returned unchanged 
                     "url"
                   ],
                   "additionalProperties": false
+                }
+              ]
+            },
+            "rememberOptions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "exact",
+                      "command-class",
+                      "path",
+                      "tool"
+                    ]
                   },
                   "label": {
                     "type": "string"
@@ -1508,6 +1524,22 @@ Cancel a pending approval. An approval that already ended is returned unchanged 
                 ],
                 "additionalProperties": false
               }
+            },
+            "ownerOnly": {
+              "type": "string",
+              "enum": [
+                "spend-over-limit",
+                "payment-step",
+                "unrecoverable-delete",
+                "new-recipient",
+                "untrusted-derived-send",
+                "grant-access",
+                "loosen-security",
+                "change-contract",
+                "irreversible-operator",
+                "standing-ask",
+                "channel-request"
+              ]
             }
           },
           "required": [
@@ -1995,40 +2027,6 @@ Claim a pending approval for operator handling. A claim is advisory: it shows wh
                     "escalations"
                   ],
                   "additionalProperties": false
-                }
-              ]
-            },
-            "rememberOptions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "tier": {
-                    "type": "string",
-                    "enum": [
-                      "session",
-                      "exact",
-                      "command-class",
-                      "path",
-                      "tool"
-                    ]
-                  },
-                  "label": {
-                    "type": "string"
-                  },
-                  "detail": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "tier",
-                  "label",
-                  "detail"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
                 },
                 {
                   "type": "object",
@@ -2075,6 +2073,56 @@ Claim a pending approval for operator handling. A claim is advisory: it shows wh
                     "url"
                   ],
                   "additionalProperties": false
+                }
+              ]
+            },
+            "rememberOptions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "exact",
+                      "command-class",
+                      "path",
+                      "tool"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tier",
+                  "label",
+                  "detail"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "ownerOnly": {
+              "type": "string",
+              "enum": [
+                "spend-over-limit",
+                "payment-step",
+                "unrecoverable-delete",
+                "new-recipient",
+                "untrusted-derived-send",
+                "grant-access",
+                "loosen-security",
+                "change-contract",
+                "irreversible-operator",
+                "standing-ask",
+                "channel-request"
+              ]
+            }
+          },
           "required": [
             "callId",
             "tool",
@@ -2586,57 +2634,6 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
                     "escalations"
                   ],
                   "additionalProperties": false
-                }
-              ]
-            },
-            "rememberOptions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "tier": {
-                    "type": "string",
-                    "enum": [
-                      "session",
-                      "exact",
-                      "command-class",
-                      "path",
-                      "tool"
-                    ]
-                  },
-                  "label": {
-                    "type": "string"
-                  },
-                  "detail": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "tier",
-                  "label",
-                  "detail"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "callId",
-            "tool",
-            "args",
-            "category",
-            "analysis"
-          ],
-          "additionalProperties": false
-        },
-        "createdAt": {
-          "type": "number"
-        },
-        "updatedAt": {
-          "type": "number"
-        },
-        "claimedBy": {
-          "type": "string"
                 },
                 {
                   "type": "object",
@@ -2683,6 +2680,73 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
                     "url"
                   ],
                   "additionalProperties": false
+                }
+              ]
+            },
+            "rememberOptions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "type": "string",
+                    "enum": [
+                      "session",
+                      "exact",
+                      "command-class",
+                      "path",
+                      "tool"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tier",
+                  "label",
+                  "detail"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "ownerOnly": {
+              "type": "string",
+              "enum": [
+                "spend-over-limit",
+                "payment-step",
+                "unrecoverable-delete",
+                "new-recipient",
+                "untrusted-derived-send",
+                "grant-access",
+                "loosen-security",
+                "change-contract",
+                "irreversible-operator",
+                "standing-ask",
+                "channel-request"
+              ]
+            }
+          },
+          "required": [
+            "callId",
+            "tool",
+            "args",
+            "category",
+            "analysis"
+          ],
+          "additionalProperties": false
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "claimedBy": {
+          "type": "string"
         },
         "claimedAt": {
           "type": "number"
@@ -3299,75 +3363,6 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                       "escalations"
                     ],
                     "additionalProperties": false
-                  }
-                ]
-              },
-              "rememberOptions": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "tier": {
-                      "type": "string",
-                      "enum": [
-                        "session",
-                        "exact",
-                        "command-class",
-                        "path",
-                        "tool"
-                      ]
-                    },
-                    "label": {
-                      "type": "string"
-                    },
-                    "detail": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "tier",
-                    "label",
-                    "detail"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            },
-            "required": [
-              "callId",
-              "tool",
-              "args",
-              "category",
-              "analysis"
-            ],
-            "additionalProperties": false
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "claimedBy": {
-            "type": "string"
-          },
-          "claimedAt": {
-            "type": "number"
-          },
-          "resolvedAt": {
-            "type": "number"
-          },
-          "resolvedBy": {
-            "type": "string"
-          },
-          "decision": {
-            "type": "object",
-            "properties": {
-              "approved": {
-                "type": "boolean"
-              },
-              "remember": {
-                "type": "boolean"
                   },
                   {
                     "type": "object",
@@ -3414,6 +3409,91 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                       "url"
                     ],
                     "additionalProperties": false
+                  }
+                ]
+              },
+              "rememberOptions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "session",
+                        "exact",
+                        "command-class",
+                        "path",
+                        "tool"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "tier",
+                    "label",
+                    "detail"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "ownerOnly": {
+                "type": "string",
+                "enum": [
+                  "spend-over-limit",
+                  "payment-step",
+                  "unrecoverable-delete",
+                  "new-recipient",
+                  "untrusted-derived-send",
+                  "grant-access",
+                  "loosen-security",
+                  "change-contract",
+                  "irreversible-operator",
+                  "standing-ask",
+                  "channel-request"
+                ]
+              }
+            },
+            "required": [
+              "callId",
+              "tool",
+              "args",
+              "category",
+              "analysis"
+            ],
+            "additionalProperties": false
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "claimedBy": {
+            "type": "string"
+          },
+          "claimedAt": {
+            "type": "number"
+          },
+          "resolvedAt": {
+            "type": "number"
+          },
+          "resolvedBy": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "object",
+            "properties": {
+              "approved": {
+                "type": "boolean"
+              },
+              "remember": {
+                "type": "boolean"
               },
               "rememberTier": {
                 "type": "string",
@@ -3784,6 +3864,52 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                 "escalations"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "exec-prompt"
+                  ]
+                },
+                "command": {
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "command",
+                "prompt"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "fetch-localhost"
+                  ]
+                },
+                "host": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "host",
+                "url"
+              ],
+              "additionalProperties": false
             }
           ]
         },
@@ -3816,6 +3942,22 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
             ],
             "additionalProperties": false
           }
+        },
+        "ownerOnly": {
+          "type": "string",
+          "enum": [
+            "spend-over-limit",
+            "payment-step",
+            "unrecoverable-delete",
+            "new-recipient",
+            "untrusted-derived-send",
+            "grant-access",
+            "loosen-security",
+            "change-contract",
+            "irreversible-operator",
+            "standing-ask",
+            "channel-request"
+          ]
         }
       },
       "required": [
@@ -3870,52 +4012,6 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
   "required": [
     "request"
   ],
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "exec-prompt"
-                  ]
-                },
-                "command": {
-                  "type": "string"
-                },
-                "prompt": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind",
-                "command",
-                "prompt"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "fetch-localhost"
-                  ]
-                },
-                "host": {
-                  "type": "string"
-                },
-                "url": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind",
-                "host",
-                "url"
-              ],
-              "additionalProperties": false
   "additionalProperties": false
 }
 ```
@@ -4144,6 +4240,52 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                     "escalations"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "exec-prompt"
+                      ]
+                    },
+                    "command": {
+                      "type": "string"
+                    },
+                    "prompt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "command",
+                    "prompt"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "fetch-localhost"
+                      ]
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "host",
+                    "url"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },
@@ -4176,6 +4318,22 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                 ],
                 "additionalProperties": false
               }
+            },
+            "ownerOnly": {
+              "type": "string",
+              "enum": [
+                "spend-over-limit",
+                "payment-step",
+                "unrecoverable-delete",
+                "new-recipient",
+                "untrusted-derived-send",
+                "grant-access",
+                "loosen-security",
+                "change-contract",
+                "irreversible-operator",
+                "standing-ask",
+                "channel-request"
+              ]
             }
           },
           "required": [
@@ -4247,52 +4405,6 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                     "type": "object",
                     "additionalProperties": {}
                   },
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "exec-prompt"
-                      ]
-                    },
-                    "command": {
-                      "type": "string"
-                    },
-                    "prompt": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "command",
-                    "prompt"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "fetch-localhost"
-                      ]
-                    },
-                    "host": {
-                      "type": "string"
-                    },
-                    "url": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "host",
-                    "url"
-                  ],
-                  "additionalProperties": false
                   {
                     "type": "array",
                     "items": {}
@@ -180509,6 +180621,52 @@ Every approval record transition, pushed the moment the broker records it: an as
                     "escalations"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "exec-prompt"
+                      ]
+                    },
+                    "command": {
+                      "type": "string"
+                    },
+                    "prompt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "command",
+                    "prompt"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "fetch-localhost"
+                      ]
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "host",
+                    "url"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },
@@ -180541,6 +180699,22 @@ Every approval record transition, pushed the moment the broker records it: an as
                 ],
                 "additionalProperties": false
               }
+            },
+            "ownerOnly": {
+              "type": "string",
+              "enum": [
+                "spend-over-limit",
+                "payment-step",
+                "unrecoverable-delete",
+                "new-recipient",
+                "untrusted-derived-send",
+                "grant-access",
+                "loosen-security",
+                "change-contract",
+                "irreversible-operator",
+                "standing-ask",
+                "channel-request"
+              ]
             }
           },
           "required": [
@@ -180629,52 +180803,6 @@ Every approval record transition, pushed the moment the broker records it: an as
                 "expired",
                 "remembered"
               ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "exec-prompt"
-                      ]
-                    },
-                    "command": {
-                      "type": "string"
-                    },
-                    "prompt": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "command",
-                    "prompt"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "fetch-localhost"
-                      ]
-                    },
-                    "host": {
-                      "type": "string"
-                    },
-                    "url": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "host",
-                    "url"
-                  ],
-                  "additionalProperties": false
             }
           },
           "required": [

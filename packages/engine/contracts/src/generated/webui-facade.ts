@@ -3065,7 +3065,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,
@@ -3152,7 +3153,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,
@@ -3235,7 +3237,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,
@@ -3323,7 +3326,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,
@@ -3427,7 +3431,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "label": "sample",
                 "detail": "sample"
               }
-            ]
+            ],
+            "ownerOnly": "spend-over-limit"
           },
           "createdAt": 0,
           "updatedAt": 0,
@@ -3494,7 +3499,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "label": "sample",
             "detail": "sample"
           }
-        ]
+        ],
+        "ownerOnly": "spend-over-limit"
       },
       "sessionId": "sample",
       "routeId": "sample",
@@ -3542,7 +3548,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,

@@ -303,6 +303,8 @@ export interface PermissionPromptRequest {
     //
     // (undocumented)
     category: PermissionCategory;
+    // Warning: (ae-forgotten-export) The symbol "OwnerOnlyKind" needs to be exported by the entry point embed.d.ts
+    ownerOnly?: OwnerOnlyKind | undefined;
     rememberOptions?: readonly RememberTierOption[] | undefined;
     // (undocumented)
     tool: string;
@@ -540,9 +542,9 @@ export interface SubmitSharedSessionMessageInput {
 
 // Warnings were encountered during analysis:
 //
-// platform/src/platform/control-plane/approval-broker.ts:338:7 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/approval-broker.ts:338:7 - (ae-forgotten-export) The symbol "SharedApprovalStoreSnapshot" needs to be exported by the entry point embed.d.ts
-// platform/src/platform/control-plane/approval-broker.ts:504:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/approval-broker.ts:339:7 - (ae-forgotten-export) The symbol "PersistentStore" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/approval-broker.ts:339:7 - (ae-forgotten-export) The symbol "SharedApprovalStoreSnapshot" needs to be exported by the entry point embed.d.ts
+// platform/src/platform/control-plane/approval-broker.ts:505:66 - (ae-forgotten-export) The symbol "OwnerApprovalGuard" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:224:5 - (ae-forgotten-export) The symbol "SharedSessionStoreSnapshot" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:226:5 - (ae-forgotten-export) The symbol "RouteBindingManager" needs to be exported by the entry point embed.d.ts
 // platform/src/platform/control-plane/session-broker.ts:227:5 - (ae-forgotten-export) The symbol "SharedSessionAgentStatusProvider" needs to be exported by the entry point embed.d.ts

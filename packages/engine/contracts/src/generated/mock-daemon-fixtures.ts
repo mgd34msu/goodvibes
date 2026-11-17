@@ -172,7 +172,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,
@@ -258,7 +259,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,
@@ -344,7 +346,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,
@@ -430,7 +433,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,
@@ -537,7 +541,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "label": "sample",
                 "detail": "sample"
               }
-            ]
+            ],
+            "ownerOnly": "spend-over-limit"
           },
           "createdAt": 0,
           "updatedAt": 0,
@@ -613,7 +618,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "label": "sample",
               "detail": "sample"
             }
-          ]
+          ],
+          "ownerOnly": "spend-over-limit"
         },
         "createdAt": 0,
         "updatedAt": 0,

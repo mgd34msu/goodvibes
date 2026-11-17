@@ -4953,7 +4953,6 @@
            "escalations"
           ],
           "additionalProperties": false
-         }
          },
          {
           "type": "object",
@@ -5000,6 +4999,7 @@
            "url"
           ],
           "additionalProperties": false
+         }
         ]
        },
        "rememberOptions": {
@@ -5031,6 +5031,22 @@
          ],
          "additionalProperties": false
         }
+       },
+       "ownerOnly": {
+        "type": "string",
+        "enum": [
+         "spend-over-limit",
+         "payment-step",
+         "unrecoverable-delete",
+         "new-recipient",
+         "untrusted-derived-send",
+         "grant-access",
+         "loosen-security",
+         "change-contract",
+         "irreversible-operator",
+         "standing-ask",
+         "channel-request"
+        ]
        }
       },
       "required": [

@@ -607,6 +607,22 @@
                                 ],
                                 "additionalProperties": false
                               }
+                            },
+                            "ownerOnly": {
+                              "type": "string",
+                              "enum": [
+                                "spend-over-limit",
+                                "payment-step",
+                                "unrecoverable-delete",
+                                "new-recipient",
+                                "untrusted-derived-send",
+                                "grant-access",
+                                "loosen-security",
+                                "change-contract",
+                                "irreversible-operator",
+                                "standing-ask",
+                                "channel-request"
+                              ]
                             }
                           },
                           "required": [
@@ -1176,23 +1192,6 @@
                                     "escalations"
                                   ],
                                   "additionalProperties": false
-                                }
-                              ]
-                            },
-                            "rememberOptions": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "tier": {
-                                    "type": "string",
-                                    "enum": [
-                                      "session",
-                                      "exact",
-                                      "command-class",
-                                      "path",
-                                      "tool"
-                                    ]
                                 },
                                 {
                                   "type": "object",
@@ -1239,6 +1238,23 @@
                                     "url"
                                   ],
                                   "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "rememberOptions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "tier": {
+                                    "type": "string",
+                                    "enum": [
+                                      "session",
+                                      "exact",
+                                      "command-class",
+                                      "path",
+                                      "tool"
+                                    ]
                                   },
                                   "label": {
                                     "type": "string"
@@ -1254,6 +1270,22 @@
                                 ],
                                 "additionalProperties": false
                               }
+                            },
+                            "ownerOnly": {
+                              "type": "string",
+                              "enum": [
+                                "spend-over-limit",
+                                "payment-step",
+                                "unrecoverable-delete",
+                                "new-recipient",
+                                "untrusted-derived-send",
+                                "grant-access",
+                                "loosen-security",
+                                "change-contract",
+                                "irreversible-operator",
+                                "standing-ask",
+                                "channel-request"
+                              ]
                             }
                           },
                           "required": [
@@ -1777,40 +1809,6 @@
                                     "escalations"
                                   ],
                                   "additionalProperties": false
-                                }
-                              ]
-                            },
-                            "rememberOptions": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "tier": {
-                                    "type": "string",
-                                    "enum": [
-                                      "session",
-                                      "exact",
-                                      "command-class",
-                                      "path",
-                                      "tool"
-                                    ]
-                                  },
-                                  "label": {
-                                    "type": "string"
-                                  },
-                                  "detail": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "tier",
-                                  "label",
-                                  "detail"
-                                ],
-                                "additionalProperties": false
-                              }
-                            }
-                          },
                                 },
                                 {
                                   "type": "object",
@@ -1857,6 +1855,56 @@
                                     "url"
                                   ],
                                   "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "rememberOptions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "tier": {
+                                    "type": "string",
+                                    "enum": [
+                                      "session",
+                                      "exact",
+                                      "command-class",
+                                      "path",
+                                      "tool"
+                                    ]
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "detail": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "tier",
+                                  "label",
+                                  "detail"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "ownerOnly": {
+                              "type": "string",
+                              "enum": [
+                                "spend-over-limit",
+                                "payment-step",
+                                "unrecoverable-delete",
+                                "new-recipient",
+                                "untrusted-derived-send",
+                                "grant-access",
+                                "loosen-security",
+                                "change-contract",
+                                "irreversible-operator",
+                                "standing-ask",
+                                "channel-request"
+                              ]
+                            }
+                          },
                           "required": [
                             "callId",
                             "tool",
@@ -2366,57 +2414,6 @@
                                     "escalations"
                                   ],
                                   "additionalProperties": false
-                                }
-                              ]
-                            },
-                            "rememberOptions": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "tier": {
-                                    "type": "string",
-                                    "enum": [
-                                      "session",
-                                      "exact",
-                                      "command-class",
-                                      "path",
-                                      "tool"
-                                    ]
-                                  },
-                                  "label": {
-                                    "type": "string"
-                                  },
-                                  "detail": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "tier",
-                                  "label",
-                                  "detail"
-                                ],
-                                "additionalProperties": false
-                              }
-                            }
-                          },
-                          "required": [
-                            "callId",
-                            "tool",
-                            "args",
-                            "category",
-                            "analysis"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "createdAt": {
-                          "type": "number"
-                        },
-                        "updatedAt": {
-                          "type": "number"
-                        },
-                        "claimedBy": {
-                          "type": "string"
                                 },
                                 {
                                   "type": "object",
@@ -2463,6 +2460,73 @@
                                     "url"
                                   ],
                                   "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "rememberOptions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "tier": {
+                                    "type": "string",
+                                    "enum": [
+                                      "session",
+                                      "exact",
+                                      "command-class",
+                                      "path",
+                                      "tool"
+                                    ]
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "detail": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "tier",
+                                  "label",
+                                  "detail"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "ownerOnly": {
+                              "type": "string",
+                              "enum": [
+                                "spend-over-limit",
+                                "payment-step",
+                                "unrecoverable-delete",
+                                "new-recipient",
+                                "untrusted-derived-send",
+                                "grant-access",
+                                "loosen-security",
+                                "change-contract",
+                                "irreversible-operator",
+                                "standing-ask",
+                                "channel-request"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "callId",
+                            "tool",
+                            "args",
+                            "category",
+                            "analysis"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "createdAt": {
+                          "type": "number"
+                        },
+                        "updatedAt": {
+                          "type": "number"
+                        },
+                        "claimedBy": {
+                          "type": "string"
                         },
                         "claimedAt": {
                           "type": "number"
@@ -3132,75 +3196,6 @@
                                       "escalations"
                                     ],
                                     "additionalProperties": false
-                                  }
-                                ]
-                              },
-                              "rememberOptions": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "tier": {
-                                      "type": "string",
-                                      "enum": [
-                                        "session",
-                                        "exact",
-                                        "command-class",
-                                        "path",
-                                        "tool"
-                                      ]
-                                    },
-                                    "label": {
-                                      "type": "string"
-                                    },
-                                    "detail": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "tier",
-                                    "label",
-                                    "detail"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              }
-                            },
-                            "required": [
-                              "callId",
-                              "tool",
-                              "args",
-                              "category",
-                              "analysis"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "createdAt": {
-                            "type": "number"
-                          },
-                          "updatedAt": {
-                            "type": "number"
-                          },
-                          "claimedBy": {
-                            "type": "string"
-                          },
-                          "claimedAt": {
-                            "type": "number"
-                          },
-                          "resolvedAt": {
-                            "type": "number"
-                          },
-                          "resolvedBy": {
-                            "type": "string"
-                          },
-                          "decision": {
-                            "type": "object",
-                            "properties": {
-                              "approved": {
-                                "type": "boolean"
-                              },
-                              "remember": {
-                                "type": "boolean"
                                   },
                                   {
                                     "type": "object",
@@ -3247,6 +3242,91 @@
                                       "url"
                                     ],
                                     "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "rememberOptions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "tier": {
+                                      "type": "string",
+                                      "enum": [
+                                        "session",
+                                        "exact",
+                                        "command-class",
+                                        "path",
+                                        "tool"
+                                      ]
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "detail": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "tier",
+                                    "label",
+                                    "detail"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "ownerOnly": {
+                                "type": "string",
+                                "enum": [
+                                  "spend-over-limit",
+                                  "payment-step",
+                                  "unrecoverable-delete",
+                                  "new-recipient",
+                                  "untrusted-derived-send",
+                                  "grant-access",
+                                  "loosen-security",
+                                  "change-contract",
+                                  "irreversible-operator",
+                                  "standing-ask",
+                                  "channel-request"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "tool",
+                              "args",
+                              "category",
+                              "analysis"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "createdAt": {
+                            "type": "number"
+                          },
+                          "updatedAt": {
+                            "type": "number"
+                          },
+                          "claimedBy": {
+                            "type": "string"
+                          },
+                          "claimedAt": {
+                            "type": "number"
+                          },
+                          "resolvedAt": {
+                            "type": "number"
+                          },
+                          "resolvedBy": {
+                            "type": "string"
+                          },
+                          "decision": {
+                            "type": "object",
+                            "properties": {
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "remember": {
+                                "type": "boolean"
                               },
                               "rememberTier": {
                                 "type": "string",

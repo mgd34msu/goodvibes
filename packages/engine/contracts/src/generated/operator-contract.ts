@@ -1122,6 +1122,22 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "ownerOnly": {
+                      "type": "string",
+                      "enum": [
+                        "spend-over-limit",
+                        "payment-step",
+                        "unrecoverable-delete",
+                        "new-recipient",
+                        "untrusted-derived-send",
+                        "grant-access",
+                        "loosen-security",
+                        "change-contract",
+                        "irreversible-operator",
+                        "standing-ask",
+                        "channel-request"
+                      ]
                     }
                   },
                   "required": [
@@ -1618,23 +1634,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "escalations"
                           ],
                           "additionalProperties": false
-                        }
-                      ]
-                    },
-                    "rememberOptions": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "tier": {
-                            "type": "string",
-                            "enum": [
-                              "session",
-                              "exact",
-                              "command-class",
-                              "path",
-                              "tool"
-                            ]
                         },
                         {
                           "type": "object",
@@ -1681,6 +1680,23 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "url"
                           ],
                           "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "rememberOptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "session",
+                              "exact",
+                              "command-class",
+                              "path",
+                              "tool"
+                            ]
                           },
                           "label": {
                             "type": "string"
@@ -1696,6 +1712,22 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "ownerOnly": {
+                      "type": "string",
+                      "enum": [
+                        "spend-over-limit",
+                        "payment-step",
+                        "unrecoverable-delete",
+                        "new-recipient",
+                        "untrusted-derived-send",
+                        "grant-access",
+                        "loosen-security",
+                        "change-contract",
+                        "irreversible-operator",
+                        "standing-ask",
+                        "channel-request"
+                      ]
                     }
                   },
                   "required": [
@@ -2180,40 +2212,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "escalations"
                           ],
                           "additionalProperties": false
-                        }
-                      ]
-                    },
-                    "rememberOptions": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "tier": {
-                            "type": "string",
-                            "enum": [
-                              "session",
-                              "exact",
-                              "command-class",
-                              "path",
-                              "tool"
-                            ]
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "detail": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "tier",
-                          "label",
-                          "detail"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
                         },
                         {
                           "type": "object",
@@ -2260,6 +2258,56 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "url"
                           ],
                           "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "rememberOptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "session",
+                              "exact",
+                              "command-class",
+                              "path",
+                              "tool"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "tier",
+                          "label",
+                          "detail"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "ownerOnly": {
+                      "type": "string",
+                      "enum": [
+                        "spend-over-limit",
+                        "payment-step",
+                        "unrecoverable-delete",
+                        "new-recipient",
+                        "untrusted-derived-send",
+                        "grant-access",
+                        "loosen-security",
+                        "change-contract",
+                        "irreversible-operator",
+                        "standing-ask",
+                        "channel-request"
+                      ]
+                    }
+                  },
                   "required": [
                     "callId",
                     "tool",
@@ -2768,57 +2816,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "escalations"
                           ],
                           "additionalProperties": false
-                        }
-                      ]
-                    },
-                    "rememberOptions": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "tier": {
-                            "type": "string",
-                            "enum": [
-                              "session",
-                              "exact",
-                              "command-class",
-                              "path",
-                              "tool"
-                            ]
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "detail": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "tier",
-                          "label",
-                          "detail"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "callId",
-                    "tool",
-                    "args",
-                    "category",
-                    "analysis"
-                  ],
-                  "additionalProperties": false
-                },
-                "createdAt": {
-                  "type": "number"
-                },
-                "updatedAt": {
-                  "type": "number"
-                },
-                "claimedBy": {
-                  "type": "string"
                         },
                         {
                           "type": "object",
@@ -2865,6 +2862,73 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "url"
                           ],
                           "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "rememberOptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "session",
+                              "exact",
+                              "command-class",
+                              "path",
+                              "tool"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "tier",
+                          "label",
+                          "detail"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "ownerOnly": {
+                      "type": "string",
+                      "enum": [
+                        "spend-over-limit",
+                        "payment-step",
+                        "unrecoverable-delete",
+                        "new-recipient",
+                        "untrusted-derived-send",
+                        "grant-access",
+                        "loosen-security",
+                        "change-contract",
+                        "irreversible-operator",
+                        "standing-ask",
+                        "channel-request"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "callId",
+                    "tool",
+                    "args",
+                    "category",
+                    "analysis"
+                  ],
+                  "additionalProperties": false
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "claimedBy": {
+                  "type": "string"
                 },
                 "claimedAt": {
                   "type": "number"
@@ -3478,75 +3542,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "escalations"
                             ],
                             "additionalProperties": false
-                          }
-                        ]
-                      },
-                      "rememberOptions": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "tier": {
-                              "type": "string",
-                              "enum": [
-                                "session",
-                                "exact",
-                                "command-class",
-                                "path",
-                                "tool"
-                              ]
-                            },
-                            "label": {
-                              "type": "string"
-                            },
-                            "detail": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "tier",
-                            "label",
-                            "detail"
-                          ],
-                          "additionalProperties": false
-                        }
-                      }
-                    },
-                    "required": [
-                      "callId",
-                      "tool",
-                      "args",
-                      "category",
-                      "analysis"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "createdAt": {
-                    "type": "number"
-                  },
-                  "updatedAt": {
-                    "type": "number"
-                  },
-                  "claimedBy": {
-                    "type": "string"
-                  },
-                  "claimedAt": {
-                    "type": "number"
-                  },
-                  "resolvedAt": {
-                    "type": "number"
-                  },
-                  "resolvedBy": {
-                    "type": "string"
-                  },
-                  "decision": {
-                    "type": "object",
-                    "properties": {
-                      "approved": {
-                        "type": "boolean"
-                      },
-                      "remember": {
-                        "type": "boolean"
                           },
                           {
                             "type": "object",
@@ -3593,6 +3588,91 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "url"
                             ],
                             "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "rememberOptions": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "tier": {
+                              "type": "string",
+                              "enum": [
+                                "session",
+                                "exact",
+                                "command-class",
+                                "path",
+                                "tool"
+                              ]
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "detail": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "tier",
+                            "label",
+                            "detail"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "ownerOnly": {
+                        "type": "string",
+                        "enum": [
+                          "spend-over-limit",
+                          "payment-step",
+                          "unrecoverable-delete",
+                          "new-recipient",
+                          "untrusted-derived-send",
+                          "grant-access",
+                          "loosen-security",
+                          "change-contract",
+                          "irreversible-operator",
+                          "standing-ask",
+                          "channel-request"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "callId",
+                      "tool",
+                      "args",
+                      "category",
+                      "analysis"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "createdAt": {
+                    "type": "number"
+                  },
+                  "updatedAt": {
+                    "type": "number"
+                  },
+                  "claimedBy": {
+                    "type": "string"
+                  },
+                  "claimedAt": {
+                    "type": "number"
+                  },
+                  "resolvedAt": {
+                    "type": "number"
+                  },
+                  "resolvedBy": {
+                    "type": "string"
+                  },
+                  "decision": {
+                    "type": "object",
+                    "properties": {
+                      "approved": {
+                        "type": "boolean"
+                      },
+                      "remember": {
+                        "type": "boolean"
                       },
                       "rememberTier": {
                         "type": "string",
@@ -3960,6 +4040,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "escalations"
                       ],
                       "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "exec-prompt"
+                          ]
+                        },
+                        "command": {
+                          "type": "string"
+                        },
+                        "prompt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "command",
+                        "prompt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "fetch-localhost"
+                          ]
+                        },
+                        "host": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "host",
+                        "url"
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -3992,6 +4118,22 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     ],
                     "additionalProperties": false
                   }
+                },
+                "ownerOnly": {
+                  "type": "string",
+                  "enum": [
+                    "spend-over-limit",
+                    "payment-step",
+                    "unrecoverable-delete",
+                    "new-recipient",
+                    "untrusted-derived-send",
+                    "grant-access",
+                    "loosen-security",
+                    "change-contract",
+                    "irreversible-operator",
+                    "standing-ask",
+                    "channel-request"
+                  ]
                 }
               },
               "required": [
@@ -4046,52 +4188,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "required": [
             "request"
           ],
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "exec-prompt"
-                          ]
-                        },
-                        "command": {
-                          "type": "string"
-                        },
-                        "prompt": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "command",
-                        "prompt"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "fetch-localhost"
-                          ]
-                        },
-                        "host": {
-                          "type": "string"
-                        },
-                        "url": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "host",
-                        "url"
-                      ],
-                      "additionalProperties": false
           "additionalProperties": false
         },
         "outputSchema": {
@@ -4315,6 +4411,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "escalations"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "exec-prompt"
+                              ]
+                            },
+                            "command": {
+                              "type": "string"
+                            },
+                            "prompt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "prompt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "fetch-localhost"
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "url"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
@@ -4347,6 +4489,22 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "ownerOnly": {
+                      "type": "string",
+                      "enum": [
+                        "spend-over-limit",
+                        "payment-step",
+                        "unrecoverable-delete",
+                        "new-recipient",
+                        "untrusted-derived-send",
+                        "grant-access",
+                        "loosen-security",
+                        "change-contract",
+                        "irreversible-operator",
+                        "standing-ask",
+                        "channel-request"
+                      ]
                     }
                   },
                   "required": [
@@ -4418,52 +4576,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "type": "object",
                             "additionalProperties": {}
                           },
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "exec-prompt"
-                              ]
-                            },
-                            "command": {
-                              "type": "string"
-                            },
-                            "prompt": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "command",
-                            "prompt"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "enum": [
-                                "fetch-localhost"
-                              ]
-                            },
-                            "host": {
-                              "type": "string"
-                            },
-                            "url": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "kind",
-                            "host",
-                            "url"
-                          ],
-                          "additionalProperties": false
                           {
                             "type": "array",
                             "items": {}
@@ -4848,6 +4960,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "additionalProperties": false
         },
         "effect": "write",
+        "ownerOnly": true,
         "invokable": true
       },
       {
@@ -179235,6 +179348,52 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "escalations"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "exec-prompt"
+                              ]
+                            },
+                            "command": {
+                              "type": "string"
+                            },
+                            "prompt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "prompt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "fetch-localhost"
+                              ]
+                            },
+                            "host": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "url"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
@@ -179267,6 +179426,22 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "ownerOnly": {
+                      "type": "string",
+                      "enum": [
+                        "spend-over-limit",
+                        "payment-step",
+                        "unrecoverable-delete",
+                        "new-recipient",
+                        "untrusted-derived-send",
+                        "grant-access",
+                        "loosen-security",
+                        "change-contract",
+                        "irreversible-operator",
+                        "standing-ask",
+                        "channel-request"
+                      ]
                     }
                   },
                   "required": [

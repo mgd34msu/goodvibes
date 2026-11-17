@@ -32,6 +32,7 @@ import { parseFleetFocusFromHash, stripFleetFocusFragment } from '../../lib/push
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { riskTone } from '../../lib/approvals';
+import { isClosedStatus } from '../../lib/sessions-union';
 import {
   DataPage,
   DetailPane,
@@ -163,14 +164,38 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
     dismissedRef.current = true;
     setSelectedKey('');
   }, []);
-  // A session is hosted when the engine lists it, or the union list says its kind is hosted.
-  const hostedIds = useMemo(() => new Set([
-    ...data.hostedRecords.map((session) => session.id),
-    ...data.sessionRecords.filter((record) => record.kind === 'hosted').map((record) => record.id),
-  ]), [data.hostedRecords, data.sessionRecords]);
+  // The hosted sessions that open in the live pane. That pane needs an attach,
+  // which the daemon refuses once a session has ended and cannot make once it
+  // has retired one, so an ended or no-longer-listed hosted session that has a
+  // session record opens the session pane instead (stored transcript, Close,
+  // Reopen, Delete, Open in chat). An ended one with no session record keeps
+  // the live pane, the only place it is shown. Before the hosted list has
+  // answered, an open record of kind hosted is taken as live.
+  const hostedListPending = data.hosted.isPending;
+  const hostedPaneIds = useMemo(() => {
+    const recordIds = new Set(data.sessionRecords.map((record) => record.id));
+    const ids = new Set(data.hostedRecords
+      .filter((session) => session.status !== 'terminated' || !recordIds.has(session.id))
+      .map((session) => session.id));
+    if (hostedListPending) {
+      for (const record of data.sessionRecords) {
+        if (record.kind === 'hosted' && !isClosedStatus(record.status)) ids.add(record.id);
+      }
+    }
+    return ids;
+  }, [data.hostedRecords, data.sessionRecords, hostedListPending]);
   const selectedSessionId = selectedKey.startsWith('session:') ? selectedKey.slice('session:'.length) : null;
-  const selectedHostedId = selectedSessionId !== null && hostedIds.has(selectedSessionId) ? selectedSessionId : null;
+  // A pane that attached keeps its live attachment until it is closed, even when
+  // the session ends in view and the hosted list stops showing it.
+  const [keptHostedId, setKeptHostedId] = useState<string | null>(null);
+  const selectedHostedId = selectedSessionId !== null
+    && (hostedPaneIds.has(selectedSessionId) || keptHostedId === selectedSessionId) ? selectedSessionId : null;
   const hostedAttachment = useHostedAttachment(selectedHostedId, data.hostedRecords, closeDetail);
+  const attachedHostedId = hostedAttachment.session?.id ?? null;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- follows the attachment's own state, which settles after render
+    setKeptHostedId(attachedHostedId !== null && attachedHostedId === selectedSessionId ? attachedHostedId : null);
+  }, [attachedHostedId, selectedSessionId]);
   // A push notification's "Allow" opens the approval for review; it never approves by itself.
   const approvalActions = useApprovalActions({
     onOpenApproval: (id) => {
@@ -296,13 +321,14 @@ function WorkViewContent({ contractScope, tab, onTabChange, subscriptionActive =
       }
       case 'session': {
         const record = data.sessionRecords.find((s) => s.id === id);
-        if (hostedIds.has(id)) {
+        if (selectedHostedId === id) {
           return (
             <HostedSessionWorkDetail
               key={id}
               sessionId={id}
               attachment={hostedAttachment}
               record={record}
+              listed={data.hostedRecords.find((h) => h.id === id)}
               fallbackTitle={nonEmpty(record?.title) ?? nonEmpty(data.hostedRecords.find((h) => h.id === id)?.title) ?? id}
               tab={sessionTab}
               onTabChange={setSessionTab}

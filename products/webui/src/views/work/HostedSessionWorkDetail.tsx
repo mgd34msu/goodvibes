@@ -7,10 +7,13 @@
  * Delete. This pane carries all of it for the one row: the live attachment
  * (useHostedAttachment) on the Transcript tab, the session's Changes, Rewind
  * and Checkpoints tabs, Leave, and one verb for ending it, End session. Delete
- * permanently is offered once the session has ended.
+ * permanently is offered once the session has ended, also when the daemon
+ * refuses the attach because it has (an ended hosted session that has a session
+ * record opens the session pane instead, see WorkView).
  */
 import { LogOut, MoreHorizontal, OctagonX } from 'lucide-react';
 import type { UnionSessionRecord } from '../../lib/sessions-union';
+import type { HostedSessionRecord } from '../../lib/goodvibes';
 import { effectiveDetachPolicyLabel, hostedAttachedClientCount, hostedStatusLabel, hostedTerminationLabel } from '../../lib/hosted-sessions';
 import { nonEmpty } from '../../lib/non-empty';
 import { useSessionLifecycle } from '../../hooks/useSessionLifecycle';
@@ -41,6 +44,8 @@ export interface HostedSessionWorkDetailProps {
   readonly attachment: HostedAttachment;
   /** The session's union-list record, when the daemon lists it there yet. */
   readonly record?: UnionSessionRecord | undefined;
+  /** The session's hosted-list record, which still says it ended when an attach is refused. */
+  readonly listed?: HostedSessionRecord | undefined;
   /** The list row's title while attaching. */
   readonly fallbackTitle: string;
   readonly tab: SessionTab;
@@ -49,19 +54,21 @@ export interface HostedSessionWorkDetailProps {
   readonly onClose: () => void;
 }
 
-export function HostedSessionWorkDetail({ sessionId, attachment, record, fallbackTitle, tab, onTabChange, streamPaused, onClose }: HostedSessionWorkDetailProps) {
+export function HostedSessionWorkDetail({ sessionId, attachment, record, listed, fallbackTitle, tab, onTabChange, streamPaused, onClose }: HostedSessionWorkDetailProps) {
   const lifecycle = useSessionLifecycle(sessionId, onClose);
   const { session } = attachment;
-  const ended = session?.status === 'terminated';
+  // The attached record when there is one, else the hosted list's (an ended session cannot be attached).
+  const known = session ?? listed;
+  const ended = known?.status === 'terminated';
 
-  const actions = session ? (
+  const actions = session || ended ? (
     <>
-      {!ended && (
+      {session && !ended && (
         <Button size="sm" variant="danger" icon={<OctagonX aria-hidden="true" />} onClick={attachment.kill} disabled={attachment.killPending}>
           {attachment.killPending ? 'Ending…' : 'End session'}
         </Button>
       )}
-      <Button size="sm" icon={<LogOut aria-hidden="true" />} onClick={attachment.leave}>Leave</Button>
+      {session && <Button size="sm" icon={<LogOut aria-hidden="true" />} onClick={attachment.leave}>Leave</Button>}
       {ended && (
         <Menu
           label="More session actions"
@@ -79,13 +86,13 @@ export function HostedSessionWorkDetail({ sessionId, attachment, record, fallbac
   return (
     <DetailPane
       title={nonEmpty(session?.title) ?? nonEmpty(record?.title) ?? fallbackTitle}
-      status={session ? (
+      status={known ? (
         <span className="work-status">
-          <StatusDot tone={ended ? 'idle' : session.status === 'running' ? 'live' : 'ok'} />
-          {sentenceCase(hostedStatusLabel(session.status))}
+          <StatusDot tone={ended ? 'idle' : known.status === 'running' ? 'live' : 'ok'} />
+          {sentenceCase(hostedStatusLabel(known.status))}
         </span>
       ) : undefined}
-      meta={session ? `Hosted · ${session.workspaceRoot}` : 'Hosted session'}
+      meta={known ? `Hosted · ${known.workspaceRoot}` : 'Hosted session'}
       actions={actions}
       onClose={onClose}
       closeLabel="Close session detail"
@@ -95,7 +102,7 @@ export function HostedSessionWorkDetail({ sessionId, attachment, record, fallbac
       <ConfirmDialog
         open={lifecycle.phase === 'confirming' && lifecycle.action === 'delete'}
         title="Delete this session?"
-        target={session?.title ?? record?.title ?? sessionId}
+        target={session?.title ?? record?.title ?? listed?.title ?? sessionId}
         description="The session record is removed for good and cannot be reopened."
         confirmLabel="Delete"
         tone="danger"
@@ -108,9 +115,19 @@ export function HostedSessionWorkDetail({ sessionId, attachment, record, fallbac
       </p>}
       {attachment.streamError && <p className="dv-notice dv-notice--bad" role="status">{attachment.streamError}</p>}
       {attachment.attaching && <SkeletonRows count={4} label="Attaching" />}
-      {!attachment.attaching && (Boolean(attachment.attachError) || !session) && (
+      {!attachment.attaching && !session && ended && listed && (
+        <p className="dv-notice" role="status">
+          {sentenceCase(hostedTerminationLabel(listed) ?? 'terminated')}. An ended hosted session cannot be attached, so its transcript is not shown here.
+        </p>
+      )}
+      {!attachment.attaching && !session && !ended && (
         <p className="dv-notice dv-notice--bad" role="alert">
           Could not attach: {attachment.attachError ?? 'Could not attach to this session.'}
+        </p>
+      )}
+      {!attachment.attaching && session && attachment.attachError && (
+        <p className="dv-notice dv-notice--bad" role="alert">
+          Could not attach: {attachment.attachError}
         </p>
       )}
 

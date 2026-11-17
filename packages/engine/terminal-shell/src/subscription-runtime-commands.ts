@@ -70,16 +70,54 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
     if (Number.isNaN(new Date(candidate.exportedAt).getTime())) return null;
     const list = candidate.subscriptions;
     if (!Array.isArray(list)) return null;
+    const subscriptions: ProviderSubscription[] = [];
     for (const entry of list) {
-      if (!entry || typeof entry !== 'object') return null;
-      const record = entry as { provider?: unknown; authMode?: unknown };
-      if (typeof record.provider !== 'string' || typeof record.authMode !== 'string') return null;
+      const record = readBundleSubscription(entry);
+      if (!record) return null;
+      subscriptions.push(record);
     }
-    return { version: 1, exportedAt: candidate.exportedAt, subscriptions: list as readonly ProviderSubscription[] };
+    return { version: 1, exportedAt: candidate.exportedAt, subscriptions };
+  }
+  /** One exported sign-in, keeping only the fields a stored session has; a refresh in flight is not carried over. */
+  function readBundleSubscription(entry: unknown): ProviderSubscription | null {
+    if (!entry || typeof entry !== 'object') return null;
+    const r = entry as Record<string, unknown>;
+    const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+    if (typeof r['provider'] !== 'string' || r['provider'].length === 0 || r['authMode'] !== 'oauth') return null;
+    if (typeof r['accessToken'] !== 'string' || r['accessToken'].length === 0 || typeof r['tokenType'] !== 'string') return null;
+    if (!isTime(r['createdAt']) || !isTime(r['updatedAt']) || typeof r['overrideAmbientApiKeys'] !== 'boolean') return null;
+    if (r['refreshToken'] !== undefined && typeof r['refreshToken'] !== 'string') return null;
+    if (r['expiresAt'] !== undefined && !isTime(r['expiresAt'])) return null;
+    if (r['revokedAt'] !== undefined && !isTime(r['revokedAt'])) return null;
+    const scopes = r['scopes'];
+    if (scopes !== undefined && (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === 'string'))) return null;
+    return {
+      provider: r['provider'],
+      accessToken: r['accessToken'],
+      ...(r['refreshToken'] !== undefined ? { refreshToken: r['refreshToken'] as string } : {}),
+      tokenType: r['tokenType'],
+      ...(r['expiresAt'] !== undefined ? { expiresAt: r['expiresAt'] as number } : {}),
+      ...(scopes !== undefined ? { scopes: scopes as string[] } : {}),
+      authMode: 'oauth',
+      overrideAmbientApiKeys: r['overrideAmbientApiKeys'],
+      createdAt: r['createdAt'],
+      updatedAt: r['updatedAt'],
+      ...(r['revokedAt'] !== undefined ? { revokedAt: r['revokedAt'] as number } : {}),
+    };
+  }
+  /** What importing `bundle` would do to each provider: add a sign-in or replace the stored one. */
+  function describeImport(manager: SubscriptionManager, bundle: SubscriptionBundle): string[] {
+    return bundle.subscriptions.map((subscription) => {
+      const current = manager.get(subscription.provider);
+      const expires = subscription.expiresAt ? `expires ${new Date(subscription.expiresAt).toISOString()}` : 'no expiry';
+      return current
+        ? `  ${subscription.provider}  replaces the stored sign-in (updated ${new Date(current.updatedAt).toISOString()}) with one updated ${new Date(subscription.updatedAt).toISOString()}, ${expires}`
+        : `  ${subscription.provider}  adds a sign-in, ${expires}`;
+    });
   }
   function inspectBundle(path: string): string {
     const bundle = readSubscriptionBundle(JSON.parse(readFileSync(path, 'utf-8')) as unknown);
-    if (!bundle) return `${path} is not a subscription bundle (expected version 1 with exportedAt and a subscriptions list).`;
+    if (!bundle) return `${path} is not a subscription bundle (expected version 1 with exportedAt and a list of complete sign-ins).`;
     return [
       'Subscription Bundle Review',
       `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
@@ -104,7 +142,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
       aliases: ['subs'],
       description: 'Manage provider subscription sessions and, when supported, let them override ambient API keys for matching providers',
       usage:
-        '[review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>]',
+        '[review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
       ...(policy.hidden ? { hidden: true } : {}),
       async handler(args, ctx) {
         // Export writes live sign-in tokens, so it needs an explicit --yes even where other mutations do not.
@@ -253,45 +291,9 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
               }
               const browserOpened = openBrowser ? await openExternalUrl(started.authorizationUrl) : false;
               const shouldAutoComplete = Boolean(listener) && (resolved.oauth.localCallback?.autoComplete ?? true) && browserOpened;
-              if (shouldAutoComplete && listener) {
-                try {
-                  const callback = await listener.waitForCode();
-                  const record = await manager.completeOAuthLogin(provider, activeConfig, callback.code);
-                  print(
-                    [
-                      `Subscription OAuth Start: ${provider}`,
-                      `  source: ${policy.formatSource(resolved.source)}`,
-                      `  state: ${started.pending.state}`,
-                      `  redirectUri: ${activeConfig.redirectUri}`,
-                      `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                      '  authorizationUrl:',
-                      `  ${started.authorizationUrl}`,
-                      `Subscription OAuth Complete: ${provider}`,
-                      `  tokenType: ${record.tokenType}`,
-                      `  expiresAt: ${record.expiresAt ? new Date(record.expiresAt).toISOString() : 'n/a'}`,
-                      describePrecedence(record),
-                    ].join('\n'),
-                  );
-                  return;
-                } catch (error) {
-                  listener.close();
-                  print(
-                    [
-                      `Subscription OAuth Start: ${provider}`,
-                      `  source: ${policy.formatSource(resolved.source)}`,
-                      `  state: ${started.pending.state}`,
-                      `  redirectUri: ${activeConfig.redirectUri}`,
-                      `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                      `  next: /subscription login ${provider} finish <code-or-url>`,
-                      `  listener: ${summarizeError(error)}`,
-                      '  authorizationUrl:',
-                      `  ${started.authorizationUrl}`,
-                    ].join('\n'),
-                  );
-                  return;
-                }
-              }
-              listener?.close();
+              // The address is printed before any wait, so a browser that opened
+              // elsewhere (another display, an SSH hop) never leaves the person
+              // without the one thing they need to finish.
               print(
                 [
                   `Subscription OAuth Start: ${provider}`,
@@ -299,12 +301,32 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
                   `  state: ${started.pending.state}`,
                   `  redirectUri: ${activeConfig.redirectUri}`,
                   `  browser: ${openBrowser ? (browserOpened ? 'opened' : 'open failed') : 'skipped'}`,
-                  `  next: /subscription login ${provider} finish <code-or-url>`,
                   ...(listenerNote ? [`  listener: ${listenerNote}`] : []),
                   '  authorizationUrl:',
                   `  ${started.authorizationUrl}`,
+                  shouldAutoComplete
+                    ? `  waiting for the browser to finish; if it opened somewhere else, open the address above and run /subscription login ${provider} finish <code-or-url>`
+                    : `  next: /subscription login ${provider} finish <code-or-url>`,
                 ].join('\n'),
               );
+              if (shouldAutoComplete && listener) {
+                try {
+                  const callback = await listener.waitForCode();
+                  const record = await manager.completeOAuthLogin(provider, activeConfig, callback.code);
+                  print(
+                    [
+                      `Subscription OAuth Complete: ${provider}`,
+                      `  tokenType: ${record.tokenType}`,
+                      `  expiresAt: ${record.expiresAt ? new Date(record.expiresAt).toISOString() : 'n/a'}`,
+                      describePrecedence(record),
+                    ].join('\n'),
+                  );
+                } catch (error) {
+                  // A `finish` typed meanwhile already stored the sign-in: nothing to report.
+                  if (!manager.getPending(provider) && manager.get(provider)) return;
+                  print(`Subscription OAuth for ${provider} did not finish automatically (${summarizeError(error)}). Run /subscription login ${provider} finish <code-or-url> with the redirect address or code.`);
+                }
+              }
               return;
             } finally {
               listener?.close();
@@ -368,7 +390,7 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
           const mode = bundleArgs[1]?.toLowerCase();
           const pathArg = bundleArgs[2];
           if (!mode || !pathArg) {
-            print('Usage: /subscription bundle <export|inspect> <path>');
+            print('Usage: /subscription bundle <export|inspect|import> <path>');
             return;
           }
           const targetPath = (shellPaths ?? requireShellPaths(ctx)).resolveWorkspacePath(pathArg);
@@ -397,11 +419,38 @@ export function createSubscriptionRuntimeCommands<Context extends SubscriptionCo
             }
             return;
           }
-          print('Usage: /subscription bundle <export|inspect> <path>');
+          if (mode === 'import') {
+            let bundle: SubscriptionBundle | null;
+            try {
+              bundle = readSubscriptionBundle(JSON.parse(readFileSync(targetPath, 'utf-8')) as unknown);
+            } catch (error) {
+              if (!policy.catchErrors) throw error;
+              print(`Could not read that bundle file: ${policy.error(error)}`);
+              return;
+            }
+            if (!bundle) {
+              print(`Not imported: ${targetPath} is not a subscription bundle (expected version 1 with exportedAt and a list of complete sign-ins). Nothing was changed.`);
+              return;
+            }
+            if (bundle.subscriptions.length === 0) {
+              print(`Not imported: ${targetPath} holds no sign-ins. Nothing was changed.`);
+              return;
+            }
+            if (!explicit.yes) {
+              print(['Subscription bundle import would:', ...describeImport(manager, bundle)].join('\n'));
+              requireYesFlag(ctx, `import ${bundle.subscriptions.length} subscription sign-in(s) from ${pathArg}`, '/subscription bundle import <path> --yes');
+              return;
+            }
+            const lines = describeImport(manager, bundle);
+            for (const subscription of bundle.subscriptions) manager.saveSubscription(subscription);
+            print([`Imported ${bundle.subscriptions.length} subscription sign-in(s) from ${targetPath}:`, ...lines].join('\n'));
+            return;
+          }
+          print('Usage: /subscription bundle <export|inspect|import> <path>');
           return;
         }
         print(
-          'Usage: /subscription [review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>]',
+          'Usage: /subscription [review|list|providers|inspect <provider>|login <provider> start [--no-browser] [--manual]|finish <code-or-url>|logout <provider>|bundle export <path> --yes|bundle inspect <path>|bundle import <path> --yes]',
         );
       },
     });

@@ -573,7 +573,7 @@ GoodVibes ships **163** built-in slash commands across **75** categories. Every 
 
 | Command | Aliases | Usage | Description |
 | --- | --- | --- | --- |
-| `/subscription` | `/subs` | `[review\|list\|providers\|inspect <provider>\|login <provider> start [--no-browser] [--manual]\|finish <code-or-url>\|logout <provider>\|bundle export <path> --yes\|bundle inspect <path>]` | Manage provider subscription sessions and, when supported, let them override ambient API keys for matching providers |
+| `/subscription` | `/subs` | `[review\|list\|providers\|inspect <provider>\|login <provider> start [--no-browser] [--manual]\|finish <code-or-url>\|logout <provider>\|bundle export <path> --yes\|bundle inspect <path>\|bundle import <path> --yes]` | Manage provider subscription sessions and, when supported, let them override ambient API keys for matching providers. `login <provider> start` prints the sign-in address before it waits for the browser. `bundle import` shows which stored sign-ins it adds or replaces, then stores them with `--yes` |
 
 ## Tasks
 

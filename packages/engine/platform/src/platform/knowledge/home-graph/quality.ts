@@ -13,6 +13,7 @@ import { preserveLegacyQualityAuthority } from './quality/fingerprint.js';
 import { createQualityRevisionPlans, readQualitySubjectState, type QualityRevisionPlan } from './quality/revision.js';
 import { projectHomeGraphQualityInput, readHomeGraphDeclaredBoolean } from './quality/projection.js';
 import type { HomeGraphQualityAnswerMemo } from './quality-answer-memo.js';
+import { withOrWithoutDecisionModel } from '../decision-policy.js';
 
 const QUALITY_NAMESPACE_PREFIX = 'homegraph';
 export function homeGraphQualityNamespace(spaceId: string): string {
@@ -28,14 +29,31 @@ export async function refreshHomeGraphQualityIssues(
   return (await refreshHomeGraphQualityReport(store, spaceId, installationId, options)).issues;
 }
 
-export async function refreshHomeGraphQualityReport(
+type QualityReportOptions = { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly answers?: HomeGraphQualityAnswerMemo | undefined };
+type QualityReport = { readonly issues: readonly KnowledgeIssueRecord[]; readonly retainedLegacyIssues: number; readonly unansweredDeviceIds: readonly string[] };
+
+/**
+ * The quality report of the space. Without a decision model the declared fields
+ * still settle issues in code; a device whose questions need a reading keeps its
+ * issues and is reported unanswered. When the set model fails during the pass
+ * under Hybrid, the pass runs again that way instead of being held.
+ */
+export function refreshHomeGraphQualityReport(
   store: KnowledgeStore,
   spaceId: string,
   installationId: string,
-  options: { readonly signal?: AbortSignal | undefined; readonly timeoutMs?: number | undefined; readonly answers?: HomeGraphQualityAnswerMemo | undefined } = {},
-): Promise<{ readonly issues: readonly KnowledgeIssueRecord[]; readonly retainedLegacyIssues: number; readonly unansweredDeviceIds: readonly string[] }> {
-  // Without a decision model the declared fields still settle issues in code; a
-  // device whose questions need a reading keeps its issues and is reported unanswered.
+  options: QualityReportOptions = {},
+): Promise<QualityReport> {
+  const pass = () => refreshHomeGraphQualityReportOnce(store, spaceId, installationId, options);
+  return withOrWithoutDecisionModel(pass, pass, options.signal);
+}
+
+async function refreshHomeGraphQualityReportOnce(
+  store: KnowledgeStore,
+  spaceId: string,
+  installationId: string,
+  options: QualityReportOptions,
+): Promise<QualityReport> {
   await store.init();
   const state = readHomeGraphState(store, spaceId);
   const originals = new Map(state.nodes.map(node => [node.id,node]));

@@ -511,7 +511,16 @@ error stands.
   sources were not ranked and facts were not checked; the page source carries
   `semanticAssessment: not-evaluated`. Sharing packets never used a model.
 - Quality issues: declared device fields settle issues in code; a device whose
-  questions need a reading keeps its existing issues.
+  questions need a reading keeps its existing issues. When the set model fails
+  during a pass under Hybrid, the pass runs again that way instead of holding.
+- Snapshot sync: links, quality and the automatic device passports and room
+  pages all run; a model failure partway through builds the remaining pages
+  unchecked rather than leaving them for later. The sync's `quality` is
+  `partial` with `not-assessed-without-decision-model:<device ids>`, `generated`
+  carries `provenance: classic` and a `reason`, and the sync result itself
+  `provenance: classic`. Such a pass is remembered as done only for syncs
+  without a decision model: the first sync with one in use reads the quality and
+  rebuilds the pages checked.
 - Issue triage: no issue is closed; the open issues are listed for review with
   `reason: triage-not-assessed-no-decision-model`.
 - Source usefulness and authority: sources are kept in stored order with

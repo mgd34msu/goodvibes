@@ -138,14 +138,16 @@ export async function runHomeGraphSnapshotSync(input: {
     // Quality and pages are read from the devices, documents, extractions and
     // facts of the space. When none of them changed since they were last made,
     // a resent snapshot costs no model request.
-    if (source.metadata.homeGraphEnrichmentInputs === homeGraphEnrichmentInputs(store, spaceId)) {
+    if (source.metadata.homeGraphEnrichmentInputs === homeGraphEnrichmentInputsKey(store, spaceId)) {
       return { ...base, created: { ...created(), issues: 0 }, enrichment: 'unchanged' as const, quality: { status: 'unchanged' as const }, generated: emptyGeneratedPages() };
     }
     if (input.deferEnrichment) {
       return { ...base, created: { ...created(), issues: 0 }, enrichment: 'queued' as const, quality: { status: 'queued' as const }, generated: emptyGeneratedPages() };
     }
     const enriched = await runHomeGraphSyncEnrichment({ store, artifactStore, spaceId, installationId, snapshot, signal: input.signal });
-    return { ...base, created: { ...created(), issues: enriched.createdIssues }, enrichment: 'done' as const,
+    // Labelled by how the pass ended: a Hybrid fallback during it ran the rest without a model.
+    return { ...base, ...(isClassicOperation() ? { provenance: 'classic' as const } : {}),
+      created: { ...created(), issues: enriched.createdIssues }, enrichment: 'done' as const,
       quality: enriched.quality, generated: enriched.generated, autoLink: enriched.autoLink };
   });
 }
@@ -178,11 +180,17 @@ export async function runHomeGraphSyncEnrichment(input: {
     currentInstallationSnapshotSource(store, spaceId, installationId)?.metadata.homeGraphQualityAnswers);
   const autoLink = await autoLinkExistingSources(store, spaceId, installationId, signal);
   let quality: NonNullable<HomeGraphSyncResult['quality']>;
-  if (isClassicOperation()) quality = { status: 'held', reason: 'decision-model-disabled' };
-  else try {
+  // Without a decision model (from the start, or since the set model failed under
+  // Hybrid) each device's questions are still settled from its declared fields
+  // and the rest are reported not assessed: as much as this pass can do then.
+  let qualityComplete = false;
+  try {
     const report = await refreshHomeGraphQualityReport(store, spaceId, installationId, { signal, answers: qualityAnswers });
+    const notAssessed = isClassicOperation();
+    qualityComplete = report.retainedLegacyIssues === 0 && (report.unansweredDeviceIds.length === 0 || notAssessed);
     quality = report.unansweredDeviceIds.length
-      ? { status: 'partial', reason: `unsettled-devices:${report.unansweredDeviceIds.join(',')}`, ...(report.retainedLegacyIssues ? { retainedLegacyIssues: report.retainedLegacyIssues } : {}) }
+      ? { status: 'partial', reason: `${notAssessed ? 'not-assessed-without-decision-model' : 'unsettled-devices'}:${report.unansweredDeviceIds.join(',')}`,
+        ...(report.retainedLegacyIssues ? { retainedLegacyIssues: report.retainedLegacyIssues } : {}) }
       : report.retainedLegacyIssues
         ? { status: 'partial', reason: 'legacy-reviewed-state-retained', retainedLegacyIssues: report.retainedLegacyIssues }
         : { status: 'refreshed' };
@@ -195,7 +203,7 @@ export async function runHomeGraphSyncEnrichment(input: {
   const createdIssues = store.listIssuesInSpace(spaceId).filter((issue) => issue.status === 'open' && !issuesBefore.has(issue.id)).length;
   // Only a complete pass is remembered as done; a held or partial one runs again
   // next sync. Settled answers are kept either way, so that rerun asks only what is new.
-  const complete = quality.status === 'refreshed' && generated.errors.length === 0 && !generated.truncated && !signal?.aborted;
+  const complete = qualityComplete && generated.errors.length === 0 && !generated.truncated && !signal?.aborted;
   const answers = signal?.aborted ? undefined : qualityAnswers.toMetadata();
   if (complete || answers) {
     const snapshotSource = currentInstallationSnapshotSource(store, spaceId, installationId);
@@ -203,11 +211,21 @@ export async function runHomeGraphSyncEnrichment(input: {
       await store.upsertSource({ id: snapshotSource.id, connectorId: snapshotSource.connectorId, sourceType: snapshotSource.sourceType,
         status: snapshotSource.status, metadata: {
           ...(answers ? { homeGraphQualityAnswers: answers } : {}),
-          ...(complete ? { homeGraphEnrichmentInputs: homeGraphEnrichmentInputs(store, spaceId) } : {}),
+          ...(complete ? { homeGraphEnrichmentInputs: homeGraphEnrichmentInputsKey(store, spaceId) } : {}),
         } });
     }
   }
   return { quality, generated, autoLink: autoLink.counts, createdIssues };
+}
+
+/**
+ * The enrichment inputs, marked when the pass ran without a decision model: an
+ * unchanged home is skipped only by a pass of the same kind, so once a decision
+ * model is in use the next sync reads the quality and rebuilds the pages checked.
+ */
+function homeGraphEnrichmentInputsKey(store: KnowledgeStore, spaceId: string): string {
+  const inputs = homeGraphEnrichmentInputs(store, spaceId);
+  return isClassicOperation() ? `without-decision-model:${inputs}` : inputs;
 }
 
 /**

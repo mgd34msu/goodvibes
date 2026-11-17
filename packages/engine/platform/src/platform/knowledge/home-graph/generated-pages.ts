@@ -3,7 +3,7 @@ import { createHomeGraphSourceIdentityPlanner } from './source-identity-plan.js'
 import { createHomeGraphNodeIdentityPlanner, prepareHomeGraphNodeIdentity } from './node-identity-plan.js';
 import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
-import { withOrWithoutDecisionModel } from '../decision-policy.js';
+import { KNOWLEDGE_WITHOUT_DECISION_MODEL, withOrWithoutDecisionModel } from '../decision-policy.js';
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
 import { createSemanticFactIdentityPlanner } from '../semantic/identity-plan.js';
 import { readHomeGraphPagePriorities } from './page-priority.js';
@@ -90,17 +90,19 @@ interface DevicePassportSourceLookup {
 type HomeGraphStateSnapshot = ReturnType<typeof readHomeGraphServingState>;
 type ExtractionBySourceId = ReadonlyMap<string, ReturnType<KnowledgeStore['getExtractionBySourceId']>>;
 
+/**
+ * The pages a sync keeps current. Without a decision model each page is built
+ * from the stored records and says it was not checked; the summary says so too.
+ */
 export async function generateAutomaticHomeGraphPages(
   context: HomeGraphPageContext & { readonly input: HomeGraphSnapshotInput },
 ): Promise<HomeGraphGeneratedPagesSummary> {
-  if (isClassicOperation()) return classicGeneratedPagesSummary();
   return generateHomeGraphPagesForCurrentState(context, context.input.pageAutomation ?? {});
 }
 
 export async function refreshAutomaticHomeGraphPages(
   context: HomeGraphPageContext,
 ): Promise<HomeGraphGeneratedPagesSummary> {
-  if (isClassicOperation()) return classicGeneratedPagesSummary();
   return generateHomeGraphPagesForCurrentState(context, {});
 }
 
@@ -117,7 +119,8 @@ async function generateHomeGraphPagesForCurrentState(
     ? Math.trunc(maxRunMs) : 0;
   const timer = budget > 0 ? setTimeout(abort, budget) : undefined;
   try {
-    return await generateHomeGraphPagesWithinBudget({ ...context, signal: controller.signal }, options);
+    // One operation for the run, so the pages after a Hybrid fallback are built without the model.
+    return await withConfiguredDecisionModelPolicy(() => generateHomeGraphPagesWithinBudget({ ...context, signal: controller.signal }, options));
   } finally {
     clearTimeout(timer);
     context.signal?.removeEventListener('abort', abort);
@@ -131,9 +134,9 @@ async function generateHomeGraphPagesWithinBudget(
   const effectiveOptions = options ?? {};
   const summary = createGeneratedPagesSummary();
   if (effectiveOptions.enabled === false) return summary;
-  // An automatic run does not go on rebuilding pages without a model: when the
-  // set model fails mid-run under Hybrid the remaining pages wait for the next run.
-  let withoutModel = false;
+  // Without a decision model, from the start or after the set model failed
+  // mid-run under Hybrid, each remaining page is built unchecked from the stored
+  // records (refreshHomeGraphDevicePassport and generateHomeGraphRoomPage take that path).
   const deadlineAt = typeof effectiveOptions.maxRunMs === 'number' && Number.isFinite(effectiveOptions.maxRunMs) && effectiveOptions.maxRunMs > 0
     ? Date.now() + Math.trunc(effectiveOptions.maxRunMs)
     : undefined;
@@ -161,8 +164,7 @@ async function generateHomeGraphPagesWithinBudget(
     // run; each passport reads only its own device's rows from them.
     const sourceLookup = buildDevicePassportSourceLookup(state.sources, state.nodes, state.edges);
     for (const [index, device] of devices.entries()) {
-      withoutModel ||= isClassicOperation();
-      if (context.signal?.aborted || deadlineReached(deadlineAt) || withoutModel) {
+      if (context.signal?.aborted || deadlineReached(deadlineAt)) {
         summary.deferredDevicePassports += devices.length - index;
         break;
       }
@@ -201,8 +203,7 @@ async function generateHomeGraphPagesWithinBudget(
     const rooms = limitRecords(allRooms, effectiveOptions.maxRoomPages);
     summary.deferredRoomPages += Math.max(0, allRooms.length - rooms.length);
     for (const [index, room] of rooms.entries()) {
-      withoutModel ||= isClassicOperation();
-      if (context.signal?.aborted || deadlineReached(deadlineAt) || withoutModel) {
+      if (context.signal?.aborted || deadlineReached(deadlineAt)) {
         summary.deferredRoomPages += rooms.length - index;
         break;
       }
@@ -234,8 +235,11 @@ async function generateHomeGraphPagesWithinBudget(
   }
 
   summary.truncated = summary.deferredDevicePassports > 0 || summary.deferredRoomPages > 0;
-  return withoutModel ? { ...summary, provenance: 'classic', reason: 'decision-model-disabled' } : summary;
+  // Running without a model stays so for the rest of the operation, so this says whether any page of the run was built unchecked.
+  return isClassicOperation() ? { ...summary, provenance: 'classic', reason: GENERATED_PAGES_WITHOUT_DECISION_MODEL } : summary;
 }
+
+const GENERATED_PAGES_WITHOUT_DECISION_MODEL = `Pages built while ${KNOWLEDGE_WITHOUT_DECISION_MODEL}: each lists its sources as stored and shows facts as not checked, and says so. The next sync with a decision model in use rebuilds them checked.`;
 
 function deadlineReached(deadlineAt: number | undefined): boolean {
   return typeof deadlineAt === 'number' && Date.now() >= deadlineAt;
@@ -866,10 +870,6 @@ function projectionArtifact(artifact: ArtifactDescriptor): HomeGraphProjectionRe
     createdAt: artifact.createdAt,
     metadata: artifact.metadata,
   };
-}
-
-export function classicGeneratedPagesSummary(): HomeGraphGeneratedPagesSummary {
-  return { ...createGeneratedPagesSummary(), provenance: 'classic', reason: 'decision-model-disabled' };
 }
 
 function createGeneratedPagesSummary(): {

@@ -410,7 +410,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.get',
     title: 'Get Shared Session',
-    description: 'Return metadata for a shared session.',
+    description: 'Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.',
     category: 'sessions',
     scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}' },

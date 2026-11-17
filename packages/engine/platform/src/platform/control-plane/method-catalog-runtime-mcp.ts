@@ -18,6 +18,9 @@ import {
 } from './method-catalog-shared.js';
 import { enumSchema, nullableSchema } from './operator-contract-schemas-shared.js';
 
+/** Header name to value; every value is a string. */
+const STRING_RECORD_SCHEMA: Record<string, unknown> = { type: 'object', additionalProperties: STRING_SCHEMA };
+
 export const MCP_SCOPE_SCHEMA = enumSchema(['project', 'global']);
 /**
  * A server to write: `command` starts a stdio process, `url` names a remote
@@ -31,6 +34,8 @@ export const MCP_SERVER_CONFIG_SCHEMA = branchedSchema(objectSchema({
   args: arraySchema(STRING_SCHEMA),
   env: objectSchema({}, [], { additionalProperties: true }),
   envKeys: arraySchema(STRING_SCHEMA),
+  // Request headers sent to a url server (an Authorization header, for one); refused on a command server.
+  headers: STRING_RECORD_SCHEMA,
   role: nullableSchema(STRING_SCHEMA),
   trustMode: nullableSchema(STRING_SCHEMA),
   allowedPaths: arraySchema(STRING_SCHEMA),
@@ -45,19 +50,20 @@ export const MCP_CONFIG_SOURCE_SCHEMA = objectSchema({
   path: STRING_SCHEMA,
   writable: BOOLEAN_SCHEMA,
 }, ['scope', 'kind', 'path', 'writable']);
-/** `command` is null for an HTTP server and `url` is null for a stdio one; credentials in `url` and `args` read as `***` here. */
+/** `command` is null for an HTTP server and `url` is null for a stdio one; credentials in `url` and `args` read as `***` here, and env and header values are named only. */
 export const MCP_CONFIG_SERVER_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
   command: nullableSchema(STRING_SCHEMA),
   url: nullableSchema(STRING_SCHEMA),
   args: arraySchema(STRING_SCHEMA),
   envKeys: arraySchema(STRING_SCHEMA),
+  headerKeys: arraySchema(STRING_SCHEMA),
   role: nullableSchema(STRING_SCHEMA),
   trustMode: nullableSchema(STRING_SCHEMA),
   allowedPaths: arraySchema(STRING_SCHEMA),
   allowedHosts: arraySchema(STRING_SCHEMA),
   source: MCP_CONFIG_SOURCE_SCHEMA,
-}, ['name', 'command', 'url', 'args', 'envKeys', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'source']);
+}, ['name', 'command', 'url', 'args', 'envKeys', 'headerKeys', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'source']);
 export const MCP_RELOAD_SERVER_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
   action: enumSchema(['added', 'changed', 'removed', 'unchanged']),
@@ -74,7 +80,7 @@ export const MCP_CONFIG_RESPONSE_SCHEMA = objectSchema({
   locations: arraySchema(MCP_CONFIG_SOURCE_SCHEMA),
   servers: arraySchema(MCP_CONFIG_SERVER_SCHEMA),
 }, ['locations', 'servers']);
-/** The redacted server record plus its env VALUES. Admin-only, see mcp.servers.reveal. */
+/** The redacted server record plus its env and header VALUES. Admin-only, see mcp.servers.reveal. */
 export const MCP_REVEALED_SERVER_SCHEMA = objectSchema({
   name: STRING_SCHEMA,
   command: nullableSchema(STRING_SCHEMA),
@@ -82,12 +88,14 @@ export const MCP_REVEALED_SERVER_SCHEMA = objectSchema({
   args: arraySchema(STRING_SCHEMA),
   envKeys: arraySchema(STRING_SCHEMA),
   env: objectSchema({}, [], { additionalProperties: true }),
+  headerKeys: arraySchema(STRING_SCHEMA),
+  headers: STRING_RECORD_SCHEMA,
   role: nullableSchema(STRING_SCHEMA),
   trustMode: nullableSchema(STRING_SCHEMA),
   allowedPaths: arraySchema(STRING_SCHEMA),
   allowedHosts: arraySchema(STRING_SCHEMA),
   source: MCP_CONFIG_SOURCE_SCHEMA,
-}, ['name', 'command', 'url', 'args', 'envKeys', 'env', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'source']);
+}, ['name', 'command', 'url', 'args', 'envKeys', 'env', 'headerKeys', 'headers', 'role', 'trustMode', 'allowedPaths', 'allowedHosts', 'source']);
 export const MCP_REVEAL_RESPONSE_SCHEMA = objectSchema({
   locations: arraySchema(MCP_CONFIG_SOURCE_SCHEMA),
   servers: arraySchema(MCP_REVEALED_SERVER_SCHEMA),

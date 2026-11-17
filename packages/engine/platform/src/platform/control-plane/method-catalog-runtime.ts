@@ -114,7 +114,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'mcp.config.get',
     title: 'MCP Effective Config',
-    description: 'Return effective MCP config from global, external, and project sources. Environment values are redacted to envKeys.',
+    description: 'Return effective MCP config from global, external, and project sources. Environment and request-header values are redacted to envKeys and headerKeys; credentials in url and args read as ***.',
     category: 'mcp',
     scopes: ['read:mcp'],
     http: { method: 'GET', path: '/api/mcp/config' },
@@ -136,7 +136,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'mcp.servers.reveal',
     title: 'MCP Servers Reveal',
-    description: 'Return effective MCP config with environment VALUES included, not just envKeys. Admin only, the redacted mcp.config.get view is what every other caller should use.',
+    description: 'Return effective MCP config with environment and request-header VALUES (env, headers) and the unredacted url and args included, so an edit can resend them. Admin only, the redacted mcp.config.get view is what every other caller should use.',
     category: 'mcp',
     scopes: ['read:mcp'],
     access: 'admin',

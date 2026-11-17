@@ -49,7 +49,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
   const MCP_TRUST_MODES = ['constrained', 'ask-on-risk', 'allow-all', 'blocked'] as const;
   const MCP_COMMAND_TRUST_MODES = ['constrained', 'ask-on-risk', 'blocked'] as const;
   const MCP_ADD_COMMAND_USAGE =
-    '/mcp add <name> <command> ... --yes; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked, --env KEY=VALUE, --path <path>, --host <host>';
+    '/mcp add <name> <command|https-url> ... --yes; options: --scope project|global, --role <role>, --trust constrained|ask-on-risk|blocked, --env KEY=VALUE (command servers), --header Name=Value (url servers), --path <path>, --host <host>';
   const MCP_TRUST_COMMAND_USAGE = '/mcp trust <server> <constrained|ask-on-risk|blocked|config> --yes';
   const MCP_ROLE_COMMAND_USAGE = '/mcp role <server> <general|docs|filesystem|git|database|browser|automation|ops|remote|config> --yes';
   interface ParsedMcpAddArgs {
@@ -123,16 +123,35 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
     }
     return value;
   }
+  /** Where a url server is, without the userinfo or query values a credential can ride in. */
+  function displayMcpUrl(value: string): string {
+    try {
+      const parsed = new URL(value);
+      return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return '(url)';
+    }
+  }
+  function describeMcpEndpoint(server: McpServerConfig): string {
+    if (server.url) {
+      const headerKeys = Object.keys(server.headers ?? {});
+      return `url ${displayMcpUrl(server.url)}${headerKeys.length ? ` headerKeys=${headerKeys.join(',')}` : ''}`;
+    }
+    const envKeys = Object.keys(server.env ?? {});
+    return `command ${server.command ?? ''}${server.args?.length ? ` ${maskLaunchArgs(server.args).join(' ')}` : ''}${envKeys.length ? ` envKeys=${envKeys.join(',')}` : ''}`;
+  }
   function parseAddServerArgs(args: string[]): ParsedMcpAddArgs {
     const name = args[1]?.trim();
-    const command = args[2]?.trim();
-    if (!name || !command) {
+    const target = args[2]?.trim();
+    if (!name || !target) {
       throw new Error(`Usage: ${MCP_ADD_COMMAND_USAGE}`);
     }
     const nameError = validateServerName(name);
     if (nameError) throw new Error(nameError);
+    const url = /^https?:\/\//i.test(target) ? target : undefined;
     const serverArgs: string[] = [];
     const env: Record<string, string> = {};
+    const headers: Record<string, string> = {};
     const allowedPaths: string[] = [];
     const allowedHosts: string[] = [];
     let role: McpServerConfig['role'];
@@ -182,6 +201,14 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
         index += 1;
         continue;
       }
+      if (token === '--header') {
+        const value = readFlagValue(tokens, index, token);
+        const eq = value.indexOf('=');
+        if (eq <= 0) throw new Error('MCP headers must use Name=Value, for example --header "Authorization=Bearer <token>".');
+        headers[value.slice(0, eq).trim()] = value.slice(eq + 1);
+        index += 1;
+        continue;
+      }
       if (token === '--path') {
         allowedPaths.push(readFlagValue(tokens, index, token));
         index += 1;
@@ -194,13 +221,20 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       }
       serverArgs.push(token);
     }
+    if (url && (serverArgs.length > 0 || Object.keys(env).length > 0)) {
+      throw new Error('A url MCP server takes no launch arguments or --env; send credentials with --header Name=Value.');
+    }
+    if (!url && Object.keys(headers).length > 0) {
+      throw new Error('--header is sent only to a url (HTTP) MCP server; this server has a command. Use --env for a command server.');
+    }
     return {
       scope,
       server: {
         name,
-        command,
+        ...(url ? { url } : { command: target }),
         ...(serverArgs.length > 0 ? { args: serverArgs } : {}),
         ...(Object.keys(env).length > 0 ? { env } : {}),
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
         ...(role ? { role } : {}),
         ...(trustMode ? { trustMode } : {}),
         ...(allowedPaths.length > 0 ? { allowedPaths } : {}),
@@ -218,6 +252,8 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
       name: 'mcp',
       effect: 'mixed',
       aliases: [],
+      // Env values and request headers carry credentials; the input history keeps neither.
+      secretArgs: { flags: ['--env', '--header'] },
       description: 'Manage MCP servers and their tools',
       ...(policy.hidden ? { hidden: true } : {}),
       usage: '[servers|review|tools [<server>]|config|add|remove|reload|auth-review|repair [server]]',
@@ -491,7 +527,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
                 `  path ${result.path}`,
                 ...(parsedAdd.scope === 'global' ? ['  global config'] : []),
                 `  Runtime reload: ${connected ? 'connected' : 'server saved; connection needs attention'} (+${result.reload.added} ~${result.reload.changed} -${result.reload.removed}, unchanged ${result.reload.unchanged})`,
-                `  command ${parsedAdd.server.command}${parsedAdd.server.args?.length ? ` ${maskLaunchArgs(parsedAdd.server.args).join(' ')}` : ''}`,
+                `  ${describeMcpEndpoint(parsedAdd.server)}`,
                 '  next /mcp tools',
               ].join('\n'),
             );
@@ -570,8 +606,7 @@ export function createMcpRuntimeCommands<Context extends McpCommandContext>(
                 `  effective servers ${effective.servers.length}`,
                 ...effective.servers.map((entry) => {
                   const server = entry.server;
-                  const envKeys = Object.keys(server.env ?? {});
-                  return `  - ${server.name}: ${server.command}${server.args?.length ? ` ${maskLaunchArgs(server.args).join(' ')}` : ''}  origin ${entry.source.scope}/${entry.source.kind}${envKeys.length ? ` envKeys=${envKeys.join(',')}` : ''}`;
+                  return `  - ${server.name}: ${describeMcpEndpoint(server)}  origin ${entry.source.scope}/${entry.source.kind}`;
                 }),
                 '',
                 `Add or update from inside ${wording.host} with explicit confirmation`,

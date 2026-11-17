@@ -1,4 +1,4 @@
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { randomUUID } from 'node:crypto';
 import { OwnedWork } from '../../utils/owned-work.js';
 import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramLegacyCursorHandle } from './offset-store.js';
 import type { TelegramCursorPreview } from './cursor-migration-data.js';
@@ -49,7 +49,7 @@ export class TelegramCursorMigration {
         if (!prepared) return Object.freeze({ state: 'not-needed', message: 'No unbound cursor needs migration for the selected bot.' });
         const now = (this.deps.now ?? Date.now)();
         if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + 300_000)) throw new Error();
-        const view = Object.freeze({ state: 'unbound' as const, previewId: `telegram-cursor:${opaqueUuid()}`,
+        const view = Object.freeze({ state: 'unbound' as const, previewId: `telegram-cursor:${randomUUID()}`,
           accountId: identity.id, username: identity.username, offset: prepared.offset, updatedAt: prepared.updatedAt, expiresAtMs: now + 300_000 });
         this.preparation = { view, store, handle: prepared.handle, current: () => { current(); assertIdentity();
           const at = (this.deps.now ?? Date.now)(); if (!Number.isSafeInteger(at) || at < now || at >= view.expiresAtMs) throw new TelegramOffsetStoreError('unavailable'); } };

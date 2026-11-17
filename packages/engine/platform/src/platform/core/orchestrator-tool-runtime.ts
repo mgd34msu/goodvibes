@@ -4,7 +4,7 @@ import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
 import { currentExecutionMode, isYoloExecution, withExecutionMode } from '../gate/execution-context.js';
-import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
+import { randomUUID } from 'node:crypto';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { UnknownPreparedToolError } from '../tools/preparation-error.js';
 import type { PreparedToolCall } from '../tools/registry.js';
@@ -89,7 +89,7 @@ function autonomousInvocationSource(manager: object, session: string, turn: stri
     while (turns.size > RETAINED_TURNS_PER_SESSION) turns.delete(turns.keys().next().value!);
   }
   let source = calls.get(call);
-  if (!source) { source = opaqueUuid(); calls.set(call, source); }
+  if (!source) { source = randomUUID(); calls.set(call, source); }
   return source;
 }
 

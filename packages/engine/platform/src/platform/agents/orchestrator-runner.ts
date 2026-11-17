@@ -65,6 +65,7 @@ import { claimStartedProcesses, cleanupLeakedProcesses, disposeSession, finishCa
 import { selfBoundedCallDeadline } from './tool-call-liveness.js';
 import { withCallingAgent } from './calling-agent.js';
 import { openAgentInlet, type AgentInlet } from './agent-inlets.js';
+import { sharedSessionOfContext } from './agent-owner-questions.js';
 import { createWorkerContextAccountingSource } from './worker-context-accounting.js';
 import { maxParallelToolCalls, planToolBatch, runBounded, toolCallLane } from '../core/tool-batch.js';
 
@@ -549,8 +550,13 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     // closure's type is non-nullable without a runtime assertion.
     const activeConversation = conversation;
     context.registerConversationSource?.(record.id, () => activeConversation.getMessageSnapshot());
-    // The owner's answer to a question this agent asked reaches it on its next request.
-    const inlet = openAgentInlet(record.id, activeConversation.hostInstructions, () => record.status === 'running');
+    // The owner's answer to a question this agent asked reaches it on its next request. A woken run
+    // takes what waited for it; a channel's turn takes answers an earlier turn of its session asked for.
+    const answersSession = sharedSessionOfContext(record.context);
+    const inlet = openAgentInlet(record.id, activeConversation.hostInstructions, () => record.status === 'running', {
+      resumed: wake !== undefined,
+      ...(answersSession !== undefined ? { session: answersSession } : {}),
+    });
     ownerAnswers = inlet;
 
     const spawnPromptContext = { ...context, projectFramework };

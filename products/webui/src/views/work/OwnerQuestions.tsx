@@ -74,7 +74,7 @@ const DELIVERY_TONE: Record<AnswerDelivery['state'], StatusTone> = { delivered: 
 
 function deliveryLabel(delivery: AnswerDelivery): string {
   if (delivery.state === 'delivered') return `Delivered to ${delivery.to}`;
-  if (delivery.state === 'waiting') return `Waiting for ${delivery.to} to be opened`;
+  if (delivery.state === 'waiting') return `Waiting for ${delivery.to}`;
   return `Not deliverable to ${delivery.to}`;
 }
 
@@ -179,7 +179,7 @@ export function OwnerQuestions({ enabled }: { enabled: boolean }) {
       if (!outcome.applied) {
         toast({ title: 'Not sent', description: [outcome.refusal.reason, outcome.refusal.next?.[0]].filter(Boolean).join(' '), tone: 'warning' });
       } else if (delivery?.state === 'undeliverable') {
-        toast({ title: 'Answer saved, not deliverable', description: `Not deliverable to ${delivery.to}: ${delivery.reason ?? 'it has ended.'}`, tone: 'warning' });
+        toast({ title: 'Answer saved, not deliverable', description: `Not deliverable to ${delivery.to}: ${delivery.reason ?? 'it cannot be opened again.'}`, tone: 'warning' });
       } else if (delivery?.state === 'waiting') {
         toast({ title: 'Answer saved', description: delivery.reason ?? `It will be delivered when ${delivery.to} is next opened.`, tone: 'success' });
       } else {

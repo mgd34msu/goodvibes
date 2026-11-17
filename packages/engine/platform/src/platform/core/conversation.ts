@@ -200,8 +200,22 @@ export class ConversationManager {
    * saved, not shown, and it does not move the message revision.
    */
   readonly hostInstructions: HostInstructions = new HostInstructionChannel();
+  /** Run as each provider request is assembled, before the host channel is read (see `onRequest`). */
+  readonly #requestHooks = new Set<() => void>();
 
   constructor() {}
+
+  /**
+   * Run `hook` as each provider request is assembled, before the host channel
+   * is read, so something the host learned since the last request (the owner's
+   * answer to a question this session asked) rides this one. A hook must be
+   * cheap and must not throw; a throw is logged and the request goes on.
+   * Returns the function that removes it.
+   */
+  onRequest(hook: () => void): () => void {
+    this.#requestHooks.add(hook);
+    return () => { this.#requestHooks.delete(hook); };
+  }
 
   /** Every change to the message history (append, stream update, undo, branch switch, compaction, reset) as a revision source. */
   get revisionSource(): RevisionSource { return this.#revisionSource; }
@@ -262,6 +276,13 @@ export class ConversationManager {
    * `hostInstructions.delivered()` after the provider accepted it.
    */
   public getMessagesForRequest(): ProviderMessage[] {
+    for (const hook of this.#requestHooks) {
+      try {
+        hook();
+      } catch (error) {
+        logger.warn('ConversationManager: a request hook failed; the request goes on without it', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     return withHostMessage(this.getMessagesForLLM(), this.hostInstructions.render());
   }
 

@@ -1,25 +1,40 @@
 /**
- * The owner inbox's own items: questions an agent left, channel claims,
- * purchase windows and queued actions. Approvals are not stored here; they stay
- * in the approval broker and the inbox reads them from it.
+ * The owner inbox's own items: questions an agent or a session left, channel
+ * claims, purchase windows and queued actions. Approvals are not stored here;
+ * they stay in the approval broker and the inbox reads them from it.
  *
- * Kept on a record log: a post, an answer, a withdrawal and what became of an
- * answer (handed to its asker, or not deliverable) are each one appended line, synced before the call returns because the person or agent
- * on the other side is told it is saved. The latest state of every item is
- * folded in memory at open, so a list is a map walk and an answer is one
- * append. One process (the daemon) writes the file.
+ * One SQLite file per owner home (`~/.goodvibes/shared/owner-inbox.sqlite`),
+ * opened directly by every process that asks or answers: the daemon, each
+ * terminal app (TUI, Agent, headless runs) and the agents they run. A post, an
+ * answer, a withdrawal and what became of an answer are each one row write in
+ * one transaction, so two processes answering at once cannot both win, and a
+ * process sees another's change on its next read. `revision()` is SQLite's own
+ * change counter (one statement, no file read): a reader compares one integer
+ * to learn whether anything changed, and re-reads the rows only when it did.
  *
- * First answer wins: an answer to an item that is no longer open changes
- * nothing and reports who answered it.
+ * First answer wins: an answer is written only while the row is still open; a
+ * later one changes nothing and reports who answered it.
  */
 import { randomUUID } from 'node:crypto';
-import { openRecordLog, type RecordLog } from '../state/record-log.js';
+import type { Database } from 'bun:sqlite';
+import { openSqliteFile, type SqliteFile, type SqliteMigration } from '../state/sqlite-file.js';
 import type { RevisionSource } from '../utils/revision.js';
 import { logger } from '../utils/logger.js';
 import type { OwnerAnswer, OwnerAnswerSource, OwnerItemKind } from './owner-inbox.js';
 
 /** Item kinds the question store holds; approvals live in the approval broker. */
 export type StoredOwnerItemKind = Exclude<OwnerItemKind, 'approval'>;
+
+/**
+ * Metadata key naming the session that asked a question (a terminal app's
+ * conversation, a headless run, a hosted session, a channel's shared session):
+ * the answer goes back into that session's conversation, now when it is open,
+ * otherwise when it is next opened.
+ */
+export const OWNER_ANSWER_SESSION_METADATA = 'answerSession';
+
+/** Metadata key naming the agent that asked: it takes the answer on its next model request while it runs. */
+export const OWNER_ANSWER_AGENT_METADATA = 'answerAgent';
 
 export interface StoredOwnerItem {
   readonly id: string;
@@ -41,7 +56,7 @@ export interface StoredOwnerItem {
   readonly metadata?: Readonly<Record<string, string | number | boolean>> | undefined;
 }
 
-/** What became of an answer: handed to the agent or session that asked, or not deliverable and why. */
+/** What became of an answer: taken by the agent or session that asked, or not deliverable and why. */
 export interface StoredAnswerDelivery {
   readonly state: 'delivered' | 'undeliverable';
   readonly reason?: string | undefined;
@@ -59,19 +74,68 @@ export interface StoredOwnerEntry {
   readonly updatedAt: number;
 }
 
-type QuestionLogRecord =
-  | { readonly v: 1; readonly op: 'post'; readonly item: StoredOwnerItem }
-  | { readonly v: 1; readonly op: 'answer'; readonly id: string; readonly answer: OwnerAnswer; readonly by: OwnerAnswerSource; readonly at: number }
-  | { readonly v: 1; readonly op: 'withdraw'; readonly id: string; readonly reason: string; readonly at: number }
-  | { readonly v: 1; readonly op: 'delivery'; readonly id: string; readonly state: StoredAnswerDelivery['state']; readonly reason?: string | undefined; readonly at: number };
-
 export type QuestionStoreAnswerResult =
   | { readonly applied: true; readonly entry: StoredOwnerEntry }
   | { readonly applied: false; readonly entry: StoredOwnerEntry };
 
-/** Closed items kept for the history view; open items are never dropped. */
+/** Whose questions to read: one session's, one agent's, or both. */
+export interface QuestionAskerScope {
+  readonly session?: string | undefined;
+  readonly agent?: string | undefined;
+}
+
+/** Where the one owner inbox store of a home is. */
+export function ownerInboxStorePath(shellPaths: { resolveUserPath(...segments: string[]): string }): string {
+  return shellPaths.resolveUserPath('shared', 'owner-inbox.sqlite');
+}
+
+/** Closed items kept for the history view; open items and answers still waiting for their asker are never dropped. */
 const MAX_CLOSED_ENTRIES = 500;
 const STORED_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action']);
+
+const MIGRATIONS: readonly SqliteMigration[] = [{
+  toVersion: 1,
+  up: (db: Database) => {
+    db.run(`CREATE TABLE owner_items (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      item_key TEXT,
+      answer_session TEXT,
+      answer_agent TEXT,
+      item TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      answer TEXT,
+      answered_by TEXT,
+      withdrawn_reason TEXT,
+      closed_at INTEGER,
+      delivery_state TEXT,
+      delivery_reason TEXT,
+      delivery_at INTEGER,
+      updated_at INTEGER NOT NULL
+    )`);
+    db.run('CREATE INDEX owner_items_open_key ON owner_items(kind, item_key) WHERE closed_at IS NULL AND item_key IS NOT NULL');
+    db.run('CREATE INDEX owner_items_answer_session ON owner_items(answer_session) WHERE answer_session IS NOT NULL');
+    db.run('CREATE INDEX owner_items_answer_agent ON owner_items(answer_agent) WHERE answer_agent IS NOT NULL');
+    db.run('CREATE INDEX owner_items_closed_at ON owner_items(closed_at) WHERE closed_at IS NOT NULL');
+  },
+}];
+
+interface ItemRow {
+  readonly id: string;
+  readonly item: string;
+  readonly answer: string | null;
+  readonly answered_by: string | null;
+  readonly withdrawn_reason: string | null;
+  readonly closed_at: number | null;
+  readonly delivery_state: string | null;
+  readonly delivery_reason: string | null;
+  readonly delivery_at: number | null;
+  readonly updated_at: number;
+}
+
+const ROW_COLUMNS = 'id, item, answer, answered_by, withdrawn_reason, closed_at, delivery_state, delivery_reason, delivery_at, updated_at';
+/** Rows an asker still has to take: open questions, and answers no one has taken or settled. */
+const UNDELIVERED = '(closed_at IS NULL OR (answer IS NOT NULL AND delivery_state IS NULL))';
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -108,29 +172,9 @@ function readSource(value: unknown): OwnerAnswerSource {
   return value as unknown as OwnerAnswerSource;
 }
 
-function decodeRecord(line: string): QuestionLogRecord {
-  const value: unknown = JSON.parse(line);
-  if (!isRecordObject(value) || value['v'] !== 1) throw new Error('unknown record version');
-  switch (value['op']) {
-    case 'post':
-      return { v: 1, op: 'post', item: readStoredItem(value['item']) };
-    case 'answer':
-      if (typeof value['id'] !== 'string' || typeof value['at'] !== 'number') throw new Error('malformed answer');
-      return { v: 1, op: 'answer', id: value['id'], answer: readAnswer(value['answer']), by: readSource(value['by']), at: value['at'] };
-    case 'withdraw':
-      if (typeof value['id'] !== 'string' || typeof value['reason'] !== 'string' || typeof value['at'] !== 'number') throw new Error('malformed withdrawal');
-      return { v: 1, op: 'withdraw', id: value['id'], reason: value['reason'], at: value['at'] };
-    case 'delivery':
-      if (typeof value['id'] !== 'string' || (value['state'] !== 'delivered' && value['state'] !== 'undeliverable')
-        || !optionalString(value['reason']) || typeof value['at'] !== 'number') throw new Error('malformed delivery');
-      return {
-        v: 1, op: 'delivery', id: value['id'], state: value['state'],
-        ...(typeof value['reason'] === 'string' ? { reason: value['reason'] } : {}),
-        at: value['at'],
-      };
-    default:
-      throw new Error('unknown record operation');
-  }
+function metadataText(item: Pick<StoredOwnerItem, 'metadata'>, key: string): string | null {
+  const value = item.metadata?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 function isClosed(entry: StoredOwnerEntry): boolean {
@@ -140,11 +184,9 @@ function isClosed(entry: StoredOwnerEntry): boolean {
 export class QuestionStore implements RevisionSource {
   readonly id = 'owner questions';
   readonly #path: string;
-  #log: RecordLog<QuestionLogRecord> | null = null;
-  #entries = new Map<string, StoredOwnerEntry>();
-  /** Open item id per `${kind}\u0000${key}`. */
-  #openKeys = new Map<string, string>();
-  #revision = 0;
+  #file: SqliteFile | null = null;
+  /** Every row as of `revision`; read again only when the revision moved. */
+  #snapshot: { readonly revision: number; readonly entries: ReadonlyMap<string, StoredOwnerEntry> } | null = null;
 
   constructor(options: { readonly path: string }) {
     this.#path = options.path;
@@ -154,152 +196,224 @@ export class QuestionStore implements RevisionSource {
     return this.#path;
   }
 
-  /** Moves on every post, answer, withdrawal and delivery report. */
+  /** Moves on every post, answer, withdrawal and delivery, made by this process or any other. */
   revision(): number {
-    return this.#revision;
+    return this.#open().revision();
   }
 
   get(id: string): StoredOwnerEntry | undefined {
-    this.#open();
-    return this.#entries.get(id);
+    return this.#entries().get(id);
   }
 
   has(id: string): boolean {
-    this.#open();
-    return this.#entries.has(id);
+    return this.#entries().has(id);
   }
 
   entries(): IterableIterator<StoredOwnerEntry> {
-    this.#open();
-    return this.#entries.values();
+    return this.#entries().values();
   }
 
-  /** The open item a producer already posted under `key`, if any. */
-  findOpen(kind: StoredOwnerItemKind, key: string): StoredOwnerEntry | undefined {
-    this.#open();
-    const id = this.#openKeys.get(`${kind}\u0000${key}`);
-    return id === undefined ? undefined : this.#entries.get(id);
+  /**
+   * One asker's open questions and the answers it has not taken yet: what a
+   * session or agent picks up when it is opened again. One indexed read.
+   */
+  undelivered(scope: QuestionAskerScope): StoredOwnerEntry[] {
+    const file = this.#open();
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (scope.session !== undefined) { clauses.push('answer_session = ?'); params.push(scope.session); }
+    if (scope.agent !== undefined) { clauses.push('answer_agent = ?'); params.push(scope.agent); }
+    if (clauses.length === 0) return [];
+    const rows = file.db.query<ItemRow, string[]>(
+      `SELECT ${ROW_COLUMNS} FROM owner_items WHERE (${clauses.join(' OR ')}) AND ${UNDELIVERED}`,
+    ).all(...params);
+    return rows.map((row) => this.#decode(row)).filter((entry): entry is StoredOwnerEntry => entry !== null);
   }
 
-  /** Append a new item. The caller validated it; `id` and `createdAt` are assigned here. */
-  post(item: Omit<StoredOwnerItem, 'id' | 'createdAt'>, now: number): StoredOwnerEntry {
-    const log = this.#open();
-    // Short enough to type as an answer target; 48 random bits is ample for one owner's inbox.
-    const record: QuestionLogRecord = { v: 1, op: 'post', item: { ...item, id: `q-${randomUUID().replace(/-/g, '').slice(0, 12)}`, createdAt: now } };
-    log.append(record);
-    this.#apply(record);
-    return this.#entry(record.item.id);
+  /**
+   * Append a new item, or return the open one a producer already posted under
+   * the same key. `stillOpen` says whether that one still counts (an expired
+   * item does not). Checked and written in one transaction, so two processes
+   * posting the same key at once ask once.
+   */
+  post(
+    item: Omit<StoredOwnerItem, 'id' | 'createdAt'>,
+    now: number,
+    stillOpen: (entry: StoredOwnerEntry) => boolean,
+  ): { readonly created: boolean; readonly entry: StoredOwnerEntry } {
+    const file = this.#open();
+    return file.tx(() => {
+      if (item.key !== undefined) {
+        const rows = file.db.query<ItemRow, [string, string]>(
+          `SELECT ${ROW_COLUMNS} FROM owner_items WHERE kind = ? AND item_key = ? AND closed_at IS NULL`,
+        ).all(item.kind, item.key);
+        for (const row of rows) {
+          const existing = this.#decode(row);
+          if (existing && stillOpen(existing)) return { created: false, entry: existing };
+        }
+      }
+      // Short enough to type as an answer target; 48 random bits is ample for one owner's inbox.
+      const stored: StoredOwnerItem = { ...item, id: `q-${randomUUID().replace(/-/g, '').slice(0, 12)}`, createdAt: now };
+      file.db.query<never, [string, string, string | null, string | null, string | null, string, number, number]>(
+        'INSERT INTO owner_items (id, kind, item_key, answer_session, answer_agent, item, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(
+        stored.id, stored.kind, stored.key ?? null,
+        metadataText(stored, OWNER_ANSWER_SESSION_METADATA), metadataText(stored, OWNER_ANSWER_AGENT_METADATA),
+        JSON.stringify(stored), now, now,
+      );
+      return { created: true, entry: { item: stored, updatedAt: now } };
+    });
   }
 
   /** Record the first answer; a later one changes nothing. Expiry is the caller's check. */
   answer(id: string, answer: OwnerAnswer, by: OwnerAnswerSource, now: number): QuestionStoreAnswerResult | undefined {
-    const log = this.#open();
-    const entry = this.#entries.get(id);
-    if (!entry) return undefined;
-    if (isClosed(entry)) return { applied: false, entry };
-    const record: QuestionLogRecord = { v: 1, op: 'answer', id, answer, by, at: now };
-    log.append(record);
-    this.#apply(record);
-    return { applied: true, entry: this.#entry(id) };
+    return this.#close(id, 'answer = ?, answered_by = ?', [JSON.stringify(answer), JSON.stringify(by)], now);
   }
 
   /** The producer takes an open item back (its window closed, its session ended). */
   withdraw(id: string, reason: string, now: number): QuestionStoreAnswerResult | undefined {
-    const log = this.#open();
-    const entry = this.#entries.get(id);
-    if (!entry) return undefined;
-    if (isClosed(entry)) return { applied: false, entry };
-    const record: QuestionLogRecord = { v: 1, op: 'withdraw', id, reason, at: now };
-    log.append(record);
-    this.#apply(record);
-    return { applied: true, entry: this.#entry(id) };
+    return this.#close(id, 'withdrawn_reason = ?', [reason], now);
   }
 
   /**
    * Record what became of an answer. Only an answered item takes one, and only
-   * once: a second report changes nothing and returns the first.
+   * once: a second report changes nothing and returns the first, so of two
+   * processes holding the asking session, exactly one hands the answer over.
    */
   recordDelivery(id: string, state: StoredAnswerDelivery['state'], reason: string | undefined, now: number): QuestionStoreAnswerResult | undefined {
-    const log = this.#open();
-    const entry = this.#entries.get(id);
+    const file = this.#open();
+    const changed = file.db.query<never, [string, string | null, number, number, string]>(
+      'UPDATE owner_items SET delivery_state = ?, delivery_reason = ?, delivery_at = ?, updated_at = ? WHERE id = ? AND answer IS NOT NULL AND delivery_state IS NULL',
+    ).run(state, reason ?? null, now, now, id).changes;
+    const entry = this.#read(id);
     if (!entry) return undefined;
-    if (entry.answer === undefined || entry.delivery !== undefined) return { applied: false, entry };
-    const record: QuestionLogRecord = { v: 1, op: 'delivery', id, state, ...(reason !== undefined ? { reason } : {}), at: now };
-    log.append(record);
-    this.#apply(record);
-    return { applied: true, entry: this.#entry(id) };
-  }
-
-  close(): void {
-    this.#log?.close();
-    this.#log = null;
-  }
-
-  #open(): RecordLog<QuestionLogRecord> {
-    if (this.#log) return this.#log;
-    const log = openRecordLog<QuestionLogRecord>(this.#path, { fsync: 'each', decode: decodeRecord });
-    for (const record of log.scan()) this.#apply(record);
-    this.#log = log;
-    this.#trimOnOpen(log);
-    return log;
-  }
-
-  #apply(record: QuestionLogRecord): void {
-    if (record.op === 'post') {
-      if (this.#entries.has(record.item.id)) return;
-      this.#entries.set(record.item.id, { item: record.item, updatedAt: record.item.createdAt });
-      if (record.item.key !== undefined) this.#openKeys.set(`${record.item.kind}\u0000${record.item.key}`, record.item.id);
-      this.#revision += 1;
-      return;
-    }
-    const entry = this.#entries.get(record.id);
-    if (!entry) {
-      logger.warn('[owner-inbox] a record names an item the log does not hold', { path: this.#path, id: record.id });
-      return;
-    }
-    if (record.op === 'delivery') {
-      if (entry.answer === undefined || entry.delivery !== undefined) return;
-      this.#entries.set(record.id, {
-        ...entry,
-        delivery: { state: record.state, ...(record.reason !== undefined ? { reason: record.reason } : {}), at: record.at },
-        updatedAt: record.at,
-      });
-      this.#revision += 1;
-      return;
-    }
-    // The first close wins; a later answer line in the log changes nothing.
-    if (isClosed(entry)) return;
-    const next: StoredOwnerEntry = record.op === 'answer'
-      ? { ...entry, answer: record.answer, answeredBy: record.by, closedAt: record.at, updatedAt: record.at }
-      : { ...entry, withdrawnReason: record.reason, closedAt: record.at, updatedAt: record.at };
-    this.#entries.set(record.id, next);
-    if (entry.item.key !== undefined) this.#openKeys.delete(`${entry.item.kind}\u0000${entry.item.key}`);
-    this.#revision += 1;
-  }
-
-  #entry(id: string): StoredOwnerEntry {
-    const entry = this.#entries.get(id);
-    if (!entry) throw new Error(`Owner item ${id} was written but is not in memory.`);
-    return entry;
+    return changed > 0 ? { applied: true, entry } : { applied: false, entry };
   }
 
   /**
-   * Keep every open item and the newest closed ones. Runs once, when the log is
-   * first opened, and only rewrites the file when it holds far more than it keeps.
+   * A session will never be opened again (deleted, or a hosted session ended):
+   * its open questions are withdrawn and its waiting answers marked not
+   * deliverable, in one transaction. Returns the ids it changed.
    */
-  #trimOnOpen(log: RecordLog<QuestionLogRecord>): void {
-    const closed = [...this.#entries.values()].filter(isClosed);
-    if (closed.length <= MAX_CLOSED_ENTRIES) return;
-    closed.sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0));
-    const dropped = new Set(closed.slice(MAX_CLOSED_ENTRIES).map((entry) => entry.item.id));
-    for (const id of dropped) this.#entries.delete(id);
-    // A kept item has at most three records (post, close, delivery); rewrite only when the file holds twice that and more.
-    if (log.size < 6 * this.#entries.size + 100) return;
-    void log.compact((record) => !dropped.has(record.op === 'post' ? record.item.id : record.id)).catch((error: unknown) => {
-      logger.warn('[owner-inbox] could not compact the question log; it keeps growing until the next start', {
+  settleSession(sessionId: string, withdrawnReason: string, undeliverableReason: string, now: number): string[] {
+    const file = this.#open();
+    return file.tx(() => {
+      const rows = file.db.query<{ id: string; closed_at: number | null }, [string]>(
+        `SELECT id, closed_at FROM owner_items WHERE answer_session = ? AND ${UNDELIVERED}`,
+      ).all(sessionId);
+      if (rows.length === 0) return [];
+      file.db.query<never, [string, number, number, string]>(
+        'UPDATE owner_items SET withdrawn_reason = ?, closed_at = ?, updated_at = ? WHERE answer_session = ? AND closed_at IS NULL',
+      ).run(withdrawnReason, now, now, sessionId);
+      file.db.query<never, [string, number, number, string]>(
+        "UPDATE owner_items SET delivery_state = 'undeliverable', delivery_reason = ?, delivery_at = ?, updated_at = ? WHERE answer_session = ? AND answer IS NOT NULL AND delivery_state IS NULL",
+      ).run(undeliverableReason, now, now, sessionId);
+      return rows.map((row) => row.id);
+    });
+  }
+
+  close(): void {
+    this.#file?.close();
+    this.#file = null;
+    this.#snapshot = null;
+  }
+
+  #close(id: string, assignments: string, values: readonly string[], now: number): QuestionStoreAnswerResult | undefined {
+    const file = this.#open();
+    const changed = file.db.query<never, (string | number)[]>(
+      `UPDATE owner_items SET ${assignments}, closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL`,
+    ).run(...values, now, now, id).changes;
+    const entry = this.#read(id);
+    if (!entry) return undefined;
+    return changed > 0 && isClosed(entry) ? { applied: true, entry } : { applied: false, entry };
+  }
+
+  #read(id: string): StoredOwnerEntry | undefined {
+    const row = this.#open().db.query<ItemRow, [string]>(`SELECT ${ROW_COLUMNS} FROM owner_items WHERE id = ?`).get(id);
+    return row ? this.#decode(row) ?? undefined : undefined;
+  }
+
+  #entries(): ReadonlyMap<string, StoredOwnerEntry> {
+    const file = this.#open();
+    const revision = file.revision();
+    if (this.#snapshot && this.#snapshot.revision === revision) return this.#snapshot.entries;
+    const entries = new Map<string, StoredOwnerEntry>();
+    for (const row of file.db.query<ItemRow, []>(`SELECT ${ROW_COLUMNS} FROM owner_items`).all()) {
+      const entry = this.#decode(row);
+      if (entry) entries.set(entry.item.id, entry);
+    }
+    this.#snapshot = { revision, entries };
+    return entries;
+  }
+
+  #decode(row: ItemRow): StoredOwnerEntry | null {
+    try {
+      const item = readStoredItem(JSON.parse(row.item));
+      const delivery = row.delivery_state === 'delivered' || row.delivery_state === 'undeliverable'
+        ? { state: row.delivery_state, ...(row.delivery_reason !== null ? { reason: row.delivery_reason } : {}), at: row.delivery_at ?? row.updated_at } as const
+        : undefined;
+      return {
+        item,
+        ...(row.answer !== null ? { answer: readAnswer(JSON.parse(row.answer)) } : {}),
+        ...(row.answered_by !== null ? { answeredBy: readSource(JSON.parse(row.answered_by)) } : {}),
+        ...(row.withdrawn_reason !== null ? { withdrawnReason: row.withdrawn_reason } : {}),
+        ...(row.closed_at !== null ? { closedAt: row.closed_at } : {}),
+        ...(delivery !== undefined ? { delivery } : {}),
+        updatedAt: row.updated_at,
+      };
+    } catch (error) {
+      logger.warn('[owner-inbox] skipped a damaged row in the owner inbox store', {
+        path: this.#path,
+        id: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  #open(): SqliteFile {
+    if (this.#file) return this.#file;
+    const file = openSqliteFile(this.#path, { name: 'owner inbox', migrations: MIGRATIONS });
+    this.#file = file;
+    this.#trimOnOpen(file);
+    return file;
+  }
+
+  /**
+   * Keep every open item, every answer still waiting for its asker, and the
+   * newest closed ones. Runs once per process, when the store is first opened;
+   * it writes only when there is more than that to drop.
+   */
+  #trimOnOpen(file: SqliteFile): void {
+    try {
+      const closed = file.db.query<{ n: number }, []>('SELECT count(*) AS n FROM owner_items WHERE closed_at IS NOT NULL').get()?.n ?? 0;
+      if (closed <= MAX_CLOSED_ENTRIES) return;
+      file.db.query<never, [number]>(
+        `DELETE FROM owner_items WHERE closed_at IS NOT NULL
+          AND NOT (answer IS NOT NULL AND delivery_state IS NULL AND (answer_session IS NOT NULL OR answer_agent IS NOT NULL))
+          AND id NOT IN (SELECT id FROM owner_items WHERE closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT ?)`,
+      ).run(MAX_CLOSED_ENTRIES);
+    } catch (error) {
+      logger.warn('[owner-inbox] could not drop old answered items; the store keeps them until the next start', {
         path: this.#path,
         error: error instanceof Error ? error.message : String(error),
       });
-    });
+    }
   }
+}
+
+const sharedStores = new Map<string, QuestionStore>();
+
+/**
+ * The store at `path`, one per process: the daemon's inbox, a terminal's
+ * `/questions`, its `query` tools and the answer delivery of its sessions and
+ * agents all read through one connection.
+ */
+export function sharedQuestionStore(path: string): QuestionStore {
+  let store = sharedStores.get(path);
+  if (!store) {
+    store = new QuestionStore({ path });
+    sharedStores.set(path, store);
+  }
+  return store;
 }

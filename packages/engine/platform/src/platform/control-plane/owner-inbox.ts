@@ -7,31 +7,47 @@
  * the inbox reads them from it and answers them through it. Everything else a
  * subsystem or an agent needs from the owner (a question, a channel claim, a
  * purchase window, an action queued while he was away) is posted here and kept
- * in the question store, a record log.
+ * in the question store: one SQLite file in the owner's home that the daemon,
+ * both terminal apps and their agents all open (question-store.ts).
  *
- * The daemon owns the one instance. The terminal apps and the web UI reach it
- * through the `inbox.*` verbs; in-process producers call it directly. A
- * terminal app running with no daemon keeps its own instance over its own file
- * (runtime/client/local-owner-inbox.ts). The first answer wins; a later one
- * changes nothing and is told who answered, from where.
+ * Each process that asks or answers holds an instance over that one store: the
+ * daemon's also reads its approval broker, and the web UI and a terminal that
+ * reaches the daemon go through the daemon's (`inbox.*` verbs) so pushes and
+ * live updates follow; a terminal with no daemon reads and answers the store
+ * itself. The first answer wins in the store, whichever process gives it; a
+ * later one changes nothing and is told who answered, from where.
  *
- * An answer goes back to whoever asked: an agent or hosted session in this
- * process at once, a terminal session through the update stream while it is
- * open, or when it is next opened. Each answered question says which of
- * delivered, waiting or not deliverable it is.
+ * An answer goes back to whoever asked, by one rule for every asker (a terminal
+ * or headless session, a hosted session, a channel's shared session, an agent):
+ * the asker takes it on its next model request while it is open, otherwise when
+ * it is next opened, and it is not deliverable only when the asker can never be
+ * opened again (deleted). The asker records that it took the answer; who
+ * answered is told which of delivered, waiting or not deliverable it is, read
+ * from the facts the asker's owner keeps (presence probes, below).
  *
- * Cost: a tool call that queues nothing costs nothing here. A post or an answer
- * is one synced append (approvals: the broker's own write); an answer an agent
- * took, or a session reported taking, is one more. A list is a walk of
- * in-memory maps, plus one session-presence lookup (a map read) per answered
- * session question still waiting. `revision()` is an integer read.
+ * Cost: a tool call that queues nothing costs nothing here. A post, an answer,
+ * a withdrawal or a delivery is one row write (approvals: the broker's own
+ * write). A list re-reads the rows only when the store's revision moved, plus
+ * one presence check (a stat, a small file read) per answered question still
+ * waiting. `revision()` is one statement over SQLite's change counters.
  */
 import { refusal, type Refusal } from '@goodvibes-jev/engine/errors';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
 import type { ApprovalActionOutcome } from './approval-broker-owner.js';
-import { QuestionStore, type StoredOwnerEntry, type StoredOwnerItem, type StoredOwnerItemKind } from './question-store.js';
+import {
+  OWNER_ANSWER_AGENT_METADATA,
+  OWNER_ANSWER_SESSION_METADATA,
+  sharedQuestionStore,
+  type QuestionAskerScope,
+  type QuestionStore,
+  type StoredOwnerEntry,
+  type StoredOwnerItem,
+  type StoredOwnerItemKind,
+} from './question-store.js';
 import type { RevisionSource } from '../utils/revision.js';
 import { logger } from '../utils/logger.js';
+
+export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA };
 
 export type OwnerItemKind = 'approval' | 'question' | 'claim' | 'purchase' | 'queued-action';
 export type OwnerItemStatus = 'open' | 'answered' | 'withdrawn' | 'expired';
@@ -95,10 +111,11 @@ export interface OwnerInboxListFilter {
 }
 
 /**
- * What became of an answer: `delivered` (it is in the asking agent's or
- * session's conversation), `waiting` (kept on the question until the asking
- * session is next opened), `undeliverable` (the asker has ended or its session
- * was deleted; `reason` says which). The answer stays on the item in every state.
+ * What became of an answer: `delivered` (the asker is open and takes it on its
+ * next model request, or has taken it), `waiting` (kept on the question until
+ * the asker is next opened), `undeliverable` (the asker was deleted or can
+ * never be opened again; `reason` says which). The answer stays on the item in
+ * every state.
  */
 export type OwnerAnswerDeliveryState = 'delivered' | 'waiting' | 'undeliverable';
 
@@ -110,33 +127,43 @@ export interface OwnerAnswerDelivery {
   readonly reason?: string | undefined;
 }
 
-/** Hands an answered item to whoever asked it in this process, and says whether it arrived (`delivered` or `undeliverable`). */
-export type OwnerAnswerRecipient = (item: OwnerItem) => OwnerAnswerDelivery;
+/**
+ * Metadata key saying which process keeps the asker: `hosted` for a hosted
+ * session and `daemon` for an agent the daemon runs (including a channel's
+ * turn). Absent: a terminal app's session (TUI, Agent, headless).
+ */
+export const OWNER_ASKER_HOST_METADATA = 'askerHost';
+/** Metadata key holding the asking terminal session's saved file: present = it can be opened again. */
+export const OWNER_ASKER_SESSION_FILE_METADATA = 'askerSessionFile';
+/** Metadata key holding the asking terminal session's liveness marker: fresh with a live process = open now. */
+export const OWNER_ASKER_LIVENESS_METADATA = 'askerLiveness';
+
+/** Who asked a question and where the facts about it are kept, read from the item. */
+export interface OwnerAsker {
+  /** The session the answer goes back to. */
+  readonly session?: string | undefined;
+  /** The agent that asked, when one did; it takes the answer while it runs. */
+  readonly agent?: string | undefined;
+  readonly host?: 'hosted' | 'daemon' | undefined;
+  readonly sessionFile?: string | undefined;
+  readonly livenessFile?: string | undefined;
+}
 
 /**
- * Metadata key naming the in-process asker an item's answer is meant for. Kept
- * on the item, so an answer given after a restart (which ends every in-process
- * asker) tells the owner it was not delivered and to whom.
+ * Whether the asker is open right now (`attached`), can be opened again but is
+ * not open (`closed`, with what reopens it), or can never be opened again
+ * (`gone`, with why).
  */
-export const OWNER_ANSWER_TO_METADATA = 'answerTo';
+export type OwnerAskerPresence =
+  | { readonly state: 'attached' | 'closed'; readonly title?: string | undefined; readonly reopens?: string | undefined }
+  | { readonly state: 'gone'; readonly reason: string };
 
 /**
- * Metadata key naming the session that asked a question (a terminal app's
- * conversation or one of its agents): the answer goes back into that session's
- * conversation, now when it is open, otherwise when it is next opened.
+ * Says where an asker is, from facts a process already keeps (the daemon's
+ * hosted sessions, agents and session broker; a terminal session's liveness
+ * marker and saved file). Undefined: not this probe's kind of asker.
  */
-export const OWNER_ANSWER_SESSION_METADATA = 'answerSession';
-
-/**
- * Whether a session is open in a terminal right now (`attached`), saved but not
- * open (`closed`), or no longer exists (`gone`). Read from facts the inbox's
- * owner already keeps: the daemon's session broker, or a terminal's own session
- * store when it runs with no daemon.
- */
-export type OwnerSessionPresence =
-  | { readonly state: 'attached' | 'closed'; readonly title?: string | undefined }
-  | { readonly state: 'gone' };
-export type OwnerSessionPresenceProbe = (sessionId: string) => OwnerSessionPresence;
+export type OwnerAskerPresenceProbe = (asker: OwnerAsker) => OwnerAskerPresence | undefined;
 
 /** What the asking side reports about an answer it took (`delivered`) or can never take (`undeliverable`). */
 export interface OwnerAnswerDeliveryReport {
@@ -144,24 +171,79 @@ export interface OwnerAnswerDeliveryReport {
   readonly reason?: string | undefined;
 }
 
+function metadataText(item: Pick<OwnerItem, 'metadata'>, key: string): string | undefined {
+  const value = item.metadata?.[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
 /** The session an item's answer goes back to, when a session asked it. */
 export function answerSessionOf(item: Pick<OwnerItem, 'metadata'>): string | undefined {
-  const session = item.metadata?.[OWNER_ANSWER_SESSION_METADATA];
-  return typeof session === 'string' && session.length > 0 ? session : undefined;
+  return metadataText(item, OWNER_ANSWER_SESSION_METADATA);
 }
 
-function sessionLabel(sessionId: string, presence: OwnerSessionPresence | undefined): string {
+/** The agent that asked an item, when one did. */
+export function answerAgentOf(item: Pick<OwnerItem, 'metadata'>): string | undefined {
+  return metadataText(item, OWNER_ANSWER_AGENT_METADATA);
+}
+
+/** Who asked an item, or undefined when no session or agent did (a claim, a purchase window). */
+export function askerOf(item: Pick<OwnerItem, 'metadata'>): OwnerAsker | undefined {
+  const session = answerSessionOf(item);
+  const agent = answerAgentOf(item);
+  if (session === undefined && agent === undefined) return undefined;
+  const host = metadataText(item, OWNER_ASKER_HOST_METADATA);
+  const sessionFile = metadataText(item, OWNER_ASKER_SESSION_FILE_METADATA);
+  const livenessFile = metadataText(item, OWNER_ASKER_LIVENESS_METADATA);
+  return {
+    ...(session !== undefined ? { session } : {}),
+    ...(agent !== undefined ? { agent } : {}),
+    ...(host === 'hosted' || host === 'daemon' ? { host } : {}),
+    ...(sessionFile !== undefined ? { sessionFile } : {}),
+    ...(livenessFile !== undefined ? { livenessFile } : {}),
+  };
+}
+
+function askerLabel(asker: OwnerAsker, presence: OwnerAskerPresence | undefined): string {
+  if (asker.session === undefined) return `agent ${asker.agent ?? 'unknown'}`;
   const title = presence && presence.state !== 'gone' ? presence.title?.trim() : undefined;
-  return title ? `session ${sessionId} ("${clip(title, 60)}")` : `session ${sessionId}`;
+  const kind = asker.host === 'hosted' ? 'hosted session' : 'session';
+  return title ? `${kind} ${asker.session} ("${clip(title, 60)}")` : `${kind} ${asker.session}`;
 }
 
-/** The delivery state of an answered session question no report has settled yet: read, never written. */
-function sessionAnswerDelivery(sessionId: string, presence: OwnerSessionPresence | undefined): OwnerAnswerDelivery {
-  const to = sessionLabel(sessionId, presence);
-  if (presence?.state === 'gone') {
-    return { state: 'undeliverable', to, reason: `${to} no longer exists: it was deleted. The answer is kept on the question.` };
+/** What an answer to `asker` becomes now, when the asker has not yet taken it. Read, never written. */
+function askerDelivery(asker: OwnerAsker, presence: OwnerAskerPresence): OwnerAnswerDelivery {
+  const to = askerLabel(asker, presence);
+  if (presence.state === 'gone') return { state: 'undeliverable', to, reason: `${presence.reason} The answer is kept on the question.` };
+  if (presence.state === 'attached') return { state: 'delivered', to };
+  const reopens = presence.reopens ?? (asker.session !== undefined ? `${to} is next opened` : `${to} runs again`);
+  return { state: 'waiting', to, reason: `Saved; it will be delivered when ${reopens}.` };
+}
+
+/** The line the asking conversation is given when its question closes. */
+export function questionClosedText(item: OwnerItem): string {
+  const question = `question ${item.id} ("${item.title}")`;
+  if (item.status === 'answered') {
+    const parts = [item.answer?.option, item.answer?.text].filter((part): part is string => typeof part === 'string' && part.trim().length > 0);
+    const from = item.answeredBy ? ` from ${item.answeredBy.surface}` : '';
+    return `[Owner answer] The owner answered your ${question}${from}: ${parts.length > 0 ? parts.join(' - ') : '(no text)'}`;
   }
-  return { state: 'waiting', to, reason: `Saved; it will be delivered when ${to} is next opened.` };
+  if (item.status === 'withdrawn') return `[Owner answer] Your ${question} was withdrawn${item.withdrawnReason ? `: ${item.withdrawnReason}` : ''}. It will not be answered.`;
+  return `[Owner answer] Your ${question} expired unanswered. Decide without it or ask again.`;
+}
+
+/**
+ * Where a process reads the answers its askers wait for: the one store, read
+ * directly. Every call is synchronous, so a conversation can look just before
+ * it builds a model request.
+ */
+export interface OwnerAnswerReader {
+  /** Moves when anything in the store changed, in any process. */
+  revision(): number;
+  get(id: string): OwnerItem | undefined;
+  /** One asker's open questions and the answers it has not taken (one indexed read). */
+  pendingFor(scope: QuestionAskerScope): readonly OwnerItem[];
+  /** Record that the caller took the answer into its conversation. True only for the first taker. */
+  claim(id: string): boolean;
 }
 
 export type OwnerAnswerOutcome =
@@ -289,18 +371,17 @@ function storedStatus(entry: StoredOwnerEntry, now: number): OwnerItemStatus {
   return 'open';
 }
 
-function storedDelivery(entry: StoredOwnerEntry, presence: OwnerSessionPresenceProbe | undefined): OwnerAnswerDelivery | undefined {
+function storedDelivery(entry: StoredOwnerEntry, presence: (asker: OwnerAsker) => OwnerAskerPresence): OwnerAnswerDelivery | undefined {
   if (entry.answer === undefined) return undefined;
-  const session = answerSessionOf(entry.item);
-  const meantFor = entry.item.metadata?.[OWNER_ANSWER_TO_METADATA];
+  const asker = askerOf(entry.item);
+  if (asker === undefined) return undefined;
   if (entry.delivery) {
-    const to = session !== undefined ? `session ${session}` : typeof meantFor === 'string' ? meantFor : entry.item.askedBy ?? 'the asker';
-    return { state: entry.delivery.state, to, ...(entry.delivery.reason !== undefined ? { reason: entry.delivery.reason } : {}) };
+    return { state: entry.delivery.state, to: askerLabel(asker, undefined), ...(entry.delivery.reason !== undefined ? { reason: entry.delivery.reason } : {}) };
   }
-  return session !== undefined ? sessionAnswerDelivery(session, presence?.(session)) : undefined;
+  return askerDelivery(asker, presence(asker));
 }
 
-function projectStored(entry: StoredOwnerEntry, now: number, presence?: OwnerSessionPresenceProbe): OwnerItem {
+function projectStored(entry: StoredOwnerEntry, now: number, presence: (asker: OwnerAsker) => OwnerAskerPresence): OwnerItem {
   const { item } = entry;
   const status = storedStatus(entry, now);
   const delivery = storedDelivery(entry, presence);
@@ -458,26 +539,25 @@ export interface OwnerInboxOptions {
   readonly questions: QuestionStore;
   /** The approval broker of the same composition. Absent: the inbox holds only its own items. */
   readonly approvals?: OwnerInboxApprovalSource | undefined;
-  /** Whether an asking session is open now; see {@link OwnerInbox.useSessionPresence}. */
-  readonly sessionPresence?: OwnerSessionPresenceProbe | undefined;
+  /** Where askers are read from; the first probe that knows an asker answers. See {@link OwnerInbox.usePresence}. */
+  readonly presence?: readonly OwnerAskerPresenceProbe[] | undefined;
   readonly now?: (() => number) | undefined;
 }
 
-export class OwnerInbox implements RevisionSource, OwnerInboxPort {
+export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerReader {
   readonly id = 'owner inbox';
   readonly #questions: QuestionStore;
   readonly #approvals: OwnerInboxApprovalSource | undefined;
   readonly #now: () => number;
   readonly #listeners = new Set<OwnerInboxListener>();
-  readonly #recipients = new Map<string, OwnerAnswerRecipient>();
   readonly #unsubscribeApprovals: (() => void) | undefined;
-  #presence: OwnerSessionPresenceProbe | undefined;
+  #probes: OwnerAskerPresenceProbe[];
   #approvalRevision = 0;
 
   constructor(options: OwnerInboxOptions) {
     this.#questions = options.questions;
     this.#approvals = options.approvals;
-    this.#presence = options.sessionPresence;
+    this.#probes = [...(options.presence ?? [])];
     this.#now = options.now ?? Date.now;
     this.#unsubscribeApprovals = this.#approvals?.subscribe((record) => {
       this.#approvalRevision += 1;
@@ -485,23 +565,35 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     });
   }
 
-  /** Moves on every post, answer, withdrawal and delivery report, and on every approval change. Expiry by time does not move it. */
+  /** Moves on every post, answer, withdrawal and delivery in any process, and on every approval change. Expiry by time does not move it. */
   revision(): number {
     return this.#questions.revision() + this.#approvalRevision;
   }
 
   /**
-   * Say where the inbox reads whether an asking session is open: the daemon's
-   * session broker, or a terminal's own sessions when there is no daemon. Read
-   * when a session's question is answered and when a list shows its answer;
-   * nothing is polled.
+   * Add a place this process reads askers from, ahead of the ones it has: the
+   * daemon's hosted sessions, agents and session broker. Read when a question
+   * is answered and when a list shows an answer its asker has not taken;
+   * nothing is polled. An asker no probe knows reads as closed.
    */
-  useSessionPresence(probe: OwnerSessionPresenceProbe): void {
-    this.#presence = probe;
+  usePresence(probe: OwnerAskerPresenceProbe): void {
+    this.#probes = [probe, ...this.#probes];
   }
 
+  #presenceOf = (asker: OwnerAsker): OwnerAskerPresence => {
+    for (const probe of this.#probes) {
+      try {
+        const found = probe(asker);
+        if (found) return found;
+      } catch (error) {
+        logger.debug('[owner-inbox] a presence probe failed; trying the next', { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return { state: 'closed' };
+  };
+
   #project(entry: StoredOwnerEntry, now: number): OwnerItem {
-    return projectStored(entry, now, this.#presence);
+    return projectStored(entry, now, this.#presenceOf);
   }
 
   get(id: string): OwnerItem | undefined {
@@ -550,14 +642,14 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
   postNow(input: NewOwnerItem, postedBy?: string): OwnerPostOutcome {
     const item = validateNewOwnerItem(input);
     const now = this.#now();
-    if (item.key !== undefined) {
-      const existing = this.#questions.findOpen(item.kind, item.key);
-      if (existing && storedStatus(existing, now) === 'open') return { created: false, item: this.#project(existing, now) };
-    }
-    const entry = this.#questions.post({ ...item, ...(postedBy !== undefined ? { postedBy } : {}) }, now);
+    const { created, entry } = this.#questions.post(
+      { ...item, ...(postedBy !== undefined ? { postedBy } : {}) },
+      now,
+      (existing) => storedStatus(existing, now) === 'open',
+    );
     const projected = this.#project(entry, now);
-    this.#emit(projected);
-    return { created: true, item: projected };
+    if (created) this.#emit(projected);
+    return { created, item: projected };
   }
 
   /** Who posted an item over the wire, for the route that lets only that principal withdraw it. */
@@ -576,21 +668,15 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     const entry = this.#questions.get(id);
     if (entry) {
       const item = this.#project(entry, now);
-      if (item.status !== 'open') {
-        this.#recipients.delete(id);
-        return { applied: false, item, refusal: closedRefusal(item) };
-      }
+      if (item.status !== 'open') return { applied: false, item, refusal: closedRefusal(item) };
       const checked = this.#checkAnswer(item, answer);
       if ('refusal' in checked) return { applied: false, item, refusal: checked.refusal };
       const result = this.#questions.answer(id, checked.answer, by, now);
       if (!result) return { applied: false, refusal: unknownRefusal(id) };
       const answered = this.#project(result.entry, now);
       if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
-      const delivery = this.#deliver(answered, now);
-      const latest = this.#questions.get(id);
-      const final = latest ? this.#project(latest, now) : answered;
-      this.#emit(final);
-      return { applied: true, item: final, ...(delivery ? { delivery } : {}) };
+      this.#emit(answered);
+      return { applied: true, item: answered, ...(answered.delivery ? { delivery: answered.delivery } : {}) };
     }
     const approval = this.#approvals?.getApproval(id);
     if (!approval || !this.#approvals) return { applied: false, refusal: unknownRefusal(id) };
@@ -604,27 +690,52 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     if (!result) return { applied: false, refusal: unknownRefusal(id) };
     const item = this.#project(result.entry, now);
     if (!result.applied) return { applied: false, item, refusal: closedRefusal(item) };
-    this.#recipients.delete(id);
     this.#emit(item);
     return { applied: true, item };
   }
 
+  /** {@link OwnerAnswerReader}: one asker's open questions and the answers it has not taken. */
+  pendingFor(scope: QuestionAskerScope): readonly OwnerItem[] {
+    const now = this.#now();
+    return this.#questions.undelivered(scope).map((entry) => this.#project(entry, now));
+  }
+
+  /** {@link OwnerAnswerReader}: the caller took the answer into its conversation; true only for the first taker. */
+  claim(id: string): boolean {
+    const result = this.#questions.recordDelivery(id, 'delivered', undefined, this.#now());
+    if (!result?.applied) return false;
+    this.#emit(this.#project(result.entry, this.#now()));
+    return true;
+  }
+
   /**
-   * Names who in this process receives the answer to an open item: called once,
-   * when the owner answers, and its result is returned to the owner with the
-   * answer. Dropped when the item closes any other way. Nothing is held for an
-   * item that is not open.
+   * A session will never be opened again: it was deleted, or it is a hosted
+   * session that ended. Its open questions are withdrawn and its waiting
+   * answers marked not deliverable, saying why, so every list shows it.
    */
-  deliverTo(id: string, recipient: OwnerAnswerRecipient): void {
-    if (this.get(id)?.status === 'open') this.#recipients.set(id, recipient);
+  settleSession(sessionId: string, why: string): void {
+    const now = this.#now();
+    const changed = this.#questions.settleSession(
+      sessionId,
+      `${why}, so the question will not be answered there`,
+      `${why} before the answer reached it. The answer is kept on the question.`,
+      now,
+    );
+    for (const id of changed) {
+      const entry = this.#questions.get(id);
+      if (entry) this.#emit(this.#project(entry, now));
+    }
   }
 
   /**
    * The asking side's report on an answer: it took the answer into its
    * conversation (`delivered`), or never can (`undeliverable`, its session was
-   * deleted). Only an answered question a session asked takes a report, once;
-   * a second one is refused and changes nothing, so a session that reports
-   * `delivered` first is the one that puts the answer in its conversation.
+   * deleted). Reported over the wire by a terminal whose daemon keeps a
+   * different store (a connected host on another machine); a process on the
+   * store itself uses {@link claim} and {@link settleSession}. Only an answered
+   * question a session asked takes a report, once; a second one is refused and
+   * changes nothing, so the session that reports `delivered` first is the one
+   * that puts the answer in its conversation.
    */
   reportDelivery(id: string, report: OwnerAnswerDeliveryReport): OwnerAnswerOutcome {
     const now = this.#now();
@@ -638,7 +749,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
         refusal: refusal({
           code: 'NOT_A_SESSION_ANSWER',
           state: item.status,
-          reason: item.status !== 'answered' ? 'This item has no answer to deliver.' : 'This answer goes to an agent the daemon runs; it reports its own delivery.',
+          reason: item.status !== 'answered' ? 'This item has no answer to deliver.' : 'This answer goes to an agent; the agent records taking it.',
           next: ['Nothing to do.'],
           status: 409,
         }),
@@ -663,43 +774,6 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
     }
     this.#emit(updated);
     return { applied: true, item: updated, ...(updated.delivery ? { delivery: updated.delivery } : {}) };
-  }
-
-  /**
-   * Hand an answer to its asker and say what became of it. An agent or hosted
-   * session in this process takes it now (its outcome is recorded on the item);
-   * a session that asked from a terminal gets it there: at once when that
-   * session is open, otherwise when it is next opened, and the owner is told
-   * which. Only the terminal records that the answer reached its conversation.
-   */
-  #deliver(item: OwnerItem, now: number): OwnerAnswerDelivery | undefined {
-    const recipient = this.#recipients.get(item.id);
-    const meantFor = item.metadata?.[OWNER_ANSWER_TO_METADATA];
-    if (recipient || typeof meantFor === 'string') {
-      const to = typeof meantFor === 'string' ? meantFor : item.askedBy ?? 'the asker';
-      let delivery: OwnerAnswerDelivery;
-      if (!recipient) {
-        delivery = { state: 'undeliverable', to, reason: 'it is no longer running: the daemon restarted after it asked. The answer is kept on the question.' };
-      } else {
-        this.#recipients.delete(item.id);
-        try {
-          delivery = recipient(item);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.warn('[owner-inbox] handing an answer to its asker failed', { itemId: item.id, error: message });
-          delivery = { state: 'undeliverable', to, reason: `handing it over failed (${message}). The answer is kept on the question.` };
-        }
-      }
-      const state = delivery.state;
-      if (state !== 'waiting') this.#questions.recordDelivery(item.id, state, delivery.reason, now);
-      return delivery;
-    }
-    const session = answerSessionOf(item);
-    if (session === undefined) return undefined;
-    const presence = this.#presence?.(session);
-    // An open session takes the answer from the update stream and reports it delivered.
-    if (presence?.state === 'attached') return { state: 'delivered', to: sessionLabel(session, presence) };
-    return sessionAnswerDelivery(session, presence);
   }
 
   /**
@@ -745,7 +819,6 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
   dispose(): void {
     this.#unsubscribeApprovals?.();
     this.#listeners.clear();
-    this.#recipients.clear();
     this.#questions.close();
   }
 
@@ -828,17 +901,21 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort {
   }
 }
 
-/** Build the inbox over a composition's approval broker and its question log at `questionsPath`. */
+/**
+ * Build an inbox over the home's one store at `questionsPath`
+ * (question-store.ts `ownerInboxStorePath`) and, in the daemon, its approval
+ * broker. Every instance in one process shares one connection to the store.
+ */
 export function createOwnerInbox(options: {
   readonly questionsPath: string;
   readonly approvals?: OwnerInboxApprovalSource | undefined;
-  readonly sessionPresence?: OwnerSessionPresenceProbe | undefined;
+  readonly presence?: readonly OwnerAskerPresenceProbe[] | undefined;
   readonly now?: (() => number) | undefined;
 }): OwnerInbox {
   return new OwnerInbox({
-    questions: new QuestionStore({ path: options.questionsPath }),
+    questions: sharedQuestionStore(options.questionsPath),
     ...(options.approvals !== undefined ? { approvals: options.approvals } : {}),
-    ...(options.sessionPresence !== undefined ? { sessionPresence: options.sessionPresence } : {}),
+    ...(options.presence !== undefined ? { presence: options.presence } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
   });
 }

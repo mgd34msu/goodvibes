@@ -2,6 +2,7 @@ import type { FailureReadOptions } from '@goodvibes-jev/engine/errors';
 import { createNativeHostedTurnHost, type NativeHostedTurnDependencies, type NativeHostedTurnHost } from '../hosted-sessions/native-turn-host.js';
 import { registerNativeHostedTurnGatewayMethods } from '../control-plane/routes/native-hosted-turn.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
+import { hostedSessionPresence } from '../agents/agent-owner-questions.js';
 /**
  * hosted-sessions-composition.ts, wiring the hosted-session engine into a
  * daemon.
@@ -210,6 +211,8 @@ export function composeHostedSessionsForFacade(
   // Closing the broker record of a hosted session ends the hosted session too; otherwise its
   // next registration re-opens the record the operator just closed.
   attachHostedSessionCloseSync(manager, runtimeServices.sessionBroker);
+  // Whether a hosted session that asked the owner something is open, idle or ended is read from this engine.
+  runtimeServices.ownerInbox?.usePresence(hostedSessionPresence(manager));
   // The contracts.* methods read and act across the hosted floors' runners too.
   runtimeServices.contractOperator.attachHosted(manager.contractRunners());
   // Dispatched contract work (the external work seam) runs in a hosted session:

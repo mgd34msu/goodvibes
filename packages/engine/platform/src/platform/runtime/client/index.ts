@@ -55,8 +55,7 @@ export type {
 
 export { createOwnerInboxClient } from './owner-inbox-client.js';
 export type { OwnerInboxClient } from './owner-inbox-client.js';
-export { localOwnerInbox, routeOwnerInbox } from './local-owner-inbox.js';
-export type { LocalOwnerInbox, LocalOwnerInboxOptions } from './local-owner-inbox.js';
+export { homeInboxClient, homeOwnerInbox, routeOwnerInbox } from './home-owner-inbox.js';
 export {
   OWNER_INBOX_UPDATE_DOMAIN,
   OWNER_INBOX_UPDATE_WIRE_EVENT,

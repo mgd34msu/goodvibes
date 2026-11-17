@@ -1,57 +1,36 @@
 /**
  * The owner inbox this terminal uses, for `/questions`, the `query` tool of its
- * conversation and the agents it spawns: the daemon's when one is reachable, the
- * terminal's own (a file under its user directory) when there is none. A
- * question is recorded as asked by the live session; the owner's answer, given
- * anywhere (here, the web UI, the phone), reaches the spawned agent that asked
- * it on its next model request while that agent runs, otherwise the session's
- * conversation: at once while the session is open here, otherwise when it is
- * next opened (any resume path, headless included). Deleting the session
- * withdraws its open questions and marks its waiting answers not deliverable.
- * One question inbox per runtime, so the main conversation and its spawned
- * agents share one answer stream, opened only while one of their questions is open.
+ * conversation and the agents it spawns: the home's one store, which the
+ * daemon, the Agent and every other terminal open too, reached through the
+ * daemon while one is reachable (so its approvals are listed and the owner's
+ * phone is pushed) and directly otherwise. A question is recorded as asked by
+ * the live session; the owner's answer, given anywhere (here, the Agent, the
+ * web UI, the phone), reaches the spawned agent that asked it on its next model
+ * request while that agent runs, otherwise the session's conversation: on its
+ * next model request while the session is open here, otherwise when it is next
+ * opened (any resume path, headless included). Deleting the session withdraws
+ * its open questions and marks its waiting answers not deliverable.
  */
 import {
   createOwnerInboxClient,
-  localOwnerInbox,
+  homeInboxClient,
+  homeOwnerInbox,
   routeOwnerInbox,
   watchOwnerInboxUpdates,
   withAnswerDelivery,
   type AnswerDeliveringInbox,
-  type LocalOwnerInbox,
   type OwnerInboxClient,
 } from '@goodvibes-jev/engine/platform/platform/runtime/client';
-import type { OwnerSessionPresence, OwnerSessionPresenceProbe } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { OWNER_ASKER_LIVENESS_METADATA, OWNER_ASKER_SESSION_FILE_METADATA } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes-jev/engine/platform/platform/agents';
+import { livenessMarkerPathFor } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import type { SessionManager } from '@goodvibes-jev/engine/platform/platform/sessions';
 import { whenSessionOpens } from '@goodvibes-jev/engine/terminal-shell/session-resume';
 import type { RuntimeServices } from '../services.ts';
 import { findSessionConversation } from '../conversation-rewind-port.ts';
 import { createDaemonVerbCaller, resolveDaemonEndpoint } from './operator-endpoint.ts';
 
-/** The terminal's own inbox file, used when no daemon is reachable. */
-function localInboxPath(shellPaths: { resolveUserPath(...segments: string[]): string }): string {
-  return shellPaths.resolveUserPath('tui', 'owner-inbox.jsonl');
-}
-
-// Set by wireOwnerQuestionSessions once the runtime knows its live session and session store.
-let presence: OwnerSessionPresenceProbe = () => ({ state: 'closed' });
-
-/** A session is open here when it is the live one, saved when the store has it, gone otherwise. */
-function terminalSessionPresence(sessions: Pick<SessionManager, 'has' | 'getMeta'>, liveSessionId: () => string | undefined): OwnerSessionPresenceProbe {
-  return (sessionId): OwnerSessionPresence => {
-    if (sessionId === liveSessionId()) return { state: 'attached' };
-    if (!sessions.has(sessionId)) return { state: 'gone' };
-    const title = sessions.getMeta(sessionId)?.title?.trim();
-    return { state: 'closed', ...(title ? { title } : {}) };
-  };
-}
-
-function localInbox(shellPaths: { resolveUserPath(...segments: string[]): string }): LocalOwnerInbox {
-  return localOwnerInbox({ questionsPath: localInboxPath(shellPaths), sessionPresence: (id) => presence(id), surface: 'tui' });
-}
-
-/** The inbox `/questions` reads and answers: the daemon's when reachable, this terminal's own otherwise. */
+/** The inbox `/questions` reads and answers: the daemon's when reachable, the home store directly otherwise. */
 export function terminalOwnerInbox(deps: {
   readonly configManager: ConfigManager;
   readonly homeDirectory: () => string;
@@ -60,12 +39,13 @@ export function terminalOwnerInbox(deps: {
   const verbs = createDaemonVerbCaller({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
   return routeOwnerInbox({
     daemon: createOwnerInboxClient(verbs),
-    local: localInbox(deps.shellPaths),
+    home: homeInboxClient(homeOwnerInbox(deps.shellPaths), 'tui'),
     daemonReachable: () => verbs.probe().available,
   });
 }
 
 const instances = new WeakMap<RuntimeServices, AnswerDeliveringInbox>();
+const sessionWatches = new WeakMap<RuntimeServices, SessionAnswerWatch>();
 
 /** The runtime's question inbox; `sessionId` is the live session, the owner of a spawned agent's questions too. */
 export function terminalOwnerQuestions(services: RuntimeServices, sessionId: () => string | undefined): AnswerDeliveringInbox {
@@ -73,24 +53,27 @@ export function terminalOwnerQuestions(services: RuntimeServices, sessionId: () 
   if (existing) return existing;
   const homeDirectory = (): string => services.shellPaths.homeDirectory;
   const verbs = createDaemonVerbCaller({ configManager: services.configManager, homeDirectory });
-  const local = localInbox(services.shellPaths);
+  const daemon = createOwnerInboxClient(verbs);
+  const home = homeOwnerInbox(services.shellPaths);
+  const daemonReachable = (): boolean => verbs.probe().available;
   const inbox = withAnswerDelivery(
-    routeOwnerInbox({ daemon: createOwnerInboxClient(verbs), local, daemonReachable: () => verbs.probe().available }),
+    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'tui'), daemonReachable }),
     {
+      home,
+      sessionWatch: () => sessionWatches.get(services),
+      // What any process reads to tell whether the asking session is open, closed or deleted.
+      askerFacts: (id) => ({
+        [OWNER_ASKER_SESSION_FILE_METADATA]: services.sessionManager.filePathFor(id),
+        [OWNER_ASKER_LIVENESS_METADATA]: livenessMarkerPathFor(services.surface, id),
+      }),
+      daemonReachable,
+      daemon,
+      // Only for a question a daemon on another machine holds: its update stream while one is open.
       watch: async (onItem, onEnd) => {
-        // The local inbox answers in this process; the daemon's arrive on its update stream.
-        const stopLocal = local.subscribe(onItem);
         const endpoint = resolveDaemonEndpoint({ configManager: services.configManager, homeDirectory });
-        const token = endpoint.available ? endpoint.token : null;
-        const remote = endpoint.available
-          ? await watchOwnerInboxUpdates({
-            baseUrl: endpoint.baseUrl,
-            getAuthToken: () => token,
-            onItem,
-            onTerminate: () => { stopLocal(); onEnd(); },
-          })
-          : null;
-        return { close: () => { stopLocal(); remote?.close(); } };
+        if (!endpoint.available) return null;
+        const token = endpoint.token;
+        return await watchOwnerInboxUpdates({ baseUrl: endpoint.baseUrl, getAuthToken: () => token, onItem, onTerminate: onEnd });
       },
       hostFor: (id) => (id ? findSessionConversation(id)?.hostInstructions : undefined),
       sessionId,
@@ -101,14 +84,26 @@ export function terminalOwnerQuestions(services: RuntimeServices, sessionId: () 
 }
 
 /**
- * Hand a session what waited for it when it is opened into `conversation`, and
- * settle its questions when it is deleted. Called once at bootstrap; returns
- * the function that undoes it.
+ * Take the owner's answers into `conversation` before each model request, hand
+ * a session what waited for it when it is opened, and settle its questions when
+ * it is deleted. Called once at bootstrap; returns the function that undoes it.
  */
-export function wireOwnerQuestionSessions(services: RuntimeServices, conversation: object, sessionId: () => string | undefined): () => void {
-  presence = terminalSessionPresence(services.sessionManager, sessionId);
+export function wireOwnerQuestionSessions(
+  services: RuntimeServices,
+  conversation: Parameters<typeof watchSessionAnswers>[0],
+  sessionId: () => string | undefined,
+): () => void {
+  // This process's sessions and agents read their answers from the home store (opened on first use).
+  homeOwnerInbox(services.shellPaths);
+  const watch = watchSessionAnswers(conversation, sessionId);
+  sessionWatches.set(services, watch);
   const inbox = (): AnswerDeliveringInbox => terminalOwnerQuestions(services, sessionId);
   const stopOpened = whenSessionOpens(conversation, (id) => inbox().openSession(id));
   const stopDeleted = services.sessionManager.onDeleted((id) => { void inbox().deleteSession(id); });
-  return () => { stopOpened(); stopDeleted(); };
+  return () => {
+    stopOpened();
+    stopDeleted();
+    watch.dispose();
+    if (sessionWatches.get(services) === watch) sessionWatches.delete(services);
+  };
 }

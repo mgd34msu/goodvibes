@@ -138,7 +138,11 @@ export interface HostedSessionManagerOptions {
   readonly spine?: HostedSessionSpine | undefined;
   /** The daemon's bearer token, read live, handed to each session's tools for the Cloudflare status. */
   readonly cloudflareAuthToken?: (() => string | null) | undefined;
-  /** The daemon's owner inbox, handed to each session for its `query` tool. */
+  /**
+   * The owner inbox, handed to each session for its `query` tool. A session that
+   * ends settles its questions here: open ones are withdrawn and answers still
+   * waiting for it are marked not deliverable, since it cannot be opened again.
+   */
   readonly ownerQuestions?: import('./session-runtime.js').HostedSessionRuntimeOptions['ownerQuestions'];
   /** Whether a workspace root is acceptable. Omitted ⇒ any absolute path. */
   readonly isWorkspaceUsable?: ((workspaceRoot: string) => boolean) | undefined;
@@ -273,6 +277,7 @@ export class HostedSessionManager {
       if (restored.terminated) {
         // Persist the reconciliation so the next restart does not repeat it.
         await this.persist(restored.record);
+        this.settleOwnerQuestions(restored.record);
       }
       const restoredLive = this.sessions.get(restored.record.id);
       if (restoredLive && restored.record.status === 'terminated') this.releaseTranscript(restoredLive);
@@ -298,6 +303,18 @@ export class HostedSessionManager {
       });
     }
     return report;
+  }
+
+  /** A session that ended cannot be opened again: what it asked the owner is settled, saying why. */
+  private settleOwnerQuestions(record: HostedSessionRecord): void {
+    try {
+      this.options.ownerQuestions?.settleSession(record.id, `hosted session ${record.id} was ended (${record.terminatedReason ?? 'terminated'})`);
+    } catch (error) {
+      logger.warn('[hosted-sessions] the owner inbox could not settle an ended session\'s questions; they read as waiting', {
+        sessionId: record.id,
+        error: summarizeError(error),
+      });
+    }
   }
 
   /** The last load report, for status surfaces. Null before `init`. */
@@ -1144,6 +1161,7 @@ export class HostedSessionManager {
         await this.persist(live.record);
         this.releaseTranscript(live);
         await this.spine.close(live.record.id);
+        this.settleOwnerQuestions(live.record);
         this.publish('hosted-session-terminated', live.record, {
           detail: teardownError === undefined ? detail : `${detail}; its loop reported an error while stopping: ${summarizeError(teardownError)}`,
         });

@@ -30,8 +30,10 @@ import { HostedSessionUnavailableError } from './errors.js';
 import type { HostedWorkspaceFloor } from './workspace-floor.js';
 import { createContractIntake } from '../contract/intake-route.js';
 import { observeSessionContracts } from './session-contracts.js';
-import { questionClosedText } from '../runtime/client/owner-inbox-updates.js';
-import { deliveringQuestions, type InProcessQuestionInbox, type QuestionAsker } from '../agents/agent-owner-questions.js';
+import { askingQuestions } from '../agents/agent-owner-questions.js';
+import { watchSessionAnswers } from '../agents/agent-inlets.js';
+import type { OwnerInbox } from '../control-plane/owner-inbox.js';
+import type { QuestionInbox } from '../tools/query/index.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { getProcessUntrustedContentLedger, withUntrustedContentScope } from '../security/untrusted-content.js';
 import {
@@ -109,10 +111,11 @@ export interface HostedSessionRuntimeOptions {
   /** The daemon's bearer token, read live; the context tool's Cloudflare status counts it as the Worker operator token. */
   readonly cloudflareAuthToken?: (() => string | null) | undefined;
   /**
-   * The daemon's owner inbox: the session's `query` tool asks there and the answer comes back into this conversation;
-   * answered after the session closed, the owner is told it was not delivered. Absent: no `query`.
+   * The owner inbox: the session's `query` tool asks there and the answer comes back into this conversation on
+   * its next model request; answered while the session is closed, it is taken when the session is next opened.
+   * Absent: no `query`.
    */
-  readonly ownerQuestions?: InProcessQuestionInbox | undefined;
+  readonly ownerQuestions?: HostedOwnerQuestions | undefined;
   /**
    * What this run's exec tool may do, when the caller decides per session
    * rather than per floor. Omitted ⇒ the floor's own decider, and
@@ -217,14 +220,13 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   });
 
   const inbox = options.ownerQuestions;
-  // An answer to this session's question reaches its next model request, handed over when the owner gives it.
-  const askerName = `session ${sessionId}`;
-  const asker: QuestionAsker = { to: askerName, receive: (item) => {
-    if (disposed) return { state: 'undeliverable', to: askerName, reason: 'the session was closed before the answer came. The answer is kept on the question.' };
-    conversation.hostInstructions.set('replay', questionClosedText(item), { once: true, append: true });
-    return { state: 'delivered', to: askerName };
-  } };
-  const ownerQuestions = inbox ? deliveringQuestions(inbox, () => asker) : undefined;
+  // The owner's answer to this session's question rides its next model request; one given while the
+  // session was closed waited in the store and is read once here, as the session is opened again.
+  const answers = inbox ? watchSessionAnswers(conversation, () => sessionId) : null;
+  answers?.open(sessionId);
+  const ownerQuestions = inbox && answers
+    ? askingQuestions(inbox, () => ({ session: sessionId, host: 'hosted', sessionWatch: answers }))
+    : undefined;
 
   const registeredTools = registerAllTools(toolRegistry, {
     ...(ownerQuestions ? { ownerQuestions } : {}),
@@ -447,6 +449,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     dispose: (): void => {
       disposed = true;
       modeRevision++;
+      // An answer that arrives from here on waits in the store for the next time the session is opened.
+      answers?.dispose();
       promptLifetime.abort();
       stopContracts();
       unbindContextAccounting();
@@ -466,6 +470,9 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
   };
   return runtime;
 }
+
+/** The owner inbox as a hosted session uses it: asks and reads there, and settles a session that ended. */
+export type HostedOwnerQuestions = QuestionInbox & Pick<OwnerInbox, 'claim' | 'settleSession'>;
 
 /** The untrusted-content scope a hosted session's turns run in. */
 export function hostedSessionContentScope(sessionId: string): string {

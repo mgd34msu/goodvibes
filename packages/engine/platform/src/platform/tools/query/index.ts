@@ -11,12 +11,13 @@ import { summarizeError } from '../../utils/error-display.js';
 import { QUERY_TOOL_SCHEMA, type QueryToolInput } from './schema.js';
 
 /**
- * Where the `query` tool leaves its questions: the owner inbox (the daemon's
- * one list), in process inside the daemon or over the `inbox.*` verbs from a
- * terminal app's session, or the terminal's own inbox when it has no daemon.
- * The inbox keeps the record, shows it on every surface, pushes it to the
- * owner's phone when push is on, keeps the first answer, and says whether the
- * answer reached the asker, waits for its session to be opened, or cannot.
+ * Where the `query` tool leaves its questions: the owner inbox, one store per
+ * home that the daemon and every terminal app read and write at once, reached
+ * in process inside the daemon, over the `inbox.*` verbs from a terminal while
+ * a daemon is reachable, or directly otherwise. The inbox keeps the record,
+ * shows it on every surface, pushes it to the owner's phone when push is on,
+ * keeps the first answer, and says whether the answer reached the asker, waits
+ * for it to be opened again, or cannot.
  */
 export interface QuestionInbox {
   post(item: NewOwnerItem & { readonly kind: 'question' }): Promise<OwnerPostOutcome>;

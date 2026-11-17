@@ -29,4 +29,23 @@ export * from './planning-goal.js';
 export { readRequestedPlatformWork } from './platform-work-reading.js';
 
 export * from './calling-agent.js';
-export { callingAgentAsker, deliveringQuestions, type InProcessQuestionInbox, type QuestionAsker } from './agent-owner-questions.js';
+export {
+  askingQuestions,
+  callingAgentAsker,
+  daemonAgentPresence,
+  hostedSessionPresence,
+  sharedSessionOfContext,
+  type AskingInbox,
+  type QuestionAsker,
+} from './agent-owner-questions.js';
+export {
+  forgetOwnerQuestion,
+  isAgentTakingAnswers,
+  ownerAnswerReader,
+  tellRunningAgent,
+  useOwnerAnswerReader,
+  watchAgentQuestion,
+  watchSessionAnswers,
+  type RequestingConversation,
+  type SessionAnswerWatch,
+} from './agent-inlets.js';

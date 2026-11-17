@@ -104,14 +104,20 @@ export type {
 } from './approval-broker.js';
 export { ApprovalBroker } from './approval-broker.js';
 export {
+  OWNER_ANSWER_AGENT_METADATA,
   OWNER_ANSWER_SESSION_METADATA,
-  OWNER_ANSWER_TO_METADATA,
+  OWNER_ASKER_HOST_METADATA,
+  OWNER_ASKER_LIVENESS_METADATA,
+  OWNER_ASKER_SESSION_FILE_METADATA,
   OWNER_ITEM_KINDS,
   OWNER_ITEM_LIMITS,
   OwnerInbox,
   OwnerInboxInputError,
+  answerAgentOf,
   answerSessionOf,
+  askerOf,
   createOwnerInbox,
+  questionClosedText,
   readOwnerAnswerDelivery,
   readOwnerItem,
   validateNewOwnerItem,
@@ -123,8 +129,11 @@ export type {
   OwnerAnswerDeliveryReport,
   OwnerAnswerDeliveryState,
   OwnerAnswerOutcome,
-  OwnerAnswerRecipient,
+  OwnerAnswerReader,
   OwnerAnswerSource,
+  OwnerAsker,
+  OwnerAskerPresence,
+  OwnerAskerPresenceProbe,
   OwnerInboxApprovalSource,
   OwnerInboxListFilter,
   OwnerInboxListener,
@@ -134,12 +143,10 @@ export type {
   OwnerItemKind,
   OwnerItemStatus,
   OwnerPostOutcome,
-  OwnerSessionPresence,
-  OwnerSessionPresenceProbe,
 } from './owner-inbox.js';
-export { QuestionStore } from './question-store.js';
-export { sessionBrokerPresence } from './owner-session-presence.js';
-export type { StoredAnswerDelivery, StoredOwnerEntry, StoredOwnerItem, StoredOwnerItemKind } from './question-store.js';
+export { QuestionStore, ownerInboxStorePath, sharedQuestionStore } from './question-store.js';
+export { terminalSessionPresence } from './owner-session-presence.js';
+export type { QuestionAskerScope, StoredAnswerDelivery, StoredOwnerEntry, StoredOwnerItem, StoredOwnerItemKind } from './question-store.js';
 export { registerOwnerInboxGatewayMethods } from './routes/owner-inbox.js';
 export { registerNotificationDeadLetterGatewayMethods, listNotificationDeadLetters, replayNotificationDeadLetters } from './routes/notification-dead-letters.js';
 export type { NotificationDeadLetterSources } from './routes/notification-dead-letters.js';

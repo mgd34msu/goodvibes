@@ -23,7 +23,7 @@ import { appendVerificationObservation } from './verification/archive.js';
 import { CompletionVerification } from './verification/coordinator.js';
 import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationWriter } from './verification/types.js';
 import { VerificationStore, type VerificationRepairCheckpoint } from './verification/store.js';
-import { VerificationJournalSource } from './verification/journal-source.js';
+import { matchesStoredVerificationCommitment, storedVerificationCommitmentMatcher, VerificationJournalSource } from './verification/journal-source.js';
 import { registerVerificationArchive, verificationHistory, verificationMessages } from './verification/archive.js';
 import { issueVerificationId, verificationSources, verificationFrames, verificationWireSource } from './verification/source.js';
 import { verificationCheckpointHistory } from './verification/batteries.js';
@@ -267,7 +267,8 @@ export class ResponseCompletionGuard {
         // pending turn after new owner input. Runtime feedback is observation,
         // so it may extend that pending turn without becoming a new request.
         const originalRoles = verificationMessages(initial.conversation, messages) as readonly ConversationMessageSnapshot[];
-        const checkpoint = this.reviewStore.repairCheckpoint(this.reviewBranch);
+        const saved = this.reviewStore.repairCheckpoint(this.reviewBranch);
+        const checkpoint = saved === undefined ? this.migrateRepairCheckpoint(initial.request, messages, originalRoles) : saved;
         this.repairId = checkpoint?.id;
         const references = checkpoint ?? this.reviewStore.repairOriginals(this.reviewBranch);
         if (references && (this.repairRequest?.id !== references.requestSource
@@ -337,6 +338,26 @@ export class ResponseCompletionGuard {
     if (!retained) throw new VerificationHeldError('missing current repair checkpoint');
     this.repairId = retained.id;
     return retained;
+  }
+
+  /** Match actually stored earlier commitments once, then write native source
+   * records. Normal new-format lookups never hash the request or transcript. */
+  private migrateRepairCheckpoint(request: string, messages: readonly ConversationMessageSnapshot[], originalRoles: readonly ConversationMessageSnapshot[]): VerificationRepairCheckpoint | undefined {
+    if (!this.reviewStore) return undefined;
+    const requestMatches = storedVerificationCommitmentMatcher(['completion-repair-checkpoint-v1', request]);
+    for (const [key, stored] of this.reviewStore.proposals) {
+      let value: { count?: unknown; prefix?: unknown; response?: unknown; review?: { findings?: unknown[] }; accessHeld?: unknown } | null;
+      try { value = JSON.parse(stored) as typeof value; } catch { continue; }
+      if (!value || typeof value.count !== 'number' || !Number.isSafeInteger(value.count) || value.count <= 0 || value.count > messages.length
+        || typeof value.prefix !== 'string' || typeof value.response !== 'string' || !requestMatches(key)
+        || value.accessHeld !== true && !(Array.isArray(value.review?.findings) && value.review.findings.length)
+        || originalRoles.slice(value.count).some(message => message.role === 'user')
+        || !matchesStoredVerificationCommitment(completionTranscript(messages.slice(0, value.count)), value.prefix)) continue;
+      const checkpoint = this.rememberCheckpoint(request, messages.slice(0, value.count), value.response, value.review ?? null, value.accessHeld === true);
+      this.reviewStore.rememberProposal(key, 'null');
+      return checkpoint;
+    }
+    return undefined;
   }
 
   private rememberReview(findings: readonly CompletionFinding[], input: ResponseCompletionInput): void {

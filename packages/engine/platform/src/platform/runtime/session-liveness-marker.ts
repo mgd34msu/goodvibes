@@ -148,6 +148,23 @@ export function checkSessionLiveness(
   return { live: true, pid: marker.pid };
 }
 
+/**
+ * The same check over a marker named by its path, for a process that is not
+ * the session's own surface (the owner inbox asking whether the session that
+ * left a question is open in a terminal now). One small file read and one
+ * signal-0 probe; never throws.
+ */
+export function checkLivenessMarkerFile(
+  path: string,
+  opts: { readonly now?: () => number; readonly isPidAliveFn?: typeof isPidAlive } = {},
+): SessionLivenessCheck {
+  const marker = parseMarkerFile(path);
+  if (!marker) return { live: false, pid: null };
+  if ((opts.now?.() ?? Date.now()) - marker.updatedAt > LIVENESS_STALE_AFTER_MS) return { live: false, pid: null };
+  if (!(opts.isPidAliveFn ?? isPidAlive)(marker.pid)) return { live: false, pid: null };
+  return { live: true, pid: marker.pid };
+}
+
 // ─── Reaping ────────────────────────────────────────────────────────────────
 //
 // `removeLivenessMarker` only runs on a CLEAN exit. A

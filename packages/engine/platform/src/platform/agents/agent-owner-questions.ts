@@ -1,82 +1,173 @@
 /**
- * The owner inbox as a `query` tool sees it inside the process that owns the
- * inbox (the daemon): each question is tagged with who asked it, and the
- * owner's answer is handed to that asker when the owner gives it. The answer
- * goes onto the asker's next model request through its host channel; when the
- * asker has ended, the answer stays on the question and the owner is told, with
- * the answer, that it was not delivered and why. Nothing waits or polls.
+ * The owner inbox as a `query` tool sees it: each question is tagged with who
+ * asked it (an agent, a session, and which process keeps that asker), and the
+ * asker starts watching for the answer, which it takes on a later model request
+ * (agent-inlets.ts). Inside the daemon this serves its agents (a channel's
+ * turns and contract units included) and its hosted sessions; the terminal
+ * apps tag their questions the same way (runtime/client/owner-inbox-updates.ts).
+ *
+ * Also here: where the daemon reads whether such an asker is open, can be
+ * opened again, or is gone, from the records it already keeps. Nothing waits
+ * or polls.
  */
 import {
-  OWNER_ANSWER_TO_METADATA,
-  type OwnerAnswerDelivery,
-  type OwnerAnswerRecipient,
+  OWNER_ANSWER_AGENT_METADATA,
+  OWNER_ANSWER_SESSION_METADATA,
+  OWNER_ASKER_HOST_METADATA,
+  answerAgentOf,
+  answerSessionOf,
+  type OwnerAnswerReader,
+  type OwnerAskerPresence,
+  type OwnerAskerPresenceProbe,
   type OwnerItem,
 } from '../control-plane/owner-inbox.js';
-import { questionClosedText } from '../runtime/client/owner-inbox-updates.js';
 import type { QuestionInbox } from '../tools/query/index.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import { callingAgentId } from './calling-agent.js';
-import { tellRunningAgent } from './agent-inlets.js';
+import { forgetOwnerQuestion, watchAgentQuestion, type SessionAnswerWatch } from './agent-inlets.js';
 
-/** An inbox in this process: questions are posted to it and their answers handed over by it. */
-export type InProcessQuestionInbox = QuestionInbox & {
-  deliverTo(id: string, recipient: OwnerAnswerRecipient): void;
-};
-
-/** Who receives the answer to a question being posted now. */
+/** Who is asking a question being posted now, and where the answer is watched for. */
 export interface QuestionAsker {
-  /** Shown to the owner: "agent …", "session …". */
-  readonly to: string;
-  readonly receive: (item: OwnerItem) => OwnerAnswerDelivery;
+  /** The agent asking, when one is; it takes the answer while it runs. */
+  readonly agent?: string | undefined;
+  /** The session the answer goes back to. */
+  readonly session?: string | undefined;
+  /** Which process keeps the asker: `hosted` session or `daemon` agent. Absent: a terminal app. */
+  readonly host?: 'hosted' | 'daemon' | undefined;
+  /** More facts about the asker kept on the question (a terminal session's saved file and liveness marker). */
+  readonly metadata?: Readonly<Record<string, string>> | undefined;
+  /** The watch of the asking session's conversation, when that conversation is in this process. */
+  readonly sessionWatch?: SessionAnswerWatch | undefined;
 }
 
-const KEPT = 'The answer is kept on the question.';
+/** An inbox the asker's process can also record "taken" in (the store itself, read directly). */
+export type AskingInbox = QuestionInbox & Partial<Pick<OwnerAnswerReader, 'claim'>>;
+
+function belongsTo(item: OwnerItem, asker: QuestionAsker): boolean {
+  if (asker.agent !== undefined) return answerAgentOf(item) === asker.agent;
+  return asker.session !== undefined && answerSessionOf(item) === asker.session && answerAgentOf(item) === undefined;
+}
+
+function askedByLabel(asker: QuestionAsker): string | undefined {
+  if (asker.agent !== undefined) return asker.session !== undefined ? `agent ${asker.agent} in session ${asker.session}` : `agent ${asker.agent}`;
+  return asker.session !== undefined ? `session ${asker.session}` : undefined;
+}
 
 /** Posts through `inbox` naming the asker; without one (`asker()` undefined) a post is left as it is. */
-export function deliveringQuestions(inbox: InProcessQuestionInbox, asker: () => QuestionAsker | undefined): QuestionInbox {
+export function askingQuestions(inbox: AskingInbox, asker: () => QuestionAsker | undefined): QuestionInbox {
+  const current = (): QuestionAsker | undefined => {
+    const who = asker();
+    return who && (who.agent !== undefined || who.session !== undefined) ? who : undefined;
+  };
   return {
     async post(item) {
-      const who = asker();
+      const who = current();
       if (!who) return await inbox.post(item);
+      const askedBy = item.askedBy ?? askedByLabel(who);
+      const session = item.sessionId ?? who.session;
       const outcome = await inbox.post({
         ...item,
-        askedBy: item.askedBy ?? who.to,
-        metadata: { ...item.metadata, [OWNER_ANSWER_TO_METADATA]: who.to },
+        ...(session !== undefined ? { sessionId: session } : {}),
+        ...(askedBy !== undefined ? { askedBy } : {}),
+        metadata: {
+          ...item.metadata,
+          ...who.metadata,
+          ...(who.session !== undefined ? { [OWNER_ANSWER_SESSION_METADATA]: who.session } : {}),
+          ...(who.agent !== undefined ? { [OWNER_ANSWER_AGENT_METADATA]: who.agent } : {}),
+          ...(who.host !== undefined ? { [OWNER_ASKER_HOST_METADATA]: who.host } : {}),
+        },
       });
-      // A post under an open key returns the question someone already asked; its asker keeps it.
-      if (outcome.created) inbox.deliverTo(outcome.item.id, who.receive);
+      // A post under an open key returns the question someone already asked; only its own asker watches it.
+      if (outcome.item.status === 'open' && (outcome.created || belongsTo(outcome.item, who))) {
+        if (who.agent !== undefined) watchAgentQuestion(who.agent, outcome.item.id);
+        if (who.sessionWatch && who.session !== undefined && who.sessionWatch.sessionId === who.session) who.sessionWatch.add(outcome.item.id);
+      }
       return outcome;
     },
-    find: (id) => inbox.find(id),
+    async find(id) {
+      const item = await inbox.find(id);
+      // The model read the answer itself: it is taken, and no request carries it again.
+      const who = current();
+      if (item && item.status === 'answered' && who && belongsTo(item, who) && inbox.claim?.(item.id)) forgetOwnerQuestion(item.id);
+      return item;
+    },
     list: (filter) => inbox.list(filter),
-    withdraw: (id, reason) => inbox.withdraw(id, reason),
+    withdraw: async (id, reason) => {
+      forgetOwnerQuestion(id);
+      return await inbox.withdraw(id, reason);
+    },
   };
 }
 
-function notRunning(record: AgentRecord | null): string {
-  if (!record) return `it is no longer known here (its record was cleared). ${KEPT}`;
-  const at = record.completedAt !== undefined ? ` at ${new Date(record.completedAt).toISOString()}` : '';
-  switch (record.status) {
-    case 'completed': return `it had already finished its run${at}. ${KEPT}`;
-    case 'failed': return `its run had ended in failure${at}${record.error ? ` (${record.error})` : ''}. ${KEPT}`;
-    case 'cancelled': return `it was cancelled${at}. ${KEPT}`;
-    default: return `it was ending its run when the answer came. ${KEPT}`;
-  }
+/** The session id a channel's turn runs for, from the context the daemon spawns it with. */
+export function sharedSessionOfContext(context: string | undefined): string | undefined {
+  const match = context === undefined ? null : /(?:^|\n)shared-session:(\S+)/.exec(context);
+  return match?.[1];
 }
 
 /**
- * The asker of a question a sub-agent's tool call posts: that agent, reached on
- * its next model request while its run is live. Undefined outside an agent's
- * tool call.
+ * The asker of a question a daemon agent's tool call posts: that agent, and
+ * for a channel's turn its shared session, so a later turn of the session
+ * takes an answer the asking turn did not live to read. Undefined outside an
+ * agent's tool call.
  */
 export function callingAgentAsker(agents: { getStatus(id: string): AgentRecord | null } | undefined): QuestionAsker | undefined {
   const agentId = callingAgentId();
   if (agentId === undefined) return undefined;
-  const to = `agent ${agentId}`;
-  return {
-    to,
-    receive: (item) => tellRunningAgent(agentId, questionClosedText(item))
-      ? { state: 'delivered', to }
-      : { state: 'undeliverable', to, reason: notRunning(agents?.getStatus(agentId) ?? null) },
+  const session = sharedSessionOfContext(agents?.getStatus(agentId)?.context);
+  return { agent: agentId, host: 'daemon', ...(session !== undefined ? { session } : {}) };
+}
+
+/**
+ * Where a daemon agent that asked is: running (`attached`); able to run again
+ * (`closed`: a failed run can be woken, a contract unit reopened, a channel's
+ * shared session gets its next turn); or gone (finished or cancelled for good,
+ * or no longer known, as after a daemon restart).
+ */
+export function daemonAgentPresence(
+  agents: { getStatus(id: string): AgentRecord | null },
+  sharedSessions?: { getSession(id: string): { readonly status: string; readonly title: string } | null },
+): OwnerAskerPresenceProbe {
+  return (asker): OwnerAskerPresence | undefined => {
+    if (asker.host !== 'daemon' || asker.agent === undefined) return undefined;
+    const record = agents.getStatus(asker.agent);
+    if (record && (record.status === 'running' || record.status === 'pending')) return { state: 'attached' };
+    if (asker.session !== undefined) {
+      const shared = sharedSessions?.getSession(asker.session) ?? null;
+      if (shared && shared.status !== 'closed') {
+        const title = shared.title.trim();
+        return { state: 'closed', ...(title ? { title } : {}), reopens: `the next message arrives in session ${asker.session}` };
+      }
+      return { state: 'gone', reason: `Session ${asker.session} was closed and agent ${asker.agent} is not running.` };
+    }
+    if (!record) return { state: 'gone', reason: `Agent ${asker.agent} is no longer known here: its record was cleared, or the daemon restarted since it asked.` };
+    if (record.status === 'failed' || (record.status === 'completed' && record.contractUnitId !== undefined)) {
+      return { state: 'closed', reopens: `agent ${asker.agent} runs again` };
+    }
+    return { state: 'gone', reason: record.status === 'cancelled'
+      ? `Agent ${asker.agent} was cancelled and cannot run again.`
+      : `Agent ${asker.agent} finished its run and cannot run again.` };
+  };
+}
+
+/**
+ * Where a hosted session that asked is: its loop is composed (`attached`); it
+ * is kept but idle, parked or restored after a restart (`closed`: the answer is
+ * taken when it is next opened); ended or retired (`gone`).
+ */
+export function hostedSessionPresence(sessions: {
+  get(id: string): { readonly status: string; readonly title?: string | undefined; readonly terminatedReason?: string | undefined } | null;
+  liveTurnControls(id: string): unknown;
+}): OwnerAskerPresenceProbe {
+  return (asker): OwnerAskerPresence | undefined => {
+    if (asker.host !== 'hosted' || asker.session === undefined) return undefined;
+    const record = sessions.get(asker.session);
+    if (!record) return { state: 'gone', reason: `Hosted session ${asker.session} no longer exists.` };
+    if (record.status === 'terminated') {
+      return { state: 'gone', reason: `Hosted session ${asker.session} was ended${record.terminatedReason ? ` (${record.terminatedReason})` : ''} and cannot be reopened.` };
+    }
+    const title = record.title?.trim();
+    const titled = title ? { title } : {};
+    return sessions.liveTurnControls(asker.session) !== null ? { state: 'attached', ...titled } : { state: 'closed', ...titled };
   };
 }

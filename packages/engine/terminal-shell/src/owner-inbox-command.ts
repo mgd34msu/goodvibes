@@ -7,9 +7,10 @@
  * answered question whether the answer reached the agent or session that
  * asked, waits for that session to be opened again, or cannot reach it.
  *
- * The products supply where the inbox is (the daemon's, reached over the
- * inbox.* verbs, or the terminal's own when there is no daemon) and who is typing. A command the model runs may read the
- * inbox but never answers it: the owner's answer is the owner's.
+ * The products supply where the inbox is (the home's one store, through the
+ * daemon's inbox.* verbs while a daemon is reachable and directly otherwise)
+ * and who is typing. A command the model runs may read the inbox but never
+ * answers it: the owner's answer is the owner's.
  */
 import { formatRefusal } from '@goodvibes-jev/engine/errors';
 import type { OwnerAnswerDelivery, OwnerInboxPort, OwnerItem } from '@goodvibes-jev/engine/platform/platform/control-plane';
@@ -54,7 +55,7 @@ function answerText(item: OwnerItem): string {
 export function formatDelivery(delivery: OwnerAnswerDelivery): string {
   const to = text(delivery.to);
   if (delivery.state === 'delivered') return `delivered to ${to}`;
-  if (delivery.state === 'waiting') return `waiting for ${to} to be opened`;
+  if (delivery.state === 'waiting') return `waiting for ${to}`;
   return `not deliverable to ${to}${delivery.reason ? `: ${text(delivery.reason)}` : ''}`;
 }
 
@@ -64,7 +65,7 @@ function deliveryNotice(delivery: OwnerAnswerDelivery | undefined): string {
   const to = text(delivery.to);
   if (delivery.state === 'delivered') return ` Sent to ${to}.`;
   if (delivery.state === 'waiting') return ` ${delivery.reason ? text(delivery.reason) : `Saved; it will be delivered when ${to} is next opened.`}`;
-  return ` Saved, not deliverable to ${to}: ${delivery.reason ? text(delivery.reason) : 'it has ended.'}`;
+  return ` Saved, not deliverable to ${to}: ${delivery.reason ? text(delivery.reason) : 'it cannot be opened again.'}`;
 }
 
 /** One line for a list. */

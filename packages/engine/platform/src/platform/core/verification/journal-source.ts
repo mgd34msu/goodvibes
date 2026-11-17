@@ -10,9 +10,21 @@ export type VerificationJournalRecord = { readonly id: string } & (
 // Used only to avoid plaintext persistence of a refused private original, or
 // to verify a previously stored commitment on recovery. Never an issued ID,
 // ordinary cache key or live currentness check. A commitment is the hex
-// SHA-256.
+// SHA-256; earlier builds saved its digits as the letters g to p, so a saved
+// commitment is read in either spelling.
 const privateCommitment = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const COMMITMENT = /^[0-9a-f]{64}$/;
+const COMMITMENT = /^[0-9a-p]{64}$/;
+const savedCommitment = (commitment: string): string => commitment.replace(/[g-p]/g, letter => String(letter.charCodeAt(0) - 103));
+
+/** Conversion of an actually stored earlier commitment, never a new key. */
+export function matchesStoredVerificationCommitment(value: unknown, commitment: string): boolean {
+  return COMMITMENT.test(commitment) && privateCommitment(captureOwnedJson(value)) === savedCommitment(commitment);
+}
+export function storedVerificationCommitmentMatcher(value: unknown): (commitment: string) => boolean {
+  const captured = captureOwnedJson(value);
+  let actual: string | undefined;
+  return expected => COMMITMENT.test(expected) && (actual ??= privateCommitment(captured)) === savedCommitment(expected);
+}
 
 /** One complete owned original. Public originals persist exactly; private
  * originals persist only a commitment and bind once during recovery. */
@@ -50,7 +62,7 @@ export class VerificationJournalSource {
     if (this.#message) return isDeepStrictEqual(this.#message, message);
     if (this.#observed && isDeepStrictEqual(this.#observed.message, message)) return this.#observed.matches;
     const saved = this.#stored;
-    const matches = !!saved && 'contentCommitment' in saved && privateCommitment(message) === saved.contentCommitment;
+    const matches = !!saved && 'contentCommitment' in saved && privateCommitment(message) === savedCommitment(saved.contentCommitment);
     this.#observed = { message, matches };
     if (matches) {
       this.#message = message;

@@ -1,6 +1,6 @@
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { composeRuntimeServices, registerGateRuntimeEvents, type ComposedRuntimeServices } from '@goodvibes-jev/engine/platform/platform/runtime/bootstrap';
-import { callingAgentAsker, deliveringQuestions } from '@goodvibes-jev/engine/platform/platform/agents';
+import { askingQuestions, callingAgentAsker, daemonAgentPresence, useOwnerAnswerReader } from '@goodvibes-jev/engine/platform/platform/agents';
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
 import { installNativeHostedConversationOwner } from './native-hosted-conversation-composition.js';
 import { createNativeWorkSubmissionHost } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger/native-submission';
@@ -8,7 +8,7 @@ import { createNativeConversationIntakeHost, createNativeRequirementProposer, ty
 import { createLocalWorkLedgerReadBinding } from '@goodvibes-jev/engine/platform/platform/workflow/work-ledger';
 import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
-import { GatewayMethodCatalog, controlPlaneStorePath, createOwnerInbox, sessionBrokerPresence } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
 import { createRuntimeAcquisitionScope } from './acquisition.js';
@@ -158,14 +158,19 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     fenceBrowserJudgment = () => browserClosing ??= browserJudgment.close();
     if (options.createBrowserJudgment) disposalScope.registry.add('browser judgment transport', fenceBrowserJudgment);
     // The one owner inbox: this broker's asks plus questions, claims, purchase
-    // windows and queued actions. Its log opens on first use, not at start-up.
+    // windows and queued actions, kept in the home's one store that the terminal
+    // apps open too. The store opens on first use, not at start-up.
     const ownerInbox = createOwnerInbox({
       approvals: approvalBroker,
-      questionsPath: controlPlaneStorePath(shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'owner-inbox.jsonl'),
+      questionsPath: ownerInboxStorePath(shellPaths),
+      // Whether the session or agent that asked is open now: a terminal session's marker and file,
+      // or this broker's record of it; the daemon's own agents and their channel sessions.
+      presence: [daemonAgentPresence(agentManager, sessionBroker), terminalSessionPresence(sessionBroker)],
     });
     disposalScope.registry.add('owner inbox', () => ownerInbox.dispose());
-    // Whether a terminal session that asked the owner something is open now: the broker's own record of it.
-    ownerInbox.useSessionPresence(sessionBrokerPresence(sessionBroker));
+    // This daemon's agents and hosted sessions read their answers from the store directly.
+    useOwnerAnswerReader(ownerInbox);
+    disposalScope.registry.add('owner answer reader', () => useOwnerAnswerReader(null));
     // A surface with no owner yet never takes its first sender as owner: that sender is held
     // as a claim in the owner inbox, and becomes the owner only when the owner accepts it.
     disposalScope.registry.add('channel owner claims', channelPolicy.attachOwnerInbox(ownerInbox));
@@ -284,9 +289,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // Workers keep the project work plan the work plan view shows.
       workPlan: workPlanStore,
       toolExecutionObserver: (tool: string, args: Record<string, unknown>, success: boolean) => ciAutoWatchObserver?.(tool, args, success),
-      // A background agent's `query` tool leaves its questions in the same inbox, and the owner's
-      // answer is handed to that agent's next model request (or the owner is told it has ended).
-      ownerQuestions: deliveringQuestions(ownerInbox, () => callingAgentAsker(agentManager)),
+      // A background agent's `query` tool leaves its questions in the same inbox; the agent takes the
+      // owner's answer on its next model request, or, if it stopped, on its next run (a channel's next turn).
+      ownerQuestions: askingQuestions(ownerInbox, () => callingAgentAsker(agentManager)),
       // Nobody watches a daemon worker's terminal: its exec requires the boundary
       // unless a composed workstream is explicitly granted the host (see
       // native-work-execution-activation.ts).

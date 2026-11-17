@@ -779,6 +779,15 @@ export class SessionManager {
   }
 
   /**
+   * The file a session is (or will be) saved in: present means it can be
+   * opened again. Another process reads it to tell a closed session from a
+   * deleted one (the owner inbox, for a session that asked a question).
+   */
+  filePathFor(name: string): string {
+    return this._resolveSessionFile(name) ?? join(this.sessionsDir, `${this.sanitizeName(name)}.jsonl`);
+  }
+
+  /**
    * Sanitize a session name into a safe filename: see {@link sanitizeSessionName}
    * (letters and digits of every script, `-` and `_`; a digest when nothing is left).
    */

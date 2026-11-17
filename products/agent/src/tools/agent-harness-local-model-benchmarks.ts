@@ -1,18 +1,12 @@
-import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { declaredClassicModelStack } from '@goodvibes-jev/engine/platform/platform/routing';
-import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { prepareJudgmentResult } from '@goodvibes-jev/engine/platform/platform/gate';
-import { localBenchmarkPrompt } from '@goodvibes-jev/engine/platform/platform/routing';
-import { assertProjectionCurrent, ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
-import type { JudgmentPort } from '@goodvibes-jev/judgment';
-import type { ArtifactDescriptor, ArtifactRecord } from '@goodvibes-jev/engine/platform/platform/artifacts';
+import { assertProjectionCurrent } from '@goodvibes-jev/engine/platform/platform/tools';
+import type { ArtifactDescriptor } from '@goodvibes-jev/engine/platform/platform/artifacts';
 import { hasPurpose, PURPOSE_MODEL_COMPARE_JUDGMENT } from './agent-review-packet-presets-core.ts';
 import { previewHarnessText } from './agent-harness-text.ts';
 import { localStackForProvider } from './agent-harness-local-model-url.ts';
 import type { LocalModelBenchmarkEvidence, LocalModelBenchmarkPlan, LocalModelBenchmarkRouteLatency, LocalModelBenchmarkWinner, LocalModelRecipe, ArtifactListLike } from './agent-harness-model-routing-types.ts';
-import { assertModelReadingInputCurrent, captureModelArtifactClockSource, captureModelArtifactClockSources, captureModelReadingInput, captureModelReadingSnapshotGuard, modelReadingServicePath, withModelReadingSource, type ModelReadingOptions } from './agent-harness-model-reading-source.ts';
+import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { readRecord, readString } from './agent-harness-model-routing-utils.ts';
-import { personalOpsEntry } from './agent-harness-personal-ops-source.ts';
 
 export interface BenchmarkArtifactContext {
   readonly platform: { readonly artifactStore?: ArtifactListLike | null | undefined };
@@ -212,48 +206,38 @@ export function localBenchmarkEvidence(
   };
 }
 
-export interface LocalBenchmarkMembership {
-  readonly provenance?: 'classic';
-  readonly artifactId: string;
-  readonly outcome: 'act' | 'hold' | 'not-evaluated';
-  readonly verdict: 'yes' | 'no' | 'unknown';
-  readonly decisionId?: string | undefined;
-  readonly reason?: string | undefined;
-}
 export interface LocalModelBenchmarkSnapshot {
-  readonly provenance?: 'classic';
-  readonly semanticAssessment?: 'not-evaluated' | 'partial';
   readonly storeAvailable: boolean;
   /** True when the store returned a full page, so older artifacts may exist that were never read. */
   readonly windowFull?: boolean;
   readonly comparisons: readonly ArtifactDescriptor[];
   readonly judgments: readonly ArtifactDescriptor[];
   readonly stacks: readonly { readonly artifactId: string; readonly stack: string | null }[];
-  readonly membership: readonly LocalBenchmarkMembership[];
 }
 export interface LocalModelBenchmarkHistory extends Record<string, unknown> {
   readonly evidence: LocalModelBenchmarkEvidence;
 }
-interface CompleteBenchmarkArtifact {
-  readonly descriptor: ArtifactDescriptor;
-  readonly record: ArtifactRecord;
-  readonly content: string;
-}
 
-/** Startup snapshots credit native typed declarations and exact links only. */
+/**
+ * Local benchmark evidence. The producer's tag is the one owner of "this
+ * comparison is a local benchmark" (`metadata.benchmarkKind`), and a judgment
+ * belongs to it by its source link; an untagged comparison is not a local
+ * benchmark. A winner's stack is its declared stack or its provider's, in code.
+ * One listing, no content loads, no model.
+ */
 export function localModelBenchmarkSnapshot(context: BenchmarkArtifactContext): LocalModelBenchmarkSnapshot {
   const store = context.platform.artifactStore ?? null;
-  if (!store?.list) return { storeAvailable: false, comparisons: [], judgments: [], stacks: [], membership: [],
-    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
-  };
+  if (!store?.list) return { storeAvailable: false, comparisons: [], judgments: [], stacks: [] };
   const allArtifacts = store.list(ARTIFACT_WINDOW);
   const comparisons = allArtifacts.filter(isLocalModelBenchmarkArtifact);
   const ids = new Set(comparisons.map(artifact => artifact.id));
   const judgments = allArtifacts.filter(artifact => isModelCompareJudgmentArtifact(artifact)
     && ids.has(readString(artifact.metadata.sourceArtifactId)));
-  return { storeAvailable: true, windowFull: allArtifacts.length >= ARTIFACT_WINDOW, comparisons, judgments, stacks: [], membership: [],
-    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
-  };
+  const stacks = judgments.flatMap(artifact => {
+    const winnerModel = readString(artifact.metadata.winnerModel);
+    return winnerModel ? [{ artifactId: artifact.id, stack: declaredClassicModelStack(readString(artifact.metadata.winnerStack)) ?? localStackForProvider(winnerModel) }] : [];
+  });
+  return { storeAvailable: true, windowFull: allArtifacts.length >= ARTIFACT_WINDOW, comparisons, judgments, stacks };
 }
 
 export function localBenchmarkRouteLatencyMapFor(snapshot: LocalModelBenchmarkSnapshot): ReadonlyMap<string, LocalModelBenchmarkRouteLatency> {
@@ -262,7 +246,6 @@ export function localBenchmarkRouteLatencyMapFor(snapshot: LocalModelBenchmarkSn
 
 export function localModelBenchmarkHistoryFrom(snapshot: LocalModelBenchmarkSnapshot, includeParameters: boolean): LocalModelBenchmarkHistory {
   if (!snapshot.storeAvailable) return {
-    ...(snapshot.provenance === 'classic' ? { provenance: 'classic', semanticAssessment: snapshot.semanticAssessment } : {}),
     status: 'unavailable', count: 0, reason: 'Artifact history is unavailable in this runtime.',
     saveRoute: 'agent_model_compare run benchmarkKind:"local-model-route" taskType:"local-model-route" explicitUserRequest:"<the user request, in their own words>"',
     evidence: localBenchmarkEvidence([], [], false),
@@ -270,7 +253,6 @@ export function localModelBenchmarkHistoryFrom(snapshot: LocalModelBenchmarkSnap
   const artifacts = snapshot.comparisons.slice(0, includeParameters ? 10 : 3);
   const judgments = snapshot.judgments.slice(0, includeParameters ? 10 : 3);
   const stacks = new Map(snapshot.stacks.map(entry => [entry.artifactId, entry.stack]));
-  const unknown = snapshot.membership.filter(entry => entry.outcome === 'not-evaluated').length;
   // Counts and the winner come from everything that was read; only the listed entries are shortened.
   const fullEvidence = localBenchmarkEvidence(snapshot.comparisons, snapshot.judgments, true, stacks);
   const windowNote = snapshot.windowFull
@@ -278,25 +260,19 @@ export function localModelBenchmarkHistoryFrom(snapshot: LocalModelBenchmarkSnap
     : '';
   const evidence = windowNote ? { ...fullEvidence, summary: fullEvidence.summary + windowNote } : fullEvidence;
   return {
-    ...(snapshot.provenance === 'classic' ? { provenance: 'classic', semanticAssessment: snapshot.semanticAssessment,
-      interpretationNotice: 'Classic credits exact benchmark tags and source links. Unmarked membership and undeclared model stacks are not interpreted.' } : {}),
-    status: artifacts.length > 0 ? 'history-found' : unknown ? 'unassessed-history' : 'no-history', count: artifacts.length,
+    status: artifacts.length > 0 ? 'history-found' : 'no-history', count: artifacts.length,
     total: snapshot.comparisons.length, totalJudgments: snapshot.judgments.length, truncated: snapshot.windowFull === true,
     artifacts: artifacts.map(describeLocalBenchmarkArtifact),
     judgments: judgments.map(artifact => describeLocalBenchmarkJudgment(artifact, stacks.get(artifact.id) ?? null)),
-    evidence: unknown ? { ...evidence, summary: (artifacts.length ? evidence.summary + ' ' : 'No benchmark membership was established from the native tags or links. ')
-      + `${unknown} unmarked artifact(s) were not interpreted during Classic operation.` } : evidence,
-    membership: snapshot.membership,
-    nextAction: unknown > 0 && artifacts.length === 0
-      ? 'Inspect the saved unmarked artifacts or declare their benchmark kind before crediting them as local benchmark evidence.'
-      : artifacts.length > 0
+    evidence,
+    nextAction: artifacts.length > 0
       ? evidence.status === 'reviewed-winner'
         ? 'Use the revealed saved judgment as evidence only; apply/update still needs a separate confirmed user request.'
         : `Review saved local benchmark ${artifacts[0]!.id}, then save a revealed judgment before recommending any default-model change.`
       : 'Run the setupPlan benchmark prompt and save the comparison artifact before recommending any default-model change.',
     analyticsRoute: 'agent_model_compare analytics benchmarkKind:"local-model-route" includeReasons:true',
     saveRoute: 'agent_model_compare run benchmarkKind:"local-model-route" taskType:"local-model-route" explicitUserRequest:"<the user request, in their own words>"',
-    policy: 'Benchmark history is read-only evidence. Unmarked artifacts need a settled complete-source membership reading; held readings credit no evidence. Route changes still require a separate revealed judgment and confirmed apply/update action.',
+    policy: 'Benchmark history is read-only evidence. A comparison counts as a local benchmark only when it was saved with benchmarkKind:"local-model-route"; untagged comparisons are not credited. Route changes still require a separate revealed judgment and confirmed apply/update action.',
   };
 }
 
@@ -304,159 +280,10 @@ export function localModelBenchmarkHistory(context: BenchmarkArtifactContext, in
   return localModelBenchmarkHistoryFrom(localModelBenchmarkSnapshot(context), includeParameters);
 }
 
-function benchmarkReadingSource(source: CompleteBenchmarkArtifact) {
-  return { descriptor: captureModelArtifactClockSource(source.descriptor).reading,
-    record: captureModelArtifactClockSource(source.record).reading, content: source.content };
-}
-
-async function readBenchmarkMembership(source: { readonly artifact: ReturnType<typeof benchmarkReadingSource> }, options: ModelReadingOptions): Promise<LocalBenchmarkMembership> {
-  return withModelReadingSource(source, options, async (state, scoped) => {
-    return decisionOrClassic<LocalBenchmarkMembership>(async () => {
-      assertProjectionCurrent(scoped.assertCurrent);
-      const installation = captureJudgmentPort(localBenchmarkPrompt.name, { signal: scoped.signal, prepareResultCapture: prepareJudgmentResult });
-      let assertInstallation = installation.assertCurrent;
-      const assertBackend = () => {
-        scoped.signal?.throwIfAborted(); installation.signal.throwIfAborted();
-        if (!isClassicOperation()) assertInstallation();
-      };
-      scoped.retainCurrent?.(assertBackend);
-      const assertCurrent = () => { scoped.signal?.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent); assertBackend(); };
-      const port = installation.port, recorder = port.recorder;
-      const guardedPort: JudgmentPort = { model: port.model, ...(recorder ? { recorder: {
-        recordReadings: (...args: Parameters<typeof recorder.recordReadings>) => { assertCurrent(); recorder.recordReadings(...args); assertCurrent(); },
-        recordAction: (...args: Parameters<typeof recorder.recordAction>) => { assertCurrent(); recorder.recordAction(...args); assertCurrent(); },
-      } } : {}), ask: async request => {
-        assertCurrent();
-        const result = await port.ask({ ...request,
-          beforeAttempt: () => { assertProjectionCurrent(request.beforeAttempt); assertCurrent(); },
-          assertLogCurrent: () => { assertProjectionCurrent(request.assertLogCurrent); assertCurrent(); },
-        });
-        assertCurrent(); return result;
-      } };
-      try {
-        const result = await localBenchmarkPrompt.run(guardedPort, personalOpsEntry(state),
-          { site: localBenchmarkPrompt.name, ...(scoped.signal ? { signal: scoped.signal } : {}) });
-        assertCurrent();
-        const reading = result.readings.member;
-        const verdict = reading.outcome === 'act' && (reading.verdict === 'yes' || reading.verdict === 'no') ? reading.verdict : 'unknown';
-        result.recordAction(verdict === 'yes' ? 'local benchmark history membership admitted'
-          : verdict === 'no' ? 'local benchmark history membership rejected' : 'local benchmark history membership held');
-        assertCurrent();
-        return { artifactId: state.artifact.descriptor.id, outcome: verdict === 'unknown' ? 'hold' : 'act',
-          verdict, decisionId: result.result.decisionId };
-      } finally {
-        const observation = installation.consumeObservation(); assertInstallation = observation.assertCurrent; assertBackend();
-      }
-    }, () => { assertProjectionCurrent(scoped.assertCurrent); return { artifactId: state.artifact.descriptor.id,
-      outcome: 'not-evaluated', verdict: 'unknown', provenance: 'classic', reason: 'decision-models-disabled' }; },
-    () => { scoped.signal?.throwIfAborted(); assertProjectionCurrent(scoped.assertCurrent); return true; });
-  });
-}
-
-function benchmarkArtifactDescriptor(record: ArtifactDescriptor): ArtifactDescriptor {
-  return { id: record.id, kind: record.kind, mimeType: record.mimeType, filename: record.filename,
-    sizeBytes: record.sizeBytes, createdAt: record.createdAt,
-    ...(typeof record.expiresAt === 'number' ? { expiresAt: record.expiresAt } : {}),
-    ...(typeof record.sourceUri === 'string' ? { sourceUri: record.sourceUri } : {}),
-    acquisitionMode: record.acquisitionMode, fetchMode: record.fetchMode, metadata: record.metadata };
-}
-
-/** Explicit readers preserve the whole native artifact and its source/store owner. */
+/** The explicit reader is the same one listing as the startup snapshot; it only honours the call's signal. */
 export async function readLocalModelBenchmarkSnapshot(context: BenchmarkArtifactContext, options: ModelReadingOptions): Promise<LocalModelBenchmarkSnapshot> {
-  return withConfiguredDecisionModelPolicy(() => readOwnedLocalModelBenchmarkSnapshot(context, options));
-}
-
-async function readOwnedLocalModelBenchmarkSnapshot(context: BenchmarkArtifactContext, options: ModelReadingOptions): Promise<LocalModelBenchmarkSnapshot> {
-  const beganClassic = isClassicOperation();
-  const signal = options.signal, originalAssert = options.assertCurrent;
-  const assertCaller = () => { signal?.throwIfAborted(); assertProjectionCurrent(originalAssert); signal?.throwIfAborted(); };
-  assertCaller();
-  const nativeStore = modelReadingServicePath(context, ['platform', 'artifactStore']);
-  const store = context.platform.artifactStore ?? null;
-  const list = store?.list, readContent = store?.readContent;
-  const originalArtifacts = list?.call(store, ARTIFACT_WINDOW) ?? [];
-  const artifactSources = captureModelArtifactClockSources(originalArtifacts);
-  captureModelReadingInput(artifactSources.reading);
-  const allArtifacts = artifactSources.native;
-  const assertArtifacts = captureModelReadingSnapshotGuard(allArtifacts);
-  const loaded = new Map<string, CompleteBenchmarkArtifact>();
-  const contentGuards: (() => void)[] = [];
-  const assertNativeBindings = () => {
-    signal?.throwIfAborted();
-    if (modelReadingServicePath(context, ['platform', 'artifactStore']) !== nativeStore
-      || options.signal !== signal || options.assertCurrent !== originalAssert) throw new ToolInputProjectionError('held');
-    assertArtifacts(originalArtifacts);
-  };
-  const assertNativeCurrent = () => {
-    assertNativeBindings();
-    if (list) assertArtifacts(list.call(store, ARTIFACT_WINDOW));
-    for (const guard of contentGuards) guard();
-    assertNativeBindings();
-  };
-  const assertCurrent = () => { assertCaller(); assertNativeCurrent(); };
-  assertCurrent(); options.retainCurrent?.(assertNativeCurrent);
-  if (!list) return { storeAvailable: false, comparisons: [], judgments: [], stacks: [], membership: [],
-    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: 'not-evaluated' as const } : {}),
-  };
-  const load = async (artifact: ArtifactDescriptor): Promise<CompleteBenchmarkArtifact | undefined> => {
-    assertCurrent(); const existing = loaded.get(artifact.id); if (existing) return existing;
-    if (!readContent) return undefined;
-    const result = await readContent.call(store, artifact.id); assertCurrent();
-    const record = captureModelArtifactClockSource(result.record).native, bytes = result.buffer;
-    if (!Buffer.isBuffer(bytes) || record.id !== artifact.id
-      || record.sizeBytes !== bytes.byteLength) throw new ToolInputProjectionError('held');
-    assertModelReadingInputCurrent(benchmarkArtifactDescriptor(record), JSON.stringify(benchmarkArtifactDescriptor(artifact)));
-    const savedBytes = Buffer.from(bytes);
-    const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(savedBytes);
-    const source = Object.freeze({ descriptor: artifact, record, content });
-    captureModelReadingInput(benchmarkReadingSource(source));
-    const serializedRecord = JSON.stringify(record);
-    const assertReadCurrent = result.assertCurrent?.bind(result);
-    contentGuards.push(() => {
-      try { assertReadCurrent?.(); } catch { throw new ToolInputProjectionError('held'); }
-      assertModelReadingInputCurrent(result.record, serializedRecord);
-      if (!Buffer.prototype.equals.call(bytes, savedBytes)) throw new ToolInputProjectionError('held');
-    });
-    loaded.set(artifact.id, source); assertCurrent(); return source;
-  };
-  const comparisons: ArtifactDescriptor[] = [], judgments: ArtifactDescriptor[] = [], membership: LocalBenchmarkMembership[] = [];
-  const readUnmarked = async (artifact: ArtifactDescriptor): Promise<boolean> => {
-    assertCurrent();
-    if (isClassicOperation()) { membership.push({ artifactId: artifact.id, outcome: 'not-evaluated', verdict: 'unknown',
-      provenance: 'classic', reason: 'decision-models-disabled' }); return false; }
-    const source = options.sourceOwner ? await load(artifact) : undefined; assertCurrent();
-    if (!source) { membership.push({ artifactId: artifact.id, outcome: 'hold', verdict: 'unknown',
-      reason: options.sourceOwner ? 'complete-artifact-source-unavailable' : 'protected-source-owner-unavailable' }); return false; }
-    const result = await readBenchmarkMembership({ artifact: benchmarkReadingSource(source) }, { ...options, assertCurrent }); assertCurrent();
-    membership.push(result); return result.outcome === 'act' && result.verdict === 'yes';
-  };
-  for (const artifact of allArtifacts) {
-    if (readString(artifact.metadata.purpose) !== 'agent-model-compare') continue;
-    if (isLocalModelBenchmarkArtifact(artifact) || await readUnmarked(artifact)) comparisons.push(artifact);
-    assertCurrent();
-  }
-  const comparisonIds = new Set(comparisons.map(artifact => artifact.id));
-  for (const artifact of allArtifacts) {
-    if (!isModelCompareJudgmentArtifact(artifact)) continue;
-    const sourceArtifactId = readString(artifact.metadata.sourceArtifactId);
-    if ((sourceArtifactId && comparisonIds.has(sourceArtifactId)) || await readUnmarked(artifact)) judgments.push(artifact);
-    assertCurrent();
-  }
-  const stacks: { artifactId: string; stack: string | null }[] = [];
-  for (const artifact of judgments) {
-    const winnerModel = readString(artifact.metadata.winnerModel);
-    if (!winnerModel) continue;
-    // The winner's stack is a fact of its provider's name, decided in code; no reading is made.
-    stacks.push({ artifactId: artifact.id, stack: declaredClassicModelStack(readString(artifact.metadata.winnerStack)) ?? localStackForProvider(winnerModel) });
-  }
-  // Every descriptor is the detached native snapshot already screened through
-  // its typed clock projection. Keep raw epochs for native consumers without
-  // reclassifying those producer clocks as borrowed payment material.
-  const result: LocalModelBenchmarkSnapshot = Object.freeze({ storeAvailable: true, windowFull: originalArtifacts.length >= ARTIFACT_WINDOW,
-    ...(isClassicOperation() ? { provenance: 'classic' as const, semanticAssessment: beganClassic ? 'not-evaluated' as const : 'partial' as const } : {}),
-    comparisons: Object.freeze(comparisons), judgments: Object.freeze(judgments),
-    stacks: captureModelReadingInput(stacks), membership: captureModelReadingInput(membership) });
-  assertCurrent(); return result;
+  options.signal?.throwIfAborted(); assertProjectionCurrent(options.assertCurrent);
+  return localModelBenchmarkSnapshot(context);
 }
 
 export async function readLocalModelBenchmarkHistory(context: BenchmarkArtifactContext, includeParameters: boolean, options: ModelReadingOptions): Promise<LocalModelBenchmarkHistory> {

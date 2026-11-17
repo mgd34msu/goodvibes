@@ -70,6 +70,7 @@ import {
   handleRemotePeerHeartbeat,
   handleRemotePeerWorkPull,
   handleRemotePeerWorkComplete,
+  matchPeerRoute,
 } from './remote-routes.js';
 import { buildRouterSessionBrokerAdapter } from './router-session-broker-adapter.js';
 import { authenticationRequired, DaemonRequestRouter, type DaemonRouteDispatcher } from './request-router.js';
@@ -419,7 +420,9 @@ export class DaemonHttpRouter {
       return this.handleLogin(req);
     }
 
-    if (url.pathname === '/api/remote/pair/request' && req.method === 'POST') {
+    // The peer endpoints, matched by the method and path the published peer contract states.
+    const peerRoute = matchPeerRoute(req.method, url.pathname);
+    if (peerRoute?.id === 'pair.request') {
       if (!this.pairRequestLimiter.allow(this.clientIpOf(req))) {
         const refused = jsonErrorResponse({
           error: 'Too many requests', code: 'RATE_LIMITED', state: 'this address used its pair requests for the minute',
@@ -435,7 +438,7 @@ export class DaemonHttpRouter {
       if (response.ok) emitCompanionPairRequested(this.context.runtimeBus, this.securityContext(req, 'pair-request'), { clientIp: this.clientIpOf(req) });
       return response;
     }
-    if (url.pathname === '/api/remote/pair/verify' && req.method === 'POST') {
+    if (peerRoute?.id === 'pair.verify') {
       const response = await handleRemotePairVerify({
         parseJsonBody: (request) => this.parseJsonBody(request),
         distributedRuntime: this.context.distributedRuntime,
@@ -446,27 +449,26 @@ export class DaemonHttpRouter {
       }
       return response;
     }
-    if (url.pathname === '/api/remote/heartbeat' && req.method === 'POST') {
+    if (peerRoute?.id === 'peer.heartbeat') {
       return handleRemotePeerHeartbeat({
         parseJsonBody: (request) => this.parseJsonBody(request),
         requireRemotePeer: (request, scope) => this.context.requireRemotePeer(request, scope),
         distributedRuntime: this.context.distributedRuntime,
       }, req);
     }
-    if (url.pathname === '/api/remote/work/pull' && req.method === 'POST') {
+    if (peerRoute?.id === 'work.pull') {
       return handleRemotePeerWorkPull({
         parseJsonBody: (request) => this.parseJsonBody(request),
         requireRemotePeer: (request, scope) => this.context.requireRemotePeer(request, scope),
         distributedRuntime: this.context.distributedRuntime,
       }, req);
     }
-    const remoteWorkCompleteMatch = url.pathname.match(/^\/api\/remote\/work\/([^/]+)\/complete$/);
-    if (remoteWorkCompleteMatch && req.method === 'POST') {
+    if (peerRoute?.id === 'work.complete' && peerRoute.params.workId) {
       return handleRemotePeerWorkComplete({
         parseJsonBody: (request) => this.parseJsonBody(request),
         requireRemotePeer: (request, scope) => this.context.requireRemotePeer(request, scope),
         distributedRuntime: this.context.distributedRuntime,
-      }, remoteWorkCompleteMatch[1]!, req);
+      }, peerRoute.params.workId, req);
     }
 
     if (url.pathname === '/webhook/github' && req.method === 'POST') {

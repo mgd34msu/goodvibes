@@ -1,13 +1,16 @@
+import { getPeerEndpoint, type PeerEndpointContract } from '@goodvibes-jev/engine/contracts';
 import type { DaemonRemoteManagementRouteHandlers } from './context.js';
 import { jsonErrorResponse, readJsonErrorResponse, serviceFailureStatus } from './error-response.js';
 import { requestActor } from './http-policy.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
+  isJsonRecord,
   readOptionalStringField,
   readStringArrayField,
   serializableJsonResponse,
   type JsonRecord,
+  type RouteBodySchema,
 } from './route-helpers.js';
 
 /**
@@ -24,6 +27,158 @@ const MAX_REMOTE_PAYLOAD_BYTES = 1_000_000;
 const MAX_REMOTE_CAPABILITIES = 128;
 const MAX_REMOTE_COMMANDS = 128;
 const MAX_REMOTE_SCOPES = 128;
+
+/**
+ * The endpoints a paired peer calls, by their id in the published peer
+ * contract. Their method, path, required scope and body fields are read from
+ * that contract, so the routes the daemon serves and the contract a peer is
+ * built against are one description.
+ */
+export type PeerRouteId = 'pair.request' | 'pair.verify' | 'peer.heartbeat' | 'work.pull' | 'work.complete';
+const PEER_ROUTE_IDS: readonly PeerRouteId[] = ['pair.request', 'pair.verify', 'peer.heartbeat', 'work.pull', 'work.complete'];
+
+/** A request matched to a peer endpoint, with the path parameters its contract path names (such as `workId`). */
+export interface PeerRouteMatch {
+  readonly id: PeerRouteId;
+  readonly params: Readonly<Record<string, string>>;
+}
+
+interface PeerRoute {
+  readonly id: PeerRouteId;
+  readonly endpoint: PeerEndpointContract;
+  readonly pattern: RegExp;
+  readonly paramNames: readonly string[];
+}
+
+/** Daemon bounds on body fields the contract types but does not limit. */
+type PeerFieldLimits = Readonly<Record<string, { readonly min?: number | undefined; readonly max: number }>>;
+
+let peerRoutes: ReadonlyMap<PeerRouteId, PeerRoute> | undefined;
+
+function compilePeerRoute(id: PeerRouteId): PeerRoute {
+  const endpoint = getPeerEndpoint(id);
+  if (!endpoint) throw new Error(`The published peer contract has no "${id}" endpoint, so the daemon cannot serve it.`);
+  if (endpoint.auth === 'bearer-peer-token' && !endpoint.requiredScope) {
+    throw new Error(`The published peer contract's "${id}" endpoint takes a peer token but names no required scope.`);
+  }
+  const paramNames: string[] = [];
+  const source = endpoint.path.split('/').map((segment) => {
+    const param = /^\{([A-Za-z][A-Za-z0-9_]*)\}$/.exec(segment);
+    if (param) {
+      paramNames.push(param[1]!);
+      return '([^/]+)';
+    }
+    return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }).join('/');
+  return { id, endpoint, pattern: new RegExp(`^${source}$`), paramNames };
+}
+
+function peerRouteTable(): ReadonlyMap<PeerRouteId, PeerRoute> {
+  peerRoutes ??= new Map(PEER_ROUTE_IDS.map((id) => [id, compilePeerRoute(id)]));
+  return peerRoutes;
+}
+
+function peerRoute(id: PeerRouteId): PeerRoute {
+  return peerRouteTable().get(id)!;
+}
+
+/** The peer endpoint a request is for, by the contract's method and path; null when it is not one. */
+export function matchPeerRoute(method: string, pathname: string): PeerRouteMatch | null {
+  if (!pathname.startsWith('/api/remote/')) return null;
+  for (const route of peerRouteTable().values()) {
+    if (route.endpoint.method !== method) continue;
+    const match = route.pattern.exec(pathname);
+    if (!match) continue;
+    const params: Record<string, string> = {};
+    route.paramNames.forEach((name, index) => {
+      params[name] = match[index + 1]!;
+    });
+    return { id: route.id, params };
+  }
+  return null;
+}
+
+/** The scope a peer token must hold to call this endpoint, as the contract states it. */
+function peerRouteScope(id: PeerRouteId): string | undefined {
+  return peerRoute(id).endpoint.requiredScope;
+}
+
+/**
+ * A body reader built from the endpoint's input schema in the peer contract:
+ * each declared property is read by its declared type, an `enum` value outside
+ * the list and a missing `required` field are refused naming the field, and
+ * path parameters are left to the path. `limits` bounds numbers and lists.
+ */
+function peerBodySchema<T>(id: PeerRouteId, limits: PeerFieldLimits = {}): RouteBodySchema<T> {
+  // The contract is read on the first request, not when this module loads.
+  return createRouteBodySchema<T>(`peer ${id}`, (body) => {
+    const read = readPeerBody(peerRoute(id), body, limits);
+    // The reader produced exactly the fields the contract's input schema declares.
+    return read instanceof Response ? read : read as unknown as T;
+  });
+}
+
+function readPeerBody(route: PeerRoute, body: JsonRecord, limits: PeerFieldLimits): JsonRecord | Response {
+  const schema = route.endpoint.inputSchema ?? {};
+  const properties = isJsonRecord(schema.properties) ? schema.properties : {};
+  const required = new Set(Array.isArray(schema.required) ? schema.required.filter((field): field is string => typeof field === 'string') : []);
+  const target = `${route.endpoint.method} ${route.endpoint.path}`;
+  const output: Record<string, unknown> = {};
+  for (const [field, declared] of Object.entries(properties)) {
+    if (route.paramNames.includes(field)) continue;
+    const property = isJsonRecord(declared) ? declared : {};
+    const allowed = Array.isArray(property.enum) ? property.enum : undefined;
+    const value = readPeerField(body, field, property, limits[field]);
+    if (allowed && value !== undefined && !allowed.includes(value)) {
+      return jsonErrorResponse({
+        error: `${field} must be one of ${allowed.map(String).join(', ')} for ${target}`,
+        code: 'INVALID_REQUEST',
+        state: `${field} was ${JSON.stringify(value)}`,
+        next: [`Send ${field} as one of ${allowed.map(String).join(', ')}.`],
+      }, { status: 400 });
+    }
+    if (value === undefined) {
+      if (required.has(field)) {
+        return jsonErrorResponse({
+          error: `Missing ${field} for ${target}`,
+          code: 'INVALID_REQUEST',
+          state: `the request body has no ${field}`,
+          next: [`Send ${field}; the peer contract lists it as required for ${target}.`],
+        }, { status: 400 });
+      }
+      continue;
+    }
+    output[field] = value;
+  }
+  return output;
+}
+
+function readPeerField(
+  body: JsonRecord,
+  field: string,
+  property: Readonly<Record<string, unknown>>,
+  limit: PeerFieldLimits[string] | undefined,
+): unknown {
+  switch (property.type) {
+    case 'string':
+      return readOptionalStringField(body, field);
+    case 'number':
+    case 'integer': {
+      const value = body[field];
+      if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+      return limit ? boundedPositiveNumber(value, limit.min ?? 0, limit.max) : value;
+    }
+    case 'boolean':
+      return typeof body[field] === 'boolean' ? body[field] : undefined;
+    case 'array':
+      return readStringArrayField(body, field, limit?.max);
+    case 'object':
+      return readRemoteMetadata(body[field]);
+    default:
+      // A field the contract leaves open (a work result) is passed on as sent.
+      return body[field];
+  }
+}
 
 /** The service surface the remote management routes call into. See {@link RemotePeerAuth}. */
 export interface DistributedRuntimeRouteService {
@@ -60,8 +215,8 @@ type RemotePairRequestBody = {
   readonly deviceFamily?: string | undefined;
   readonly version?: string | undefined;
   readonly clientMode?: string | undefined;
-  readonly capabilities: readonly string[];
-  readonly commands: readonly string[];
+  readonly capabilities?: readonly string[] | undefined;
+  readonly commands?: readonly string[] | undefined;
   readonly metadata: RemoteMetadata;
   readonly ttlMs?: number | undefined;
 };
@@ -126,67 +281,21 @@ interface DaemonRemoteRouteContext {
 }
 
 const remoteBodySchemas = createRouteBodySchemaRegistry({
-  pairRequest: createRouteBodySchema<RemotePairRequestBody>('POST /api/remote/pair', (body) => {
-    const label = readOptionalStringField(body, 'label');
-    if (!label) return jsonErrorResponse({ error: 'Missing remote peer label' }, { status: 400 });
-    const requestedId = readOptionalStringField(body, 'requestedId');
-    const platform = readOptionalStringField(body, 'platform');
-    const deviceFamily = readOptionalStringField(body, 'deviceFamily');
-    const version = readOptionalStringField(body, 'version');
-    const clientMode = readOptionalStringField(body, 'clientMode');
-    const ttlMs = boundedPositiveNumber(body.ttlMs, 1_000, 86_400_000);
-    return {
-      peerKind: body.peerKind === 'device' ? 'device' : 'node',
-      ...(requestedId ? { requestedId } : {}),
-      label,
-      ...(platform ? { platform } : {}),
-      ...(deviceFamily ? { deviceFamily } : {}),
-      ...(version ? { version } : {}),
-      ...(clientMode ? { clientMode } : {}),
-      capabilities: readStringArrayField(body, 'capabilities', MAX_REMOTE_CAPABILITIES) ?? [],
-      commands: readStringArrayField(body, 'commands', MAX_REMOTE_COMMANDS) ?? [],
-      metadata: readRemoteMetadata(body.metadata),
-      ...(ttlMs !== undefined ? { ttlMs } : {}),
-    };
+  pairRequest: peerBodySchema<RemotePairRequestBody>('pair.request', {
+    capabilities: { max: MAX_REMOTE_CAPABILITIES },
+    commands: { max: MAX_REMOTE_COMMANDS },
+    ttlMs: { min: 1_000, max: 86_400_000 },
   }),
-  pairVerify: createRouteBodySchema<RemotePairVerifyBody>('POST /api/remote/pair/verify', (body) => {
-    const requestId = readOptionalStringField(body, 'requestId');
-    const challenge = readOptionalStringField(body, 'challenge');
-    if (!requestId || !challenge) {
-      return jsonErrorResponse({ error: 'Missing requestId or challenge' }, { status: 400 });
-    }
-    return { requestId, challenge, metadata: readRemoteMetadata(body.metadata) };
+  pairVerify: peerBodySchema<RemotePairVerifyBody>('pair.verify'),
+  peerHeartbeat: peerBodySchema<RemotePeerHeartbeatBody>('peer.heartbeat', {
+    capabilities: { max: MAX_REMOTE_CAPABILITIES },
+    commands: { max: MAX_REMOTE_COMMANDS },
   }),
-  peerHeartbeat: createRouteBodySchema<RemotePeerHeartbeatBody>('POST /api/remote/heartbeat', (body) => {
-    const capabilities = readStringArrayField(body, 'capabilities', MAX_REMOTE_CAPABILITIES);
-    const commands = readStringArrayField(body, 'commands', MAX_REMOTE_COMMANDS);
-    const version = readOptionalStringField(body, 'version');
-    const clientMode = readOptionalStringField(body, 'clientMode');
-    return {
-      ...(capabilities ? { capabilities } : {}),
-      ...(commands ? { commands } : {}),
-      ...(version ? { version } : {}),
-      ...(clientMode ? { clientMode } : {}),
-      metadata: readRemoteMetadata(body.metadata),
-    };
+  workPull: peerBodySchema<RemoteWorkPullBody>('work.pull', {
+    maxItems: { min: 1, max: 100 },
+    leaseMs: { min: 1_000, max: 3_600_000 },
   }),
-  workPull: createRouteBodySchema<RemoteWorkPullBody>('POST /api/remote/work/pull', (body) => {
-    const maxItems = boundedPositiveNumber(body.maxItems, 1, 100);
-    const leaseMs = boundedPositiveNumber(body.leaseMs, 1_000, 3_600_000);
-    return {
-      ...(maxItems !== undefined ? { maxItems } : {}),
-      ...(leaseMs !== undefined ? { leaseMs } : {}),
-    };
-  }),
-  workComplete: createRouteBodySchema<RemoteWorkCompleteBody>('POST /api/remote/work/:workId/complete', (body) => {
-    const error = readOptionalStringField(body, 'error');
-    return {
-      ...(body.status === 'failed' || body.status === 'cancelled' || body.status === 'completed' ? { status: body.status } : {}),
-      result: body.result,
-      ...(error ? { error } : {}),
-      metadata: readRemoteMetadata(body.metadata),
-    };
-  }),
+  workComplete: peerBodySchema<RemoteWorkCompleteBody>('work.complete'),
   operatorNote: createRouteBodySchema<RemoteOperatorNoteBody>('POST /api/remote/operator-action', (body) => {
     const note = readOptionalStringField(body, 'note');
     const reason = readOptionalStringField(body, 'reason');
@@ -293,7 +402,7 @@ export async function handleRemotePeerHeartbeat(
   context: Pick<DaemonRemoteRouteContext, 'parseJsonBody' | 'requireRemotePeer' | 'distributedRuntime'>,
   req: Request,
 ): Promise<Response> {
-  const auth = await context.requireRemotePeer(req, 'remote:heartbeat');
+  const auth = await context.requireRemotePeer(req, peerRouteScope('peer.heartbeat'));
   if (auth instanceof Response) return auth;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
@@ -310,7 +419,7 @@ export async function handleRemotePeerWorkPull(
   context: Pick<DaemonRemoteRouteContext, 'parseJsonBody' | 'requireRemotePeer' | 'distributedRuntime'>,
   req: Request,
 ): Promise<Response> {
-  const auth = await context.requireRemotePeer(req, 'remote:pull');
+  const auth = await context.requireRemotePeer(req, peerRouteScope('work.pull'));
   if (auth instanceof Response) return auth;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
@@ -328,7 +437,7 @@ export async function handleRemotePeerWorkComplete(
   workId: string,
   req: Request,
 ): Promise<Response> {
-  const auth = await context.requireRemotePeer(req, 'remote:complete');
+  const auth = await context.requireRemotePeer(req, peerRouteScope('work.complete'));
   if (auth instanceof Response) return auth;
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;

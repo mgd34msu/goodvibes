@@ -235,6 +235,9 @@ export {
   handleRemotePeerHeartbeat,
   handleRemotePeerWorkPull,
   handleRemotePeerWorkComplete,
+  matchPeerRoute,
+  type PeerRouteId,
+  type PeerRouteMatch,
 } from './remote-routes.js';
 export { buildErrorResponseBody, jsonErrorResponse, readErrorResponseBody, readJsonErrorResponse, summarizeErrorForRecord } from './error-response.js';
 export {

@@ -32,6 +32,7 @@ import {
   startDistributedRuntime,
 } from './distributed-runtime-store.js';
 import { DistributedRuntimeRefusalError, nextDistributedPeerStatus, refusalReason } from './distributed-runtime-lifecycles.js';
+import { getPeerContract } from '../../../contracts.js';
 
 export async function requestDistributedPairing(
   state: DistributedRuntimeManagerState,
@@ -658,7 +659,8 @@ function issueToken(
   state: DistributedRuntimeManagerState,
   peerId: string,
   label: string,
-  scopes: readonly string[] = ['remote:pull', 'remote:complete', 'remote:heartbeat'],
+  // A new peer token holds every scope the published peer contract names.
+  scopes: readonly string[] = getPeerContract().scopes,
 ): { token: StoredPeerTokenRecord; value: string } {
   const peer = state.peers.get(peerId);
   if (!peer) throw new Error(`Unknown distributed peer: ${peerId}`);

@@ -48,7 +48,7 @@ export interface PeerInvokeOptions extends PeerRemoteClientInvokeOptions {}
  * import { createGoodVibesPlatform } from '@goodvibes-jev/engine/platform';
  *
  * const platform = createGoodVibesPlatform({ baseUrl: 'https://daemon.example.com', authToken: token });
- * const pairState = await platform.peer.pairing.request({ peerKind: 'agent' });
+ * const pairState = await platform.peer.pairing.request({ peerKind: 'node', label: 'build-box' });
  */
 export type PeerApiClient =
   & Omit<PeerRemoteClient, 'getOperation'>

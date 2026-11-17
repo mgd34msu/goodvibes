@@ -5,7 +5,7 @@ import { captureOwnedJson } from '@goodvibes-jev/engine/platform/platform/gate';
 import { inspectCatalogData, captureCatalogData, captureCatalogSnapshotGuard, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { captureModelReadingSnapshotGuard } from './agent-harness-model-reading-source.ts';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment/decisions';
-import { personalOpsNativeFields, personalOpsResultFields, type PersonalOpsNativeSchema } from './agent-personal-ops-native-fields.ts';
+import { personalOpsNativeFields, personalOpsResultFields } from './agent-personal-ops-native-fields.ts';
 
 /** Hidden producer data is still semantic source; serialization cannot omit it. */
 export function capturePersonalOpsData(value: unknown): unknown {
@@ -184,8 +184,9 @@ function freezeDeclarations<T extends readonly { readonly path: readonly string[
 }
 
 /** Native producer facts remain local until the complete DTO is protected. */
-export async function protectPersonalOpsData(value: unknown, options: CatalogRankingOptions = {}, schema?: PersonalOpsNativeSchema): Promise<unknown> {
-  return protectPersonalOpsSource(value, options, true, schema);
+/** A DTO this product's code built: every field is shown, masked; `withheld` names fields this read model must not show. */
+export async function protectPersonalOpsData(value: unknown, options: CatalogRankingOptions = {}, withheld?: ReadonlySet<string>): Promise<unknown> {
+  return protectPersonalOpsSource(value, options, true, withheld);
 }
 
 /** Arbitrary provider results are observational data. Redacted names/values may
@@ -195,7 +196,7 @@ export async function protectPersonalOpsResult(value: unknown, options: CatalogR
   return protectPersonalOpsSource(value, options, false);
 }
 
-async function protectPersonalOpsSource(value: unknown, options: CatalogRankingOptions, nativeFacts: boolean, schema?: PersonalOpsNativeSchema): Promise<unknown> {
+async function protectPersonalOpsSource(value: unknown, options: CatalogRankingOptions, nativeFacts: boolean, withheld?: ReadonlySet<string>): Promise<unknown> {
   // One frozen copy, masked once. The masking is local and synchronous in
   // effect, so the copy cannot change under it: the call's signal and the
   // caller's own check are the only things looked at again.
@@ -203,7 +204,7 @@ async function protectPersonalOpsSource(value: unknown, options: CatalogRankingO
   const assertCurrent = (): void => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
   const result = await redactStructuredDataAsync(captureOwnedJson(captured), { signal: options.signal, assertCurrent,
-    declaredFields: freezeDeclarations(nativeFacts ? personalOpsNativeFields(captured, schema) : personalOpsResultFields(captured)),
+    declaredFields: freezeDeclarations(nativeFacts ? personalOpsNativeFields(captured, withheld) : personalOpsResultFields(captured)),
   });
   const preserveFacts = (original: unknown, protectedValue: unknown): void => {
     if (typeof original === 'boolean' || typeof original === 'number' || original === null) {

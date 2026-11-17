@@ -19,6 +19,9 @@
  * on the runner's own settle event, and an idempotency key is forgotten then
  * too: a requester that never polls again leaves nothing behind. Without a
  * settle source the next status, result or cancel after settlement does it.
+ * Ending the session can retire its workspace floor and with it the runner that
+ * held the contract, so the settled contract's status and result are kept here
+ * for a while and answered from that copy.
  */
 import {
   contractWorkHandle,
@@ -76,6 +79,15 @@ function metadataString(metadata: Record<string, unknown> | undefined, key: stri
 
 /** The contract statuses that have no further transition. */
 const SETTLED_STATUSES: ReadonlySet<string> = new Set(['passed', 'failed', 'cancelled']);
+/** How long the outcome of a contract whose session was ended stays readable, and how many are kept. */
+const SETTLED_OUTCOME_RETENTION_MS = 24 * 60 * 60_000;
+const SETTLED_OUTCOME_LIMIT = 512;
+
+interface SettledOutcome {
+  readonly snapshot: ReturnType<typeof contractWorkSnapshot>;
+  readonly result: ReturnType<typeof contractWorkResult>;
+  readonly at: number;
+}
 
 export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterDeps): HostedContractWorkAdapter {
   /** Sessions this adapter created for a dispatch, by contract id: it ends them with the work. */
@@ -84,6 +96,25 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
   const dispatched = new Map<string, Promise<Awaited<ReturnType<ContractExternalWorkAdapter['dispatch']>>>>();
   /** The idempotency key each keyed dispatch's contract was started under, so settlement forgets it. */
   const keyOf = new Map<string, string>();
+  /** Settled contracts whose session this adapter ended, in settle order: their runner may be gone. */
+  const settledOutcomes = new Map<string, SettledOutcome>();
+
+  const keepOutcome = (contractId: string, outcome: SettledOutcome): void => {
+    settledOutcomes.delete(contractId);
+    settledOutcomes.set(contractId, outcome);
+    for (const [id, kept] of settledOutcomes) {
+      if (settledOutcomes.size <= SETTLED_OUTCOME_LIMIT && outcome.at - kept.at < SETTLED_OUTCOME_RETENTION_MS) break;
+      settledOutcomes.delete(id);
+    }
+  };
+  /** A kept outcome still within its retention, or undefined. */
+  const keptOutcome = (contractId: string): SettledOutcome | undefined => {
+    const kept = settledOutcomes.get(contractId);
+    if (kept === undefined) return undefined;
+    if (Date.now() - kept.at < SETTLED_OUTCOME_RETENTION_MS) return kept;
+    settledOutcomes.delete(contractId);
+    return undefined;
+  };
 
   const endSession = async (sessionId: string): Promise<void> => {
     try {
@@ -93,8 +124,7 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
     }
   };
 
-  const contractOf = (externalTaskId: string) => {
-    const contract = deps.runner.get(externalTaskId);
+  const contractOf = (externalTaskId: string, contract = deps.runner.get(externalTaskId)) => {
     if (contract === null) throw new ContractOperatorError(`No contract ${externalTaskId} on this daemon.`, 'CONTRACT_NOT_FOUND', 404);
     return contract;
   };
@@ -109,6 +139,9 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
     const sessionId = createdFor.get(contractId);
     if (sessionId === undefined) return;
     createdFor.delete(contractId);
+    // Read before the session ends: ending it may retire the floor whose runner holds the contract.
+    const contract = deps.runner.get(contractId);
+    if (contract !== null) keepOutcome(contractId, { snapshot: contractWorkSnapshot(contract), result: contractWorkResult(contract), at: Date.now() });
     await endSession(sessionId);
   };
 
@@ -189,19 +222,28 @@ export function createHostedContractWorkAdapter(deps: HostedContractWorkAdapterD
       detachDispatcher?.();
     },
     async status(externalTaskId) {
-      const contract = contractOf(externalTaskId);
+      const found = deps.runner.get(externalTaskId);
+      const kept = found === null ? keptOutcome(externalTaskId) : undefined;
+      if (kept !== undefined) return kept.snapshot;
+      const contract = contractOf(externalTaskId, found);
       const snapshot = contractWorkSnapshot(contract);
       await releaseWhenSettled(externalTaskId, contract.status);
       return snapshot;
     },
     async cancel(externalTaskId, reason) {
-      contractOf(externalTaskId);
+      const found = deps.runner.get(externalTaskId);
+      // A settled contract whose session was ended has nothing left to cancel.
+      if (found === null && keptOutcome(externalTaskId) !== undefined) return;
+      contractOf(externalTaskId, found);
       deps.runner.cancel(externalTaskId, reason ?? EXTERNAL_CANCEL_REASON);
       const after = deps.runner.get(externalTaskId);
       if (after !== null) await releaseWhenSettled(externalTaskId, after.status);
     },
     async result(externalTaskId) {
-      const contract = contractOf(externalTaskId);
+      const found = deps.runner.get(externalTaskId);
+      const kept = found === null ? keptOutcome(externalTaskId) : undefined;
+      if (kept !== undefined) return kept.result;
+      const contract = contractOf(externalTaskId, found);
       const result = contractWorkResult(contract);
       await releaseWhenSettled(externalTaskId, contract.status);
       return result;

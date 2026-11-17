@@ -27,6 +27,7 @@ import {
 import { detectPushSupport, readNotificationPermission } from '../../lib/push/push-support';
 import type { PushSupport, NotificationPermissionState } from '../../lib/push/push-support';
 import { useInstallPrompt } from '../../lib/pwa/install-prompt';
+import { client as platformClient, type PushSubscriptionRemoval } from '../../lib/goodvibes';
 import { capabilityReason, useOriginPosture } from '../../hooks/useOriginPosture';
 import { useToast } from '../../lib/toast';
 import { Button } from '../ui/Button';
@@ -34,6 +35,21 @@ import { SettingRow, SettingsBlock } from './dialog/parts';
 import '../../styles/components/notifications.css';
 
 const pushErrorMessage = describePushSubscribeError;
+
+const REMOVAL_REASONS: Record<string, string> = {
+  gone: 'the push service said the device no longer exists',
+  'failure-threshold': 'the push service refused it too many times in a row',
+  unusable: 'its stored record could never receive a push',
+  malformed: 'its stored record could never receive a push',
+};
+
+/** The last device the daemon removed, in words: when, from which push service, and the daemon's evidence. */
+function removalSentence(removal: PushSubscriptionRemoval): string {
+  const when = new Date(removal.removedAt).toLocaleString();
+  const why = REMOVAL_REASONS[removal.reason] ?? removal.reason;
+  const evidence = removal.evidence.trim().replace(/([^.!?])$/, '$1.');
+  return `A device was removed on ${when} (${removal.endpointOrigin}): ${why}. ${evidence} Turn notifications on again on that device to receive pushes there.`;
+}
 
 // The honest fallback while pairing.posture.get hasn't answered yet (or errored), still
 // true, just less specific than the daemon's own wording about ITS deployment.
@@ -77,7 +93,7 @@ export function NotificationSettings() {
     mutationFn: subscribeToPush,
     onSuccess: async () => {
       setPermission(readNotificationPermission());
-      await queryClient.invalidateQueries({ queryKey: ['push', 'subscribed'] });
+      await queryClient.invalidateQueries({ queryKey: ['push'] });
       toast({ title: 'Notifications on', description: 'This device will receive approval and completion pushes.', tone: 'success' });
     },
     onError: (error) => {
@@ -89,7 +105,7 @@ export function NotificationSettings() {
   const unsubscribe = useMutation({
     mutationFn: unsubscribeFromPush,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['push', 'subscribed'] });
+      await queryClient.invalidateQueries({ queryKey: ['push'] });
       toast({ title: 'Notifications off', description: 'This device will no longer receive pushes.', tone: 'success' });
     },
     onError: (error) => {
@@ -104,6 +120,15 @@ export function NotificationSettings() {
   });
 
   const isSubscribed = subscribed.data === true;
+  // The daemon's own record of the last device it removed, so a device that stopped
+  // receiving pushes is explained rather than silent.
+  const devices = useQuery({
+    queryKey: ['push', 'subscriptions'],
+    queryFn: () => platformClient.operator.push.list(),
+    enabled: support === 'ok',
+    retry: false,
+  });
+  const lastRemoval = devices.data?.lastRemoval;
 
   return (
     <SettingsBlock className="notifications-panel" title="Notifications & install">
@@ -119,6 +144,11 @@ export function NotificationSettings() {
         </div>
       ) : (
         <div className="notifications-push">
+          {lastRemoval && (
+            <div className="banner warning" role="status">
+              <BellOff size={16} aria-hidden="true" /> {removalSentence(lastRemoval)}
+            </div>
+          )}
           {permission === 'denied' && (
             <div className="banner warning" role="status">
               <BellOff size={16} aria-hidden="true" />{' '}

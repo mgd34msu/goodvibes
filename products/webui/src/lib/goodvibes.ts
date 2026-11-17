@@ -982,6 +982,9 @@ export type PushSubscriptionKeys = PushSubscriptionCreateInput['keys'];
 /** Reconcile heals the daemon's record for a device it already knows, so `deviceId` is required here. */
 export type PushSubscriptionReconcileInput = OperatorMethodInput<'push.subscriptions.reconcile'>;
 export type PublicPushSubscription = OperatorMethodOutput<'push.subscriptions.list'>['subscriptions'][number];
+/** This operator's push devices and the most recent device the daemon removed, with why. */
+export type PushSubscriptionListResult = OperatorMethodOutput<'push.subscriptions.list'>;
+export type PushSubscriptionRemoval = NonNullable<PushSubscriptionListResult['lastRemoval']>;
 /** What reconcile changed: created, endpoint-updated, keys-updated or unchanged. */
 export type PushReconcileDrift = OperatorMethodOutput<'push.subscriptions.reconcile'>['drift'];
 
@@ -1744,7 +1747,7 @@ export const client = {
     push: {
       vapidKey: () => invokeGatewayMethod('push.vapid.get', {}),
       subscribe: (input: PushSubscriptionCreateInput) => invokeGatewayMethod('push.subscriptions.create', input),
-      list: () => invokeGatewayMethod('push.subscriptions.list', {}),
+      list: (): Promise<PushSubscriptionListResult> => invokeGatewayMethod('push.subscriptions.list', {}),
       unsubscribe: (subscriptionId: string) => invokeGatewayMethod('push.subscriptions.delete', { subscriptionId }),
       verify: (subscriptionId: string) => invokeGatewayMethod('push.subscriptions.verify', { subscriptionId }),
       // reconcile: the reconcile-on-open self-heal call, see

@@ -36764,14 +36764,14 @@ Return a companion-chat session record together with its full message history.
 
 #### `companion.chat.sessions.list`
 
-List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions.
+List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions. Each record carries its title and system prompt, so it needs read:transcripts.
 
 - Title: `List Companion Chat Sessions`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/companion/chat/sessions`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -75194,14 +75194,14 @@ Return windowed (24h/7d) cost attribution over observed LLM usage, grouped by a 
 
 #### `deliveries.get`
 
-Return a single delivery record.
+Return a single delivery record. It names its recipient (address and label), so it needs read:automation-content.
 
 - Title: `Get Delivery`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/deliveries/{deliveryId}`
-- Scopes: `read:deliveries`
+- Scopes: `read:automation-content`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -75334,14 +75334,14 @@ Return a single delivery record.
 
 #### `deliveries.list`
 
-Return delivery records and integration snapshot data.
+Return delivery records and integration snapshot data. Each attempt names its recipient (address and label), so it needs read:automation-content.
 
 - Title: `List Deliveries`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/deliveries`
-- Scopes: `read:deliveries`
+- Scopes: `read:automation-content`
 - Emits events: `runtime.deliveries`
 - Dangerous: `no`
 - Invokable: `yes`
@@ -124105,7 +124105,7 @@ The honest TLS/capability posture of a web origin, pass your surface's current o
 
 #### `pairing.tokens.create`
 
-Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.
+Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.
 
 - Title: `Mint Paired Device Token`
 - Source: `builtin`
@@ -138336,14 +138336,14 @@ Update an existing route binding. (Renamed from routes.bindings.patch in the 1.0
 
 #### `routes.snapshot`
 
-Return the route and binding integration snapshot.
+Return the route and binding integration snapshot. A binding carries the chat's title and who wrote from it, so it needs read:channel-content.
 
 - Title: `Route Snapshot`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/routes`
-- Scopes: `read:routes`
+- Scopes: `read:channel-content`
 - Emits events: `runtime.routes`
 - Dangerous: `no`
 - Invokable: `yes`
@@ -143303,7 +143303,7 @@ Queue a deferred follow-up for a shared session so it runs after the current age
 
 #### `sessions.get`
 
-Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.
+Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts, as sessions.list and sessions.search do (titles and participants).
 
 - Title: `Get Shared Session`
 - Source: `builtin`
@@ -144363,14 +144363,14 @@ End a hosted session regardless of who is attached or what its detach policy say
 
 #### `sessions.hosted.list`
 
-Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. ws-only invoke verb; no REST binding.
+Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. A session's title is its first prompt unless one was given, so it needs read:transcripts. ws-only invoke verb; no REST binding.
 
 - Title: `List Daemon-Hosted Sessions`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -145556,14 +145556,14 @@ Return explicit session inputs, including queued follow-ups and delivered steeri
 
 #### `sessions.integration.snapshot`
 
-Return the session integration snapshot.
+Return the session integration snapshot. It carries the conversation's title, which is drawn from what was said, so it needs read:transcripts.
 
 - Title: `Session Integration Snapshot`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/session`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -145634,14 +145634,14 @@ Return the session integration snapshot.
 
 #### `sessions.list`
 
-Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.
+Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them. Session titles come from what was said and participants name the people in each conversation, so it needs read:transcripts.
 
 - Title: `List Shared Sessions`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/sessions`
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: `runtime.session`
 - Dangerous: `no`
 - Invokable: `yes`
@@ -147707,14 +147707,14 @@ Reopen a previously closed shared session.
 
 #### `sessions.search`
 
-Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKind, and status. Closed sessions are EXCLUDED by default, pass includeClosed:true to include them, and a returned closed session always carries an honest status:"closed" (never hidden, never relabeled). Cursor pagination returns disjoint pages that union to the full matching set.
+Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKind, and status. Closed sessions are EXCLUDED by default, pass includeClosed:true to include them, and a returned closed session always carries an honest status:"closed" (never hidden, never relabeled). Cursor pagination returns disjoint pages that union to the full matching set. Titles and participants come from the conversations, so it needs read:transcripts.
 
 - Title: `Search Shared Sessions`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:sessions`
+- Scopes: `read:transcripts`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -150460,7 +150460,7 @@ Return a single runtime task record.
 
 #### `tasks.list`
 
-Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.
+Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history. An agent task's title and description are its prompt, so a caller without read:transcripts gets each row with its kind as the title and no description or error, and `withheld` says so; counts and states are whole.
 
 - Title: `List Runtime Tasks`
 - Source: `builtin`
@@ -150683,6 +150683,9 @@ Return the integration snapshot for runtime tasks. `limit` returns only the newe
         ],
         "additionalProperties": false
       }
+    },
+    "withheld": {
+      "type": "string"
     }
   },
   "required": [
@@ -180767,12 +180770,12 @@ Shared-session lifecycle broadcast. Every session created / closed / deleted / r
 
 #### `control.surface_message`
 
-Out-of-band control-plane surface messages for operators and connected clients.
+Out-of-band control-plane surface messages for operators and connected clients. Each carries the message text, so it needs read:transcripts, as control.messages.list does.
 
 - Title: `Surface Message`
 - Source: `builtin`
 - Transport: `sse`, `ws`
-- Scopes: `read:events`
+- Scopes: `read:events`, `read:transcripts`
 - Domains: none
 - Wire events: `surface-message`
 

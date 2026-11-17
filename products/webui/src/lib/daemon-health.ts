@@ -45,7 +45,7 @@ export type AuthState = 'signed-in' | 'signed-out' | 'unknown';
 
 /**
  * WORKING axis. An authed read (sessions.list) succeeded without 401. This is the axis
- * that catches a token minted WITHOUT the read:sessions scope: reachable + signed-in
+ * that catches a token minted WITHOUT the read:transcripts scope: reachable + signed-in
  * but not working, so the strip never claims "live" when session data is silently 401ing.
  */
 export type WorkingState = 'working' | 'blocked' | 'unknown';
@@ -227,7 +227,7 @@ export function deriveAuthState(input: { ok: boolean; status: number | null }): 
 
 /**
  * Derive the WORKING axis from an authed read (sessions.list). Success is working; a
- * 401 is blocked (signed-out OR a token missing the read:sessions scope, either way
+ * 401 is blocked (signed-out OR a token missing the read:transcripts scope, either way
  * session data cannot be read, so we must not claim "live"); other failures are unknown.
  */
 export function deriveWorkingState(input: { ok: boolean; status: number | null }): WorkingState {

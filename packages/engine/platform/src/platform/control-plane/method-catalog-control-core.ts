@@ -369,9 +369,9 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.integration.snapshot',
     title: 'Session Integration Snapshot',
-    description: 'Return the session integration snapshot.',
+    description: 'Return the session integration snapshot. It carries the conversation\'s title, which is drawn from what was said, so it needs read:transcripts.',
     category: 'sessions',
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/session' },
     inputSchema: EMPTY_OBJECT_SCHEMA,
     outputSchema: SESSION_SNAPSHOT_SCHEMA,
@@ -379,9 +379,9 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.list',
     title: 'List Shared Sessions',
-    description: 'Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.',
+    description: 'Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them. Session titles come from what was said and participants name the people in each conversation, so it needs read:transcripts.',
     category: 'sessions',
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/sessions' },
     events: [runtimeEventId('session')],
     inputSchema: EMPTY_OBJECT_SCHEMA,
@@ -423,7 +423,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.get',
     title: 'Get Shared Session',
-    description: 'Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.',
+    description: 'Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts, as sessions.list and sessions.search do (titles and participants).',
     category: 'sessions',
     scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/sessions/{sessionId}' },
@@ -732,9 +732,9 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'sessions.search',
     title: 'Search Shared Sessions',
-    description: 'Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKind, and status. Closed sessions are EXCLUDED by default, pass includeClosed:true to include them, and a returned closed session always carries an honest status:"closed" (never hidden, never relabeled). Cursor pagination returns disjoint pages that union to the full matching set.',
+    description: 'Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKind, and status. Closed sessions are EXCLUDED by default, pass includeClosed:true to include them, and a returned closed session always carries an honest status:"closed" (never hidden, never relabeled). Cursor pagination returns disjoint pages that union to the full matching set. Titles and participants come from the conversations, so it needs read:transcripts.',
     category: 'sessions',
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     transport: ['ws'],
     inputSchema: SESSIONS_SEARCH_INPUT_SCHEMA,
     outputSchema: SESSIONS_SEARCH_OUTPUT_SCHEMA,
@@ -760,7 +760,7 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
   methodDescriptor({
     id: 'tasks.list',
     title: 'List Runtime Tasks',
-    description: 'Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.',
+    description: 'Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history. An agent task\'s title and description are its prompt, so a caller without read:transcripts gets each row with its kind as the title and no description or error, and `withheld` says so; counts and states are whole.',
     category: 'tasks',
     scopes: ['read:tasks'],
     http: { method: 'GET', path: '/api/tasks' },

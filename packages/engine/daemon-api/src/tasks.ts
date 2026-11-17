@@ -30,7 +30,7 @@ async function dispatchTaskRoutesInner(
 
   if (pathname === '/api/tasks' && method === 'GET') {
     const limit = url.searchParams.get('limit');
-    return handlers.getIntegrationTasks(limit === null ? undefined : readBoundedPositiveInteger(limit, 500, 5_000));
+    return handlers.getIntegrationTasks(limit === null ? undefined : readBoundedPositiveInteger(limit, 500, 5_000), req);
   }
   const taskDetailMatch = pathname.match(/^\/api\/tasks\/([^/]+)$/);
   if (taskDetailMatch && method === 'GET') return handlers.getRuntimeTask(safeDecodeURIComponent(taskDetailMatch[1]!));

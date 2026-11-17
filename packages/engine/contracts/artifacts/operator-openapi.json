@@ -35097,7 +35097,7 @@
       "get": {
         "operationId": "companion.chat.sessions.list",
         "summary": "List Companion Chat Sessions",
-        "description": "List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions.",
+        "description": "List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions. Each record carries its title and system prompt, so it needs read:transcripts.",
         "tags": [
           "companion"
         ],
@@ -35259,7 +35259,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "x-effect": "read",
         "parameters": [
@@ -64468,7 +64468,7 @@
       "get": {
         "operationId": "deliveries.get",
         "summary": "Get Delivery",
-        "description": "Return a single delivery record.",
+        "description": "Return a single delivery record. It names its recipient (address and label), so it needs read:automation-content.",
         "tags": [
           "deliveries"
         ],
@@ -64594,7 +64594,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:deliveries"
+          "read:automation-content"
         ],
         "x-effect": "read",
         "parameters": [
@@ -64613,7 +64613,7 @@
       "get": {
         "operationId": "deliveries.list",
         "summary": "List Deliveries",
-        "description": "Return delivery records and integration snapshot data.",
+        "description": "Return delivery records and integration snapshot data. Each attempt names its recipient (address and label), so it needs read:automation-content.",
         "tags": [
           "deliveries"
         ],
@@ -64771,7 +64771,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:deliveries"
+          "read:automation-content"
         ],
         "x-effect": "read"
       }
@@ -123213,7 +123213,7 @@
       "get": {
         "operationId": "routes.snapshot",
         "summary": "Route Snapshot",
-        "description": "Return the route and binding integration snapshot.",
+        "description": "Return the route and binding integration snapshot. A binding carries the chat's title and who wrote from it, so it needs read:channel-content.",
         "tags": [
           "routes"
         ],
@@ -123394,7 +123394,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:routes"
+          "read:channel-content"
         ],
         "x-effect": "read"
       }
@@ -127376,7 +127376,7 @@
       "get": {
         "operationId": "sessions.list",
         "summary": "List Shared Sessions",
-        "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.",
+        "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them. Session titles come from what was said and participants name the people in each conversation, so it needs read:transcripts.",
         "tags": [
           "sessions"
         ],
@@ -127623,7 +127623,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "x-effect": "read"
       }
@@ -127699,7 +127699,7 @@
       "get": {
         "operationId": "sessions.get",
         "summary": "Get Shared Session",
-        "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.",
+        "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts, as sessions.list and sessions.search do (titles and participants).",
         "tags": [
           "sessions"
         ],
@@ -130053,7 +130053,7 @@
       "get": {
         "operationId": "sessions.integration.snapshot",
         "summary": "Session Integration Snapshot",
-        "description": "Return the session integration snapshot.",
+        "description": "Return the session integration snapshot. It carries the conversation's title, which is drawn from what was said, so it needs read:transcripts.",
         "tags": [
           "sessions"
         ],
@@ -130124,7 +130124,7 @@
           "ws"
         ],
         "x-scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "x-effect": "read"
       }
@@ -134873,7 +134873,7 @@
       "get": {
         "operationId": "tasks.list",
         "summary": "List Runtime Tasks",
-        "description": "Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.",
+        "description": "Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history. An agent task's title and description are its prompt, so a caller without read:transcripts gets each row with its kind as the title and no description or error, and `withheld` says so; counts and states are whole.",
         "tags": [
           "tasks"
         ],
@@ -135076,6 +135076,9 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "withheld": {
+                      "type": "string"
                     }
                   },
                   "required": [

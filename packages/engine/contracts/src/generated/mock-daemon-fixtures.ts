@@ -26282,7 +26282,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "correlationId": "sample",
           "turnId": "sample"
         }
-      ]
+      ],
+      "withheld": "sample"
     }
   },
   "tasks.retry": {

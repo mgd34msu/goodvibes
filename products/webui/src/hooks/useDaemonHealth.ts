@@ -78,13 +78,14 @@ function scopeCovers(granted: string, required: string): boolean {
 }
 
 /**
- * The WORKING axis from the sign-in's own grant, as auth.current reports it: data reads
- * need `read:sessions`. A daemon that reports no scope list is not judged.
+ * The WORKING axis from the sign-in's own grant, as auth.current reports it: the
+ * conversation reads (sessions.list and the transcripts behind it) need
+ * `read:transcripts`. A daemon that reports no scope list is not judged.
  */
 function workingFromGrant(snapshot: unknown): WorkingState {
   const scopes: unknown = (snapshot as { scopes?: unknown } | null)?.scopes;
   if (!Array.isArray(scopes)) return 'working';
-  return (scopes as readonly unknown[]).some((scope) => typeof scope === 'string' && scopeCovers(scope, 'read:sessions'))
+  return (scopes as readonly unknown[]).some((scope) => typeof scope === 'string' && scopeCovers(scope, 'read:transcripts'))
     ? 'working'
     : 'blocked';
 }

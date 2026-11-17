@@ -29526,7 +29526,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "correlationId": "sample",
           "turnId": "sample"
         }
-      ]
+      ],
+      "withheld": "sample"
     }
   },
   "tasks.retry": {

@@ -243,8 +243,8 @@ devices are unpaired to fit under it again.
   device as `mintedBy`; a device whose own pairing is gone cannot mint (403
   `PAIRING_TOKEN_NOT_FOUND`).
 - **Limit** what a device may do with `pairing.tokens.create({ name, scopes })`: the device
-  holds only those operator scopes (for example `read:sessions` and `write:sessions` for a
-  phone that only chats) and is not an admin. Left out, the device holds full operator
+  holds only those operator scopes (for example `read:sessions`, `read:transcripts` and
+  `write:sessions` for a phone that only chats) and is not an admin. Left out, the device holds full operator
   authority. A caller grants only what it holds: a limited device's or user's new token
   inherits its list, and naming a scope the caller does not hold is 403 `MISSING_SCOPE`.
   `pairing.tokens.list` returns each device's `scopes`, and the web app's device list shows

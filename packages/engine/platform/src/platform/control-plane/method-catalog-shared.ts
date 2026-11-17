@@ -367,9 +367,14 @@ function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
  * - `read:transcripts`: every read that returns conversation or message text:
  *   shared session messages and inputs, queued messages, companion chat
  *   history and its stream, the messages surfaces received
- *   (`control.messages.list`, `control.snapshot`), an agent task's prompt,
- *   progress and result (`tasks.get`, `tasks.status`), batch requests and
- *   answers, and check-in briefings and the messages they sent.
+ *   (`control.messages.list`, `control.snapshot`, the surface-message event),
+ *   an agent task's prompt, progress and result (`tasks.get`, `tasks.status`;
+ *   `tasks.list` serves its counts and states without it), batch requests and
+ *   answers, check-in briefings and the messages they sent, and the session
+ *   listings (`sessions.list`, `sessions.search`, `sessions.hosted.list`,
+ *   `sessions.integration.snapshot`, `companion.chat.sessions.list`), whose
+ *   titles come from what was said and whose participants name the people in
+ *   each conversation.
  * - `read:pairing`, `read:remote`: paired devices, device nodes and their
  *   grants, remote peers, their pair requests and the work sent to them.
  * - `read:checkpoints`: workspace file contents (checkpoint diffs and
@@ -379,9 +384,10 @@ function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
  *   `read:automation-content`, `read:fleet-content`, `read:skill-content`: the
  *   records of an area whose status stays on `read:browser`, `read:knowledge`,
  *   `read:channels`, `read:automation`, `read:fleet` and `read:skills`.
+ *   Delivery records (they name the recipient) are automation records, and
+ *   route bindings (a chat's title and who wrote from it) channel records.
  *
- * Session metadata (`sessions.list`, `sessions.search`) stays on
- * `read:sessions`; a contract is shown only to the principal that started it.
+ * A contract is shown only to the principal that started it.
  */
 export const OWNER_PRIVATE_READ_SCOPES: ReadonlySet<string> = new Set([
   'read:email', 'read:profile', 'read:profile-document', 'read:payments', 'read:occasions', 'read:memory',

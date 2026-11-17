@@ -387,6 +387,8 @@ export const TASK_SNAPSHOT_SCHEMA = objectSchema({
   // The snapshot rows are the runtime task fields a client rebuilds a task from
   // (cancellable, childTaskIds and description included), so they share its schema.
   tasks: arraySchema(RUNTIME_TASK_SCHEMA),
+  /** Present when the caller may not read task text (read:transcripts): says what each row leaves out. */
+  withheld: STRING_SCHEMA,
 }, ['queued', 'running', 'blocked', 'totals', 'tasks']);
 
 export const TASK_CREATE_INPUT_SCHEMA = objectSchema({

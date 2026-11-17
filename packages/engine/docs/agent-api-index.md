@@ -20,13 +20,13 @@ Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{
 | `sessions.hosted.create` | invoke / WebSocket only | write:sessions |  | Compose a full conversation loop INSIDE the daemon for a workspace: the same orchestrator, tool registry and … |
 | `sessions.hosted.detach` | invoke / WebSocket only | write:sessions |  | Leave a hosted session. |
 | `sessions.hosted.kill` | invoke / WebSocket only | write:sessions |  | End a hosted session regardless of who is attached or what its detach policy says: the in-flight turn is inte… |
-| `sessions.hosted.list` | invoke / WebSocket only | read:sessions |  | Every session this daemon hosts, most recently updated first. |
+| `sessions.hosted.list` | invoke / WebSocket only | read:transcripts |  | Every session this daemon hosts, most recently updated first. |
 | `sessions.hosted.workspaces` | invoke / WebSocket only | read:sessions |  | The folders sessions.hosted.create accepts as workspaceRoot: the daemon's working directory and every registe… |
 | `sessions.inputs.cancel` | `POST /api/sessions/{sessionId}/inputs/{inputId}/cancel` | write:sessions |  | Cancel a queued shared-session input before it is delivered or spawned. |
 | `sessions.inputs.deliver` | `POST /api/sessions/{sessionId}/inputs/{inputId}/deliver` | write:sessions |  | A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acti… |
 | `sessions.inputs.list` | `GET /api/sessions/{sessionId}/inputs` | read:transcripts |  | Return explicit session inputs, including queued follow-ups and delivered steering requests. |
-| `sessions.integration.snapshot` | `GET /api/session` | read:sessions |  | Return the session integration snapshot. |
-| `sessions.list` | `GET /api/sessions` | read:sessions |  | Return shared-session integration state. |
+| `sessions.integration.snapshot` | `GET /api/session` | read:transcripts |  | Return the session integration snapshot. |
+| `sessions.list` | `GET /api/sessions` | read:transcripts |  | Return shared-session integration state. |
 | `sessions.messages.create` | `POST /api/sessions/{sessionId}/messages` | write:sessions | body `messageId` | Append a user message to a shared session. |
 | `sessions.messages.list` | `GET /api/sessions/{sessionId}/messages` | read:transcripts |  | Return a page of retained session messages. |
 | `sessions.permissionMode.get` | `GET /api/sessions/{sessionId}/permission-mode` | read:sessions |  | Return the effective session execution mode: ask-me, jev-decides, just-vibes, yolo, or the read-only plan pos… |
@@ -36,7 +36,7 @@ Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{
 | `sessions.queuedMessages.list` | `GET /api/sessions/{sessionId}/queued-messages` | read:transcripts |  | List the messages queued behind the current turn (submitted while the model was thinking), in delivery order. |
 | `sessions.register` | `POST /api/sessions/register` | write:sessions | body `sessionId` | Idempotently register (or heartbeat) a session keyed on a caller-supplied id, carrying its kind, project, and… |
 | `sessions.reopen` | `POST /api/sessions/{sessionId}/reopen` | write:sessions |  | Reopen a previously closed shared session. |
-| `sessions.search` | invoke / WebSocket only | read:sessions |  | Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKin… |
+| `sessions.search` | invoke / WebSocket only | read:transcripts |  | Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKin… |
 | `sessions.steer` | `POST /api/sessions/{sessionId}/steer` | write:sessions | body `messageId` | Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn wh… |
 | `sessions.toolCalls.cancel` | `POST /api/sessions/{sessionId}/tool-calls/{callId}/cancel` | write:sessions |  | Cancel a single running tool call by its callId, leaving the turn and any other running calls untouched. |
 | `sessions.turns.cancel` | `POST /api/sessions/{sessionId}/turns/cancel` | write:sessions |  | Atomically compare expectedTurnId and request cancellation of that live turn, preserving the session and futu… |

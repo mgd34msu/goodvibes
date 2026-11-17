@@ -1,4 +1,5 @@
 import type { JsonRecord } from './route-helpers.js';
+import type { RequestPrincipal } from './http-policy.js';
 import type { RuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 
 export type { RuntimeEventDomain };
@@ -190,7 +191,12 @@ export interface DaemonIntegrationRouteContext {
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
   readonly providerRuntime: ProviderRuntimeSnapshotServiceLike;
   readonly requireAdmin: (req: Request) => Response | null;
-  /** The credential's own identity; a memory review is recorded under it, never under a name the body claims. Absent: reviews carry no reviewer. */
-  readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string } | null) | undefined;
+  /**
+   * The credential's own identity and grant. A memory review is recorded under
+   * it, never under a name the body claims, and a task row's text is shown only
+   * to a caller holding read:transcripts. Absent: reviews carry no reviewer and
+   * task rows are served whole.
+   */
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => Pick<RequestPrincipal, 'principalId' | 'admin' | 'scopeSet'> | null) | undefined;
   readonly userAuth: UserAuthManagerLike;
 }

@@ -175,10 +175,10 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
   methodDescriptor({
     id: 'sessions.hosted.list',
     title: 'List Daemon-Hosted Sessions',
-    description: 'Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. ws-only invoke verb; no REST binding.',
+    description: 'Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. A session\'s title is its first prompt unless one was given, so it needs read:transcripts. ws-only invoke verb; no REST binding.',
     category: 'sessions',
     transport: ['ws'],
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     inputSchema: objectSchema({ includeTerminated: BOOLEAN_SCHEMA }, []),
     outputSchema: objectSchema({
       sessions: arraySchema(HOSTED_SESSION_RECORD_SCHEMA),

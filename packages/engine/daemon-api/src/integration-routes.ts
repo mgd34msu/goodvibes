@@ -2,6 +2,7 @@ import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes-jev/engine/errors';
 import type { DaemonIntegrationRouteHandlers } from './context.js';
 import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
 import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput } from './integration-route-types.js';
+import { principalHasScope } from './http-policy.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -132,13 +133,39 @@ function withAuthenticatedReviewer(
   return principal ? { ...rest, reviewedBy: principal.principalId } : rest;
 }
 
+/** What a task row needs to hide when the caller may not read conversation text. */
+const TASK_TEXT_WITHHELD = 'Task titles, prompts and errors need read:transcripts; the counts and states are whole.';
+
+/**
+ * The task snapshot as the caller may see it. An agent task's title and
+ * description are its prompt and its error can quote the work, so a caller
+ * without read:transcripts gets each row's kind as its title and no prompt or
+ * error, and `withheld` says so. A request no credential resolved for (an
+ * embedder without a resolver) is served whole, as before.
+ */
+function taskSnapshotFor(context: DaemonIntegrationRouteContext, req: Request | undefined, snapshot: unknown): unknown {
+  const principal = req ? context.resolveAuthenticatedPrincipal?.(req) ?? null : null;
+  if (!principal || principal.admin || principalHasScope(principal, 'read:transcripts')) return snapshot;
+  const record = snapshot as { readonly tasks?: unknown } | null;
+  if (!record || typeof record !== 'object' || !Array.isArray(record.tasks)) return snapshot;
+  return {
+    ...record,
+    tasks: record.tasks.map((row: unknown) => {
+      if (!row || typeof row !== 'object') return row;
+      const { title: _title, description: _description, error: _error, ...rest } = row as Record<string, unknown>;
+      return { ...rest, title: `${typeof rest['kind'] === 'string' ? rest['kind'] : 'runtime'} task` };
+    }),
+    withheld: TASK_TEXT_WITHHELD,
+  };
+}
+
 export function createDaemonIntegrationRouteHandlers(
   context: DaemonIntegrationRouteContext,
 ): DaemonIntegrationRouteHandlers {
   return {
     getReview: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.buildReview())),
     getIntegrationSession: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getSessionSnapshot())),
-    getIntegrationTasks: (limit?: number) => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getTaskSnapshot(limit))),
+    getIntegrationTasks: (limit?: number, req?: Request) => withHelpers(context.integrationHelpers, (helpers) => Response.json(taskSnapshotFor(context, req, helpers.getTaskSnapshot(limit)))),
     getIntegrationAutomation: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getAutomationSnapshot())),
     getIntegrationSessions: (url?: URL) => handleGetIntegrationSessions(context.integrationHelpers, url),
     getDeliveries: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getDeliverySnapshot())),

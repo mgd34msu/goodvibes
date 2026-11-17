@@ -25,6 +25,7 @@ import { registerPairingGatewayMethods } from '../platform/src/platform/control-
 import { registerContractGatewayMethods } from '../platform/src/platform/control-plane/routes/contracts.ts';
 import { PairingTokenManager } from '../platform/src/platform/pairing/pairing-token-store.ts';
 import { createContractOperatorService } from '../platform/src/platform/contract/operator-service.ts';
+import { createDaemonIntegrationRouteHandlers, dispatchTaskRoutes, type DaemonIntegrationRouteContext } from '../daemon-api/src/index.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { makeHarness, makeRepo, oneUnitPlan, type Harness } from './contract/runner-support.ts';
 
@@ -46,16 +47,23 @@ function daemon() {
   const catalog = new GatewayMethodCatalog();
   const pairing = new PairingTokenManager(join(dir, 'pairing-tokens.json'));
   registerPairingGatewayMethods(catalog, pairing);
-  const helper = new DaemonControlPlaneHelper({
+  // The task routes as the daemon router wires them: the caller is the request's own credential.
+  const tasks = { snapshot: {} as Record<string, unknown> };
+  const taskRoutes = (req: Request) => dispatchTaskRoutes(req, createDaemonIntegrationRouteHandlers({
+    integrationHelpers: { getTaskSnapshot: () => tasks.snapshot },
+    resolveAuthenticatedPrincipal: (request: Request) => helper.authenticateRequest(request)?.principal ?? null,
+  } as unknown as DaemonIntegrationRouteContext) as unknown as Parameters<typeof dispatchTaskRoutes>[1]);
+  const helper: DaemonControlPlaneHelper = new DaemonControlPlaneHelper({
     gatewayMethods: catalog, userAuth, pairingTokens: pairing,
     controlPlaneGateway: new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() }),
     authToken: () => 'fixture-operator-token', trustProxyEnabled: () => false, host: '127.0.0.1', port: 0,
+    dispatchApiRoutes: taskRoutes,
   } as unknown as DaemonControlPlaneContext);
   const owner = userAuth.createSession('owner').token;
   const viewer = userAuth.createSession('viewer').token;
   const call = (token: string, methodId: string, body: Record<string, unknown> = {}) =>
     helper.invokeGatewayMethodCall({ authToken: token, methodId, body });
-  return { userAuth, catalog, pairing, helper, owner, viewer, call };
+  return { userAuth, catalog, pairing, helper, owner, viewer, call, tasks };
 }
 
 test('a non-admin user cannot read transcripts, paired devices or any owner-private record', async () => {
@@ -67,7 +75,8 @@ test('a non-admin user cannot read transcripts, paired devices or any owner-priv
   for (const scope of [...OWNER_PRIVATE_READ_SCOPES]) expect(`${scope}: ${principal.scopes.includes(scope)}`).toBe(`${scope}: false`);
   for (const methodId of ['sessions.get', 'sessions.messages.list', 'sessions.inputs.list', 'pairing.tokens.list', 'browser.readText',
     'calendar.events.list', 'channels.inbox.list', 'channels.drafts.get', 'knowledge.search', 'approvals.list', 'inbox.list',
-    'checkpoints.diff', 'fleet.snapshot', 'control.messages.list', 'tasks.status', 'principals.list', 'remote.peers.list']) {
+    'checkpoints.diff', 'fleet.snapshot', 'control.messages.list', 'tasks.status', 'principals.list', 'remote.peers.list',
+    'sessions.list', 'sessions.search', 'sessions.hosted.list', 'companion.chat.sessions.list', 'routes.snapshot', 'deliveries.list']) {
     const refused = await d.call(d.viewer, methodId, { sessionId: 'owner-session' });
     expect(`${methodId}: ${refused.status}`).toBe(`${methodId}: 403`);
     expect(JSON.stringify(refused.body)).not.toContain('owner phone');
@@ -82,10 +91,11 @@ test('a non-admin user cannot read transcripts, paired devices or any owner-priv
  * Every method a signed-in user without the admin role may call, reviewed,
  * each with why it is open: it returns only the caller's own records or status
  * that is not the owner's content (counts, states, names, configuration). The
- * owner's content (mail, profile, purchases, dates, memory, transcripts, paired
- * devices and peers, calendar, approvals, named people, workspace file
- * contents, and the records of his browser, knowledge, channels, automations,
- * fleet and skills) is absent because its scopes are outside that grant.
+ * owner's content (mail, profile, purchases, dates, memory, transcripts and the
+ * session listings drawn from them, paired devices and peers, calendar,
+ * approvals, named people, workspace file contents, and the records of his
+ * browser, knowledge, channels, automations, fleet and skills) is absent because
+ * its scopes are outside that grant.
  */
 const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['accounts.snapshot', 'provider routes, readiness and freshness; no account identity'],
@@ -115,7 +125,6 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['checkin.config.get', 'check-in settings and whether the schedule is installed'],
   ['ci.status', 'job conclusions of a repository ref'],
   ['ci.watches.list', 'standing CI watches and their states'],
-  ['companion.chat.sessions.list', 'companion chat session metadata; history needs read:transcripts'],
   ['continuity.snapshot', 'session recovery state'],
   ['contracts.get', 'only a contract the caller started (see the contract test below)'],
   ['contracts.list', 'only contracts the caller started'],
@@ -123,6 +132,7 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['contracts.summaries', 'only contracts the caller started'],
   ['control.auth.current', 'the caller\'s own principal and grant'],
   ['control.auth.login', 'signing in'],
+  ['control.auth.logout', 'ending the caller\'s own sign-in'],
   ['control.clients.list', 'connected clients and when they were seen'],
   ['control.contract', 'the published operator contract'],
   ['control.events.catalog', 'the event catalog'],
@@ -132,8 +142,6 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['control.status', 'daemon status and version'],
   ['control.web', 'a redirect into the web app'],
   ['cost.attribution.get', 'cost totals by dimension'],
-  ['deliveries.get', 'one delivery attempt: target and status, no text'],
-  ['deliveries.list', 'delivery attempts and totals, no text'],
   ['flags.graduation.report', 'feature defaults'],
   ['health.snapshot', 'daemon health'],
   ['homeassistant.conversation.health', 'whether the Home Assistant surface is on'],
@@ -175,20 +183,15 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['relay.reachability.get', 'relay registration state'],
   ['remote.node_host.contract', 'the published node host contract; peers need read:remote'],
   ['review.snapshot', 'counts of sessions, tasks, approvals and panels'],
-  ['routes.snapshot', 'route bindings: surface, thread and session ids'],
   ['runtime.metrics.get', 'process-wide counters and histograms'],
   ['sessions.contextUsage.get', 'context window token counts'],
-  ['sessions.hosted.list', 'hosted session metadata; messages need read:transcripts'],
   ['sessions.hosted.workspaces', 'folders a hosted session may use'],
-  ['sessions.integration.snapshot', 'the current session\'s metadata'],
-  ['sessions.list', 'session metadata; messages need read:transcripts'],
   ['sessions.permissionMode.get', 'the effective permission mode'],
-  ['sessions.search', 'session metadata search'],
   ['skills.list', 'skill index lines; bodies need read:skill-content'],
   ['stepup.challenge.mint', 'a single-use challenge for the caller\'s own relay call'],
   ['surfaces.list', 'registered surfaces'],
   ['tailscale.get', 'whether tailscale is usable'],
-  ['tasks.list', 'task titles and states; prompts and results need read:transcripts'],
+  ['tasks.list', 'task counts and states; each row\'s title, prompt and error need read:transcripts'],
   ['telemetry.errors.list', 'telemetry records, redacted without read:telemetry-sensitive'],
   ['telemetry.events.list', 'telemetry events, redacted without read:telemetry-sensitive'],
   ['telemetry.metrics.get', 'telemetry aggregates'],
@@ -211,6 +214,21 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['workspaces.resolve', 'whether a path is in a registered workspace'],
   ['worktrees.snapshot', 'worktree records: paths, branches, owners'],
 ]);
+
+test('a non-admin user reads task counts and states but not an agent task\'s prompt or error', async () => {
+  const d = daemon();
+  const prompt = 'Draft the reply to my lawyer about the custody hearing';
+  d.tasks.snapshot = {
+    queued: 0, running: 1, blocked: 0, totals: { created: 1, completed: 0, failed: 0, cancelled: 0 },
+    tasks: [{ id: 'task-1', kind: 'agent', title: prompt, description: prompt, status: 'running', owner: 'agent-1', cancellable: true, childTaskIds: [], queuedAt: 1, error: `failed on: ${prompt}` }],
+  };
+  const seen = await d.call(d.viewer, 'tasks.list');
+  expect(seen.status).toBe(200);
+  expect(JSON.stringify(seen.body)).not.toContain('custody');
+  expect(seen.body).toMatchObject({ running: 1, tasks: [{ id: 'task-1', kind: 'agent', status: 'running' }] });
+  const own = await d.call(d.owner, 'tasks.list');
+  expect(JSON.stringify(own.body)).toContain('custody');
+});
 
 test('every method open to a non-admin user is on the reviewed list, and the list names nothing that is not', () => {
   const d = daemon();

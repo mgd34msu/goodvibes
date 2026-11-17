@@ -119,8 +119,10 @@ const RUNTIME_DOMAIN_DESCRIPTIONS = {
  * events carry setting values, approvals and tool arguments, conversation or
  * tool output, other principals' credentials and connections, or the owner's
  * records (knowledge sources and the task a packet was built for; the fleet's
- * agents and what they are doing); the rest describe state a non-admin can
- * already read through the request path.
+ * agents and what they are doing; a task's prompt, which its title and
+ * description are; the work plan's tasks and notes; a delivery's recipient);
+ * the rest describe state a non-admin can already read through the request
+ * path.
  */
 export type GatewayEventAccess = 'authenticated' | 'admin';
 
@@ -129,11 +131,11 @@ const RUNTIME_DOMAIN_ACCESS = {
   turn: 'admin',
   providers: 'authenticated',
   tools: 'admin',
-  tasks: 'authenticated',
+  tasks: 'admin',
   agents: 'admin',
   contracts: 'admin',
   communication: 'admin',
-  planner: 'authenticated',
+  planner: 'admin',
   gate: 'admin',
   plugins: 'authenticated',
   mcp: 'authenticated',
@@ -146,7 +148,7 @@ const RUNTIME_DOMAIN_ACCESS = {
   automation: 'authenticated',
   routes: 'authenticated',
   'control-plane': 'admin',
-  deliveries: 'authenticated',
+  deliveries: 'admin',
   watchers: 'authenticated',
   surfaces: 'authenticated',
   knowledge: 'admin',
@@ -242,10 +244,10 @@ export const builtinGatewayEventDescriptors: readonly GatewayEventDescriptor[] =
   eventDescriptor({
     id: 'control.surface_message',
     title: 'Surface Message',
-    description: 'Out-of-band control-plane surface messages for operators and connected clients.',
+    description: 'Out-of-band control-plane surface messages for operators and connected clients. Each carries the message text, so it needs read:transcripts, as control.messages.list does.',
     category: 'transport',
     transport: ['sse', 'ws'],
-    scopes: ['read:events'],
+    scopes: ['read:events', 'read:transcripts'],
     wireEvents: ['surface-message'],
     outputSchema: CONTROL_PLANE_SURFACE_MESSAGE_SCHEMA,
   }),

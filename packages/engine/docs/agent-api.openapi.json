@@ -1712,7 +1712,7 @@
    "get": {
     "operationId": "sessions.list",
     "summary": "List Shared Sessions",
-    "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.",
+    "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them. Session titles come from what was said and participants name the people in each conversation, so it needs read:transcripts.",
     "tags": [
      "sessions"
     ],
@@ -1802,7 +1802,7 @@
      }
     },
     "x-scopes": [
-     "read:sessions"
+     "read:transcripts"
     ]
    }
   },
@@ -1886,7 +1886,7 @@
    "get": {
     "operationId": "sessions.get",
     "summary": "Get Shared Session",
-    "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.",
+    "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts, as sessions.list and sessions.search do (titles and participants).",
     "tags": [
      "sessions"
     ],
@@ -2470,7 +2470,7 @@
    "get": {
     "operationId": "sessions.integration.snapshot",
     "summary": "Session Integration Snapshot",
-    "description": "Return the session integration snapshot.",
+    "description": "Return the session integration snapshot. It carries the conversation's title, which is drawn from what was said, so it needs read:transcripts.",
     "tags": [
      "sessions"
     ],
@@ -2545,7 +2545,7 @@
      }
     },
     "x-scopes": [
-     "read:sessions"
+     "read:transcripts"
     ]
    }
   },
@@ -4066,7 +4066,7 @@
    "get": {
     "operationId": "tasks.list",
     "summary": "List Runtime Tasks",
-    "description": "Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.",
+    "description": "Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history. An agent task's title and description are its prompt, so a caller without read:transcripts gets each row with its kind as the title and no description or error, and `withheld` says so; counts and states are whole.",
     "tags": [
      "tasks"
     ],
@@ -4126,6 +4126,9 @@
            "items": {
             "$ref": "#/components/schemas/Task"
            }
+          },
+          "withheld": {
+           "type": "string"
           }
          },
          "required": [

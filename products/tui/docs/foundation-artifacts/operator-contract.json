@@ -37101,7 +37101,7 @@
       {
         "id": "companion.chat.sessions.list",
         "title": "List Companion Chat Sessions",
-        "description": "List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions.",
+        "description": "List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions. Each record carries its title and system prompt, so it needs read:transcripts.",
         "category": "companion",
         "source": "builtin",
         "access": "authenticated",
@@ -37110,7 +37110,7 @@
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -75662,7 +75662,7 @@
       {
         "id": "deliveries.get",
         "title": "Get Delivery",
-        "description": "Return a single delivery record.",
+        "description": "Return a single delivery record. It names its recipient (address and label), so it needs read:automation-content.",
         "category": "deliveries",
         "source": "builtin",
         "access": "authenticated",
@@ -75671,7 +75671,7 @@
           "ws"
         ],
         "scopes": [
-          "read:deliveries"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -75799,7 +75799,7 @@
       {
         "id": "deliveries.list",
         "title": "List Deliveries",
-        "description": "Return delivery records and integration snapshot data.",
+        "description": "Return delivery records and integration snapshot data. Each attempt names its recipient (address and label), so it needs read:automation-content.",
         "category": "deliveries",
         "source": "builtin",
         "access": "authenticated",
@@ -75808,7 +75808,7 @@
           "ws"
         ],
         "scopes": [
-          "read:deliveries"
+          "read:automation-content"
         ],
         "http": {
           "method": "GET",
@@ -125078,7 +125078,7 @@
       {
         "id": "pairing.tokens.create",
         "title": "Mint Paired Device Token",
-        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.",
+        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -139086,7 +139086,7 @@
       {
         "id": "routes.snapshot",
         "title": "Route Snapshot",
-        "description": "Return the route and binding integration snapshot.",
+        "description": "Return the route and binding integration snapshot. A binding carries the chat's title and who wrote from it, so it needs read:channel-content.",
         "category": "routes",
         "source": "builtin",
         "access": "authenticated",
@@ -139095,7 +139095,7 @@
           "ws"
         ],
         "scopes": [
-          "read:routes"
+          "read:channel-content"
         ],
         "http": {
           "method": "GET",
@@ -144085,7 +144085,7 @@
       {
         "id": "sessions.get",
         "title": "Get Shared Session",
-        "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts; sessions.list and sessions.search return session metadata under read:sessions.",
+        "description": "Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts, as sessions.list and sessions.search do (titles and participants).",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -145139,7 +145139,7 @@
       {
         "id": "sessions.hosted.list",
         "title": "List Daemon-Hosted Sessions",
-        "description": "Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. ws-only invoke verb; no REST binding.",
+        "description": "Every session this daemon hosts, most recently updated first. Terminated sessions are excluded unless `includeTerminated` is set, they are kept, with the reason they ended, until the retention window retires them, so a session that stopped can be asked about instead of having simply vanished. Each record carries the policy that would apply on the next detach, so a client can show what leaving will do before it leaves. A session's title is its first prompt unless one was given, so it needs read:transcripts. ws-only invoke verb; no REST binding.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -145147,7 +145147,7 @@
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "inputSchema": {
           "type": "object",
@@ -146355,7 +146355,7 @@
       {
         "id": "sessions.integration.snapshot",
         "title": "Session Integration Snapshot",
-        "description": "Return the session integration snapshot.",
+        "description": "Return the session integration snapshot. It carries the conversation's title, which is drawn from what was said, so it needs read:transcripts.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -146364,7 +146364,7 @@
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -146430,7 +146430,7 @@
       {
         "id": "sessions.list",
         "title": "List Shared Sessions",
-        "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them.",
+        "description": "Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them. Session titles come from what was said and participants name the people in each conversation, so it needs read:transcripts.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -146439,7 +146439,7 @@
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "http": {
           "method": "GET",
@@ -148577,7 +148577,7 @@
       {
         "id": "sessions.search",
         "title": "Search Shared Sessions",
-        "description": "Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKind, and status. Closed sessions are EXCLUDED by default, pass includeClosed:true to include them, and a returned closed session always carries an honest status:\"closed\" (never hidden, never relabeled). Cursor pagination returns disjoint pages that union to the full matching set.",
+        "description": "Paginated, filtered query over shared sessions: free-text query (matches id/title), project, kind, surfaceKind, and status. Closed sessions are EXCLUDED by default, pass includeClosed:true to include them, and a returned closed session always carries an honest status:\"closed\" (never hidden, never relabeled). Cursor pagination returns disjoint pages that union to the full matching set. Titles and participants come from the conversations, so it needs read:transcripts.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -148585,7 +148585,7 @@
           "ws"
         ],
         "scopes": [
-          "read:sessions"
+          "read:transcripts"
         ],
         "inputSchema": {
           "type": "object",
@@ -151413,7 +151413,7 @@
       {
         "id": "tasks.list",
         "title": "List Runtime Tasks",
-        "description": "Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history.",
+        "description": "Return the integration snapshot for runtime tasks. `limit` returns only the newest that many tasks (the totals stay whole), so a long-lived daemon does not send its whole history. An agent task's title and description are its prompt, so a caller without read:transcripts gets each row with its kind as the title and no description or error, and `withheld` says so; counts and states are whole.",
         "category": "tasks",
         "source": "builtin",
         "access": "authenticated",
@@ -151635,6 +151635,9 @@
                 ],
                 "additionalProperties": false
               }
+            },
+            "withheld": {
+              "type": "string"
             }
           },
           "required": [
@@ -182204,7 +182207,7 @@
       {
         "id": "control.surface_message",
         "title": "Surface Message",
-        "description": "Out-of-band control-plane surface messages for operators and connected clients.",
+        "description": "Out-of-band control-plane surface messages for operators and connected clients. Each carries the message text, so it needs read:transcripts, as control.messages.list does.",
         "category": "transport",
         "source": "builtin",
         "transport": [
@@ -182212,7 +182215,8 @@
           "ws"
         ],
         "scopes": [
-          "read:events"
+          "read:events",
+          "read:transcripts"
         ],
         "wireEvents": [
           "surface-message"

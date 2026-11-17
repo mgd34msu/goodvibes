@@ -102,9 +102,9 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.sessions.list',
     title: 'List Companion Chat Sessions',
-    description: 'List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions.',
+    description: 'List active companion-chat sessions. Pass `includeClosed` to include recently closed sessions. Each record carries its title and system prompt, so it needs read:transcripts.',
     category: 'companion',
-    scopes: ['read:sessions'],
+    scopes: ['read:transcripts'],
     http: { method: 'GET', path: '/api/companion/chat/sessions' },
     inputSchema: objectSchema({
       includeClosed: BOOLEAN_SCHEMA,

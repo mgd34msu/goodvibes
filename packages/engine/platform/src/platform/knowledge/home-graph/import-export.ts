@@ -13,6 +13,38 @@ function* batches<T>(records: readonly T[]): Generator<T[]> {
   for (let start = 0; start < records.length; start += IMPORT_BATCH_SIZE) yield records.slice(start, start + IMPORT_BATCH_SIZE);
 }
 
+export type HomeGraphImportCounts = { sources: number; nodes: number; edges: number; issues: number; extractions: number };
+export type HomeGraphImportBatchKind = 'sources' | 'extractions' | 'nodes' | 'edges' | 'issues';
+
+/**
+ * An import that stopped after some of its batches were written. Each batch is
+ * its own publication, so what came before the failed batch stays written; this
+ * says what was written, which batch failed and why, and what to do next.
+ */
+export class HomeGraphImportIncompleteError extends Error {
+  override readonly name = 'HomeGraphImportIncompleteError';
+  readonly code = 'HOME_GRAPH_IMPORT_INCOMPLETE';
+  readonly state = 'partly-imported';
+  readonly next: readonly string[];
+  /** 500 when the store failed (a full disk, a lost file); otherwise the route's own status. */
+  readonly status?: number;
+  constructor(
+    readonly spaceId: string,
+    readonly written: Readonly<HomeGraphImportCounts>,
+    readonly total: Readonly<HomeGraphImportCounts>,
+    readonly failedBatch: { readonly kind: HomeGraphImportBatchKind; readonly index: number; readonly of: number; readonly records: number },
+    override readonly cause: unknown,
+  ) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    const counts = (value: Readonly<HomeGraphImportCounts>) => `${value.sources} sources, ${value.extractions} extractions, ${value.nodes} nodes, ${value.edges} edges, ${value.issues} issues`;
+    super(`Home Graph import stopped at ${failedBatch.kind} batch ${failedBatch.index} of ${failedBatch.of} (${failedBatch.records} records): ${reason} `
+      + `Written before it: ${counts(written)}, of ${counts(total)}.`);
+    this.next = ['Run the same import again once the cause is fixed: records are written by id, so the ones already written are replaced, not duplicated.'];
+    const code = cause !== null && typeof cause === 'object' ? (cause as { readonly code?: unknown }).code : undefined;
+    if (typeof code === 'string' && /^E[A-Z0-9]+$/.test(code)) this.status = 500;
+  }
+}
+
 export function exportHomeGraphSpace(
   store: KnowledgeStore,
   input: { readonly spaceId: string; readonly installationId: string },
@@ -63,17 +95,34 @@ export async function importHomeGraphSpace(
   assertKnowledgeImportRecordSizes({ sources: sourceInputs, extractions: extractionInputs, nodes: nodeInputs, edges: edgeInputs, issues: issueInputs });
   // A home of any size imports in bounded batches, each one publication: sources with
   // their extractions first, then nodes, then the edges and issues that refer to them.
-  for (const sources of batches(sourceInputs)) {
+  // A batch that fails stops the import with what the earlier batches wrote.
+  const total: HomeGraphImportCounts = { sources: sourceInputs.length, nodes: nodeInputs.length, edges: edgeInputs.length,
+    issues: issueInputs.length, extractions: extractionInputs.length };
+  const written: HomeGraphImportCounts = { sources: 0, nodes: 0, edges: 0, issues: 0, extractions: 0 };
+  const write = async <T>(kind: HomeGraphImportBatchKind, records: readonly T[], apply: (batch: T[]) => Promise<HomeGraphImportCounts>): Promise<void> => {
+    const of = Math.ceil(records.length / IMPORT_BATCH_SIZE);
+    let index = 0;
+    for (const batch of batches(records)) {
+      index += 1;
+      let added: HomeGraphImportCounts;
+      try { added = await apply(batch); } catch (error) {
+        throw new HomeGraphImportIncompleteError(input.spaceId, { ...written }, total, { kind, index, of, records: batch.length }, error);
+      }
+      for (const key of Object.keys(written) as (keyof HomeGraphImportCounts)[]) written[key] += added[key];
+    }
+  };
+  const none: HomeGraphImportCounts = { sources: 0, nodes: 0, edges: 0, issues: 0, extractions: 0 };
+  await write('sources', sourceInputs, async (sources) => {
     const ids = new Set(sources.map((source) => source.id));
-    await store.applyImport({ ...empty, sources, extractions: extractionInputs.filter((extraction) => ids.has(extraction.sourceId)) }, options);
-  }
+    const extractions = extractionInputs.filter((extraction) => ids.has(extraction.sourceId));
+    await store.applyImport({ ...empty, sources, extractions }, options);
+    return { ...none, sources: sources.length, extractions: extractions.length };
+  });
   const importedSourceIds = new Set(sourceInputs.map((source) => source.id));
   const orphanExtractions = extractionInputs.filter((extraction) => !importedSourceIds.has(extraction.sourceId));
-  for (const extractions of batches(orphanExtractions)) await store.applyImport({ ...empty, extractions }, options);
-  for (const nodes of batches(nodeInputs)) await store.applyImport({ ...empty, nodes }, options);
-  for (const edges of batches(edgeInputs)) await store.applyImport({ ...empty, edges }, options);
-  for (const issues of batches(issueInputs)) await store.applyImport({ ...empty, issues }, options);
-  return { ok: true, spaceId: input.spaceId, imported: {
-    sources: sourceInputs.length, nodes: nodeInputs.length, edges: edgeInputs.length, issues: issueInputs.length, extractions: extractionInputs.length,
-  } };
+  await write('extractions', orphanExtractions, async (extractions) => { await store.applyImport({ ...empty, extractions }, options); return { ...none, extractions: extractions.length }; });
+  await write('nodes', nodeInputs, async (nodes) => { await store.applyImport({ ...empty, nodes }, options); return { ...none, nodes: nodes.length }; });
+  await write('edges', edgeInputs, async (edges) => { await store.applyImport({ ...empty, edges }, options); return { ...none, edges: edges.length }; });
+  await write('issues', issueInputs, async (issues) => { await store.applyImport({ ...empty, issues }, options); return { ...none, issues: issues.length }; });
+  return { ok: true, spaceId: input.spaceId, imported: total };
 }

@@ -303,8 +303,9 @@ Telegram webhooks, WhatsApp, the bridges) never delivers the same answer again
 as a new message. Slash commands and buttons show the same outcome as a line.
 
 Each inbound message costs at most one decision-model request. Code decides
-which questions it needs: whether it gives card details (only when it holds a
-short number or a month/year pair), its answer to a work proposal or permission
+which questions it needs: whether it gives card details (only when it uses card
+words, such as card, CVV, security code or expiry, beside a short number or a
+month/year pair), its answer to a work proposal or permission
 ask (only when one is pending on that conversation for that sender), and
 whether it asks for work (only on a gated surface). They are asked together,
 with the decision deadline. A card number is refused by its checksum without

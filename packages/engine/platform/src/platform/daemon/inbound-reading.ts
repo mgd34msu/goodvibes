@@ -5,7 +5,7 @@
  * another, by modules that did not know the others had run: card talk, the
  * answer to a pending proposal, the answer to a pending permission ask, and
  * work-versus-conversation intent. Code now decides which of those questions
- * apply, from facts it holds (a short number in the text, a proposal or ask
+ * apply, from facts it holds (a short number beside card words, a proposal or ask
  * pending on this conversation for this sender, a gated surface), and asks
  * them together: at most one request per message, none when nothing applies.
  *
@@ -69,11 +69,21 @@ function anyOutside(pattern: RegExp, text: string, taken: readonly { startIndex:
 }
 
 /**
- * Whether the card questions are worth asking: a short number or a
- * month/year pair outside a card number (a card number itself is refused by
- * code, by its checksum, before anything is read).
+ * Words a message giving card details uses. A time, a price, a year or an
+ * order number with none of them around it is not read as a card detail:
+ * that is nearly every chat message with a number in it.
+ */
+const CARD_VOCABULARY = /\b(?:card|credit|debit|visa|master\s?card|amex|american\s+express|cvv2?|cvc2?|csc|cid|security\s+code|card\s+code|verification\s+(?:code|value|number)|exp|expiry|expiration|expires|valid\s+(?:thru|through|until))\b/i;
+
+/**
+ * Whether the card questions are worth asking: the message uses card words
+ * and has a short number or a month/year pair outside a card number (a card
+ * number itself is refused by code, by its checksum, before anything is read;
+ * a short number typed while a purchase waits for its security code is
+ * handled by that wait, surface-card-gate.ts).
  */
 export function cardTalkCandidates(text: string): { readonly securityCode: boolean; readonly expiry: boolean } {
+  if (!CARD_VOCABULARY.test(text)) return { securityCode: false, expiry: false };
   const pans = findCardNumberShapes(text);
   return { securityCode: anyOutside(SHORT_DIGIT_RUN, text, pans), expiry: anyOutside(EXPIRY_PAIR, text, pans) };
 }

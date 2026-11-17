@@ -268,6 +268,21 @@ interface SettingsPairingAuthorityRecord {
   readonly createdAt?: number;
 }
 
+/**
+ * Whether the pairing store at `filePath` records the shared operator token as
+ * revoked, read without opening the store: no lock, no write, no directory. A
+ * missing or unreadable file reads as not revoked; the daemon that owns the
+ * store is still the authority on every request.
+ */
+export function readLegacySharedRevoked(filePath: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(filePath, 'utf-8'));
+    return typeof parsed === 'object' && parsed !== null && (parsed as { legacyRevoked?: unknown }).legacyRevoked === true;
+  } catch {
+    return false;
+  }
+}
+
 export class PairingTokenStoreBusyError extends Error {
   readonly code = 'PAIRING_TOKEN_STORE_BUSY';
   /** @param detail Which lock, and who holds it, when that is known. */

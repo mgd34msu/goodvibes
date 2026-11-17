@@ -24,7 +24,7 @@ export type { PruneStaleOperatorTokensOptions, PruneStaleOperatorTokensResult } 
 
 export { formatConnectionBlock } from './connection-info.js';
 
-export { PairingLimitReachedError, PairingTokenManager, pairingPrincipalId } from './pairing-token-store.js';
+export { PairingLimitReachedError, PairingTokenManager, pairingPrincipalId, readLegacySharedRevoked } from './pairing-token-store.js';
 export type {
   PublicPairingToken,
   MintedPairingToken,

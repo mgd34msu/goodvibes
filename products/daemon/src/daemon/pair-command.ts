@@ -65,6 +65,8 @@ export interface PairCommandDeps {
   readonly operatorToken?: string | undefined;
   /** Asks the daemon, here or remote, with the configured outbound TLS trust (`createDaemonCommandRemote`). */
   readonly fetchImpl?: DaemonFetch | undefined;
+  /** Whether this daemon's pairing store records the shared operator token as revoked. Absent: never. */
+  readonly sharedTokenRevoked?: (() => boolean) | undefined;
 }
 
 /** The listener `/api/health` reports. */
@@ -183,6 +185,15 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
     return failure(
       'no operator token was found for this machine, so there is no link to print',
       'start the daemon once; it creates the token as it starts: goodvibes-daemon serve',
+      flags.json,
+    );
+  }
+  // The stored shared token after it was revoked signs nothing in, with or
+  // without a daemon answering, so no link is printed from it.
+  if (flags.token === undefined && input.operatorToken === undefined && input.sharedTokenRevoked?.() === true) {
+    return failure(
+      'the shared operator token stored on this machine was revoked, so a link built from it would not sign in',
+      'mint the device its own token: run /devices migrate-shared in the GoodVibes terminal on this machine, or goodvibes-daemon pair --host <this machine\'s address> --token <a token that still signs in>',
       flags.json,
     );
   }

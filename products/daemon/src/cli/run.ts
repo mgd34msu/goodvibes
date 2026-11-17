@@ -3,6 +3,9 @@ import { homedir } from 'node:os';
 import { writeSync } from 'node:fs';
 import { runClusterCommand } from '@goodvibes-jev/engine/terminal-shell';
 import { readOperatorTokenFile } from '@goodvibes-jev/engine/platform/platform/workspace';
+import { readLegacySharedRevoked } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { controlPlaneStorePath } from '@goodvibes-jev/engine/platform/platform/control-plane';
+import { createShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
 import { createRuntimeSecretsManager, isDeclaredSecretBearingConfigKey } from '@goodvibes-jev/engine/platform/platform/config';
 import { runConfigCommand } from '../daemon/config-command.js';
 import { runPairCommand } from '../daemon/pair-command.js';
@@ -159,6 +162,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       case 'sessions': return result(await runSessionsCommand({ ...remote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));
       case 'pair': return result(await runPairCommand({ ...remote,
         version: VERSION, readToken: readOperatorTokenFile, operatorToken: env.GOODVIBES_DAEMON_TOKEN?.trim() ? env.GOODVIBES_DAEMON_TOKEN : undefined,
+        sharedTokenRevoked: () => readLegacySharedRevoked(controlPlaneStorePath(createShellPathService({ workingDirectory, homeDirectory }),
+          GOODVIBES_DAEMON_SURFACE_ROOT, 'pairing-tokens.json')),
         flags: { ...remoteFlags, yes: cli.flags.yes } }));
       case 'mcp': return await runMcpCommand({ configManager: config, daemonHomeDir: daemonHomeDirectory,
         flags: { ...remoteFlags, categories: cli.flags.categories, allowWrite: cli.flags.allowWrite, allowDestructive: cli.flags.allowDestructive }, args: cli.commandArgs, stderr, fetchImpl: remote.fetchImpl,

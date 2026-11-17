@@ -366,7 +366,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'ci watches list',
       'ci watches create <repo> --delivery-channel <channel> [--ref <ref>] [--pr <number>] [--trigger-fix-session] --yes',
       'ci watches delete <watchId> --yes',
-      'ci watches run <watchId> --yes',
+      'ci watches run <watchId>',
     ],
     summary:
       'Check per-job CI status on the connected host and manage standing CI watches. Status is always rendered per job (name, status, conclusion), never collapsed to a single rollup.',
@@ -375,7 +375,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'ci status my-org/my-repo --pr 42',
       'ci watches list',
       'ci watches create my-org/my-repo --ref main --delivery-channel slack:C123 --yes',
-      'ci watches run watch-123 --yes',
+      'ci watches run watch-123',
       'ci watches delete watch-123 --yes',
     ],
   },

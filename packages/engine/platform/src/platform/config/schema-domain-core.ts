@@ -185,11 +185,11 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSetting)[]
     key: 'display.theme',
     type: 'enum',
     default: 'goodvibes',
-    description: 'Color theme name, the color palette (e.g. vaporwave). Independent of display.themeMode, which controls light/dark appearance.',
+    description: 'Color theme name, the color palette (e.g. goodvibes-neon). Independent of display.themeMode, which controls light/dark appearance.',
     // Literal on purpose: no registry access at module scope in compiled bundles.
     // Functional tests pin these choices to the runtime catalog plus its two special names.
     enumValues: ['goodvibes', 'goodvibes-neon', 'catppuccin', 'tokyonight', 'dracula', 'nord', 'gruvbox',
-      'one-dark', 'rosepine', 'solarized', 'github', 'system', 'vaporwave'],
+      'one-dark', 'rosepine', 'solarized', 'github', 'system'],
   },
   {
     key: 'display.themeMode',

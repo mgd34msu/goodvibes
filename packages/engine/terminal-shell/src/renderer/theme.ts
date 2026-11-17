@@ -14,9 +14,8 @@
  *   activeUiTones()   chrome tokens in the legacy TONE_TOKENS shape
  *   activeDiffTones() diff add/del/hunk in the legacy DIFF_TONES shape
  *
- * Theme names: every bundled theme, 'system', and the legacy 'vaporwave'
- * (an alias of 'goodvibes-neon', the pre-2026-09 look). Unknown names fall
- * back to the default theme. 'system' is generated from the terminal palette
+ * Theme names: every bundled theme and 'system'. Unknown names fall back to
+ * the default theme. 'system' is generated from the terminal palette
  * the startup probe reads (OSC 10 foreground, OSC 11 background, OSC 4;0..15,
  * see terminal-palette-probe.ts); until that palette has been read, and when
  * the terminal answered nothing (non-TTY, tmux without passthrough), 'system'
@@ -51,9 +50,6 @@ export type ThemeMode = 'dark' | 'light';
 /** User-facing appearance preference: auto probes the terminal; dark/light force. */
 export type ThemeModeSetting = 'auto' | ThemeMode;
 
-/** Legacy config value kept working: the old name of goodvibes-neon. */
-const LEGACY_VAPORWAVE_THEME_NAME = 'vaporwave';
-const NEON_THEME_NAME = 'goodvibes-neon';
 
 /** Transcript tokens (markdown / conversation rendering), one mode. */
 export interface ThemeTokens {
@@ -129,13 +125,11 @@ export function listThemeChoices(): ThemeChoice[] {
 
 /**
  * Turn a configured `display.theme` value into a theme name this runtime can
- * resolve: 'vaporwave' maps to 'goodvibes-neon', unknown or non-string values
- * map to the default theme.
+ * resolve: unknown or non-string values map to the default theme.
  */
 export function normalizeThemeName(raw: unknown): string {
   if (typeof raw !== 'string') return DEFAULT_THEME_NAME;
   const name = raw.trim().toLowerCase();
-  if (name === LEGACY_VAPORWAVE_THEME_NAME) return NEON_THEME_NAME;
   if (name === SYSTEM_THEME_NAME) return SYSTEM_THEME_NAME;
   return getBundledTheme(name) !== undefined ? name : DEFAULT_THEME_NAME;
 }

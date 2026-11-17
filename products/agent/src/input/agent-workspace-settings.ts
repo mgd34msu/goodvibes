@@ -390,8 +390,7 @@ export function buildAgentWorkspaceSettingActionEffect(
 
   const currentValue = readAgentSettingValue(configManager, setting);
   // The theme cycles through the selectable themes ('system', then the
-  // bundled catalog), not the raw schema enum, which also carries the legacy
-  // 'vaporwave' alias of goodvibes-neon.
+  // bundled catalog).
   if (String(setting.key) === THEME_NAME_CONFIG_KEY) {
     const names = listThemeChoices().map((choice) => choice.name);
     const currentIndex = Math.max(0, names.indexOf(normalizeThemeName(currentValue)));

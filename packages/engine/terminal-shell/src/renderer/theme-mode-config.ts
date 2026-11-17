@@ -49,11 +49,11 @@ export function applyThemeModeSettingChange(value: unknown, requestFullRepaint?:
     }
     return { message: 'Theme mode: auto (the terminal did not report its background; probes it on next startup)' };
 }
-/** Config key backing the color theme (bundled name, 'system', or legacy 'vaporwave'). */
+/** Config key backing the color theme (bundled name or 'system'). */
 export const THEME_NAME_CONFIG_KEY: ConfigKey = 'display.theme';
 /**
- * Read the configured theme name, normalized: 'vaporwave' maps to
- * 'goodvibes-neon' and an unset or unknown value maps to the default theme.
+ * Read the configured theme name, normalized: an unset or unknown value maps
+ * to the default theme.
  */
 export function resolveConfiguredThemeName(configManager: Pick<ConfigManager, 'get'>): string {
     try {

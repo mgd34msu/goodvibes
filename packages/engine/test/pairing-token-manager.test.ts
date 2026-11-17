@@ -1,3 +1,7 @@
+// Proves: A device token is readable from disk, a revoked device still signs in, or a token it handed off outlives it.
+// Red when: The plain token is stored or listed, a revoked token or a token it handed off still authenticates (now or after a reload), or the legacy revocation flag is lost on a restart.
+// Proves: Revoking the shared operator token ends the value in use every time, the replacement included.
+// Red when: A second revoke leaves the first replacement accepted: a copy of it taken off the machine could never be ended.
 /**
  * pairing-token-manager.test.ts
  *

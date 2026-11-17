@@ -1,3 +1,5 @@
+// Proves: After a crash the daemon does not know a purchase may already have been submitted, and submits it again.
+// Red when: The record written before the click is not on disk when `put` resolves or comes back altered, or an unreadable journal is treated as empty and overwritten.
 /**
  * DurableCheckoutJournal: the property under test is durability with opaque
  * cargo. A `submit-pending` record written before a crash must come back

@@ -1,3 +1,5 @@
+// Proves: When the owner denies reads, content search and the repository map return no file text and no exported names.
+// Red when: Find's content search or the repository map returns file text or exported names while reads are denied, or returns nothing while reads are allowed so the refusal proves nothing.
 /**
  * When the owner denies reads, the search and map tools do not read for the
  * agent either: the find tool's content search and the repository map return

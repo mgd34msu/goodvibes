@@ -1,3 +1,5 @@
+// Proves: A change of credentials, rules or conversation goes unnoticed by code that decides from a remembered copy.
+// Red when: A rule change, a conversation append or undo, a device revoke or rename, or a session, password or user change does not move its store's revision, or another app's change is not taken in.
 /**
  * The revision contract every owner of a fact implements: a captured token is
  * stale after any source moves and the refusal names that source, and each

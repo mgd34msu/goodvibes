@@ -1,3 +1,5 @@
+// Proves: The record log under sessions, contracts, mail records and web chat loses no acknowledged record, and a failed SQLite migration changes nothing.
+// Red when: A half-written last line is kept and joined to the next append or a complete record before it is lost, compaction drops a record or a second handle reads stale offsets, or a failed migration step leaves a partial change or loses rows.
 /**
  * The store kinds other stores are built on: a record log that loses no
  * acknowledged record, and a SQLite file whose revision moves on another

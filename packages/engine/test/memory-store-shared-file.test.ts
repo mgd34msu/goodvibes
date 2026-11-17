@@ -1,3 +1,5 @@
+// Proves: A memory written by one app is not seen by, or is erased by, another app on the same file; or one of two writes made together is not stored.
+// Red when: A store handle answers from a private copy or saves its whole view, or one of two adds made together (or a review during an add) is withdrawn or not committed.
 /**
  * One memory file, more than one app: the daemon, a terminal and the memory
  * command each open it with their own MemoryStore. A memory one of them adds

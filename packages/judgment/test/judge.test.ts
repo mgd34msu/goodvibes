@@ -1,3 +1,7 @@
+// Proves: A decision a tool call or a person waits on never settles when the decision endpoint is silent.
+// Red when: judge() stops applying its deadline, so an unattended turn waits for ever with nobody told.
+// Proves: A decision the model is unsure about is never acted on; the caller's fallback (ask) applies.
+// Red when: A 0.5 reading on a medium-stakes question settles to an answer instead of the fallback. No engine test covers an unsure reading; judge() is called from exec, edit, credential-header and hook decisions.
 import { describe, expect, test } from 'bun:test';
 import {
   createJudgeCache,

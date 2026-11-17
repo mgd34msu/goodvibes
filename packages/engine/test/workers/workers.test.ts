@@ -1,3 +1,5 @@
+// Proves: The Cloudflare Worker that provisioning uploads holds the daemon's operator token and is reachable from the internet; a caller without the Worker token must reach nothing.
+// Red when: The uploaded module forwards a request without the Worker token to the daemon, where it would arrive with the operator token.
 /**
  * The GoodVibes Cloudflare Worker, in the real workerd isolate (Miniflare),
  * from source, with no build: the exact module text platform provisioning

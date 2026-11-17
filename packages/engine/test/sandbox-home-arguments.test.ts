@@ -1,3 +1,5 @@
+// Proves: A sandboxed command's path argument binds a file from the hidden home (a key file, or a link into home) into the sandbox.
+// Red when: `programReadOnlyPaths` binds arguments without checking them against home after resolving links: the key file or the link is in the bound list.
 /**
  * A sandboxed command's path arguments never bind part of the home directory
  * the boundary hides: not a key file named directly, and not a link outside

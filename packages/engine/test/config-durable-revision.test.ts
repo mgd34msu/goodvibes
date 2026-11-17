@@ -1,3 +1,5 @@
+// Proves: A saved continuation grant stays valid after the settings it was issued under changed, or a settings write silently discards an edit another writer made to the same file.
+// Red when: The durable revision does not move on a change later undone or moves on a plain restart, a hand edit goes unnoticed, or a write overwrites another writer's edit without loading it.
 /**
  * The durable configuration revision a saved grant is bound to: the same after
  * a restart with unchanged files, different after any change, including one

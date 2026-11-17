@@ -1,3 +1,5 @@
+// Proves: A purchase is started or continued by a caller who is not the owner asking, or the owner cannot cancel one.
+// Red when: A started purchase keeps its authority after a revocation or a lowered limit, the owner (local or paired) cannot cancel, or a purchase is started or cancelled without the explicit request or without transport authority.
 /**
  * Who may start and stop a purchase. An app on the owner's own machine (the
  * transport's 'local' authority) and a paired device may both start and cancel;

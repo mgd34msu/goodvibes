@@ -1,3 +1,5 @@
+// Proves: A companion entry point (React Native, browser, Workers) imports a Node-only module and the companion bundle no longer builds.
+// Red when: A module reachable from a companion entry imports a Node built-in or calls a Bun API, or the walk stops following imports.
 /**
  * The companion entry points (React Native, Expo, browser, web, Workers and the
  * auth helpers) pull in no Node-only module and call no Bun API. Metro and the

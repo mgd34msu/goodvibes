@@ -1,3 +1,7 @@
+// Proves: Card number or security code reaches disk in plain text, an error message, a page read or the activity log.
+// Red when: The security code is stored in plain text, or a driver error, a page read after the fill or the activity log carries the number or the code.
+// Proves: On an install with no decision model, a page snapshot reports the value of a text box, select or misspelt input type, handing a typed card number to the model provider.
+// Red when: The no-decision-model fallback in `classifyCardFields` reports a control's value instead of withholding it.
 /**
  * Card material goes to the daemon's encrypted secret store and nowhere else:
  * not in plain text on disk, not into a settings key a surface can write, not

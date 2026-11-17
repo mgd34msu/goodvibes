@@ -1,3 +1,5 @@
+// Proves: A client shorthand sends its call to another method's route (for example approve wired to deny).
+// Red when: A client shorthand names the wrong method id or drops a path parameter or its body, or a shorthand is added without a row.
 /**
  * The operator client covers the operator contract: every shorthand of the
  * client sends the HTTP method and path the contract gives its method id, a

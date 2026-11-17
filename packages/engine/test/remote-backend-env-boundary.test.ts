@@ -1,3 +1,5 @@
+// Proves: A remote command's payload swaps the program that runs under an allowed name (PATH, LD_PRELOAD, NODE_OPTIONS, a proxy).
+// Red when: A program-choosing variable is passed through to a backend.
 /**
  * A remote command's payload cannot swap the program that runs under an
  * allowed name: environment variables that choose the program or what it

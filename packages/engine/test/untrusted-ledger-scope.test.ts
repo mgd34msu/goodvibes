@@ -1,3 +1,5 @@
+// Proves: Once a turn has read untrusted text, a send goes only with the owner's approval of that exact message, and another session's turn start does not erase what this session read.
+// Red when: One session's turn start clears another session's reads on the shared ledger, or a send after an untrusted read goes without the owner's approval of that exact message within its window.
 /**
  * Text from an untrusted source is never evidence for an approval: no surface
  * but the owner's own can mint one, and once a turn has read a page, a send is

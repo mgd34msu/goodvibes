@@ -1,3 +1,5 @@
+// Proves: A crash snapshot the person chose to keep is replaced or deleted by the session carrying on, and the conversation it held is gone.
+// Red when: The live snapshot write or the turn-end save and delete replaces or removes the kept snapshot.
 /**
  * A crash snapshot the person chose to keep is still offered at the next launch,
  * with the conversation it held, even when the kept session is the one they go

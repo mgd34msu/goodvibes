@@ -1,3 +1,5 @@
+// Proves: A daemon-hosted conversational turn runs a command directly on the host when the sandbox is required but unavailable, switched off or not wired.
+// Red when: The containment decision allows a command when the boundary is required and the plan is unavailable, switched off or absent, or the exec tool (in the foreground or the background) runs without consulting it.
 /**
  * hosted-exec-containment.test.ts, a hosted conversational turn does not get
  * the host.

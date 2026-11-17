@@ -1,3 +1,5 @@
+// Proves: A write that arrives over the relay runs without the owner's step-up, or an assertion for one call is accepted for another.
+// Red when: Step-up is decided by HTTP verb, so a write bound to GET or sent through generic invoke runs without an assertion, or the verifier is not given this call's method, path, rendezvous and principal.
 /**
  * A call that arrives over the relay needs the owner's WebAuthn step-up by what
  * it does, not by its HTTP verb: the daemon's own method catalog decides

@@ -1,3 +1,5 @@
+// Proves: A pairing link signs the device in and the operator token does not stay in the address bar or history.
+// Red when: Opening #pair=<token> does not sign in, or the token is still in the URL afterwards.
 /**
  * QR pairing hand-off: opening a `#pair=<token>` link (what the terminal's
  * `goodvibes pair` QR encodes) signs the device in and scrubs the token from the

@@ -1,3 +1,5 @@
+// Proves: The released installer, working in a directory it may share with other things, removes nothing beside its own version directory, and a failed directory swap leaves the old tree in force.
+// Red when: A failed swap leaves the browser-driver directory missing or mixed, or an update removes another version's bundle, an owner-made directory, or something outside the install directory through a link.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';

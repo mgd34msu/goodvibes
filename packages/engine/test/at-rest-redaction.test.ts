@@ -1,3 +1,5 @@
+// Proves: An API key or token that passed through a turn is written in the clear to the transcript journal, the execution ledger or the span file, or is sent to a model provider to be classified.
+// Red when: The redactor misses an issuer format or a bearer token or asks a decision model about a span, or the agent journal, the ledger writer or the span writer stops passing its lines through it.
 /**
  * at-rest-redaction.test.ts
  *

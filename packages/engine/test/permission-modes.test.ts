@@ -1,3 +1,5 @@
+// Proves: A call that needs the owner runs without the owner (or with Jev standing in) in a mode that promises otherwise.
+// Red when: A mode sends a call to the wrong party (an owner-only call runs or goes to Jev, a judgment call goes to the owner), jev-decides without a model does not behave as ask-me, a hosted session's mode is overridden by a looser setting, or one approval covers another held call.
 /**
  * Who is asked in each mode. ask-me asks the owner; jev-decides asks Jev on a
  * judgment call when a decision model works and is ask-me when none does,

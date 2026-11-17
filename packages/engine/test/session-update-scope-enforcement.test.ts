@@ -1,3 +1,5 @@
+// Proves: A non-admin principal receives no admin-only event, a principal that loses admin stops receiving them, and one hosted session cannot reach another session's agents.
+// Red when: An admin-only event reaches a non-admin socket (live, replayed, or by naming itself a tui), a demoted principal's socket keeps its grant, or one session's agent tool reaches another session's agents.
 /**
  * session-update-scope-enforcement.test.ts
  *

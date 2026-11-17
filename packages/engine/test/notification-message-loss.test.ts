@@ -1,3 +1,7 @@
+// Proves: A notification or an inbound chat message is lost.
+// Red when: Dead letters live in memory only or a resend does not remove its row, a Socket Mode envelope is acknowledged before it was taken, or ntfy suppresses a repeat by its text.
+// Proves: A notification that could not be sent is lost when a resend of it fails again.
+// Red when: A resend that fails again drops the dead letter (or duplicates it). notification-message-loss.test.ts only ever resends successfully; add the failing resend to its restart case (the list and its file still hold the one entry).
 /**
  * Notifications and inbound chat messages are not lost: a failed notification
  * outlives a restart and can be resent, a Slack Socket Mode envelope is only

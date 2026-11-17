@@ -1,3 +1,5 @@
+// Proves: The product's core contract with the model: a read, an edit and a remembered command actually run and return real output through the services, registry, gate and executor every app composes.
+// Red when: Any link between composeRuntimeServices, the registry bound to the graph's permission manager, autonomous admission and executePrepared stops a real call from running, or if a remembered rule no longer settles the command without asking.
 /**
  * A tool call the model makes actually runs and returns real output through
  * the path every app uses: services composed by composeRuntimeServices with a

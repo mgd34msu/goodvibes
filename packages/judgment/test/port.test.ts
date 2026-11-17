@@ -1,3 +1,5 @@
+// Proves: A malformed answer from the decision endpoint is a failed judgment, never a guessed one.
+// Red when: An answer that is missing, of the wrong type, out of range, outside the offered options or inconsistent with its distribution is returned as a reading.
 import { describe, expect, test } from 'bun:test';
 import {
   choice,

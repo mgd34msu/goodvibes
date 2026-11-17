@@ -1,3 +1,5 @@
+// Proves: A hosted session's transcript is lost: not restored after a restart, deleted because the file could not be read (or was written by a newer build), or evicted while the session is live.
+// Red when: A saved transcript or its contract ids do not load in a new store, an unreadable or newer-build file is deleted instead of kept, or the cap or the retention sweep removes a live session.
 /**
  * A hosted session's transcript outlives the daemon: what was saved loads in a
  * new store over the same directory, an older file still loads, a file that

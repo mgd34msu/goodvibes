@@ -1,3 +1,5 @@
+// Proves: An upgrade or a second launch loses the owner's knowledge store.
+// Red when: The move to the current format drops rows or the old file, or a second launch misses commits in the write-ahead log or rewrites what the running app holds.
 /**
  * The owner's knowledge store is never lost to an upgrade or a second launch.
  * Opening a store written by an older version moves it to the current format

@@ -1,3 +1,5 @@
+// Proves: The shipped goodvibes-agent binary starts and completes a first turn on both of its routes (through a paired daemon, and in its own process when there is none).
+// Red when: The daemon cannot start or pair, the compiled Agent does not reach its main screen or writes to stderr, or a first turn (through the daemon or in its own process) is not answered, creates work, or asks a decision model under No Decision Model.
 /**
  * The built `goodvibes-agent` binary in a real terminal, against a real daemon
  * and a scripted model at the HTTP wire:

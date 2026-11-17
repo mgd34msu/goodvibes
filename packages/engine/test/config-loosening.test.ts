@@ -1,3 +1,7 @@
+// Proves: A credential is stored as a literal in a settings file, card material reaches one, or a refusal echoes the value.
+// Red when: A credential literal or card material is accepted into a settings file, or the refusal echoes the value.
+// Proves: An agent loosens the sandbox, a payments limit or the permission mode through a settings write that neither the owner, his rule nor the mode settled.
+// Red when: `ConfigManager.setMany` saves a loosening change from an agent with no decision or with only Jev's, saves part of a refused update, or a new key under a security prefix has neither a loosening rule nor a review.
 /**
  * An agent cannot loosen security through settings: a write that widens the
  * sandbox or loosens any payments key is refused unless the owner, his rule or

@@ -1,3 +1,5 @@
+// Proves: The gate lets recoverable writes through without asking because undo can restore them; if undo does not restore the exact prior content, or overwrites what the person changed since, that is lost work.
+// Red when: Undo does not restore an edit's prior content or remove a created file, or overwrites a file the person changed after the agent's edit.
 import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -1,3 +1,5 @@
+// Proves: A machine drops out of its group, losing the group key it held, because a key save was refused.
+// Red when: A failed save during rotation discards the key in hand or the membership.
 /** A refused key save does not take a machine out of its group. */
 import { expect, test } from 'bun:test';
 import { createGroup } from '../platform/src/platform/cluster/group-operations.ts';

@@ -1,3 +1,5 @@
+// Proves: An agent's answer to a channel message is sent twice, or not at all, when the daemon restarts between storing it and sending it.
+// Red when: A repeated report after a restart sends the answer again, or an answer stored but not sent when the daemon stopped is never sent or is sent on every start.
 /**
  * An agent's answer to a channel message reaches the channel once, also when
  * the daemon restarts after sending it and the surface that ran the agent

@@ -1,3 +1,7 @@
+// Proves: A purchase reaches the merchant's submit more than once, at a total or on terms the owner did not see, to another merchant or cart, without the owner's window, or on the word of a page.
+// Red when: The total, terms or price are not re-checked after the window and the card fill, the flow does not submit exactly once with the card, a gate, the window, the owner's objection, recognition, the domain, the cart or the stated total is skipped, a challenge or a failed submit releases the hold or retries, or text from a page starts a purchase.
+// Proves: Two purchases drive one checkout page and the same cart is submitted twice.
+// Red when: CheckoutRegistry stops refusing a second purchase on a page another purchase owns.
 /**
  * The daemon buying something, end to end through the real checkout flow:
  * a purchase reaches the merchant's submit endpoint exactly once or not at all.

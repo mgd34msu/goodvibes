@@ -1,3 +1,7 @@
+// Proves: A crash during a contract save loses or corrupts saved progress, or an older build (after a rollback) writes over progress saved by a newer one.
+// Red when: A torn last record makes the checkpoint unreadable or quarantined or is chained onto by the next save, or a build that cannot read a newer record writes over it.
+// Proves: After a restart a contract's saved progress is not what was saved, finished work is run and paid for again, or two writers write one contract.
+// Red when: A restart reads back something other than the last save, compaction drops state or an input, an older single-file contract cannot be continued, a second process or a stale copy overwrites a save, or the runner reruns or recharges a passed unit.
 /**
  * A contract's saved progress is intact after a restart, and completed work is
  * neither run again nor paid for again.

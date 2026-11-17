@@ -1,3 +1,5 @@
+// Proves: The checkout installer never deletes or overwrites what is not its own, keeps the data across update and removal, and a failed update leaves the old installation running.
+// Red when: Uninstall or purge removes data, credentials or files that are not the installation's own or leaves links behind, an update touches the data or keeps a failed release linked, install overwrites a command or adopts a data directory it does not own, or a previous installer's receipt can no longer be read.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';

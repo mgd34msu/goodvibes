@@ -1,3 +1,5 @@
+// Proves: The writer under settings, secrets, ledgers and offsets leaves a torn or world-readable file, or lets a writer that lost its right replace a newer document.
+// Red when: A file is written with the wrong mode or keeps bytes of a longer document, a write happens in place so a failure destroys the document, or the currency check is not made just before the rename.
 /**
  * The durable writer used for settings, secrets, ledgers and offsets: a
  * document is replaced whole or not at all, a writer that lost its right to

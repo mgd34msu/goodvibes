@@ -1,3 +1,7 @@
+// Proves: A sender outside the owner's allowlists reaches the assistant because the lists are combined as "any" instead of "all".
+// Red when: With only a group listed a stranger's direct message is admitted, or with a user and a group listed an unlisted member or an unlisted group is admitted.
+// Proves: The first person to write to an unowned channel becomes its owner, or someone other than the owner answers a pending permission ask by replying in the channel.
+// Red when: The first unknown sender is admitted or made owner without the owner accepting the claim, or a non-owner's "approve" resolves a pending approval.
 /**
  * Who reaches the assistant over a chat channel, and who may answer for the
  * owner. On a surface with no owner the first unknown sender is held as a

@@ -1,3 +1,5 @@
+// Proves: State an agent saved for a conversation is gone after a restart.
+// Red when: State set before a restart is not on disk or not found under the same session id.
 /**
  * Session state outlives the process that wrote it, and a session id cannot
  * make the store write outside its own directory.

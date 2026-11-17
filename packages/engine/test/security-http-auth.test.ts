@@ -1,3 +1,7 @@
+// Proves: A remote caller that reaches the daemon through a proxy on the same machine is not given the local credential's authority.
+// Red when: A request with any forwarding header, a public Host or a non-loopback peer is classed as local; the local credential carries owner authority (it can start a purchase).
+// Proves: A wrong token authenticates, or a non-admin session is treated as an administrator.
+// Red when: authenticateOperatorToken returns a principal for a wrong token, or isOperatorAdmin is true for an operator-role session.
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import {

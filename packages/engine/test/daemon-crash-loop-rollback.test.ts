@@ -1,3 +1,5 @@
+// Proves: A verified update that cannot start leaves the daemon dead until someone repairs it by hand; or the rollback itself destroys something (restores a build that cannot read the saved data, or leaves half an installation).
+// Red when: Three failed starts no longer restore the whole previous installation and record the rejected version, the restored build clears that record so the loop reinstalls it, a build is restored over data it has not confirmed it can read, or a failed rollback leaves a mixed installation.
 /**
  * Crash-loop rollback: a verified update that cannot start is replaced by the
  * kept previous installation after three failed boots, never twice in a row,

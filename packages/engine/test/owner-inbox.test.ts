@@ -1,3 +1,5 @@
+// Proves: The owner's answer is changed after the fact, lost on restart, never reaches the waiting call, or is inverted for an approval.
+// Red when: A second answer overwrites the first or the answer is not on disk when `answer` returns, approve and deny map wrongly to the broker, or another process's answer never reaches the waiting call.
 /**
  * The owner inbox: the first answer wins and survives a restart, an approval
  * answered there reaches the waiting call once, and an answer written by

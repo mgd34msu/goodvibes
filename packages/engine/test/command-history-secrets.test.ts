@@ -1,3 +1,5 @@
+// Proves: A secret typed on a command line is written in plain text to the input-history file.
+// Red when: A command's declared secret arguments are no longer applied before the line reaches history, or the history's own rule for token flags stops matching.
 /**
  * A secret typed as a command argument is not written to input history.
  *

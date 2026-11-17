@@ -1,3 +1,5 @@
+// Proves: Two writers hold one store at once, across processes or inside one, and one write is lost.
+// Red when: The lock is not exclusive across processes, a killed holder keeps it, or two holders in one process overlap.
 /**
  * The process lock is what keeps two processes from writing one store at once,
  * and a holder that is killed must not leave the store locked.

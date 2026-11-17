@@ -1,3 +1,5 @@
+// Proves: The scope the owner picks when approving in the web UI is the scope that reaches the daemon.
+// Red when: The approve request carries another approval id, no remember flag or another tier than the one picked.
 /**
  * What the owner decides on an approval reaches the daemon as decided: the
  * remember tier he chose arrives with the approval. Runs on phone and desktop;

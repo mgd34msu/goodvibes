@@ -1,3 +1,5 @@
+// Proves: A sandboxed command reaches a host runtime socket (a Unix socket outside the workspace) and so the host through it.
+// Red when: The sandbox binds the host root or /var/tmp again: the contained connect succeeds and the server counts a second connection.
 /**
  * Inside real bubblewrap, an ordinary command cannot connect to a host runtime
  * socket (a Unix socket outside the workspace), while it can still read the

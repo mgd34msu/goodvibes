@@ -1,3 +1,5 @@
+// Proves: The operator bearer token is not sent over plain http to an address outside a private network (here: a 100.64/10 address not stated to be Tailscale).
+// Red when: A transport for http://100.70.1.2 is built and sends the Authorization header, or if stating one address opens the rest of the range.
 /**
  * The plain-http wall in front of the operator bearer token. A 100.64/10
  * address is shared address space: Tailscale uses it and so does carrier-grade

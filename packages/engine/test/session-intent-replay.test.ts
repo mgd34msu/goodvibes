@@ -1,3 +1,5 @@
+// Proves: The same provider message id sent to two sessions is two messages, and a redelivery to one session is one, also after a restart.
+// Red when: The replay key leaves out the session (the second session's message is dropped) or a redelivery after a restart is recorded twice.
 /**
  * A caller that addresses sessions by id numbers its messages per session, so
  * the same message id sent to two sessions is two messages: each session

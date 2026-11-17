@@ -1,3 +1,5 @@
+// Proves: A session's messages are found after a restart, and a terminal's named session keeps saving.
+// Red when: A message appended to an open or closed session is missing in a second broker, or a resumed session saved under its file name is refused or lands in a second file.
 /**
  * Session stores lose nothing across a restart. The daemon's session broker:
  * a message appended is found by the next broker over the same files, for an

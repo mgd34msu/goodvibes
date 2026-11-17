@@ -1,3 +1,5 @@
+// Proves: A routine runs in one terminal only, and a terminal does not move or rewrite the daemon's routine file under the same home.
+// Red when: A second terminal starts its routine manager while another holds the routine lock or cannot take over from a dead holder, or the terminal renames, rewrites or re-sends the daemon's routine file.
 /**
  * A routine runs in one place only. With the daemon off, routines run in
  * exactly one terminal: the one holding the routine lock; another terminal,

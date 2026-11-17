@@ -1,3 +1,5 @@
+// Proves: A daemon restart while a purchase waits on the owner buys twice, or turns "silence means no" into "silence buys".
+// Red when: The resumed approval submits or records twice or not at all, or the restored window reopens as a notice whose silence buys.
 /**
  * A purchase waiting on the owner survives a daemon restart. The case that
  * matters is the follow-up: the owner answered the "goes ahead unless you stop

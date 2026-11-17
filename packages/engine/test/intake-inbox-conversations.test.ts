@@ -1,3 +1,5 @@
+// Proves: The Slack inbox loses messages: conversations beyond a page budget are never read, a failure discards what a tick already read, or a message that screening could not look at is passed over or shown unscreened.
+// Red when: Conversations after the first pages are never polled, a rate limit discards a tick's reads or advances an unread conversation, or a held message is shown in the clear or passed by the cursor unscreened.
 /**
  * Slack and Discord inboxes keep one cursor per conversation and lose nothing:
  * a large account is read whole across ticks, a failure keeps what the tick

@@ -1,3 +1,5 @@
+// Proves: A signed-in user without the admin role reads the owner's transcripts, devices, task prompts or contracts.
+// Red when: A private read scope reaches the non-admin grant or a method loses its scope, the task list stops redacting prompts and errors, a method's openness changes without the reviewed list, or contract visibility follows session attachment instead of the starting principal.
 /**
  * A signed-in user without the admin role cannot read the owner's content
  * (transcripts, paired devices, browser pages, calendar, inbox, knowledge,

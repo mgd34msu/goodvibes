@@ -1,3 +1,5 @@
+// Proves: A command that needs the network is spawned after the owner's escalation permit was revoked, in one of the four spawn paths.
+// Red when: A spawn path (foreground, progress, until-pattern or PTY) spawns without claiming the permit, so a revoked permit still runs the command.
 /**
  * Inside real bubblewrap, a command that needs the network runs only on the
  * owner's escalation permit, and the permit is claimed at the final spawn: a

@@ -1,3 +1,5 @@
+// Proves: Inbound mail is lost or announced twice across reconnect, restart mid-batch, mailbox reset, a poison message, or two daemons.
+// Red when: The cursor advances before a message is recorded or a restart re-announces one, one unreadable message stops the drain, or both daemons sign in and read.
 /**
  * One mailbox, one reader: inbound notices and the inbox both get every
  * message from the same reader, exactly once, against a scripted IMAP server.

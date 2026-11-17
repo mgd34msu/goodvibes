@@ -1,3 +1,5 @@
+// Proves: Assets come only from the authorised repository and are checked before anything is replaced, a failed or interrupted update leaves the previous programs, a release that cannot read the saved data is refused, and it does not run over the daemon's own updater or a checkout installation.
+// Red when: An asset comes from outside the authorised release or with a wrong checksum, a failed or hung-up update leaves programs changed or a claim behind, an older release is installed over data it cannot read, or the installer runs over the updater's claim or a checkout installation.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';

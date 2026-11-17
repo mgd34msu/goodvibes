@@ -1,3 +1,5 @@
+// Proves: Words that arrived by voice never run as a shell command.
+// Red when: A transcript starting with ! runs through the shell passthrough on any of the three spoken routes; the typed control shows the marker command does run.
 /**
  * Words that arrived by voice never run as a shell command. A transcript that
  * starts with `!` goes to the model as said, whether it came from the

@@ -1,3 +1,7 @@
+// Proves: A provider redelivery starts a second agent run, a message whose handling failed is never run, a refused sender is run, or a webhook caller reaches another caller's callback, the platform's own markers or another surface's session.
+// Red when: The shared pipeline or Telegram's own handler runs a refused sender or answers a refusal with a failure, a claim is kept after a failed handling or dropped after a success, telephony keys spoken turns by call id, or a webhook caller inherits another's callback, sets platform markers or enters another surface's session.
+// Proves: A sender the channel policy refuses starts work on Telegram.
+// Red when: The Telegram handler stops asking the policy, or runs a message the policy refused.
 /**
  * What the webhook adapters do when a provider redelivers, a sender is refused,
  * or a caller supplies more than it should: no second run of a message already

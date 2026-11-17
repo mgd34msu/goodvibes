@@ -1,3 +1,5 @@
+// Proves: The Agent's client presents its credential on the contract route, a write is never sent twice, a path value cannot turn one method into another route, and the owner's switch stops it dialling.
+// Red when: A write goes to another route, without the credential or the explicit-request header, or more than once (also after a 500 or 504), a `..` path value is sent, or the Agent dials while daemon.connectedHost.enabled is false.
 /**
  * The connected-host client's contract: which credential it presents, what a
  * failure says about the host and about the request, that a write is never

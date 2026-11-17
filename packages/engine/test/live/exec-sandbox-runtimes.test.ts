@@ -1,3 +1,5 @@
+// Proves: A project test run inside the sandbox reads a private file in home, replaces the interpreter, or has a network route.
+// Red when: Home is bound into the sandbox, the runtime becomes writable, or the network namespace is shared: the inner run exits non-zero.
 /**
  * Inside real bubblewrap, a project's own test run (here `bun test`, the
  * runtime an agent most often starts) cannot see a private file outside the

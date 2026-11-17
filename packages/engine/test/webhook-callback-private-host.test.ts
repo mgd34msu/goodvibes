@@ -1,3 +1,5 @@
+// Proves: A callback address supplied by a webhook sender cannot send job output to a host on the owner's own network, even one the owner approved for his own targets.
+// Red when: A delivery to a sender-bound callback on a private host reaches dispatch, or nothing reaches dispatch at all so the refusal proves nothing.
 /**
  * A webhook callback URL is supplied by whoever bound the route, so a delivery
  * to it is held to public hosts even when the owner approved a host on his own

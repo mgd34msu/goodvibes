@@ -1,3 +1,5 @@
+// Proves: A peer client shorthand sends its call to another endpoint's route.
+// Red when: A peer client shorthand names the wrong endpoint id or drops a path parameter, or an endpoint or a shorthand is added without a row.
 /**
  * The peer client covers the peer contract: every shorthand of the client
  * sends the HTTP method and path the contract gives its endpoint id, an

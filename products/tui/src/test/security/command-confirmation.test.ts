@@ -1,3 +1,5 @@
+// Proves: A mail is sent only on the owner's own answer; neither --yes inside the message text nor a --yes the model wrote counts as it.
+// Red when: --yes in a subject or body counts as the owner's confirmation, or a command line the model ran with --yes sends without asking.
 /**
  * The word `--yes` inside a message is text, not the owner's answer: a
  * `/mail send` line whose subject or body contains it still asks the owner,

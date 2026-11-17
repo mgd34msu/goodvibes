@@ -1,3 +1,5 @@
+// Proves: Two calls that touch the same file never run together, every call gets exactly one result (also on failure and on cancel), cancel reaches every running call, and a turn ends at its round limit and on a repeated call.
+// Red when: One throwing call costs its neighbours their results, writes to one file overlap, a cancel misses a running call or a later call starts, calls run past the round ceiling without a closing answer, a cancelled batch loses a result, or a repeated call is never stopped.
 /**
  * The one tool-batch executor and the one turn loop: independent calls of a
  * response run at the same time (counted, never timed), calls that could

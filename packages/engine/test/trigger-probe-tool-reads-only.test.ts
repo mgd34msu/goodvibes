@@ -1,3 +1,5 @@
+// Proves: A trigger's probe runs unattended, so it may call only a tool call that reads.
+// Red when: ProbeToolHost.call runs a tool whose declaration writes.
 /**
  * A trigger's platform-tool probe runs unattended, so it may call only a tool
  * call that reads: a tool that writes is refused before it runs, and a reading

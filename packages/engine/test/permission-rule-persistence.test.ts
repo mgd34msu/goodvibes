@@ -1,3 +1,5 @@
+// Proves: A remembered rule that was never saved grants, or a saved rule is lost when two are added together.
+// Red when: A rule is published to the live set before its write commits, or two adds each write the file from their own copy and one rule is lost.
 /**
  * A remembered permission rule is live only after its file write commits: a
  * save that fails, or one still in flight, never grants anything, and a failed

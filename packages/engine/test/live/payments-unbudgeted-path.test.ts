@@ -1,3 +1,5 @@
+// Proves: An agent places an order with ordinary browser actions (a merchant's saved payment method), around every spending limit.
+// Red when: The browser click path stops asking whether a control places an order or loses its name, or Enter or a submitting type in the order form is not treated as an order.
 /**
  * An order cannot be placed around the spending limits. A merchant's saved
  * payment method lets one click on "Place order" charge the card, so the

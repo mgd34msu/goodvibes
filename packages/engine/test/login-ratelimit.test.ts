@@ -1,3 +1,7 @@
+// Proves: Password guessing against one username from changing addresses is unlimited.
+// Red when: The per-username slow-down in `UserAuthManager.authenticateSignIn` is removed or stops counting across addresses: the right password from a fresh address answers 200.
+// Proves: Password guessing from one caller is not throttled.
+// Red when: The sign-in limiter is not consulted before the password check, or a right password skips it: the fourth and fifth attempts are not 429.
 /**
  * Password guessing on POST /login is throttled per caller, the throttle holds
  * even for the right password, and once a username has failed many times from

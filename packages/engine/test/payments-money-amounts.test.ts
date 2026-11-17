@@ -1,3 +1,5 @@
+// Proves: A limit that cannot be read enforces nothing, or a page amount is read at a thousand times (or a thousandth of) its value.
+// Red when: `readBudgetLimits` passes a non-number or a negative through, or a grouped three-decimal amount with no fraction is guessed instead of refused.
 /**
  * Money amounts: an owner's limit is the number they would say out loud, it is
  * enforced as an exact whole count of the currency's smallest unit, and a page

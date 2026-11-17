@@ -1,3 +1,7 @@
+// Proves: A damaged budget file is read as an empty day, which hands the whole daily budget back.
+// Red when: A parse failure is caught and treated as no spend: the snapshot answers instead of refusing, or the file is rewritten.
+// Proves: Money held for an unresolved checkout is handed back by a restart, a day change or a sweep, so the day's budget is overspent.
+// Red when: The durable ledger drops the hold-until-settled mark on write or sweeps the hold after its ordinary lifetime: a week later the reopened ledger shows the full budget, or the commit does not become spend.
 /**
  * The daemon's budget ledger on disk: a hold taken through one ledger is what
  * a second ledger over the same file sees a week later, so a restart never

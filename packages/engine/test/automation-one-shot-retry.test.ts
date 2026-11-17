@@ -1,3 +1,5 @@
+// Proves: A one-time job (a reminder, a scheduled task) is deleted after a run that failed, so the owner's scheduled work is silently gone.
+// Red when: `manager-runtime-reconcile.ts:178` deletes a `deleteAfterRun` job on any settlement instead of only a completed one.
 /**
  * A one-time job is the owner's record of work to do: a run of it that fails
  * must leave the job in place so the run can be retried, and only a run that

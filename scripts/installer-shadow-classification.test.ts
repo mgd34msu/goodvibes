@@ -1,3 +1,5 @@
+// Proves: When the installer offers to remove an older copy that shadows the new command (and removes it unasked with GOODVIBES_SHADOW_REMOVE=1), it never plans to remove a package or file that is not this product.
+// Red when: A command that belongs to another npm package gets a removal plan, by name prefix, by its version banner, or as a standalone file.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';

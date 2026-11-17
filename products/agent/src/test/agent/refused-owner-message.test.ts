@@ -1,3 +1,5 @@
+// Proves: A message from the owner's phone that the host refuses is held and sent once, never dropped and never reported sent.
+// Red when: A refused phone message is dropped, reported sent while held, or sent twice when the way clears.
 /**
  * A message the connected host refuses is never reported as taken. While the
  * owner's typed message is still being taken, a message from the phone is

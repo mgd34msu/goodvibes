@@ -1,3 +1,7 @@
+// Proves: The operator's private stores (inbox mirror, handler state) are readable by other users of the machine.
+// Red when: The store directory is created under the process umask and not re-moded: its mode is not 0700.
+// Proves: Two openers of one store file (a terminal and the daemon: inbox cursors, route bindings, drafts) do not see each other's rows, or a failed transaction leaves part of itself behind.
+// Red when: Each opener works on its own copy, or a transaction that throws leaves rows behind, or committed rows do not survive a reopen.
 import { afterEach, expect, test } from 'bun:test';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';

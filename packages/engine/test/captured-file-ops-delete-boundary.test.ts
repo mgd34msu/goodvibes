@@ -1,3 +1,5 @@
+// Proves: A captured run's recursive delete removes a file the owner denied it, or a nested `.git` directory.
+// Red when: The tree walk before a recursive delete stops asking the owner's read rule for each entry, or stops refusing a reserved directory nested inside the tree.
 /**
  * A captured run's recursive delete removes only what the owner lets that run
  * read: every entry inside the deleted directory passes the owner's read

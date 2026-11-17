@@ -1,3 +1,5 @@
+// Proves: A remembered allow vouches for a command it never saw, or a deny rule is slipped by rewriting the call.
+// Red when: Rules match the visible command instead of the one that runs (base64, a workflow's later command), an allow matches one entry of a batch or a bare command with chains or redirection, a deny checks only the first command, or a host or path deny is slipped by rewriting.
 /**
  * What the permission text and scope rules read from a call: the command text the exec tool would
  * actually run, a rule for a bare command never covering more than that command, a command a call

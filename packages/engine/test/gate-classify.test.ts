@@ -1,3 +1,5 @@
+// Proves: A tool call is decided by the wrong party: code allows what should be judged, Jev decides what only the owner may, or an owner-only item is settled by a generic allow rule.
+// Red when: The order of the gate changes (a deny no longer wins, code allows a read or write outside the directories, plan mode writes), an owner-only kind goes to Jev or is settled by a generic grant, an unreadable path counts as inside, or the executor puts an MCP trust change or a loosening settings write anywhere but to the owner.
 /**
  * Who decides a tool call: a fact code settles, an item only the owner
  * decides, or a judgment for Jev, in that order.

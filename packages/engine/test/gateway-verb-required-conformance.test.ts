@@ -1,3 +1,5 @@
+// Proves: A handler refuses a field its descriptor never declared required, so every consumer compiles against the generated types and gets a 400 at run time.
+// Red when: A handler demands a field its descriptor does not list as required, refuses input without naming the field or with a plain Error outside the closed list, or a new route family is never probed.
 /**
  * gateway-verb-required-conformance.test.ts
  *

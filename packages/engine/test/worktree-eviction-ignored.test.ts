@@ -1,3 +1,5 @@
+// Proves: Evicting a kept worktree never writes an ignored file (a credential file an agent wrote) into a commit on a branch that survives and can be pushed, and keeps that file for the owner only.
+// Red when: Eviction commits .env.local to the preserved branch, or drops it instead of keeping it in an owner-only directory.
 /**
  * Evicting a kept worktree keeps its work, but a file the owner's ignore rules
  * keep out of history (a credential file an agent wrote, a local database)

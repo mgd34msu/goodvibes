@@ -1,3 +1,5 @@
+// Proves: A daemon embedded in another program replaces that program's executable or exits it; or a standalone daemon stops itself to hand over to the service manager before a successor is ready, leaving nothing running.
+// Red when: An embedded daemon starts the update loop or installs a service unit and exits, or a standalone daemon stops or exits before the user service manager answered and the unit was installed and reloaded.
 /**
  * A daemon replaces or hands itself over only when it owns the artifact and a
  * successor is ready:

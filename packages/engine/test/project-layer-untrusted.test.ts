@@ -1,3 +1,7 @@
+// Proves: A cloned repository's own files change the owner's security settings or send the owner's stored credential to the repository's server.
+// Red when: A restricted key takes effect from the project layer, or a project service gets the owner's token without confirmation, redefines the owner's service, or keeps its confirmation after its address changes.
+// Proves: A repository's secret file points at the owner's credential and reads it.
+// Red when: A pointer in the project store is followed into the owner's store or the environment: `get` returns the owner's value.
 /**
  * A repository's own files are content its author wrote, not the owner. Its
  * settings file cannot set a restricted key, loosen one or run a command;

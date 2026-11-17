@@ -1,3 +1,5 @@
+// Proves: A purchase that was submitted is not found after a restart, or a damaged ledger reads as "never bought", so it is bought again; or a purchase record is lost.
+// Red when: A submitted-but-unverified purchase is not found after a restart or reads as purchased, a ledger that cannot be parsed answers "never bought" or takes a new record, or concurrent appends lose rows.
 /**
  * The purchase ledger: every purchase is recorded once under its request id,
  * survives a reopen and concurrent writers in other processes, and damaged

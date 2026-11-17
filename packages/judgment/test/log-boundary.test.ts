@@ -1,3 +1,5 @@
+// Proves: Whatever the port underneath throws, its text, cause and extra properties never reach the decision log on disk or the error shown.
+// Red when: An exception's message, cause or properties are written into the decision log or kept on the error returned.
 import { describe, expect, test } from 'bun:test';
 import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '../src/index.ts';
 

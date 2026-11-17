@@ -1,3 +1,5 @@
+// Proves: Updates are fetched from a repository other than the authorised one because a setting was pointed elsewhere.
+// Red when: The settings manager accepts another repository, another host, or a URL carrying credentials as the release source.
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -1,3 +1,5 @@
+// Proves: An approval outlives its deadline across a daemon restart, so a purchase or action waiting on it can be approved long after the window the owner was given; or an approval already given is lost by the restart.
+// Red when: The start-up pass stops expiring an approval whose deadline passed while the daemon was down, a restart loses an approval already given, or a deadline still ahead is not re-armed or expires on sight.
 /**
  * A pending approval survives a daemon restart and is never left hanging.
  *

@@ -1,3 +1,5 @@
+// Proves: Two apps editing one work plan lose an edit.
+// Red when: Either app writes whole tasks from its own copy: a status or a note is missing from the final plan.
 /**
  * The one work plan: every app (terminal, Agent, daemon) keeps a project's
  * plan as rows in one shared file. Edits two apps make to the same tasks at

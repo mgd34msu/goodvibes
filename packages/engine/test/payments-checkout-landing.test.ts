@@ -1,3 +1,5 @@
+// Proves: A declined payment is recorded as an order, a card number is stored as an order number, or an unreadable page turns a submitted purchase into a failed one.
+// Red when: The decline check runs after the order-number match, a card-shaped number is taken as the order id, or a page read that throws turns a charged purchase into a failed submit.
 import { describe, expect, test } from 'bun:test';
 import { describeCheckoutLanding, readOrderConfirmation, type CheckoutLandingEngine } from '../platform/src/platform/payments/checkout-landing.ts';
 

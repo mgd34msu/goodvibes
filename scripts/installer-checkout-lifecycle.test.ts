@@ -1,3 +1,5 @@
+// Proves: The readiness check that decides between keeping and rolling back an update is real, an incomplete release is not published, an update killed half-way can be recovered, and an update never rewrites the credentials file.
+// Red when: The readiness check accepts a failed daemon or refuses a running one, a release missing a program is published, an update killed after publishing cannot be recovered, or an update rewrites or prints the credentials.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createServer } from 'node:net';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';

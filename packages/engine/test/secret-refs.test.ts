@@ -1,3 +1,5 @@
+// Proves: A secret reference, which can arrive in a repository or an imported file, cannot choose the program that runs or the server a token is sent to, and resolves only from the store it names.
+// Red when: A reference to the local store falls back to the environment, a reference's own fields choose the program, data directory, session, server or token, or a failing provider's partial output reaches the error or is used as the credential.
 /**
  * A secret reference resolves only from the store it names, and only through
  * the program, server and token variable the owner's own settings name. A

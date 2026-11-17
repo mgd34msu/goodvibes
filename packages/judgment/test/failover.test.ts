@@ -1,3 +1,7 @@
+// Proves: Each decision target is sent only its own key and no redirect is followed, and a failing target is asked a bounded number of times.
+// Red when: A target is sent another target's key, a redirect is followed with a key, a failure does not pass to the next target, a key reaches the decision log, or a failing target is asked more than twice.
+// Proves: The decision model's own answer (reject, held, revise, defer, unsure) is treated as a failure and a fallback model is asked until one says yes.
+// Red when: The transport fails over on an answer instead of only on an outage.
 import { describe, expect, test } from 'bun:test';
 import { createSystemOnePort, JudgmentError, choice, noul, DEFAULT_MODEL, SqliteDecisionLog, withDecisionLog, type JudgmentConfig } from '../src/index.ts';
 

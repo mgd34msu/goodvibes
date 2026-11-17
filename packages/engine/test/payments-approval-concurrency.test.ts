@@ -1,3 +1,5 @@
+// Proves: One owner approval of a purchase is spent twice.
+// Red when: A store handle spends from its own copy instead of the file: the second handle takes the grant the first already spent.
 import { join } from 'node:path';
 import { beforeEach, expect, test } from 'bun:test';
 import { DaemonApprovalStore } from '../platform/src/platform/payments/host/approval-store.js';

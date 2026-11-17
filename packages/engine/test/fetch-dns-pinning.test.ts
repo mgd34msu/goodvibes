@@ -1,3 +1,6 @@
+// Proves: The fetch tool reaches a loopback, private or cloud-metadata address through a host name, a redirect or a second DNS answer; or serves a response fetched with one credential to a request with another.
+// Red when: A name resolving to a refused range is requested, a redirect hop is followed unchecked, the request goes to the name instead of the checked address, or the response cache is keyed without the credential.
+
 // The fetch tool checks where a host name resolves, not only how it is
 // written: every A and AAAA answer is compared with the refused address ranges
 // before each request hop (the first and every redirect), and the request is

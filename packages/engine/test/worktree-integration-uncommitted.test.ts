@@ -1,3 +1,5 @@
+// Proves: Work whose commit the repository refused is neither merged as if committed nor lost.
+// Red when: The lane merges or removes the worktree of an item whose commit failed, or loses the file the agent wrote, or does not merge once the retried commit lands.
 /**
  * Work whose commit failed is neither integrated as if committed nor lost. An
  * item works in its own worktree; its phase commit is refused (a pre-commit

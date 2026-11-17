@@ -1,3 +1,5 @@
+// Proves: The agent spends past a limit the owner set, or without asking when no limit is set.
+// Red when: Spend is not read back from the budget file, the ceiling or the card's cap is compared with the item price, tax and fees escape the overage budget, the owner's maximum is ignored or misread, an approved overdraw raises the limit past the shortfall, or a limit of 0 or a typed answer is misread.
 /**
  * The owner's spending limits. Inside them the agent buys without asking; over
  * one it stops and names the limit and the amounts; the per-purchase ceiling is

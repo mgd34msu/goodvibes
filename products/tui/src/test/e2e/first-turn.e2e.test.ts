@@ -1,3 +1,5 @@
+// Proves: The shipped goodvibes binary starts, completes an interactive first turn, and its headless entry point exits 0 with the reply as JSON and reaches no outside network.
+// Red when: The daemon cannot start or pair, the compiled terminal does not reach its input area or writes to stderr, a first turn is not answered or creates work, or the headless run does not exit 0 with JSON, asks a decision model under No Decision Model, or tries the network.
 /**
  * The built `goodvibes` binary on a fresh home, against a real daemon and a
  * scripted model at the HTTP wire: it starts in a real terminal with nothing on

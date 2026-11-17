@@ -1,3 +1,5 @@
+// Proves: The Agent's own tool registry, composed as the shipped Agent composes it, runs a model call. tool-call-end-to-end.test.ts proves the engine tools on the terminal composition; this is the only proof for the Agent's registry.
+// Red when: ComposeAgentToolRegistry, registerAgentTools, autonomous admission or executePrepared stop an agent_harness call from running.
 import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';

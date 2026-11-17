@@ -1,3 +1,5 @@
+// Proves: A sender the owner removed regains access at the next restart (an old accepted claim is applied again), or an owner-claim answer given while the daemon was down is lost.
+// Red when: The claim replay at start-up re-applies an answer that was already applied, or skips one answered while the daemon was down.
 /**
  * A sender the owner took off a channel's allowlist stays off after a daemon
  * restart, while an owner-claim answer given while the daemon was down is

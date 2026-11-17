@@ -1,3 +1,5 @@
+// Proves: A remembered rule covers more than was granted, a remembered deny is not enforced, or a deleted rule keeps applying.
+// Red when: A remembered exact deny is not enforced or outlives its deletion, a class grant misses a consumer or covers `gitfoo`, a stored grant lets an input-only surface run a command, or an exact rule is normalised when stored.
 /**
  * Remembered authority keeps its chosen scope and follows live revocation.
  * Explicit owner rules are exercised through live permission and registry consumers.

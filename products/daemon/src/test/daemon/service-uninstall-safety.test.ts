@@ -1,3 +1,5 @@
+// Proves: Removing the daemon's service removes only the definition GoodVibes wrote and leaves the data, the settings and anyone else's definition.
+// Red when: Uninstall removes a neighbouring definition, the settings or the data, or stops or deletes a definition the owner wrote at the service path.
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

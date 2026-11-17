@@ -1,3 +1,5 @@
+// Proves: An edit's `validate` runs a project script on the host in a session that requires containment and has none.
+// Red when: The validator runner stops consulting the containment posture: the build script runs and the marker file appears.
 /**
  * Validators run only through the exec tool's path: in a session that
  * requires the exec boundary and has none, an edit's `validate` runs nothing

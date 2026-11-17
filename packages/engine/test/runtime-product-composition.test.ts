@@ -1,3 +1,5 @@
+// Proves: A product that asks for the home memory store gets a per-project one, so memories written in one app are not found in another; or no workspace trust owner stands in front of its asks.
+// Red when: The `home` choice no longer resolves to the canonical home memory file, or the trust owner is not composed.
 /**
  * The one service composition: a product's choices decide where its memory
  * lands and whether a workspace trust owner stands in front of its asks. A

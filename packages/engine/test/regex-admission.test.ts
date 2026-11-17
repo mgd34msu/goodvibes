@@ -1,3 +1,5 @@
+// Proves: A pattern in an untrusted schema (an MCP tool, a contract response) stalls the thread that every message runs on; a deny rule with a pattern stops applying when no decision model is reachable.
+// Red when: A pattern with nested or adjacent repeats is handed to the native engine on the calling thread, or a deny rule's pattern matcher needs a judgment service and stops matching without one.
 /**
  * A regular expression that can stall the thread is never run natively.
  *

@@ -1,3 +1,5 @@
+// Proves: Uninstalling the released programs removes the programs only; the owner's memory and every directory beside the programs stay.
+// Red when: Uninstall removes ~/.goodvibes data or any directory in the install directory (browser driver, WebUI versions, owner-made directories), or leaves the programs or a claim behind.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';

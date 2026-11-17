@@ -1,3 +1,5 @@
+// Proves: A retried contract start (a lost reply, a restart) starts a second contract, so the work is done and paid for twice.
+// Red when: The idempotency record is not consulted or not durable, a reused key with a different request is accepted, or one caller's key answers another caller.
 import { afterEach, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { RefusalError } from '@goodvibes-jev/engine/errors';

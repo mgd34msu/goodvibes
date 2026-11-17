@@ -1,3 +1,5 @@
+// Proves: A session ends at its expiry, and a user deleted or re-keyed from the command line loses access on the running daemon and is not brought back by its next write.
+// Red when: An expired session token is accepted, the running daemon keeps honouring a deleted user, or its next write of the user store restores a deleted user or an old password.
 /**
  * Local auth: the last administrator cannot be deleted, an unreadable user
  * store is kept aside instead of overwritten, a failed hash upgrade does not

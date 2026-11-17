@@ -1,3 +1,5 @@
+// Proves: A handler answers with a payload the published contract rejects, so every strict client fails on that method (the operator client validates each answer with additionalProperties false).
+// Red when: A profile, occasions or runtime metrics handler answers (on a read, an accepted write or a refusal) with a payload the published schema does not validate.
 /**
  * gateway-response-contract-conformance.test.ts, real route responses against
  * the published contract, using the client's own validator.

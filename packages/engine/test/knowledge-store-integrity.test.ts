@@ -1,3 +1,5 @@
+// Proves: The owner's knowledge rows are lost: one app's write drops another's rows, a partial update wipes fields it did not name, or deleting one source deletes what another still backs.
+// Red when: A store writes its in-memory copy over rows another saved, a status-only update wipes fields it did not name, or deleting a source deletes a node another source still backs.
 /**
  * Knowledge rows survive a reopen and a second writer on the same file: a
  * write by one store never drops a row another store saved, a partial update

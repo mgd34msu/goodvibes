@@ -1,3 +1,5 @@
+// Proves: A credential with ordinary write access obtains the daemon's operator authority through a hosted Agent session, or the operator credential is sent to another host.
+// Red when: The create handler lets a write-scoped or non-admin credential create an Agent-surface session, or the in-process host sends the operator credential to the address the Agent dials.
 /**
  * A GoodVibes Agent session the daemon hosts acts on the daemon with full
  * operator authority, so only a caller that already holds it may create one:

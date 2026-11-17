@@ -4109,12 +4109,12 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   {
     "key": "judgment.policy",
     "type": "enum",
-    "default": "Default - On",
-    "description": "Default - On requires available decision models. Preferred tries the configured chain and falls back to Classic only on availability exhaustion. Classic - Off makes no decision-model calls, uses owner-approved tool execution and ordinary completion, and exposes decision-only feature limitations.",
+    "default": "Hybrid",
+    "description": "Hybrid (default) uses the set decision model and, when none is set or it fails, continues without it: decisions take their fallbacks and a failure is shown once with the model, what failed and the next step. Decision Model Only stops the operation and reports when the set decision model fails. No Decision Model makes no decision-model calls. With no decision model set, every policy continues without one.",
     "enumValues": [
-      "Default - On",
-      "Preferred",
-      "Classic - Off"
+      "Hybrid",
+      "Decision Model Only",
+      "No Decision Model"
     ]
   },
   {

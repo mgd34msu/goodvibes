@@ -273,11 +273,6 @@ export {
   type OverlayWidthClass,
 } from './overlay-viewport.js';
 
-export {
-  fitLabelDetailColumns,
-  wrapWithHangingIndent,
-} from './text-layout.js';
-
 export { computePromptContentWidth } from './prompt-content-width.js';
 
 export {

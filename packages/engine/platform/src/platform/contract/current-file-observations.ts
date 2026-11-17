@@ -5,10 +5,8 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import { summarizeError } from '../utils/error-display.js';
-import { originalContractInputFileDigest, type ContractInputFile } from './input-snapshot.js';
 import { ownedContractCheckpointText, type OwnedContractCheckpointRead } from './owned-checkpoint-read.js';
 
-const inputIdentity = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 const fileFacts = (stat: BigIntStats): readonly string[] => Object.freeze([
   stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink, stat.size, stat.mtimeNs, stat.ctimeNs, stat.birthtimeNs,
 ].map(String));
@@ -155,14 +153,11 @@ type DirectoryFactsCache = Map<string, readonly string[]>;
 /**
  * Actual file identity observations shared by native checks and repair context.
  * Each directory is examined once per pass; a file is read in full only when
- * its text or its captured-input digest is wanted, otherwise its first bytes
+ * its text is wanted, otherwise its first bytes
  * tell text from binary and the rest is read on first use.
  */
 export function currentFileObservations(cwd: string, paths: readonly string[], options: {
   readonly includeText?: boolean;
-  /** Actual captured publication-input contract; its existing digest is a
-   * cross-boundary commitment, not the ordinary local read identity. */
-  readonly inputFile?: ContractInputFile;
   /** Actual contract/check owner, never a source identity supplied by a model. */
   readonly owner?: object;
 } = {}, directoryCache: DirectoryFactsCache = new Map()): JsonValue[] {
@@ -201,21 +196,11 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
       const previous = labels?.get(absolute);
       const observationId = previous && isDeepStrictEqual(previous.facts, facts) ? previous.id : randomUUID();
       labels?.set(absolute, { facts, id: observationId });
-      const expected = options.inputFile, expectedOid = expected?.oid;
-      if (expected && (expected.path !== path || expected.kind !== 'file' || !expectedOid || expected.identity !== inputIdentity(before)))
-        throw new Error('Current file no longer belongs to the selected captured input.');
-      const originalInput = expected?.digest === undefined ? undefined : originalContractInputFileDigest(expected, root, path);
-      const wholeFile = options.includeText === true || (expected?.digest !== undefined && originalInput === undefined);
+      const wholeFile = options.includeText === true;
       // The descriptor's identity equals the lstat above, so the bytes are this file's.
       const read = readObservedFile(absolute, originalFile, wholeFile ? undefined : BINARY_PROBE_BYTES);
       let whole: Buffer | undefined = wholeFile ? read : undefined;
       const bytes = (): Buffer => whole ??= readObservedFile(absolute, originalFile);
-      // Fresh native input already bound this original physical leaf's bytes.
-      // Its exact owner may lend that commitment, but copied/foreign expected
-      // files still require a complete independent byte comparison.
-      originalInput?.assertCurrent();
-      const sha256 = expected?.digest === undefined ? undefined : originalInput?.digest ?? createHash('sha256').update(bytes()).digest('hex');
-      if (expected?.digest !== undefined && sha256 !== expected.digest) throw new Error('Current file does not match its captured publication input.');
       const binary = read.includes(0), text = options.includeText && !binary ? read.toString('utf8') : undefined;
       let retired = false;
       const assertObservationCurrent = () => {
@@ -227,10 +212,8 @@ export function currentFileObservations(cwd: string, paths: readonly string[], o
       };
       const observation = Object.freeze({ operation: 'read-current-file', source: 'native-host-filesystem', success: true,
         path, bytes: Number(before.size), binary, observationId,
-        ...(sha256 === undefined ? {} : { sha256 }), ...(expectedOid ? { inputBlobOid: expectedOid } : {}),
         ...(text !== undefined && Buffer.from(text, 'utf8').equals(read) ? { text } : {}) });
-      nativeFiles.set(observation, { bytes, facts, assertCurrent: assertObservationCurrent,
-        ...(sha256 === undefined ? {} : { savedDigest: sha256 }) });
+      nativeFiles.set(observation, { bytes, facts, assertCurrent: assertObservationCurrent });
       return [observation];
     } catch (error) {
       return [{ operation: 'read-current-file', source: 'native-host-filesystem', success: false, path,

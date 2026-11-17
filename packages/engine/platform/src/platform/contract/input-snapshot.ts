@@ -304,11 +304,6 @@ export async function assertContractInputOwner(snapshot: ContractInputSnapshot, 
   if (workingTree(root, false) !== snapshot.inputTree) throw new ContractInputOwnerChangedError('file', 'your files changed since the contract started');
 }
 
-/** Kept for callers of the older per-file receipt; there is no per-file proof to lend, so a caller reads the bytes itself. */
-export function originalContractInputFileDigest(_file: ContractInputFile, _root: string, _path: string): { readonly digest: string; readonly assertCurrent: () => void } | undefined {
-  return undefined;
-}
-
 /** Historical readers retain the recorded repository identity without requiring live owner files/HEAD. */
 export async function assertContractInputGitIdentity(snapshot: ContractInputSnapshot): Promise<void> {
   if (await repositoryIdentity(snapshot.sourceRoot) !== snapshot.gitIdentity)

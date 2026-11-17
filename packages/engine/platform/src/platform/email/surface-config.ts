@@ -164,6 +164,16 @@ function readString(getConfig: ConfigReader, key: string): string | undefined {
   return undefined;
 }
 
+function readStringList(getConfig: ConfigReader, key: string): readonly string[] {
+  let value: unknown;
+  try {
+    value = getConfig(key);
+  } catch {
+    return [];
+  }
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : [];
+}
+
 function readNumber(getConfig: ConfigReader, key: string): number | undefined {
   let value: unknown;
   try {
@@ -233,6 +243,8 @@ export interface SurfaceEmailSettings {
   readonly mailbox: string | undefined;
   /** Drafts folder. Absent means let the server's `\Drafts` flag decide. */
   readonly draftsMailbox: string | undefined;
+  /** `surfaces.email.imap.authservIds`: the receiving server's authserv-ids for a provider not built in. */
+  readonly authservIds: readonly string[];
 }
 
 /** Resolve every non-secret mailbox setting, in the precedence documented above. */
@@ -265,6 +277,7 @@ export function readSurfaceEmailSettings(getConfig: ConfigReader): SurfaceEmailS
     // is asked which one carries the `\Drafts` flag, the answer that gets
     // Gmail's `[Gmail]/Drafts` right instead of creating a stray folder.
     draftsMailbox: readString(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.draftsMailbox`),
+    authservIds: readStringList(getConfig, `${SURFACE_EMAIL_PREFIX}.imap.authservIds`),
   };
 }
 
@@ -317,6 +330,8 @@ export function createSurfaceEmailConfigReader(getConfig: ConfigReader): ConfigR
         return settings.mailbox ?? '';
       case 'email.draftsMailbox':
         return settings.draftsMailbox ?? '';
+      case 'email.authservIds':
+        return settings.authservIds;
       case 'email.passwordRef':
         return SURFACE_EMAIL_PASSWORD_REF;
       case 'email.smtpPasswordRef':

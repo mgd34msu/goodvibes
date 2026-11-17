@@ -73,6 +73,7 @@ export const daemonMailboxConfigDefaults = {
       secure: true,
       mailbox: 'INBOX',
       draftsMailbox: '',
+      authservIds: [] as string[],
     },
     smtp: {
       host: '',

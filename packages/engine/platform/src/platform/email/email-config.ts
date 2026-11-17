@@ -37,6 +37,10 @@ function readBoolean(value: unknown, fallback = false): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function readStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : [];
+}
+
 function readSmtpSecurity(value: unknown): SmtpSecurityMode {
   if (value === 'tls' || value === 'starttls' || value === 'auto') return value;
   return 'auto';
@@ -94,6 +98,7 @@ export function readEmailConfig(getConfig: (key: string) => unknown): EmailConfi
     fromAddress: readString(getConfig('email.fromAddress')),
     mailbox: readString(getConfig('email.mailbox')),
     draftsMailbox: readString(getConfig('email.draftsMailbox')),
+    authservIds: readStringList(getConfig('email.authservIds')),
   };
 }
 

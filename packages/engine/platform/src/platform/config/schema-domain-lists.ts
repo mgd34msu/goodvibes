@@ -21,6 +21,7 @@ import { conversationGateConfigDefaults } from './schema-domain-conversation-gat
 import { contractConfigDefaults } from './schema-domain-contract.js';
 import { coreConfigDefaults } from './schema-domain-core.js';
 import { runtimeConfigDefaults } from './schema-domain-runtime.js';
+import { daemonMailboxConfigDefaults } from './schema-domain-daemon-mailbox.js';
 
 export interface ListConfigSetting extends Omit<ConfigSetting, 'key' | 'type'> {
   readonly key: ListConfigKey;
@@ -105,6 +106,15 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     validate: (value) => stringList(value) && value.every((entry) => isAbsolute(entry)),
     closedShape: true,
     validationHint: 'list of absolute paths',
+  },
+  {
+    key: 'surfaces.email.imap.authservIds',
+    type: 'object',
+    default: [...daemonMailboxConfigDefaults.email.imap.authservIds],
+    description: 'Authserv-ids the mailbox\'s own receiving server writes in Authentication-Results, for a provider whose id is not built in (Gmail, Fastmail, Zoho, Yahoo and AOL are). Only a top-most header naming one of these is read as a sender verdict; with none, senders on such a mailbox read as unverified. An entry starting with "." matches the hosts under that domain',
+    validate: (value) => stringList(value) && value.every((entry) => /^\*?\.?[a-z0-9-]+(\.[a-z0-9-]+)+\.?$/i.test(entry.trim())),
+    closedShape: true,
+    validationHint: 'list of host names, for example ["mx.example.com"] or [".mail.example.net"]',
   },
   {
     key: 'worktree.setup.commands',

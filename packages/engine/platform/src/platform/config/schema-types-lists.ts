@@ -11,5 +11,6 @@ export type ListConfigKey =
   | 'notifications.webhookUrls'
   | 'sandbox.egressAllowlist'
   | 'sandbox.workspaceWritable'
+  | 'surfaces.email.imap.authservIds'
   | 'worktree.setup.commands'
   | 'worktree.setup.carryOverGlobs';

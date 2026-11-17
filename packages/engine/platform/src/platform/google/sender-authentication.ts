@@ -126,20 +126,43 @@ export function readAuthservId(headerValue: string): string {
   return id.includes('=') ? '' : id.toLowerCase();
 }
 
-/** IMAP hosts whose server prepends its own verdict, and the authserv-id it writes. */
+/**
+ * IMAP hosts whose server prepends its own verdict, and the authserv-id it
+ * writes. An id that starts with "." matches any host under that domain, for
+ * providers whose receiving hosts are numbered (mx1, mx2, ...).
+ */
 const STAMPING_SERVERS: ReadonlyArray<{ readonly imapHost: string; readonly authservId: string }> = [
   { imapHost: 'imap.gmail.com', authservId: 'mx.google.com' },
   { imapHost: 'imap.googlemail.com', authservId: 'mx.google.com' },
+  { imapHost: 'imap.fastmail.com', authservId: '.messagingengine.com' },
+  { imapHost: 'imap.zoho.com', authservId: 'mx.zohomail.com' },
+  { imapHost: 'imappro.zoho.com', authservId: 'mx.zohomail.com' },
+  { imapHost: 'imap.mail.yahoo.com', authservId: '.yahoo.com' },
+  { imapHost: 'imap.aol.com', authservId: '.yahoo.com' },
 ];
+
+function normaliseAuthservId(id: string): string {
+  const trimmed = id.trim().toLowerCase().replace(/\.$/, '');
+  return trimmed.startsWith('*.') ? trimmed.slice(1) : trimmed;
+}
 
 /**
  * The authserv-ids whose verdict this mailbox may be shown: the id its own
- * receiving server writes, by the IMAP host it is read from. Empty for a host
- * not known to stamp one, which makes every verdict read `unverified`.
+ * receiving server writes, by the IMAP host it is read from, plus the ids the
+ * owner configured for a provider not listed here
+ * (`surfaces.email.imap.authservIds`). Empty for a host not known to stamp one
+ * and nothing configured, which makes every verdict read `unverified`.
  */
-export function mailboxAuthservIds(imapHost: string): readonly string[] {
+export function mailboxAuthservIds(imapHost: string, configured: readonly string[] = []): readonly string[] {
   const host = imapHost.trim().toLowerCase().replace(/\.$/, '');
-  return STAMPING_SERVERS.filter((server) => server.imapHost === host).map((server) => server.authservId);
+  const known = STAMPING_SERVERS.filter((server) => server.imapHost === host).map((server) => server.authservId);
+  const extra = configured.map(normaliseAuthservId).filter((id) => id.length > 0 && id !== '.');
+  return [...new Set([...known, ...extra])];
+}
+
+/** Whether a header's authserv-id is one of the mailbox's own (an entry starting with "." matches its subdomains). */
+function isOwnAuthservId(id: string, authservIds: readonly string[]): boolean {
+  return authservIds.some((entry) => (entry.startsWith('.') ? id.endsWith(entry) && id.length > entry.length : entry === id));
 }
 
 /**
@@ -159,7 +182,7 @@ export function readSenderAuthentication(
   const topMost = headerValues[0];
   if (topMost === undefined) return {};
   const id = readAuthservId(topMost);
-  if (id === '' || !authservIds.includes(id)) return {};
+  if (id === '' || !isOwnAuthservId(id, authservIds)) return {};
   return parseAuthenticationResults(topMost);
 }
 

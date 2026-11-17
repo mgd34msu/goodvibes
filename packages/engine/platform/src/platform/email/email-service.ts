@@ -112,6 +112,12 @@ export interface EmailConfig {
    * only when the server does not advertise one.
    */
   readonly draftsMailbox: string;
+  /**
+   * Authserv-ids the mailbox's own receiving server writes in
+   * `Authentication-Results`, for a provider the program does not already
+   * know. Only a top-most header naming one of these is read as a verdict.
+   */
+  readonly authservIds?: readonly string[] | undefined;
 }
 
 export interface EmailSummary {
@@ -411,7 +417,7 @@ export class EmailService {
       detail.messageId,
       this.deps.describeSenderClaim(
         detail.from,
-        readSenderAuthentication(detail.authenticationResults, mailboxAuthservIds(config.imapHost)),
+        readSenderAuthentication(detail.authenticationResults, mailboxAuthservIds(config.imapHost, config.authservIds)),
       ),
     );
   }

@@ -264,6 +264,8 @@ export interface DaemonMailboxConfig {
     secure: boolean;
     mailbox: string;
     draftsMailbox: string;
+    /** Authserv-ids the receiving server writes, for a provider not built in. */
+    authservIds: string[];
   };
   smtp: {
     host: string;

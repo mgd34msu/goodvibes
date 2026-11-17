@@ -13,7 +13,7 @@ export async function listEmailInbox(deps: EmailServiceDeps, config: EmailConfig
   const requested = input.limit ?? 10;
   const limit = Number.isFinite(requested) ? Math.max(1, Math.floor(requested)) : 10;
   const unreadOnly = input.unreadOnly ?? true;
-  const authservIds = mailboxAuthservIds(config.imapHost);
+  const authservIds = mailboxAuthservIds(config.imapHost, config.authservIds);
   return withEmailReadConnection(deps, config, sourceRead, input.signal, async (client, current) => {
     const uids = unreadOnly
       ? await client.searchUnseen(input.since)

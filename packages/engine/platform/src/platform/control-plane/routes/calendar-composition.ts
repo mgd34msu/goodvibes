@@ -25,6 +25,7 @@ import {
   type GoogleCalendarGatewayServiceOptions,
 } from '../../google/gateway-calendar-service.js';
 import { createFetchCalDavHttpPort, nodeGoogleFilePort } from '../../google/node.js';
+import { daemonGoogleConnectionOwner } from '../../google/daemon-connection.js';
 import type { CalDavHttpPort } from '../../google/caldav-client.js';
 import {
   CALDAV_URL_KEY,
@@ -128,6 +129,14 @@ export function createDaemonCalendarGatewayService(
       secretGet: (key) => deps.secretsManager.get(key),
     },
     fetch: deps.calendarFetch ?? { fetch: (url, init) => fetch(url, init) },
+    // The daemon's one token manager, shared with the Gmail reader and the start-up check.
+    connectionOwner: daemonGoogleConnectionOwner({
+      configManager: deps.configManager,
+      secretsManager: deps.secretsManager,
+      homeDirectory: home,
+      files: nodeGoogleFilePort,
+      ...(deps.calendarFetch === undefined ? {} : { fetch: deps.calendarFetch }),
+    }),
     recordUntrustedIngest,
   });
 

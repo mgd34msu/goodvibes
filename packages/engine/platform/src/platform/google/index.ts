@@ -252,6 +252,12 @@ export {
   type GoogleConnectionOwnerOptions,
 } from './connection-owner.js';
 
+export {
+  checkDaemonGoogleAtBoot,
+  daemonGoogleConnectionOwner,
+  type DaemonGoogleConnectionDeps,
+} from './daemon-connection.js';
+
 // ---------------------------------------------------------------------------
 // Registering a client the owner handed over, and the consent that follows
 // ---------------------------------------------------------------------------

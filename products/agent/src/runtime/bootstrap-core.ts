@@ -21,6 +21,7 @@ import { publishToSharedFeed } from '../core/notices.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
 import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
+import { existingGoogleConnectionOwner } from '@goodvibes-jev/engine/platform/platform/google';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
 import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
@@ -325,6 +326,16 @@ export async function initializeBootstrapCore(
     `Saved approvals could not be loaded from ${services.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'approvals.json')}; approval requests will fail until the file is repaired or removed`,
     () => approvalBroker.start(),
   );
+  // The session's one Google connection (made when the google tool was
+  // registered) refreshes once now, so a revoked grant is said at start rather
+  // than by the first call that fails. Not connected says nothing.
+  const googleConnection = existingGoogleConnectionOwner(services.secretsManager);
+  if (googleConnection !== undefined) {
+    startupNotices.guard('The Google account could not be checked', async () => {
+      const check = await googleConnection.checkAtBoot();
+      if (check.needsReauthorization) startupNotices.report(`[Startup] ${check.detail} Run /google connect to connect the account again.`);
+    });
+  }
   startupNotices.guard(
     `Saved sessions could not be loaded from ${services.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'sessions.json')}`,
     () => sharedSessionBroker.start(),

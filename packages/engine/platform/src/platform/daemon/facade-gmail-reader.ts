@@ -34,6 +34,7 @@ import {
   type GmailInboundReaderSources,
 } from '../google/gmail-inbound-reader.js';
 import { nodeGoogleFilePort } from '../google/node.js';
+import { daemonGoogleConnectionOwner } from '../google/daemon-connection.js';
 
 /** The slice of the daemon runtime this composition needs. Nothing wider. */
 export interface DaemonGmailInboundReaderDeps {
@@ -84,5 +85,13 @@ export function createDaemonGmailInboundReader(
       secretGet: (key) => deps.secretsManager.get(key),
     },
     fetch: fetchPort,
+    // The daemon's one token manager, shared with the calendar verbs and the start-up check.
+    connectionOwner: daemonGoogleConnectionOwner({
+      configManager: deps.configManager,
+      secretsManager: deps.secretsManager,
+      homeDirectory: home,
+      files: nodeGoogleFilePort,
+      ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
+    }),
   });
 }

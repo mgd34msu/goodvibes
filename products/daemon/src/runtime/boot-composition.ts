@@ -6,6 +6,8 @@ import { synchronizeConfiguredServices } from '@goodvibes-jev/engine/platform/pl
 import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '@goodvibes-jev/engine/platform/platform/runtime/operations';
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import { describeFatalFailure } from '@goodvibes-jev/engine/platform/platform/daemon/fatal-boot-report';
+import { checkDaemonGoogleAtBoot } from '@goodvibes-jev/engine/platform/platform/google';
+import { nodeGoogleFilePort } from '@goodvibes-jev/engine/platform/platform/google/node';
 import type { DaemonBootOperations } from './boot-tasks.js';
 import { createDaemonPluginLoaderDeps } from './plugin-composition.js';
 import type { RuntimeServices } from './runtime-services-types.js';
@@ -170,8 +172,27 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
         close: () => { for (const unsubscribe of unsubscribers.splice(0)) unsubscribe(); return notifier.close(); },
       };
     },
-    synchronizeServices: () => withServiceReadDrain(runtime.serviceRegistry, (registry) =>
-      synchronizeConfiguredServices((record, source) => {
+    synchronizeServices: () => {
+      // The Google grant is checked once, in the background, so a revoked one
+      // is announced at start (a degraded row with the reason and the step)
+      // instead of by the first call that fails; boot does not wait on Google.
+      void checkDaemonGoogleAtBoot({
+        configManager: runtime.configManager,
+        secretsManager: runtime.secretsManager,
+        homeDirectory: runtime.homeDirectory,
+        files: nodeGoogleFilePort,
+      }).then((check) => {
+        if (!check.usable && !check.needsReauthorization) return;
+        if (check.needsReauthorization) logger.warn('The Google account needs to be connected again', { detail: check.detail });
+        runtime.runtimeDispatch.syncIntegration({
+          id: 'google', displayName: 'Google', category: 'communication',
+          status: check.usable ? 'healthy' : 'degraded', enabled: true, successCount: 0, errorCount: check.usable ? 0 : 1,
+          ...(check.usable ? {} : { lastErrorAt: Date.now(), lastError: `${check.detail} Connect the Google account again (the Agent's /google connect, or the web UI's Google setup).` }),
+          meta: { needsReauthorization: check.needsReauthorization, scopes: [...check.scopes] },
+        }, 'boot.google');
+      }, () => undefined);
+      return withServiceReadDrain(runtime.serviceRegistry, (registry) =>
+        synchronizeConfiguredServices((record, source) => {
         // A webhook-only configured Slack/Discord service has no primary token.
         // Preserve the real notification owner's health and queue facts while
         // adding service inspection facts, rather than relabeling it unconfigured.
@@ -180,7 +201,8 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
         runtime.runtimeDispatch.syncIntegration(notification
           ? { ...record, ...notification, meta: { ...record.meta, ...notification.meta } }
           : record, source);
-      }, registry)),
+        }, registry));
+    },
     initializePlugins: () => runtime.pluginManager.init(createDaemonPluginLoaderDeps(runtime)),
     closePlugins: () => runtime.pluginManager.close(),
     // The reason is the cause chain with credentials masked (the same line a

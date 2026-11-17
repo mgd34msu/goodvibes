@@ -54,6 +54,7 @@
  */
 
 import { openGoogleConnection, type GoogleConnectionSources } from './connection.js';
+import type { GoogleConnectionOwner } from './connection-owner.js';
 import type { GoogleApiFetchPort, GoogleApiResult } from './api-client.js';
 import type { GoogleFetchPort } from './oauth-loopback.js';
 import type { HistoryDeltaDeps } from './history-delta.js';
@@ -113,6 +114,8 @@ export interface GmailInboundReaderSources {
   readonly sources: GoogleConnectionSources;
   readonly fetch: GoogleFetchPort & GoogleApiFetchPort;
   readonly now?: (() => number) | undefined;
+  /** The process's held connection; without it a connection is opened for this resolution. */
+  readonly connectionOwner?: GoogleConnectionOwner | undefined;
 }
 
 /**
@@ -127,11 +130,13 @@ export async function resolveGmailInboundReader(
 ): Promise<GmailInboundReaderResolution> {
   let connection: Awaited<ReturnType<typeof openGoogleConnection>>;
   try {
-    connection = await openGoogleConnection(
-      input.sources,
-      { fetch: input.fetch },
-      input.now?.() ?? Date.now(),
-    );
+    connection = input.connectionOwner !== undefined
+      ? await input.connectionOwner.connection({ sources: input.sources })
+      : await openGoogleConnection(
+        input.sources,
+        { fetch: input.fetch },
+        input.now?.() ?? Date.now(),
+      );
   } catch (error) {
     return {
       kind: 'unavailable',

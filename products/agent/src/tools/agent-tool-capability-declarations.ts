@@ -15,7 +15,9 @@
 
 export type DeclaredToolCapability =
   /** Drives a real browser: opens pages, reads them, and acts on them. */
-  'browser-control';
+  | 'browser-control'
+  /** Drives the desktop itself (windows, pointer, keyboard), outside a browser. */
+  | 'desktop-control';
 
 const declarations = new Map<DeclaredToolCapability, Set<string>>();
 

@@ -1,14 +1,15 @@
-import { types as nodeTypes } from 'node:util';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
 import { acquireInteractiveRuntimeSnapshot, type InteractiveRuntimeSnapshot } from './agent-harness-interactive-runtime-records.ts';
 import { isAgentMcpCallRouteInstalled } from './agent-mcp-call-route.ts';
 import { toolsDeclaringCapability } from './agent-tool-capability-declarations.ts';
 import type { AgentHarnessInteractiveRuntimeRecord } from './agent-harness-interactive-runtime-records.ts';
-import { captureCatalogData, captureCatalogMethods, rankHarnessCatalog, type CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
+import type { CatalogRankingOptions } from './agent-harness-catalog-ranking.ts';
 import { ToolInputProjectionError } from '@goodvibes-jev/engine/platform/platform/tools';
 
 type BrowserControlStatus = 'ready' | 'attention' | 'setup-needed';
+/** A capability row: `unavailable` when no registered tool declares it, whatever else is configured. */
+type BrowserControlCapabilityStatus = BrowserControlStatus | 'unavailable';
 type BrowserControlDecisionStatus = 'ready-to-inspect-tool' | 'review-connector-first' | 'setup-needed';
 
 export interface BrowserControlRouteArgs {
@@ -30,7 +31,7 @@ interface BrowserControlMcpServer {
 interface BrowserControlWorkflow {
   readonly id: string;
   readonly label: string;
-  readonly status: BrowserControlStatus;
+  readonly status: BrowserControlCapabilityStatus;
   readonly summary: string;
   readonly next: string;
   readonly inspectRoute: string;
@@ -142,19 +143,26 @@ function workflowStatus(configured: boolean, needsReview: boolean): BrowserContr
   return needsReview ? 'attention' : 'setup-needed';
 }
 
+/**
+ * The three things a person may want, each with its own truthful status:
+ * browser navigation and screenshots need an invocable browser route; desktop
+ * control needs a registered tool that declares it, and is `unavailable` otherwise.
+ */
 function browserControlWorkflows(
   configured: boolean,
   needsReview: boolean,
   recommendedRoute: string,
   setupRoute: string,
+  desktopTools: readonly string[],
 ): readonly BrowserControlWorkflow[] {
   const status = workflowStatus(configured, needsReview);
   const inspectRoute = configured ? recommendedRoute : setupRoute;
   const next = configured
     ? `Call ${recommendedRoute}, this route is invocable now.`
     : needsReview
-      ? 'Review trust/schema freshness before treating this browser or desktop connector as usable.'
-      : 'Configure a trusted browser/desktop MCP server or first-class tool before attempting live UI control.';
+      ? 'Review trust/schema freshness before treating this browser connector as usable.'
+      : 'Configure a trusted browser MCP server or first-class tool before attempting live UI control.';
+  const desktopRoute = desktopTools[0] ? `agent_harness mode:"tool" toolName:"${quoteRouteValue(desktopTools[0])}" includeParameters:true` : '';
   return [
     {
       id: 'browser-navigation',
@@ -164,30 +172,46 @@ function browserControlWorkflows(
       next,
       inspectRoute,
       setupRoute,
-      safety: 'Use read-only web/fetch routes for research unless the user explicitly needs live browser state or authentication.',
+      safety: BROWSER_CONTROL_SAFETY[0]!,
     },
     {
       id: 'screenshot-observation',
-      label: 'Screenshot or screen observation',
+      label: 'Screenshot of a browser page',
       status,
-      summary: 'Capture or inspect the screen through configured screenshot/screen-recording tooling.',
+      summary: 'Capture a page through the browser route; screens outside the browser need a desktop-control tool.',
       next,
       inspectRoute,
       setupRoute,
-      safety: 'Screenshots can expose secrets or private data; inspect setup and ask before capturing sensitive surfaces.',
+      safety: BROWSER_CONTROL_SAFETY[1]!,
     },
-    {
+    desktopRoute ? {
       id: 'desktop-control',
       label: 'Desktop control',
-      status,
-      summary: 'Use desktop/computer-control only after trust, host, and confirmation boundaries are clear.',
-      next,
-      inspectRoute,
+      status: 'ready',
+      summary: `Control the desktop through ${desktopTools.join(', ')}.`,
+      next: `Inspect ${desktopRoute} before acting.`,
+      inspectRoute: desktopRoute,
       setupRoute,
-      safety: 'Desktop actions are external effects; destructive or account-changing actions require explicit user confirmation.',
+      safety: BROWSER_CONTROL_SAFETY[2]!,
+    } : {
+      id: 'desktop-control',
+      label: 'Desktop control',
+      status: 'unavailable',
+      summary: 'No registered tool declares desktop control, so windows, pointer and keyboard outside a browser cannot be driven from this session.',
+      next: 'Use the browser route for anything inside a web page; desktop control needs a tool that declares it.',
+      inspectRoute: setupRoute,
+      setupRoute,
+      safety: BROWSER_CONTROL_SAFETY[2]!,
     },
   ];
 }
+
+/** The safety notes, one list for every answer. */
+const BROWSER_CONTROL_SAFETY: readonly string[] = [
+  'Use read-only web/fetch routes for research unless the user explicitly needs live browser state or authentication.',
+  'Screenshots can expose secrets or private data; ask before capturing sensitive surfaces.',
+  'Desktop and browser actions are external effects; destructive or account-changing actions require explicit user confirmation.',
+];
 
 /**
  * The routes that can be invoked, derived from what is registered right now:
@@ -283,7 +307,8 @@ function projectBrowserControlPosture(context: CommandContext, toolRegistry: Too
     mcpServers,
     certifiedRuntimeRecords: runtimeParity.browserDesktopRecords.slice(0, 5),
     runtime,
-    workflows: browserControlWorkflows(configured, needsReview, recommendedRoute, setupRoute),
+    workflows: browserControlWorkflows(configured, needsReview, recommendedRoute, setupRoute,
+      toolsDeclaringCapability('desktop-control').filter((toolName) => registeredNames.has(toolName))),
     setupChecklist: [
       'Inspect browser/desktop MCP servers and first-class tools before attempting live UI control.',
       'Prefer constrained trust, fresh schemas, and explicit allowed hosts/paths.',
@@ -301,93 +326,21 @@ function projectBrowserControlPosture(context: CommandContext, toolRegistry: Too
   };
 }
 
+/** One look at the registry, the MCP servers and the runtime records; a posture is correct for the moment it was taken. */
 export async function captureBrowserControlPosture(context: CommandContext, toolRegistry?: ToolRegistry, options: CatalogRankingOptions = {}): Promise<{
   readonly posture: BrowserControlPosture; readonly assertCurrent: () => void; readonly assertSourceCurrent: () => void;
 }> {
-  const optionSlots = captureCatalogMethods(options, ['signal', 'sourceOwner', 'assertCurrent', 'retainCurrent', 'requirePreservedSource']);
-  const registry = toolRegistry ?? context.extensions?.toolRegistry;
-  const nativeGuards = [captureCatalogMethods(context, ['clients', 'extensions']), captureCatalogMethods(context.extensions, ['toolRegistry', 'mcpRegistry'])];
-  if (context.clients) nativeGuards.push(captureCatalogMethods(context.clients, ['mcpApi']));
-  if (registry) nativeGuards.push(captureCatalogMethods(registry, ['getToolDefinitions']));
-  const mcp = context.clients?.mcpApi ?? context.extensions?.mcpRegistry;
-  if (mcp) nativeGuards.push(captureCatalogMethods(mcp, ['listServerSecurity']));
-  optionSlots();
-  const originalRetainCurrent = options.retainCurrent, originalAssertCurrent = options.assertCurrent, signal = options.signal;
-  if ((originalRetainCurrent !== undefined && (typeof originalRetainCurrent !== 'function' || nodeTypes.isProxy(originalRetainCurrent)))
-    || (originalAssertCurrent !== undefined && (typeof originalAssertCurrent !== 'function' || nodeTypes.isProxy(originalAssertCurrent))))
-    throw new ToolInputProjectionError('invalid');
-  const throwIfAborted = AbortSignal.prototype.throwIfAborted;
-  const checkSignal = (): void => { if (signal) Reflect.apply(throwIfAborted, signal, []); };
-  const dispatchRetainCurrent = (guard: () => void, key?: string): void => {
-    optionSlots(); checkSignal();
-    let result: unknown;
-    try { result = originalRetainCurrent?.(guard, key); }
-    finally {
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      optionSlots(); checkSignal();
-    }
-    if (result !== undefined) throw new ToolInputProjectionError('held');
-  };
-  const assertBorrowedCurrent = (): void => {
-    optionSlots(); checkSignal();
-    let result: unknown;
-    try { result = originalAssertCurrent?.(); }
-    finally {
-      if (nodeTypes.isPromise(result)) void Promise.prototype.then.call(result, undefined, () => {});
-      optionSlots(); checkSignal();
-    }
-    if (result !== undefined) throw new ToolInputProjectionError('held');
-  };
-  const retained = new Set<() => void>();
-  const retainCurrent = (guard: () => void): void => {
-    optionSlots(); checkSignal();
-    retained.add(guard);
-  };
-  assertBorrowedCurrent();
-  const snapshot = await acquireInteractiveRuntimeSnapshot(context, { ...options, retainCurrent });
-  snapshot.assertCurrent();
-  for (const guard of retained) guard();
-  optionSlots();
-  for (const guard of nativeGuards) guard();
-  const posture = projectBrowserControlPosture(context, registry, snapshot);
-  const revision = JSON.stringify(captureCatalogData(posture));
-  const assertSourceCurrent = () => {
-    optionSlots(); checkSignal();
-    for (const guard of nativeGuards) guard();
-    for (const guard of retained) guard();
-    if (JSON.stringify(captureCatalogData(projectBrowserControlPosture(context, registry, snapshot))) !== revision)
-      throw new ToolInputProjectionError('stale');
-  };
-  const assertCurrent = () => { assertSourceCurrent(); assertBorrowedCurrent(); assertSourceCurrent(); };
-  dispatchRetainCurrent(assertSourceCurrent, 'agent.browser-control.posture.sources');
+  const assertSourceCurrent = (): void => { options.signal?.throwIfAborted(); };
+  const assertCurrent = (): void => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   assertCurrent();
-  return { posture, assertCurrent, assertSourceCurrent };
+  const registry = toolRegistry ?? context.extensions?.toolRegistry;
+  const snapshot = await acquireInteractiveRuntimeSnapshot(context, options);
+  assertCurrent();
+  return { posture: projectBrowserControlPosture(context, registry, snapshot), assertCurrent, assertSourceCurrent };
 }
 
 export async function browserControlPosture(context: CommandContext, toolRegistry?: ToolRegistry, options: CatalogRankingOptions = {}): Promise<BrowserControlPosture> {
   return (await captureBrowserControlPosture(context, toolRegistry, options)).posture;
-}
-
-function workflowSearchText(workflow: BrowserControlWorkflow): string {
-  return [
-    workflow.id,
-    workflow.label,
-    workflow.summary,
-    workflow.next,
-    workflow.safety,
-  ].join('\n');
-}
-
-async function selectBrowserControlWorkflow(posture: BrowserControlPosture, input: string, options: CatalogRankingOptions): Promise<BrowserControlWorkflow | undefined> {
-  if (!input) return posture.workflows[0];
-  const exact = posture.workflows.find(workflow => workflow.id === input);
-  if (exact) return exact;
-  const ranked = await rankHarnessCatalog(posture.workflows, input, workflow => ({
-    id: workflow.id, description: workflowSearchText(workflow), evidence: workflow,
-  }), 'agent.browser-control.workflow', { ...options, requirePreservedSource: true });
-  const selected = ranked.matches[0];
-  if (selected && (selected.judgment?.reading.outcome !== 'act' || selected.judgment?.reading.verdict !== 'yes')) throw new ToolInputProjectionError('held');
-  return selected?.entry;
 }
 
 function toolCandidateRoutes(toolMatches: readonly string[]): readonly Record<string, unknown>[] {
@@ -413,7 +366,6 @@ function mcpCandidateRoutes(mcpServers: readonly BrowserControlMcpServer[]): rea
 
 function browserControlDecision(
   posture: BrowserControlPosture,
-  workflow: BrowserControlWorkflow,
   toolRoutes: readonly Record<string, unknown>[],
   mcpRoutes: readonly Record<string, unknown>[],
 ): BrowserControlDecision {
@@ -429,7 +381,7 @@ function browserControlDecision(
       userRoute: 'Agent Workspace -> Work & Approvals or Tools & MCP',
       nextStep: route
         ? `Call ${route.modelRoute} directly, replacing any <placeholder> with a real value. ${route.summary}`
-        : `Inspect the configured ${workflow.label.toLowerCase()} tool/server before acting.`,
+        : 'Inspect the configured browser tool/server before acting.',
       reason: route
         ? route.kind === 'daemon-certified-route'
           ? `A certified daemon record declares this route and ${route.toolName} is registered in this session.`
@@ -437,7 +389,7 @@ function browserControlDecision(
             ? 'The mcp tool is registered and a connected MCP browser server has fresh schemas and a trusted mode.'
             : `${route.toolName} is registered and can be invoked from this session.`
         : 'A browser/desktop control tool or fresh trusted MCP server is configured.',
-      safety: workflow.safety,
+      safety: BROWSER_CONTROL_SAFETY[2]!,
     };
   }
   if (posture.needsReview) {
@@ -462,43 +414,24 @@ function browserControlDecision(
   };
 }
 
+/**
+ * The browser/desktop posture, answered from code: what can be invoked now,
+ * what blocks it, and one fixed list of safety notes. A query or target is
+ * echoed, never ranked: every row leads to the same route.
+ */
 export async function browserControlRouteSummary(
   context: CommandContext,
   toolRegistry: ToolRegistry,
   args: BrowserControlRouteArgs,
   options: CatalogRankingOptions = {},
 ): Promise<Record<string, unknown>> {
-  options.signal?.throwIfAborted(); options.assertCurrent?.();
-  const source = JSON.stringify(captureCatalogData(args));
   const input = readString(args.query) || readString(args.target);
   const includeParameters = args.includeParameters === true;
-  const assertRegistryCurrent = captureCatalogMethods(toolRegistry, ['getToolDefinitions']);
-  const mcp = context.clients?.mcpApi ?? context.extensions?.mcpRegistry;
-  const assertMcpCurrent = mcp ? captureCatalogMethods(mcp, ['listServerSecurity']) : () => {};
-  const assertBackendsCurrent = () => {
-    assertRegistryCurrent(); assertMcpCurrent();
-    if ((context.clients?.mcpApi ?? context.extensions?.mcpRegistry) !== mcp) throw new ToolInputProjectionError('stale');
-  };
-  assertBackendsCurrent();
-  const acquired = await captureBrowserControlPosture(context, toolRegistry, options);
-  const posture = acquired.posture;
-  const assertSourceCurrent = () => {
-    options.signal?.throwIfAborted();
-    assertBackendsCurrent();
-    acquired.assertSourceCurrent();
-    if (JSON.stringify(captureCatalogData(args)) !== source) throw new ToolInputProjectionError('stale');
-  };
-  options.retainCurrent?.(assertSourceCurrent, 'agent.browser-control.workflow.sources');
-  const assertCurrent = () => { options.assertCurrent?.(); assertSourceCurrent(); };
-  const workflow = await selectBrowserControlWorkflow(posture, input, { ...options, assertCurrent });
-  assertCurrent();
-  if (!workflow) return {
-    mode: 'browser_control_route', request: input, status: 'no-matching-workflow', workflow: null, decision: null,
-    candidates: posture.workflows, note: 'No browser or desktop workflow was established for this request.',
-  };
+  const { posture, assertCurrent } = await captureBrowserControlPosture(context, toolRegistry, options);
   const toolRoutes = toolCandidateRoutes(posture.toolMatches);
   const mcpRoutes = mcpCandidateRoutes(posture.mcpServers);
-  const decision = browserControlDecision(posture, workflow, toolRoutes, mcpRoutes);
+  const decision = browserControlDecision(posture, toolRoutes, mcpRoutes);
+  assertCurrent();
   return {
     mode: 'browser_control_route',
     request: input || null,
@@ -507,11 +440,12 @@ export async function browserControlRouteSummary(
     needsReview: posture.needsReview,
     invocationRoutes: posture.invocationRoutes,
     ...(posture.blockers.length > 0 ? { blockers: posture.blockers } : {}),
-    workflow,
+    capabilities: posture.workflows.map(({ id, label, status, next }) => ({ id, label, status, next })),
     decision,
     toolCandidates: toolRoutes,
     mcpCandidates: mcpRoutes,
     fallbackRoutes: posture.fallbackRoutes,
+    safety: BROWSER_CONTROL_SAFETY,
     routes: {
       controlPosture: 'computer action:"control" includeParameters:true',
       setup: posture.setupRoute,
@@ -521,7 +455,7 @@ export async function browserControlRouteSummary(
     ...(includeParameters ? { posture } : {}),
     policy: {
       effect: 'read-only-route-plan',
-      boundary: 'This route selects the safest browser/desktop control workflow only. It never opens a browser, captures a screenshot, controls the desktop, or invokes a browser/MCP tool by itself.',
+      boundary: 'This route reports browser and desktop control only. It never opens a browser, captures a screenshot, controls the desktop, or invokes a browser/MCP tool by itself.',
       confirmation: 'Live browser, screenshot, authenticated browsing, account-changing, purchase, send, or destructive desktop actions require the selected tool-specific confirmation boundary and explicit user request.',
     },
   };

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { createAuthBundleHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
@@ -18,6 +19,19 @@ import {
   requireShellPaths,
   requireSubscriptionManager,
 } from './runtime-services.ts';
+
+/**
+ * `/auth bundle export <path>` over an existing file replaces what it holds,
+ * for the owner and for a model-run command alike, so the registry asks once
+ * first; a new file is written at once.
+ */
+function authBundleExportConfirmation(args: readonly string[], resolvePath: (path: string) => string) {
+  const words = args.filter((word) => word !== '--yes');
+  if (words[0] !== 'bundle' || words[1] !== 'export' || !words[2]) return undefined;
+  const target = resolvePath(words[2]);
+  if (!existsSync(target)) return undefined;
+  return { title: `Replace ${target}?`, detail: `${target} already exists; the auth review bundle replaces it, and what it holds now cannot be recovered.`, confirmLabel: 'Replace' };
+}
 
 interface AuthReviewBundle {
   readonly version: 1;
@@ -277,6 +291,7 @@ export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry)
     usage:
       '[review|show <provider>|repair <provider>|bundle export <path>|bundle inspect <path>|login <daemon|listener> <baseUrl> <username> [password] [secretKey]|logout <daemon|listener> <baseUrl> [secretKey]|local <review|panel|add-user|delete-user|rotate-password|revoke-session|clear-bootstrap-file>]',
     secretArgs: { subcommands: { login: [4], 'local add-user': [3], 'local rotate-password': [3], 'local revoke-session': [2] } },
+    confirm: (args, ctx) => authBundleExportConfirmation(args, (path) => requireShellPaths(ctx).resolveWorkspacePath(path)),
     async handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
       const sub = args[0] ?? 'review';

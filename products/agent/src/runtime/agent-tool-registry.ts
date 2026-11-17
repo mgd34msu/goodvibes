@@ -4,11 +4,7 @@ import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/p
 import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend } from './agent-browser.ts';
-import { registerAgentKnowledgeIngestTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { registerAgentKnowledgeTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
-import { registerAgentModelCompareTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { registerAgentResearchReportTool } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   connectedHostGoogleCalendar,
   getOutwardApprovalStore,
@@ -180,29 +176,26 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     },
     memoryRegistry: services.memoryRegistry,
     memoryAccess: services.memorySpineClient,
-  });
-  registerAgentKnowledgeIngestTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentKnowledgeTool(toolRegistry, services.shellPaths, configManager);
-  registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
-  registerAgentResearchReportTool(toolRegistry, services.artifactStore, deps.researchReportSourceOwner ?? deps.researchSourceOwner,
-    deps.researchReportSourceOwner ? 'report-only' : 'shared', deps.researchSourceOwner);
-  registerAgentModelCompareTool(toolRegistry, {
-    modelCatalog: services.providerRegistry,
-    providerRegistry: services.providerRegistry,
-    artifactStore: services.artifactStore,
-    applyModelRoute: async (registryKey, parentOptions, ownership) => {
-      const previousModel = String(configManager.get('provider.model') ?? '').trim();
-      const applied = await toolRegistry.executeNested(`model-route-${randomUUID()}`, 'settings',
-        { action: 'set', key: 'provider.model', value: registryKey }, parentOptions, ownership);
-      let verified = false;
-      try { verified = applied.success && JSON.parse(applied.output ?? '{}').verifiedInOwningStore === true; } catch { /* Value-free refusal below. */ }
-      if (!verified || configManager.get('provider.model') !== registryKey) throw new Error('Model route transition did not verify in its owning store.');
-      return {
-        ...(previousModel ? { previousModel } : {}),
-        selectedModel: registryKey,
-      };
+    researchReportSourceOwner: deps.researchReportSourceOwner,
+    researchSourceOwner: deps.researchSourceOwner,
+    modelCompare: {
+      modelCatalog: services.providerRegistry,
+      providerRegistry: services.providerRegistry,
+      applyModelRoute: async (registryKey, parentOptions, ownership) => {
+        const previousModel = String(configManager.get('provider.model') ?? '').trim();
+        const applied = await toolRegistry.executeNested(`model-route-${randomUUID()}`, 'settings',
+          { action: 'set', key: 'provider.model', value: registryKey }, parentOptions, ownership);
+        let verified = false;
+        try { verified = applied.success && JSON.parse(applied.output ?? '{}').verifiedInOwningStore === true; } catch { /* Value-free refusal below. */ }
+        if (!verified || configManager.get('provider.model') !== registryKey) throw new Error('Model route transition did not verify in its owning store.');
+        return {
+          ...(previousModel ? { previousModel } : {}),
+          selectedModel: registryKey,
+        };
+      },
     },
   });
+  registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   installAgentToolPolicyGuard(toolRegistry);
   compactRegisteredToolDefinitions(toolRegistry);
   return { toolRegistry, fileCache, projectIndex, dispose };

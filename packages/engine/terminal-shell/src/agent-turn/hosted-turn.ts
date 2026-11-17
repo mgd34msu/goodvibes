@@ -43,6 +43,14 @@ import { registerAgentNotifyTool } from './notify-tool.js';
 import { registerAgentMediaGenerateTool } from './media-generate-tool.js';
 import { registerAgentReviewPacketShareTool } from './review-packet-share-tool.js';
 import { registerAgentWorkPlanTool, type AgentWorkPlanStore } from './work-plan-tool.js';
+import { registerAgentKnowledgeTool } from './knowledge-tool.js';
+import { registerAgentKnowledgeIngestTool } from './knowledge-ingest-tool.js';
+import { registerAgentResearchReportTool } from './research-report-tool.js';
+import { registerAgentModelCompareTool } from './model-compare-tool.js';
+import type { AgentModelCompareToolDeps } from './model-compare-types.js';
+import { createAgentResearchSourceOwner, createAgentSettingsReader } from './research-source-screening.js';
+import { createClassicProtectedSourceOwner, type ProtectedSourceOwner } from '@goodvibes-jev/engine/platform/platform/security';
+import { randomUUID } from 'node:crypto';
 import { registerAgentOperatorActionTool } from './operator-action-tool.js';
 import { registerAgentOperatorBriefingTool } from './operator-briefing-tool.js';
 import { registerAgentOperatorMethodTool } from './operator-method-tool.js';
@@ -90,6 +98,15 @@ export interface AgentTurnToolDeps {
   readonly mediaProviders: Parameters<typeof registerAgentMediaGenerateTool>[1];
   /** The process's one channel delivery router; the daemon's in a hosted turn. */
   readonly channelDeliveryRouter: Parameters<typeof registerAgentReviewPacketShareTool>[2];
+  /**
+   * The research screening owners `agent_research_report` and the comparison
+   * readings use: the report-only owner (hosted screening under the Agent's
+   * consent setting, or Classic) and the shared owner for first-party local reads.
+   */
+  readonly researchReportSourceOwner?: ProtectedSourceOwner | undefined;
+  readonly researchSourceOwner?: ProtectedSourceOwner | undefined;
+  /** `agent_model_compare`: the models this turn runs on, and how a judged winner becomes the Agent's model setting. */
+  readonly modelCompare: Pick<AgentModelCompareToolDeps, 'modelCatalog' | 'providerRegistry' | 'applyModelRoute'>;
   /** The project work plan of this turn's workspace; absent where none is kept for it. */
   readonly workPlan?: AgentWorkPlanStore | undefined;
   /** This process's settings: the connected host the operator tools call, and the owner's mail address. */
@@ -143,6 +160,12 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentReviewPacketShareTool(registry, deps.artifactStore, deps.channelDeliveryRouter);
   registerAgentMediaGenerateTool(registry, deps.mediaProviders, deps.artifactStore);
   registerAgentNotifyTool(registry, deps.notificationConfig, deps.webhookNotifier);
+  // Agent Knowledge on the connected host: the daemon itself, in process, when it hosts this turn.
+  registerAgentKnowledgeTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  registerAgentKnowledgeIngestTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  registerAgentResearchReportTool(registry, deps.artifactStore, deps.researchReportSourceOwner ?? deps.researchSourceOwner,
+    deps.researchReportSourceOwner ? 'report-only' : 'shared', deps.researchSourceOwner);
+  registerAgentModelCompareTool(registry, { ...deps.modelCompare, artifactStore: deps.artifactStore });
   if (deps.workPlan) registerAgentWorkPlanTool(registry, deps.workPlan);
   registerAgentOperatorActionTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentOperatorBriefingTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
@@ -180,8 +203,7 @@ export const AGENT_SHELL_TOOL_NAMES: readonly string[] = Object.freeze([
  * `registerAgentTurnTools`.
  */
 export const AGENT_NOT_YET_HOSTED_TOOL_NAMES: readonly string[] = Object.freeze([
-  'agent_knowledge', 'agent_knowledge_ingest',
-  'agent_learning_consolidation', 'agent_model_compare', 'agent_research_report',
+  'agent_learning_consolidation',
 ]);
 
 /** Every Agent tool a hosted turn refuses. */
@@ -203,6 +225,7 @@ function hostedAgentSection(): string {
   return [
     '## This Agent turn is hosted by the daemon',
     'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_channel_send`, `browser` (the daemon\'s browser), `google` (the daemon\'s Google account and calendar) and, in the daemon\'s own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
+    'The Agent Knowledge, research report and model comparison tools `agent_knowledge`, `agent_knowledge_ingest`, `agent_research_report` and `agent_model_compare` are here too: Agent Knowledge is this daemon\'s own, reached in process with the Agent\'s own credential, reports and comparisons are saved to the same artifact store, and a comparison\'s apply mode sets the Agent\'s own model setting.',
     'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing` and `agent_operator_method` are here too: their host is this daemon, reached in process with the Agent\'s own credential, so each call is judged as the Agent\'s.',
     'The schedule tools `schedule`, `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` are here too: they list, create, edit, run, pause, resume and delete this daemon\'s own schedules through `agent_operator_method` and `agent_operator_action`, so each change is judged as the Agent\'s.',
     '`accounts` is here too: the Agent\'s register of the accounts it created, and a signup alias opens this daemon\'s own watch for the verification mail.',
@@ -245,6 +268,20 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       .resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'prompt-context-receipts.jsonl'),
   );
   const section = hostedAgentSection();
+  // The research screening owners, as the Agent process has them: hosted screening
+  // under the Agent's own consent setting (read from its settings file) or Classic,
+  // and code-only screening for first-party local reads. Made on first use, kept for the daemon's life.
+  const screeningLifetime = new AbortController();
+  let researchOwners: { readonly report: ProtectedSourceOwner; readonly shared: ProtectedSourceOwner } | null = null;
+  const researchOwnersFor = (): { readonly report: ProtectedSourceOwner; readonly shared: ProtectedSourceOwner } => researchOwners ??= {
+    report: createAgentResearchSourceOwner(createAgentSettingsReader(deps.homeDirectory), deps.secretsManager, screeningLifetime.signal),
+    shared: createClassicProtectedSourceOwner(Object.freeze({
+      ownerId: `agent-local-reads-${randomUUID()}`,
+      revision: randomUUID(),
+      signal: screeningLifetime.signal,
+      assertCurrent: () => screeningLifetime.signal.throwIfAborted(),
+    })),
+  };
   // One in-process host per daemon request path: the daemon is the operator tools' connected host.
   let inProcess: { readonly requests: HostedDaemonRequestPath; readonly host: AgentInProcessHost } | null = null;
   const inProcessHostFor = (requests: HostedDaemonRequestPath | undefined): AgentInProcessHost | undefined => {
@@ -265,7 +302,7 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
   const calendarHost = inProcessGoogleCalendarHost(deps.gatewayMethods);
   const browser = deps.browser;
   return {
-    registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests }) {
+    registerTools({ registry, workspaceRoot, sessionId, floor, daemonRequests, providerRegistry }) {
       // The daemon keeps one project work plan, for its own project; a session in
       // another workspace has no plan of its own here and is told so on a call.
       const ownProject = resolve(deps.workPlan.projectRoot) === resolve(workspaceRoot);
@@ -289,6 +326,28 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
         mediaProviders: deps.mediaProviders,
         channelDeliveryRouter: deps.channelDeliveryRouter,
         settings: deps.settings,
+        researchReportSourceOwner: researchOwnersFor().report,
+        researchSourceOwner: researchOwnersFor().shared,
+        modelCompare: {
+          modelCatalog: providerRegistry,
+          providerRegistry,
+          // The winner becomes the Agent's own model setting: this session's settings
+          // tool writes the Agent's client-owned keys to the Agent's settings file and
+          // re-reads them there, which `verifiedInOwningStore` reports.
+          applyModelRoute: async (registryKey, parentOptions, ownership) => {
+            const applied = await registry.executeNested(`model-route-${randomUUID()}`, 'goodvibes_settings',
+              { mode: 'set', key: 'provider.model', value: registryKey }, parentOptions, ownership);
+            let verified = false;
+            let previousModel = '';
+            try {
+              const output = JSON.parse(applied.output ?? '{}') as { readonly verifiedInOwningStore?: unknown; readonly previous?: unknown };
+              verified = applied.success && output.verifiedInOwningStore === true;
+              previousModel = typeof output.previous === 'string' ? output.previous.trim() : '';
+            } catch { /* Value-free refusal below. */ }
+            if (!verified) throw new Error('Model route transition did not verify in its owning store.');
+            return { ...(previousModel ? { previousModel } : {}), selectedModel: registryKey };
+          },
+        },
         ...(operatorHost ? { inProcessHost: operatorHost } : {}),
         ...(operatorHost ? { accountExpectations: createDaemonExpectationClient(inProcessVerbCaller(operatorHost)) } : {}),
         ...(browser ? { browser: {

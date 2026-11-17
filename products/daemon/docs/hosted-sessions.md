@@ -80,7 +80,11 @@ memory store, the browser its `browser.*` methods drive, and the Google account 
 methods it holds), and `agent_work_plan` when the session is in the daemon's own project. Its `schedule`,
 `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` tools list, create, edit, run,
 pause, resume and delete the daemon's own schedules through the daemon's own request path under the Agent's
-credential, so each change is judged as the Agent's. Its platform tools carry the
+credential, so each change is judged as the Agent's. Its `agent_knowledge` and `agent_knowledge_ingest` tools read
+and add to the Agent's own knowledge store (`/api/goodvibes-agent/knowledge/*`) the same way, its
+`agent_research_report` tool saves sourced reports under the Agent's own screening consent
+(`tools.hostedResearchScreening` in the Agent's settings, or Classic), and its `agent_model_compare` tool
+blind-compares this session's models and, on apply, sets the Agent's own `provider.model`. Its platform tools carry the
 Agent's read-mode table, so a mode reads or changes exactly as it does in the Agent, and a
 `profile` or `occasions` call is admitted with the scopes the paired Agent's credential holds. The Agent tools that work through the Agent's own
 command session are named in that prompt with the platform tool that covers the

@@ -56,7 +56,7 @@ export interface AgentOrchestratorRunContext {
    * live transcript to a fleet tab. Optional, contexts that don't wire a
    * manager (e.g. isolated tests) simply skip the bridge.
    */
-  readonly registerConversationSource?: ((agentId: string, source: () => ConversationMessageSnapshot[]) => void) | undefined;
+  readonly registerConversationSource?: ((agentId: string, source: (last?: number) => ConversationMessageSnapshot[]) => void) | undefined;
   /**
    * Release the live source at run end, freezing one final snapshot into
    * AgentManager's bounded retention ring (see manager.ts). Always safe to

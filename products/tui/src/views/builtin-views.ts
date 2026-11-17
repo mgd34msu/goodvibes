@@ -114,7 +114,7 @@ export function createShellViews(deps: BuiltinViewDeps): ShellViews {
     interrupt: (id) => fleetReadModel.interrupt(id),
     resume: (id) => fleetReadModel.resume(id),
     kill: (id, opts) => fleetReadModel.kill(id, opts),
-    getConversationSnapshot: (agentId) => ui.agents.agentManager.getConversationSnapshot(agentId),
+    getConversationSnapshot: (agentId, options) => ui.agents.agentManager.getConversationSnapshot(agentId, options),
     resolveSessionLogPath: (agentId) => ui.environment.shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'sessions', `${agentId}.jsonl`),
     steer: (id, text) => fleetReadModel.steer(id, text),
   };

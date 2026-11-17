@@ -554,7 +554,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     // const (rather than closing over the outer `let conversation`) so the
     // closure's type is non-nullable without a runtime assertion.
     const activeConversation = conversation;
-    context.registerConversationSource?.(record.id, () => activeConversation.getMessageSnapshot());
+    context.registerConversationSource?.(record.id, (last) => (last === undefined ? activeConversation.getMessageSnapshot() : activeConversation.getRecentMessageSnapshot(last)));
     // The owner's answer to a question this agent asked reaches it on its next request. A woken run
     // takes what waited for it; a channel's turn takes answers an earlier turn of its session asked for.
     const answersSession = sharedSessionOfContext(record.context);

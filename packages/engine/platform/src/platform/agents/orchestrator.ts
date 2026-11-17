@@ -66,7 +66,8 @@ export { summarizeToolArgs } from './orchestrator-utils.js';
  * dependency, same pattern as setRuntimeBus).
  */
 export interface AgentConversationSink {
-  readonly register: (agentId: string, source: () => ConversationMessageSnapshot[]) => void;
+  /** `source(last)` copies only the last `last` messages when given, the whole history otherwise. */
+  readonly register: (agentId: string, source: (last?: number) => ConversationMessageSnapshot[]) => void;
   readonly release: (agentId: string) => void;
 }
 

@@ -63,8 +63,8 @@ export interface FleetActionCallbacks {
   readonly interrupt: (id: string) => boolean;
   readonly resume: (id: string) => boolean;
   readonly kill: (id: string, opts: { readonly cascade: boolean }) => readonly string[];
-  /** An agent's conversation, live or just finished; empty when unavailable. */
-  readonly getConversationSnapshot: (agentId: string) => readonly ConversationMessageSnapshot[];
+  /** An agent's conversation, live or just finished (only the newest `last` messages when given); empty when unavailable. */
+  readonly getConversationSnapshot: (agentId: string, options?: { readonly last?: number }) => readonly ConversationMessageSnapshot[];
   /** The agent's on-disk event log, the fallback when its conversation is gone. */
   readonly resolveSessionLogPath: (agentId: string) => string;
   readonly steer: (id: string, text: string) => SteerResult;
@@ -721,7 +721,8 @@ export class AgentsModal implements SurfaceModal {
     const meta = [node.kind === 'acp-agent' ? 'hosted over ACP' : node.kind, node.model, node.provider].filter(Boolean).join(' · ');
     let tail: AgentsText[] = [];
     if (node.kind === 'agent' || node.kind === 'acp-agent') {
-      if (this.tailCache?.nodeId !== node.id) this.tailCache = { nodeId: node.id, texts: transcriptTail(this.deps.actions.getConversationSnapshot(node.id), 30) };
+      // The tail shows 30 lines and every message it shows gives at least one, so only the last 30 messages are copied.
+      if (this.tailCache?.nodeId !== node.id) this.tailCache = { nodeId: node.id, texts: transcriptTail(this.deps.actions.getConversationSnapshot(node.id, { last: 30 }), 30) };
       tail = this.tailCache.texts;
     }
     return { title: node.label, meta, blocks: [{ kind: 'lines', build: (width) => renderFleetDetailLines(node, width, stopping, blocked, undefined, observedDraft, graph) }], tail };

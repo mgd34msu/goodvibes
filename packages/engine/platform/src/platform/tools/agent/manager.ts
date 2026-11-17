@@ -165,7 +165,7 @@ export class AgentManager {
    * creates the agent's ConversationManager; the manager never stores
    * messages itself while an agent is running, it just holds a callback.
    */
-  private readonly conversationSources = new Map<string, () => ConversationMessageSnapshot[]>();
+  private readonly conversationSources = new Map<string, (last?: number) => ConversationMessageSnapshot[]>();
   /**
    * Cooperative cancellation bridge: per-agent AbortSignal
    * registered by an orchestration-engine work item for the duration of one
@@ -978,7 +978,7 @@ export class AgentManager {
    * getConversationSnapshot(); the manager never copies or stores the
    * messages itself while the agent is running.
    */
-  registerConversationSource(agentId: string, source: () => ConversationMessageSnapshot[]): void {
+  registerConversationSource(agentId: string, source: (last?: number) => ConversationMessageSnapshot[]): void {
     this.conversationSources.set(agentId, source);
   }
 
@@ -1077,18 +1077,23 @@ export class AgentManager {
    *   for this array, it is a truncated event log (tool args/results
    *   sliced to 500 chars, no assistant message text), so callers past
    *   eviction get a degraded activity view, never a fabricated replay.
+   *
+   * `last` limits the read to the newest messages: a live source copies only
+   * those, so a view that shows a tail does not copy the whole history.
    */
-  getConversationSnapshot(agentId: string): ConversationMessageSnapshot[] {
+  getConversationSnapshot(agentId: string, options: { readonly last?: number | undefined } = {}): ConversationMessageSnapshot[] {
+    const last = options.last !== undefined ? Math.max(0, Math.floor(options.last)) : undefined;
     const liveSource = this.conversationSources.get(agentId);
     if (liveSource) {
       try {
-        return liveSource();
+        return liveSource(last);
       } catch (error) {
         logger.warn('AgentManager: conversation source threw', { agentId, error: summarizeError(error) });
         return [];
       }
     }
-    return this.frozenConversationSnapshots.get(agentId) ?? [];
+    const frozen = this.frozenConversationSnapshots.get(agentId) ?? [];
+    return last === undefined ? frozen : frozen.slice(frozen.length - Math.min(last, frozen.length));
   }
 
   listByGraph(graphId: string): AgentRecord[] {

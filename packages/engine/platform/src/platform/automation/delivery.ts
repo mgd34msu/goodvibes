@@ -20,7 +20,6 @@ export interface AutomationDeliveryPolicy {
   readonly targets: readonly AutomationDeliveryTarget[];
   readonly fallbackTargets: readonly AutomationDeliveryTarget[];
   readonly includeSummary: boolean;
-  readonly includeTranscript: boolean;
   readonly includeLinks: boolean;
   readonly replyToRouteId?: string | undefined;
 }

@@ -40,7 +40,6 @@ export interface CreateAutomationJobInput {
   readonly wakeMode?: AutomationWakeMode | undefined;
   readonly timeoutMs?: number | undefined;
   readonly toolAllowlist?: readonly string[] | undefined;
-  readonly autoApprove?: boolean | undefined;
   readonly allowUnsafeExternalContent?: boolean | undefined;
   readonly externalContentSource?: AutomationExternalContentSource | undefined;
   readonly lightContext?: boolean | undefined;
@@ -69,7 +68,6 @@ export interface UpdateAutomationJobInput {
   readonly wakeMode?: AutomationWakeMode | undefined;
   readonly timeoutMs?: number | undefined;
   readonly toolAllowlist?: readonly string[] | undefined;
-  readonly autoApprove?: boolean | undefined;
   readonly allowUnsafeExternalContent?: boolean | undefined;
   readonly externalContentSource?: AutomationExternalContentSource | undefined;
   readonly lightContext?: boolean | undefined;
@@ -254,7 +252,6 @@ export function buildAutomationExecutionIntent(
 
 export function buildDefaultExecution(
   input: CreateAutomationJobInput,
-  configManager: ConfigManager,
   models?: readonly ModelIdCandidate[],
 ): AutomationExecutionPolicy {
   const provider = normalizeOptionalString(input.provider);
@@ -288,13 +285,12 @@ export function buildDefaultExecution(
     ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
     ...(thinking ? { thinking } : {}),
     ...(input.wakeMode ? { wakeMode: input.wakeMode } : {}),
-    ...((input.timeoutMs ?? Number(configManager.get('automation.defaultTimeoutMs') ?? 0)) ? { timeoutMs: input.timeoutMs ?? Number(configManager.get('automation.defaultTimeoutMs') ?? 0) } : {}),
+    // Only a job's own timeout is stored; one without runs under automation.defaultTimeoutMs as it stands.
+    ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
     ...(input.toolAllowlist?.length ? { toolAllowlist: input.toolAllowlist } : {}),
-    ...(input.autoApprove !== undefined ? { autoApprove: input.autoApprove } : {}),
     ...(input.allowUnsafeExternalContent !== undefined ? { allowUnsafeExternalContent: input.allowUnsafeExternalContent } : {}),
     ...(input.externalContentSource !== undefined ? { externalContentSource: input.externalContentSource } : {}),
     ...(input.lightContext !== undefined ? { lightContext: input.lightContext } : {}),
-    sandboxMode: 'inherit',
   };
 }
 
@@ -304,12 +300,13 @@ export function buildDefaultDelivery(overrides?: Partial<AutomationDeliveryPolic
     targets: [],
     fallbackTargets: [],
     includeSummary: true,
-    includeTranscript: false,
     includeLinks: true,
   };
+  // Jobs saved before includeTranscript was dropped still carry it; it is not kept.
+  const { includeTranscript: _dropped, ...rest } = (overrides ?? {}) as Partial<AutomationDeliveryPolicy> & { readonly includeTranscript?: unknown };
   return {
     ...base,
-    ...overrides,
+    ...rest,
     targets: overrides?.targets ?? [],
     fallbackTargets: overrides?.fallbackTargets ?? [],
   };
@@ -410,6 +407,10 @@ export function normalizeJobRecord(job: AutomationJob, configManager: ConfigMana
   const timestamp = job.createdAt ?? Date.now();
   const { enabled, status } = resolveJobEnablement(job);
   const target = job.execution?.target ?? { kind: 'isolated', createIfMissing: true } as AutomationSessionTarget;
+  // Jobs saved before autoApprove and sandboxMode were dropped still carry them; they are not kept.
+  const { autoApprove: _autoApprove, sandboxMode: _sandboxMode, ...storedExecution } = (job.execution ?? {}) as Partial<AutomationJob['execution']> & {
+    readonly autoApprove?: unknown; readonly sandboxMode?: unknown;
+  };
   return {
     ...job,
     labels: job.labels ?? [],
@@ -419,7 +420,7 @@ export function normalizeJobRecord(job: AutomationJob, configManager: ConfigMana
     status,
     execution: {
       prompt: job.execution?.prompt ?? job.description ?? job.name,
-      ...job.execution,
+      ...storedExecution,
       target,
       fallbackModels: job.execution?.fallbackModels ?? job.execution?.routing?.fallbackModels,
       routing: normalizeProviderRoutingPolicy({

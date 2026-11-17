@@ -39,7 +39,6 @@ export type {
   AutomationExecutionPolicy,
   AutomationSessionTarget,
   AutomationSessionTargetKind,
-  AutomationSandboxMode,
   AutomationWakeMode,
   AutomationExternalContentSource,
   AutomationExternalContentSourceKind,

@@ -250,7 +250,6 @@ export function buildRoutineSchedulePayload(
       targets: parsed.deliveryTargets.map(toDeliveryTargetInput),
       fallbackTargets: [],
       includeSummary: true,
-      includeTranscript: false,
       includeLinks: true,
     },
     failure: {
@@ -267,7 +266,6 @@ export function buildRoutineSchedulePayload(
       disableAfterFailures: false,
     },
     lightContext: true,
-    autoApprove: false,
     allowUnsafeExternalContent: false,
     ...modelRoute,
   };

@@ -251,7 +251,6 @@ export function buildReminderSchedulePayload(parsed: ParsedReminderScheduleArgs)
       targets: parsed.deliveryTargets.map(toDeliveryTargetInput),
       fallbackTargets: [],
       includeSummary: true,
-      includeTranscript: false,
       includeLinks: true,
     },
     failure: {
@@ -268,7 +267,6 @@ export function buildReminderSchedulePayload(parsed: ParsedReminderScheduleArgs)
       disableAfterFailures: false,
     },
     lightContext: true,
-    autoApprove: false,
     allowUnsafeExternalContent: false,
     ...modelRoute,
   };

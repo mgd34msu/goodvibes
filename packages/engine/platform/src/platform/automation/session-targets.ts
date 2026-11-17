@@ -24,7 +24,6 @@ export interface AutomationSessionTarget {
   readonly createIfMissing?: boolean | undefined;
 }
 
-export type AutomationSandboxMode = 'inherit' | 'isolate' | 'off';
 export type AutomationWakeMode = 'next-heartbeat' | 'now';
 export type AutomationExternalContentSourceKind =
   | 'gmail'
@@ -68,8 +67,6 @@ export interface AutomationExecutionPolicy {
   readonly timeoutMs?: number | undefined;
   readonly maxAttempts?: number | undefined;
   readonly toolAllowlist?: readonly string[] | undefined;
-  readonly autoApprove?: boolean | undefined;
-  readonly sandboxMode?: AutomationSandboxMode | undefined;
   readonly allowUnsafeExternalContent?: boolean | undefined;
   readonly externalContentSource?: AutomationExternalContentSource | undefined;
   readonly lightContext?: boolean | undefined;

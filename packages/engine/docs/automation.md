@@ -54,12 +54,20 @@ run message is sent; it does not count as a failure and is not retried.
 Deleting a job cancels a run of it that is still in flight.
 
 A run ends at its timeout: the job's `execution.timeoutMs`, or
-`automation.defaultTimeoutMs` when the job sets none. Past it, the run's agent
-is stopped and the run fails with `Timed out after <duration>`; the job's
-failure policy then applies as for any other failure. A run that was in flight
-when the daemon or app stopped is failed when it starts again ("Agent state
-lost before completion"), since nothing can report on it any more, and the
-retry policy applies at once.
+`automation.defaultTimeoutMs` (two hours unless changed) when the job sets
+none; a job stores only a timeout of its own, so changing the default applies
+to every other job at once. Past it, the run's agent is stopped and the run
+fails with `Timed out after <duration>`; the job's failure policy then applies
+as for any other failure. A run that was in flight when the daemon or app
+stopped is failed when it starts again ("Agent state lost before completion",
+or "Check-in interrupted by a restart"), since nothing can report on it any
+more, and the retry policy applies at once. A run reported on by a remote peer
+waits for that report or its deadline.
+
+A run uses the permission posture and sandbox of the owner who created its
+job (`permissions.mode`, `sandbox.enabled`); a job has no setting of its own
+for either. Delivery sends the run's result when `includeSummary` is on and
+its links when `includeLinks` is on.
 
 Editing a job's name, prompt, delivery or failure policy keeps its next run
 time; only a change to its schedule or to whether it is enabled moves it. An
@@ -103,7 +111,7 @@ runs at once, and how long its history is kept:
 | `automation.enabled` | `true` | Master gate for the subsystem: durable jobs, schedule evaluation, run history. With no jobs defined it idles. |
 | `automation.maxConcurrentRuns` | `4` | How many automation runs may execute at the same time. |
 | `automation.runHistoryLimit` | `100` | Run history entries retained per job before the oldest are dropped. |
-| `automation.defaultTimeoutMs` | `0` (no deadline) | Timeout in milliseconds for a run whose job sets no `timeoutMs`: past it the run's agent is stopped and the run fails. `0` means such a run has no deadline and ends only when it finishes or is cancelled. |
+| `automation.defaultTimeoutMs` | `7200000` (two hours) | Timeout in milliseconds for a run whose job sets no `timeoutMs`: past it the run's agent is stopped and the run fails. `0` means such a run has no deadline and ends only when it finishes or is cancelled. |
 | `automation.catchUpWindowMinutes` | `30` | How long after daemon startup the engine will still catch up runs it missed while it was down. |
 | `automation.failureCooldownMs` | `300000` (5 minutes) | Cooldown enforced after a failed run before the job is eligible to run again. |
 | `automation.deleteAfterRun` | `false` | Whether a one-shot job (`kind: 'at'`) deletes itself after its first successful run. |

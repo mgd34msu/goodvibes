@@ -225,7 +225,6 @@ const EXECUTION_FILESYSTEM_POLICY_SCHEMA = enumSchema(['inherit', 'workspace-wri
 // in operator-contract-schemas-runtime.ts.
 const AUTOMATION_REASONING_EFFORT_SCHEMA = enumSchema([...REASONING_EFFORT_SEVERITY]);
 const AUTOMATION_WAKE_MODE_SCHEMA = enumSchema(['next-heartbeat', 'now']);
-const AUTOMATION_SANDBOX_MODE_SCHEMA = enumSchema(['inherit', 'isolate', 'off']);
 const AUTOMATION_EXTERNAL_CONTENT_SOURCE_KIND_SCHEMA = enumSchema([
   'gmail',
   'email',
@@ -333,8 +332,6 @@ export const AUTOMATION_EXECUTION_POLICY_SCHEMA = objectSchema({
   timeoutMs: NUMBER_SCHEMA,
   maxAttempts: NUMBER_SCHEMA,
   toolAllowlist: STRING_LIST_SCHEMA,
-  autoApprove: BOOLEAN_SCHEMA,
-  sandboxMode: AUTOMATION_SANDBOX_MODE_SCHEMA,
   allowUnsafeExternalContent: BOOLEAN_SCHEMA,
   externalContentSource: AUTOMATION_EXTERNAL_CONTENT_SOURCE_SCHEMA,
   lightContext: BOOLEAN_SCHEMA,
@@ -353,10 +350,9 @@ export const AUTOMATION_DELIVERY_POLICY_SCHEMA = objectSchema({
   targets: arraySchema(AUTOMATION_DELIVERY_TARGET_SCHEMA),
   fallbackTargets: arraySchema(AUTOMATION_DELIVERY_TARGET_SCHEMA),
   includeSummary: BOOLEAN_SCHEMA,
-  includeTranscript: BOOLEAN_SCHEMA,
   includeLinks: BOOLEAN_SCHEMA,
   replyToRouteId: STRING_SCHEMA,
-}, ['mode', 'targets', 'fallbackTargets', 'includeSummary', 'includeTranscript', 'includeLinks'], { additionalProperties: false });
+}, ['mode', 'targets', 'fallbackTargets', 'includeSummary', 'includeLinks'], { additionalProperties: false });
 
 const AUTOMATION_RETRY_POLICY_SCHEMA = objectSchema({
   maxAttempts: NUMBER_SCHEMA,

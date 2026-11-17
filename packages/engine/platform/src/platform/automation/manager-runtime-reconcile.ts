@@ -211,7 +211,16 @@ export function reconcileAutomationActiveRuns(context: AutomationReconcileContex
       settled = true;
       continue;
     }
-    if (!run.agentId) continue;
+    if (!run.agentId) {
+      // A check-in is evaluated inside the process that started it, so one read
+      // back from disk can never finish. Any other run without an agent is
+      // settled by a remote peer's report or, failing that, by its deadline.
+      if (restored && run.labels.includes('checkin')) {
+        settleAutomationRun(context, run, { status: 'failed', endedAt: now, error: 'Check-in interrupted by a restart', failure: { known: AGENT_STATE_LOST } }, 'automation.reconcile');
+        settled = true;
+      }
+      continue;
+    }
     const agent = context.agentStatusProvider.getStatus(run.agentId);
     if (!agent) {
       // A run read back from disk can never be reported on, because agent ids

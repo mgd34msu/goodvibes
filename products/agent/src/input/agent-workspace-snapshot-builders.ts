@@ -463,7 +463,7 @@ export function buildAgentWorkspaceConfigSettingsSnapshot(context: CommandContex
     automationEnabled: bool('automation.enabled', false),
     automationMaxConcurrentRuns: num('automation.maxConcurrentRuns', 4),
     automationRunHistoryLimit: num('automation.runHistoryLimit', 100),
-    automationDefaultTimeoutMs: num('automation.defaultTimeoutMs', 15 * 60 * 1000),
+    automationDefaultTimeoutMs: num('automation.defaultTimeoutMs', 2 * 60 * 60 * 1000),
     automationCatchUpWindowMinutes: num('automation.catchUpWindowMinutes', 30),
     automationFailureCooldownMs: num('automation.failureCooldownMs', 5 * 60 * 1000),
     automationDeleteAfterRun: bool('automation.deleteAfterRun', false),

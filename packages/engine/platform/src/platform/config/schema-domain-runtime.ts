@@ -99,7 +99,7 @@ export const runtimeConfigDefaults = {
     enabled: true,
     maxConcurrentRuns: 4,
     runHistoryLimit: 100,
-    defaultTimeoutMs: 0,
+    defaultTimeoutMs: 2 * 60 * 60 * 1000,
     catchUpWindowMinutes: 30,
     failureCooldownMs: 5 * 60 * 1000,
     deleteAfterRun: false,
@@ -222,8 +222,8 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'automation.defaultTimeoutMs',
     type: 'number',
-    default: 0,
-    description: 'Optional execution timeout for automation runs in milliseconds; 0 disables the deadline',
+    default: 2 * 60 * 60 * 1000,
+    description: 'How long an automation run without its own timeout may run, in milliseconds (default two hours); a run past it is stopped and recorded as failed. Applies to running runs at once. 0 removes the deadline',
     ...intRange(0, 2_147_483_647),
   },
   {

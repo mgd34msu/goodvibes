@@ -273,7 +273,6 @@ export function buildAutonomySchedulePayload(parsed: ParsedAutonomyScheduleArgs)
       targets: parsed.deliveryTargets.map(toDeliveryTargetInput),
       fallbackTargets: [],
       includeSummary: true,
-      includeTranscript: false,
       includeLinks: true,
     },
     failure: {
@@ -290,7 +289,6 @@ export function buildAutonomySchedulePayload(parsed: ParsedAutonomyScheduleArgs)
       disableAfterFailures: false,
     },
     lightContext: true,
-    autoApprove: false,
     allowUnsafeExternalContent: false,
     ...modelRoute,
   };

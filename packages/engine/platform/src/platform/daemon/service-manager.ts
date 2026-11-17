@@ -745,7 +745,7 @@ export class PlatformServiceManager {
     let actionError: string | undefined;
     let accepted: string | undefined;
     if (existsSync(status.path)) {
-      const self = fromDaemon && this.runsThisDaemon(status);
+      const self = fromDaemon && (yield* this.runsThisDaemonFlow(status));
       if (self && status.platform === 'systemd') {
         // Unregister and remove while this process still runs; the stop that ends
         // it is queued last and not waited for.
@@ -816,10 +816,23 @@ export class PlatformServiceManager {
     return yield* this.platformActionFlow(platform, action, fromDaemon);
   }
 
-  /** Whether the service is this daemon: launchd names its pid; a running systemd unit asked from inside the daemon is taken to be it. */
-  private runsThisDaemon(status: ManagedServiceStatus): boolean {
+  /**
+   * Whether the service is this daemon: launchd names its pid; systemd is
+   * asked for the unit's main pid (one more command, only on a stop, restart or
+   * uninstall asked of the daemon). A daemon the unit did not start (one hosted
+   * in a terminal app, or another home's) is not ended by the job, so it takes
+   * the waiting path and reports the job's outcome.
+   */
+  private *runsThisDaemonFlow(status: ManagedServiceStatus): ServiceFlow<boolean> {
     if (!status.installed || !status.running) return false;
-    return status.platform === 'launchd' ? status.pid === process.pid : status.platform === 'systemd';
+    if (status.platform === 'launchd') return status.pid === process.pid;
+    if (status.platform !== 'systemd') return false;
+    const result = yield { run: ['systemctl', '--user', 'show', '-p', 'MainPID', '--value', `${status.serviceName}.service`] };
+    const mainPid = (result.status ?? 1) === 0 ? Number((result.stdout ?? '').trim()) : Number.NaN;
+    // Unreadable: a running unit asked from inside the daemon is taken to be it,
+    // since waiting on a stop that ends this process would lose the answer.
+    if (!Number.isInteger(mainPid)) return true;
+    return mainPid === process.pid;
   }
 
   /**
@@ -978,7 +991,7 @@ export class PlatformServiceManager {
     const path = definitionPath(platform, serviceName, this.statePaths());
     if (fromDaemon && action !== 'start' && (platform === 'systemd' || platform === 'launchd')) {
       const before = yield* this.statusFlow();
-      if (this.runsThisDaemon(before)) {
+      if (yield* this.runsThisDaemonFlow(before)) {
         if (platform === 'systemd') {
           // The stop reaches this process after the answer: the manager is asked to queue the job, not to wait for it.
           const queued = yield { run: ['systemctl', '--user', '--no-block', action, `${serviceName}.service`] };

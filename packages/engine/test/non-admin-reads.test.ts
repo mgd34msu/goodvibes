@@ -53,7 +53,7 @@ function daemon() {
   const owner = userAuth.createSession('owner').token;
   const viewer = userAuth.createSession('viewer').token;
   const call = (token: string, methodId: string, body: Record<string, unknown> = {}) =>
-    helper.invokeGatewayMethodCall({ authToken: token, methodId, body, context: {} });
+    helper.invokeGatewayMethodCall({ authToken: token, methodId, body });
   return { userAuth, catalog, pairing, helper, owner, viewer, call };
 }
 

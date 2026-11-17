@@ -6,6 +6,8 @@ export type {
 export type {
   UiIntelligenceSnapshot,
   UiMarketplaceSnapshot,
+  UiMarketplaceRanking,
+  UiMarketplaceReadModel,
   UiCockpitSnapshot,
   UiHealthSnapshot,
   UiSystemObservabilityReadModels,

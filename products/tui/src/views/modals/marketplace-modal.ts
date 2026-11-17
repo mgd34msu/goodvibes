@@ -14,12 +14,12 @@ import {
   type EcosystemCatalogPathOptions,
   type EcosystemEntryKind,
 } from '@/runtime/index.ts';
-import type { UiMarketplaceSnapshot, UiReadModel } from '../../runtime/ui-read-models.ts';
+import type { UiMarketplaceReadModel } from '../../runtime/ui-read-models.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 
 /** Live deps the marketplace modal captures (mirrors the earlier view factory). */
 export interface MarketplaceModalDeps {
-  readonly readModel?: UiReadModel<UiMarketplaceSnapshot>;
+  readonly readModel?: UiMarketplaceReadModel;
   readonly ecosystemPaths?: EcosystemCatalogPathOptions;
 }
 
@@ -107,6 +107,8 @@ class MarketplaceModalSurface implements ConfigModalSurface {
       }
       if (generation !== this.generation) return;
       this.rows = built.sort((a, b) => a.entry.name.localeCompare(b.entry.name));
+      // The installed set may have changed; the ranking reruns only when the live needs or entries did.
+      void this.deps.readModel?.recommend();
     } catch (error) {
       if (generation !== this.generation) return;
       this.rows = [];
@@ -187,7 +189,10 @@ class MarketplaceModalSurface implements ConfigModalSurface {
 
     // Recommendations (displayed with their command; digit-jump dropped).
     const recommendations = snapshot?.recommendations ?? [];
-    if (recommendations.length > 0) {
+    if (snapshot?.ranking === 'pending') {
+      rows.push(headerRow('rec:title', 'Recommended'));
+      rows.push(infoRow('rec:pending', 'ranking…', { fg: MODAL_TONES.dim }));
+    } else if (recommendations.length > 0) {
       rows.push(headerRow('rec:title', 'Recommended'));
       for (const [i, rec] of recommendations.slice(0, 3).entries()) {
         rows.push(infoRow(`rec:${i}`, `${rec.title}: ${rec.command}`, { fg: MODAL_TONES.dim }));

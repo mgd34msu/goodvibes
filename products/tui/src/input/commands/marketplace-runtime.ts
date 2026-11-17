@@ -120,7 +120,13 @@ export function registerMarketplaceRuntimeCommands(registry: CommandRegistry): v
         return;
       }
       if (sub === 'recommend') {
-        const recommendations = requireReadModels(ctx).marketplace.getSnapshot().recommendations;
+        // Ranking is asked for here and awaited, so the answer is the ranked list, not the one before it.
+        const snapshot = await requireReadModels(ctx).marketplace.recommend();
+        if (snapshot.ranking === 'off' || snapshot.ranking === 'failed') {
+          ctx.print(['Marketplace Recommendations', ...snapshot.startupIssues.map((issue) => `  ${issue}`)].join('\n'));
+          return;
+        }
+        const recommendations = snapshot.recommendations;
         ctx.print(recommendations.length > 0
           ? [
             'Marketplace Recommendations',

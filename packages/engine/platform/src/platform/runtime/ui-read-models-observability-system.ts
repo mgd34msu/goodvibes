@@ -67,9 +67,29 @@ export function readIntelligenceSnapshot(readiness: CodeIntelligenceReadiness = 
   };
 }
 
+/**
+ * Where the recommendations stand: `idle` until something asks for them,
+ * `pending` while Jev ranks them, `ready` with the ranked list (which may be
+ * empty), `failed` when the ranking could not be read (startupIssues says
+ * why), `off` in Classic mode, where nothing is ranked.
+ */
+export type UiMarketplaceRanking = 'idle' | 'pending' | 'ready' | 'failed' | 'off';
+
 export interface UiMarketplaceSnapshot {
   readonly startupIssues: readonly string[];
   readonly recommendations: readonly EcosystemRecommendation[];
+  readonly ranking: UiMarketplaceRanking;
+}
+
+/** The marketplace read model: a snapshot that never reads the disk or asks a model, and the explicit ranking. */
+export interface UiMarketplaceReadModel extends UiReadModel<UiMarketplaceSnapshot> {
+  /**
+   * Collect the live needs and the uninstalled entries that could answer
+   * them (one read of the catalogs), rank them with Jev when they changed
+   * since the last ranking, and resolve with the snapshot once the ranking
+   * settled. Never rejects; a failed ranking is `ranking: 'failed'`.
+   */
+  recommend(): Promise<UiMarketplaceSnapshot>;
 }
 
 export interface UiCockpitSnapshot {
@@ -115,7 +135,7 @@ export interface UiHealthSnapshot {
 
 export interface UiSystemObservabilityReadModels {
   readonly intelligence: UiReadModel<UiIntelligenceSnapshot>;
-  readonly marketplace: UiReadModel<UiMarketplaceSnapshot>;
+  readonly marketplace: UiMarketplaceReadModel;
   readonly cockpit: UiReadModel<UiCockpitSnapshot>;
   readonly health: UiReadModel<UiHealthSnapshot>;
 }
@@ -125,23 +145,15 @@ function candidatesKey(candidates: readonly RecommendationCandidates[]): string 
   return JSON.stringify(candidates.map((candidate) => [candidate.need, candidate.reason, candidate.entries]));
 }
 
-/** How long after a failed ranking the same candidates wait before Jev is asked again. */
-const RANKING_RETRY_MS = 60_000;
-
 /**
  * The marketplace read model. Startup issues are counted from the store on
- * every snapshot. Recommendations are read by Jev, which is asynchronous, so
- * the snapshot carries the last ranked list: each snapshot collects the live
- * needs and uninstalled entries (code, as before), and when they differ from
- * the ones last ranked a ranking starts; its result replaces the list and
- * notifies subscribers. A ranking overtaken by a newer one is discarded.
- * A failed ranking leaves the list empty, says so in the startup issues, and
- * is tried again for the same candidates once RANKING_RETRY_MS has passed.
+ * every snapshot. Recommendations are ranked by Jev only when asked
+ * (`recommend`): that collects the live needs and uninstalled entries once,
+ * reuses the last ranking when they are unchanged, and otherwise ranks them;
+ * every change of `ranking` notifies subscribers. A snapshot reads neither
+ * the disk nor a model. A ranking overtaken by a newer one is discarded.
  */
-function createMarketplaceReadModel(
-  runtimeServices: RuntimeServices,
-  now: () => number = Date.now,
-): UiReadModel<UiMarketplaceSnapshot> {
+function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiMarketplaceReadModel {
   const { runtimeStore } = runtimeServices;
   const catalogOptions = {
     cwd: runtimeServices.shellPaths.workingDirectory,
@@ -149,64 +161,79 @@ function createMarketplaceReadModel(
   };
   const listeners = new Set<() => void>();
   let recommendations: readonly EcosystemRecommendation[] = [];
+  let ranking: UiMarketplaceRanking = 'idle';
   let rankedKey: string | undefined;
-  let failure: { readonly key: string; readonly at: number; readonly message: string } | undefined;
+  let failureMessage: string | undefined;
+  let inFlight: { readonly key: string; readonly done: Promise<void> } | undefined;
 
-  const publish = (key: string, next: readonly EcosystemRecommendation[]): void => {
-    if (rankedKey !== key) return;
-    failure = undefined;
-    recommendations = next;
+  const notify = (): void => {
     for (const listener of [...listeners]) listener();
   };
 
-  const rankingFailed = (key: string, err: unknown): void => {
-    // A ranking overtaken by a newer one says nothing about the current candidates.
-    if (rankedKey !== key) return;
-    const message = summarizeError(err);
-    logger.warn('Marketplace recommendations could not be ranked', { error: message });
-    // Forget the key so the next snapshot can ask again (after the retry delay), and say why the list is empty.
-    rankedKey = undefined;
-    failure = { key, at: now(), message };
-    recommendations = [];
-    for (const listener of [...listeners]) listener();
+  const snapshot = (): UiMarketplaceSnapshot => {
+    const state = runtimeStore.getState();
+    const startupIssues: string[] = [];
+    if (state.permissions.denialCount >= 3) {
+      startupIssues.push(`${state.permissions.denialCount} permission denials suggest a policy-pack or trust posture review.`);
+    }
+    const authRequiredServers = [...state.mcp.servers.values()].filter((server) => server.status === 'auth_required');
+    if (authRequiredServers.length > 0) {
+      startupIssues.push(`${authRequiredServers.length} MCP server${authRequiredServers.length === 1 ? '' : 's'} need auth or reconnect repair.`);
+    }
+    const staleSchemas = [...state.mcp.servers.values()].filter((server) => server.schemaFreshness !== 'fresh');
+    if (staleSchemas.length > 0) {
+      startupIssues.push(`${staleSchemas.length} MCP server schema${staleSchemas.length === 1 ? ' is' : 's are'} stale or quarantined.`);
+    }
+    if (isClassicOperation()) {
+      startupIssues.push('Classic mode: semantic marketplace recommendations are not evaluated. Browse the catalog and choose entries explicitly.');
+      return { startupIssues, recommendations: [], ranking: 'off' };
+    }
+    if (ranking === 'failed' && failureMessage) {
+      startupIssues.push(`Marketplace recommendations could not be ranked (${failureMessage}); /marketplace recommend tries again.`);
+    }
+    return { startupIssues, recommendations, ranking };
   };
 
-  const refreshRecommendations = (): void => {
-    const candidates = collectRecommendationCandidates(runtimeStore, catalogOptions);
-    const key = candidatesKey(candidates);
-    if (key === rankedKey) return;
-    if (failure && failure.key !== key) failure = undefined;
-    if (failure && failure.key === key && now() - failure.at < RANKING_RETRY_MS) return;
+  const rank = (key: string, candidates: readonly RecommendationCandidates[]): Promise<void> => {
     rankedKey = key;
-    rankRecommendationCandidates(candidates).then(
-      (ranked) => publish(key, ranked),
-      (err: unknown) => rankingFailed(key, err),
+    ranking = 'pending';
+    notify();
+    return rankRecommendationCandidates(candidates).then(
+      (ranked) => {
+        if (rankedKey !== key) return;
+        recommendations = ranked;
+        failureMessage = undefined;
+        ranking = 'ready';
+        notify();
+      },
+      (err: unknown) => {
+        // A ranking overtaken by a newer one says nothing about the current candidates.
+        if (rankedKey !== key) return;
+        failureMessage = summarizeError(err);
+        logger.warn('Marketplace recommendations could not be ranked', { error: failureMessage });
+        // Forget the key so the next request asks again.
+        rankedKey = undefined;
+        recommendations = [];
+        ranking = 'failed';
+        notify();
+      },
     );
   };
 
   return {
-    getSnapshot() {
-      const state = runtimeStore.getState();
-      const startupIssues: string[] = [];
-      if (state.permissions.denialCount >= 3) {
-        startupIssues.push(`${state.permissions.denialCount} permission denials suggest a policy-pack or trust posture review.`);
+    getSnapshot: snapshot,
+    async recommend() {
+      if (isClassicOperation()) return snapshot();
+      const candidates = collectRecommendationCandidates(runtimeStore, catalogOptions);
+      const key = candidatesKey(candidates);
+      if (inFlight?.key === key) {
+        await inFlight.done;
+      } else if (key !== rankedKey || ranking !== 'ready') {
+        const done = rank(key, candidates);
+        inFlight = { key, done };
+        try { await done; } finally { if (inFlight?.done === done) inFlight = undefined; }
       }
-      const authRequiredServers = [...state.mcp.servers.values()].filter((server) => server.status === 'auth_required');
-      if (authRequiredServers.length > 0) {
-        startupIssues.push(`${authRequiredServers.length} MCP server${authRequiredServers.length === 1 ? '' : 's'} need auth or reconnect repair.`);
-      }
-      const staleSchemas = [...state.mcp.servers.values()].filter((server) => server.schemaFreshness !== 'fresh');
-      if (staleSchemas.length > 0) {
-        startupIssues.push(`${staleSchemas.length} MCP server schema${staleSchemas.length === 1 ? ' is' : 's are'} stale or quarantined.`);
-      }
-      if (isClassicOperation()) {
-        rankedKey = undefined; failure = undefined; recommendations = [];
-        startupIssues.push('Classic mode: semantic marketplace recommendations are not evaluated. Browse the catalog and choose entries explicitly.');
-      } else {
-        refreshRecommendations();
-        if (failure) startupIssues.push(`Marketplace recommendations could not be ranked (${failure.message}); they are tried again automatically.`);
-      }
-      return { startupIssues, recommendations };
+      return snapshot();
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -227,7 +254,7 @@ export function createSystemObservabilityReadModels(
 
   return {
     intelligence: createStoreBackedReadModel(runtimeServices, () => readIntelligenceSnapshot()),
-    marketplace: createMarketplaceReadModel(runtimeServices, options.now),
+    marketplace: createMarketplaceReadModel(runtimeServices),
     cockpit: {
       getSnapshot() {
         const state = runtimeStore.getState();

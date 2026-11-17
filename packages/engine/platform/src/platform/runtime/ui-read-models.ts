@@ -21,6 +21,8 @@ export type {
   UiRemoteSnapshot,
   UiIntelligenceSnapshot,
   UiMarketplaceSnapshot,
+  UiMarketplaceRanking,
+  UiMarketplaceReadModel,
   UiCockpitSnapshot,
   UiSecuritySnapshot,
   UiHealthSnapshot,

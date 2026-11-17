@@ -1665,9 +1665,11 @@ from a storefront nobody vouched for. A model outage must never make spending
 more automatic.
 
 When decision models are off (Classic operation) the judge does not guess: it
-refuses with a decision-features-disabled error, so a checkout that needs a
-merchant judgement does not proceed until decision models are on, or the owner
-has listed the domain themselves in `payments.majorRetailersAdditional`.
+answers not confident, with the recourse "not judged, because decision models
+are off", so the merchant is treated as not major and the owner is asked, unless
+the owner has listed the domain themselves in `payments.majorRetailersAdditional`.
+(Automated checkout itself still needs decision models for the cart reading, so
+today a Classic daemon refuses the checkout before the merchant is judged.)
 
 The judge returns a `recourse` phrase that comes from a fixed table keyed by the
 recourse reading's closed answer set (an established retailer with a returns

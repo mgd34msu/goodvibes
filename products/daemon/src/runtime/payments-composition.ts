@@ -21,6 +21,7 @@ import type { GatewayMethodCatalog } from '@goodvibes-jev/engine/platform/platfo
 import { createJevMerchantJudge, readCvvHandling, PaymentReplyInbox, reportOrderConfirmation, mailboxAddress, SecurityCodeRequests } from '@goodvibes-jev/engine/platform/platform/payments';
 import type { BudgetLedger, PaymentsConfigReader } from '@goodvibes-jev/engine/platform/platform/payments';
 import { getProcessUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
+import { isClassicOperation } from '@goodvibes-jev/engine/platform/platform/runtime';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ChannelDeliveryRouter } from '@goodvibes-jev/engine/platform/platform/channels';
@@ -109,6 +110,10 @@ export function createOrderMailObserver(deps: {
   const seen = new Set<string>();
   let tail: Promise<void> = Promise.resolve();
   return (mail) => {
+    // Tying a mail to a purchase is a decision-model reading; with Classic
+    // operation nothing is correlated, so the mail is not read (and not retried
+    // and logged as a failure on every poll).
+    if (isClassicOperation()) return;
     if (seen.has(mail.id)) return;
     seen.add(mail.id);
     if (seen.size > REPORTED_MAIL_MEMORY) {

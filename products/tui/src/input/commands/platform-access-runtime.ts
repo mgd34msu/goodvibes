@@ -2,6 +2,7 @@ import { createAuthBundleHandler } from '@goodvibes-jev/engine/terminal-shell/au
 import { createAuthReviewHandler } from '@goodvibes-jev/engine/terminal-shell/auth-review-command';
 import { buildUrl } from '@goodvibes-jev/engine/transport-http';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { readDaemonSessionToken, writeDaemonSessionToken } from '../../runtime/client/connected-daemon-credentials.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { VERSION } from '../../version.ts';
 import '@goodvibes-jev/engine/platform/platform/config';
@@ -93,6 +94,17 @@ async function exchangeServiceLogin(
       ctx.print('Auth login response did not include a session token.');
       return;
     }
+    if (input.target === 'daemon') {
+      // The session is what this terminal presents to that daemon from now on
+      // (operator-endpoint.ts), held per address beside its other bearers.
+      writeDaemonSessionToken(requireShellPaths(ctx).homeDirectory, input.baseUrl.origin, body.token);
+      ctx.print([
+        `Signed in to the daemon at ${input.baseUrl.origin} as ${input.username}; this terminal now calls that daemon with the session.`,
+        `  It stays in use until it expires (calls are then refused until you sign in again or sign out) or you run /auth logout daemon ${input.baseUrl.origin}.`,
+        ...(input.secretKey === sessionTokenKey(input.target, undefined) ? [] : [`  A daemon session is kept per daemon address, so the key name ${input.secretKey} is not used.`]),
+      ].join('\n'));
+      return;
+    }
     await requireSecretsManager(ctx).set(input.secretKey, body.token);
     ctx.print([
       `Signed in to the ${input.target} at ${input.baseUrl.origin} as ${input.username}; the session token is in secure storage as ${input.secretKey}.`,
@@ -119,9 +131,12 @@ async function endServiceSession(
   input: { target: ServiceTarget; baseUrl: URL; secretKey: string },
 ): Promise<void> {
   const secrets = requireSecretsManager(ctx);
-  const token = await secrets.get(input.secretKey);
+  const homeDirectory = requireShellPaths(ctx).homeDirectory;
+  // A daemon session is held per address; one kept in secure storage by an earlier version is ended too.
+  const held = input.target === 'daemon' ? readDaemonSessionToken(homeDirectory, input.baseUrl.origin) : null;
+  const token = held ?? await secrets.get(input.secretKey);
   if (!token) {
-    ctx.print(`No ${input.target} session is stored as ${input.secretKey}; nothing to sign out of. /auth login ${input.target} <baseUrl> <username> signs in.`);
+    ctx.print(`No ${input.target} session is held for ${input.baseUrl.origin}; nothing to sign out of. /auth login ${input.target} <baseUrl> <username> signs in.`);
     return;
   }
   let revoked: string;
@@ -142,6 +157,11 @@ async function endServiceSession(
     } catch (error) {
       revoked = `The daemon could not be reached (${error instanceof Error ? error.message : String(error)}); the session lapses at its expiry.`;
     }
+  }
+  if (held) {
+    writeDaemonSessionToken(homeDirectory, input.baseUrl.origin, null);
+    ctx.print(`Signed out of the daemon at ${input.baseUrl.origin}: ${revoked} This terminal calls it with its own credential again.`);
+    return;
   }
   await secrets.delete(input.secretKey);
   ctx.print(`Signed out of the ${input.target} at ${input.baseUrl.origin}: ${revoked} The stored token ${input.secretKey} was removed.`);

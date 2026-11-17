@@ -27,6 +27,8 @@
  * terminal was pointed at (`daemon.connectedHost.url`) is dialled with the
  * bearer setup stored for that address in the terminal's own state
  * (connected-daemon-credentials.ts); the local daemon's record is left alone.
+ * A session token from `/auth login daemon <baseUrl>` is held for that address
+ * in the same record and is the bearer for it until `/auth logout` drops it.
  * `GOODVIBES_DAEMON_TOKEN`, when set, wins here, once, for every caller, as it
  * does for the daemon itself (`resolveDaemonEndpoint`).
  */
@@ -38,7 +40,7 @@ import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/conf
 import { readConnectedDaemonOrigin, resolveDaemonEnabled } from '@goodvibes-jev/engine/platform/platform/config';
 import { resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
 import { getOrCreateCompanionToken } from '@goodvibes-jev/engine/platform/platform/pairing';
-import { readConnectedDaemonToken } from './connected-daemon-credentials.ts';
+import { readConnectedDaemonToken, readDaemonSessionToken } from './connected-daemon-credentials.ts';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/workspace';
 import type { DaemonVerbCaller } from '@goodvibes-jev/engine/platform/platform/runtime/client';
 
@@ -164,6 +166,10 @@ export function resolveDaemonEndpoint(deps: {
   // shell paths are not wired (a disabled-daemon path) must still get the honest
   // unavailable reason above, never a "shell paths not wired" throw.
   const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
+  // A session the owner signed in to this daemon with (/auth login daemon) is the
+  // bearer while it is held; /auth logout drops it and the address's own bearer applies.
+  const session = daemonTokenOverride() ? null : readDaemonSessionToken(homeDirectory, baseUrl);
+  if (session) return { available: true, baseUrl, token: session };
   // A daemon this terminal was pointed at is dialled with the bearer stored for that address; the
   // address and its token come from one record, so they cannot disagree.
   const connected = readConnectedDaemonOrigin((key) => configManager.get(key));

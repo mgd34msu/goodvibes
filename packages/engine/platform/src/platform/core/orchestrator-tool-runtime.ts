@@ -231,8 +231,10 @@ export function toolBudgetDeadline(budget: ToolBudget | undefined): AbortSignal 
 }
 
 /**
- * The result of a call its time limit stopped. Whatever the tool produced
- * before it stopped is kept; it may have done part of its work.
+ * The result of a call its time limit stopped (it threw or failed once the
+ * limit fired). Whatever the tool produced before it stopped is kept; it may
+ * have done part of its work. A call that ignored the limit and finished its
+ * action is not this: it succeeded, and `applyToolBudget` says it ran over.
  */
 export function toolBudgetStoppedResult(callId: string, toolName: string, budget: ToolBudget, settled: ToolResult | null): ToolResult {
   return {
@@ -245,9 +247,8 @@ export function toolBudgetStoppedResult(callId: string, toolName: string, budget
 
 /**
  * The first limit a finished call went over, as a sentence for the model, or
- * null. The result keeps its output: the tool already ran, so the model is told
- * to check its effect before repeating it. Token and cost limits apply only to
- * tools that report `tokenCount` / `costUsd` on their result.
+ * null. Token and cost limits apply only to tools that report `tokenCount` /
+ * `costUsd` on their result.
  */
 function describeBudgetBreach(budget: ToolBudget, elapsedMs: number, result: ToolResult): string | null {
   const reported = result as ToolResult & { readonly tokenCount?: unknown; readonly costUsd?: unknown };
@@ -258,18 +259,17 @@ function describeBudgetBreach(budget: ToolBudget, elapsedMs: number, result: Too
 }
 
 /**
- * A finished call that went over its budget becomes a failed result that keeps
- * its output; a call within budget, or already failed, is returned as is.
+ * A call that finished its action over its budget still succeeded: it keeps
+ * `success` and its output, and the model is told which limit it went over so
+ * it asks for smaller pieces next time. A call within budget, or one that
+ * failed, is returned as is.
  */
 export function applyToolBudget(budget: ToolBudget | undefined, toolName: string, elapsedMs: number, result: ToolResult): ToolResult {
   if (!budget || !result.success) return result;
   const breach = describeBudgetBreach(budget, elapsedMs, result);
   if (!breach) return result;
-  return {
-    ...result,
-    success: false,
-    error: `Tool '${toolName}' finished but exceeded its budget: ${breach}. Its action may have taken effect, so check the result before repeating it.`,
-  };
+  const note = `[Over budget] Tool '${toolName}' finished, but ${breach}. Ask for smaller pieces of work so later calls stay within it.`;
+  return { ...result, output: result.output ? `${result.output}\n\n${note}` : note };
 }
 
 /**
@@ -675,7 +675,10 @@ async function executeToolCallsInMode(
         ));
         if (checkResult.autonomousDecision) result = { ...result, autonomousDecision: checkResult.autonomousDecision };
         if (stoppedByBudget()) {
-          result = toolBudgetStoppedResult(call.id, call.name, budget!, result);
+          // A call that ignored its time limit and finished its action succeeded; only a failed one was stopped.
+          result = result.success
+            ? applyToolBudget(budget, call.name, Math.max(performance.now() - executeStartedAt, (budget!.maxMs ?? 0) + 1), result)
+            : toolBudgetStoppedResult(call.id, call.name, budget!, result);
         } else if (callSignal?.aborted) {
           // The user cancelled THIS call mid-flight: the model sees a structured
           // cancelled result and the turn continues.

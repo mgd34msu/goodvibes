@@ -218,7 +218,7 @@ is what it guards.
 | `permissions.divergenceDashboard` | The divergence aggregation that gates enforce-mode transitions |
 | `policy.registryEnabled` | The policy bundle promote/rollback registry |
 | `policy.requireSignedBundles` | HMAC validation of policy bundles; unsigned, altered or key-less loads are refused (key in `GOODVIBES_POLICY_SIGNING_KEY`) |
-| `runtime.toolBudget.enforced` | A tool call is stopped at its wall-clock limit; one that finishes over its token or cost limit is reported as failed |
+| `runtime.toolBudget.enforced` | A tool call is stopped at its wall-clock limit; one that finishes anyway, or over its token or cost limit, is reported as succeeded with a note naming the limit |
 | `permissions.commandParser` | Per-segment AST parsing of shell commands before execution (it refuses a command that parses to no segment; what a command would destroy, and obfuscation, are the gate's reading) |
 | `security.tokenAudit.enabled` | Advisory auditing of token scopes and rotation |
 | `tools.contractVerification` | Registration-time verification that keeps malformed tools out of the registry |

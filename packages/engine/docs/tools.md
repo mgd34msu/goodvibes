@@ -255,9 +255,10 @@ Related tool settings:
 - `runtime.toolBudget.enforced` (default off): holds each tool call to the
   wall-clock, token, and cost limits (`runtime.toolBudget.maxMs`, `maxTokens`,
   `maxCostUsd`). The wall-clock limit stops the call when it is reached and the
-  result says so. Token and cost are known only when the call returns, so a
-  call over those is reported as failed with its output kept and a note that
-  its action may already have happened.
+  result says so. A call that finishes its action anyway (it ignored the stop),
+  or finishes over its token or cost limit (known only when it returns), is
+  reported as succeeded, with its output and a note naming the limit it went
+  over.
 - `tools.overflowSpillBackend`: selects the overflow spill backend
   (`file`, `ledger`, or `diagnostics`); `file` is the stock behavior. The
   choice is read when the runtime starts, so a change applies after a restart.

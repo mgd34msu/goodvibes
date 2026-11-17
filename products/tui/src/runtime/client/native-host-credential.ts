@@ -1,7 +1,7 @@
 import { OwnedSelectionObservation } from '@goodvibes-jev/engine/platform/platform/runtime/client/selection-observation';
 import type { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
-import { resolveControlPlaneBaseUrl } from './operator-endpoint.ts';
+import { readConnectedDaemonOrigin, resolveDaemonEnabled, resolveGoodVibesDaemonHome } from '@goodvibes-jev/engine/platform/platform/config';
+import { daemonTokenOverride, resolveControlPlaneBaseUrl } from './operator-endpoint.ts';
 import { statSync } from 'node:fs';
 import { isLoopbackHost } from '@goodvibes-jev/engine/platform/platform/utils/reachable-base-url';
 import { operatorTokenPath } from '@goodvibes-jev/engine/platform/platform/pairing/companion-token';
@@ -53,8 +53,14 @@ function readLocalOperatorToken(home: string): string | null {
   return token;
 }
 
-/** A daemon origin on this machine. */
-function isLocalOrigin(origin: string): boolean {
+/**
+ * A daemon origin on this machine: a loopback address this terminal did not
+ * reach through `daemon.connectedHost.url`. A connected host on a loopback
+ * address can be a forwarded port of another machine, so it is never sent this
+ * machine's token.
+ */
+function isLocalOrigin(origin: string, config: Pick<ConfigManager, 'get'>): boolean {
+  if (readConnectedDaemonOrigin((key) => config.get(key))) return false;
   try { return isLoopbackHost(new URL(origin).hostname); } catch { return false; }
 }
 
@@ -77,9 +83,10 @@ export type NativeHostCredential =
 /**
  * The credential native work presents to the selected daemon: the per-device
  * pairing bound to this exact origin when there is one. On the daemon's own
- * machine (a loopback origin) without one, the operator token this user
- * already holds: the daemon treats it as the owner's own machine, so there is
- * no pairing step. A daemon on another machine is never sent that token; it is
+ * machine (a loopback origin not reached through a connected host) without
+ * one, the bearer every other verb presents there: `GOODVIBES_DAEMON_TOKEN`
+ * when set, otherwise the operator token this user already holds. The daemon
+ * treats it as the owner's own machine, so there is no pairing step. A daemon on another machine is never sent that token; it is
  * paired with /host pair. Live scopes are enforced by each operation; a read
  * does not require write/admin.
  */
@@ -94,8 +101,9 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     const selected = resolveControlPlaneBaseUrl(owner);
     const baseUrl = resolveTuiHostOrigin(owner);
     const pairing = baseUrl ? readPairing(home, baseUrl) : null;
-    const local = enabled && baseUrl && pairing && pairing.status !== 'paired' && pairing.status !== 'unavailable' && isLocalOrigin(baseUrl)
-      ? readLocalOperatorToken(home) : null;
+    const onThisMachine = baseUrl !== null && isLocalOrigin(baseUrl, owner);
+    const local = enabled && baseUrl && pairing && pairing.status !== 'paired' && pairing.status !== 'unavailable' && onThisMachine
+      ? daemonTokenOverride() ?? readLocalOperatorToken(home) : null;
     // Full state, not merely the bearer: replacement and indeterminate state
     // invalidate queued reads, permits and mutation preflights as well.
     let observation = retained ?? observations.get(owner);
@@ -114,7 +122,7 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     // it made, never a second one), so nothing is swapped in under it meanwhile.
     if (pairing?.status === 'unknown') return { available: false, identity, reason: 'The reply to this terminal\'s pairing request was lost. Run /host pair --bootstrap-shared to repeat it.' };
     if (pairing?.status === 'missing') {
-      return { available: false, identity, reason: isLocalOrigin(baseUrl)
+      return { available: false, identity, reason: onThisMachine
         ? 'The daemon on this machine is selected, but its operator token could not be read (it must be your own private file). Start the daemon once, or pair this terminal with /host pair.'
         : 'This terminal has no device credential for the daemon on another machine; pair it with /host pair.' };
     }

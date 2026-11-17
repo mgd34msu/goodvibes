@@ -19965,7 +19965,7 @@
     {
       "name": "SettingsIngestionAction",
       "kind": "type",
-      "text": "export type SettingsIngestionAction = 'skipped' | 'refused';"
+      "text": "export type SettingsIngestionAction = 'skipped' | 'refused' | 'mapped';"
     },
     {
       "name": "SettingsIngestionNotice",
@@ -71519,7 +71519,7 @@
         "path",
         "reason"
       ],
-      "text": "export interface KeptWorktree { readonly path: string; readonly branch: string; readonly reason: WorktreeKeepReason; } ;; via WorktreeKeepReason = export type WorktreeKeepReason = { readonly why: 'running'; readonly detail: string; } | { readonly why: 'uncommitted'; readonly detail: string; } | { readonly why: 'unmerged'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'ignored'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'unreadable'; readonly detail: string; } | { readonly why: 'protected'; readonly detail: string; } | { readonly why: 'owner-unknown'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'removable'; readonly detail: string; };"
+      "text": "export interface KeptWorktree { readonly path: string; readonly branch: string; readonly head?: string | undefined; readonly reason: WorktreeKeepReason; } ;; via WorktreeKeepReason = export type WorktreeKeepReason = { readonly why: 'running'; readonly detail: string; } | { readonly why: 'uncommitted'; readonly detail: string; } | { readonly why: 'detached'; readonly detail: string; } | { readonly why: 'unmerged'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'ignored'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'unreadable'; readonly detail: string; } | { readonly why: 'protected'; readonly detail: string; } | { readonly why: 'owner-unknown'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'removable'; readonly detail: string; };"
     },
     {
       "name": "KeptWorktreeInfo",
@@ -71532,7 +71532,7 @@
         "summary",
         "willBeRemoved"
       ],
-      "text": "export interface KeptWorktreeInfo { readonly path: string; readonly branch: string; readonly ageMs: number; readonly sizeBytes?: number; readonly reason: WorktreeKeepReason; readonly willBeRemoved: boolean; readonly summary: string; } ;; via WorktreeKeepReason = export type WorktreeKeepReason = { readonly why: 'running'; readonly detail: string; } | { readonly why: 'uncommitted'; readonly detail: string; } | { readonly why: 'unmerged'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'ignored'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'unreadable'; readonly detail: string; } | { readonly why: 'protected'; readonly detail: string; } | { readonly why: 'owner-unknown'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'removable'; readonly detail: string; };"
+      "text": "export interface KeptWorktreeInfo { readonly path: string; readonly branch: string; readonly ageMs: number; readonly sizeBytes?: number; readonly reason: WorktreeKeepReason; readonly willBeRemoved: boolean; readonly nextSteps?: readonly string[] | undefined; readonly summary: string; } ;; via WorktreeKeepReason = export type WorktreeKeepReason = { readonly why: 'running'; readonly detail: string; } | { readonly why: 'uncommitted'; readonly detail: string; } | { readonly why: 'detached'; readonly detail: string; } | { readonly why: 'unmerged'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'ignored'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'unreadable'; readonly detail: string; } | { readonly why: 'protected'; readonly detail: string; } | { readonly why: 'owner-unknown'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'removable'; readonly detail: string; };"
     },
     {
       "name": "ManagedWorktreeKind",
@@ -71797,7 +71797,7 @@
         "path",
         "pruned"
       ],
-      "text": "export interface SweptWorktree { readonly path: string; readonly branch: string | null; readonly branchDeleted: boolean; readonly pruned: boolean; readonly note: string; }"
+      "text": "export interface SweptWorktree { readonly path: string; readonly branch: string | null; readonly branchDeleted: boolean; readonly pruned: boolean; readonly savedBranch?: string | undefined; readonly note: string; }"
     },
     {
       "name": "SystemMessageActivity",
@@ -71863,6 +71863,17 @@
       "text": "export interface WorktreeAttachmentReview { readonly targetKind: 'session' | 'task'; readonly targetId: string; readonly total: number; readonly active: number; readonly paused: number; readonly kept: number; readonly records: readonly ManagedWorktreeMeta[]; }"
     },
     {
+      "name": "WorktreeAttention",
+      "kind": "interface",
+      "required": [
+        "branch",
+        "nextSteps",
+        "path",
+        "reason"
+      ],
+      "text": "export interface WorktreeAttention { readonly path: string; readonly branch: string; readonly reason: WorktreeKeepReason; readonly nextSteps: readonly string[]; } ;; via WorktreeKeepReason = export type WorktreeKeepReason = { readonly why: 'running'; readonly detail: string; } | { readonly why: 'uncommitted'; readonly detail: string; } | { readonly why: 'detached'; readonly detail: string; } | { readonly why: 'unmerged'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'ignored'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'unreadable'; readonly detail: string; } | { readonly why: 'protected'; readonly detail: string; } | { readonly why: 'owner-unknown'; readonly detail: string; readonly pruneInDays: number | null; } | { readonly why: 'removable'; readonly detail: string; };"
+    },
+    {
       "name": "WorktreeDiscardReceipt",
       "kind": "interface",
       "required": [
@@ -71898,7 +71909,7 @@
         "constructor",
         "describeKept",
         "discard",
-        "keptWorktreeNotice",
+        "lastStartupReport",
         "list",
         "reconcile",
         "recordSetup",
@@ -71907,7 +71918,7 @@
         "startupSweep",
         "sweepRetention"
       ],
-      "text": "export declare class WorktreeRegistry { constructor(workingDirectory: string); list(): Promise<WorktreeStatusRecord[]>; reconcile(): Promise<WorktreeStatusRecord[]>; sweepRetention(options?: WorktreeRetentionOptions): Promise<WorktreeSweepReport>; releaseEnded(targets: ReadonlyArray<{ readonly path: string; readonly baseBranch?: string | undefined; }>, options?: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs'>): Promise<WorktreeSweepReport>; describeKept(options?: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs' | 'owner'> & { readonly rows?: readonly WorktreeStatusRecord[] | undefined; readonly only?: string | undefined; }): Promise<KeptWorktreeInfo[]>; keptWorktreeNotice(options?: { readonly thresholdBytes?: number; readonly owner?: WorktreeRetentionOptions['owner']; }): Promise<string | null>; startupSweep(): Promise<string | null>; attach(path: string, target: { sessionId?: string; taskId?: string; }): void; setState(path: string, state: ManagedWorktreeState): void; recordSetup(path: string, setup: WorktreeSetupResult): void; cleanup(path: string): Promise<void>; discard(path: string): Promise<WorktreeDiscardReceipt>; protected createWorktreeGit(worktreePath: string): Pick<GitService, 'branch' | 'status' | 'addAll' | 'commit'>; } ;; via Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ReadonlyArray = interface ReadonlyArray<T> { readonly length: number; toString(): string; toLocaleString(): string; concat(...items: ConcatArray<T>[]): T[]; concat(...items: (T | ConcatArray<T>)[]): T[]; join(separator?: string): string; slice(start?: number, end?: number): T[]; indexOf(searchElement: T, fromIndex?: number): number; lastIndexOf(searchElement: T, fromIndex?: number): number; every<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): this is readonly S[]; every(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; some(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; forEach(callbackfn: (value: T, index: number, array: readonly T[]) => void, thisArg?: any): void; map<U>(callbackfn: (value: T, index: number, array: readonly T[]) => U, thisArg?: any): U[]; filter<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): S[]; filter(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): T[]; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduce<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduceRight<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; readonly [n: number]: T; } ;; WorktreeSetupResult = export interface WorktreeSetupResult { readonly state: WorktreeSetupState; readonly startedAt: number; readonly completedAt: number; readonly steps: readonly WorktreeSetupStep[]; readonly error?: string | undefined; }"
+      "text": "export declare class WorktreeRegistry { constructor(workingDirectory: string); list(): Promise<WorktreeStatusRecord[]>; reconcile(): Promise<WorktreeStatusRecord[]>; sweepRetention(options?: WorktreeRetentionOptions): Promise<WorktreeSweepReport>; releaseEnded(targets: ReadonlyArray<{ readonly path: string; readonly baseBranch?: string | undefined; }>, options?: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs'>): Promise<WorktreeSweepReport>; describeKept(options?: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs' | 'owner'> & { readonly rows?: readonly WorktreeStatusRecord[] | undefined; readonly only?: string | undefined; }): Promise<KeptWorktreeInfo[]>; lastStartupReport(): WorktreeStartupReport | null; startupSweep(options?: { readonly thresholdBytes?: number | undefined; }): Promise<WorktreeStartupReport | null>; attach(path: string, target: { sessionId?: string; taskId?: string; }): void; setState(path: string, state: ManagedWorktreeState): void; recordSetup(path: string, setup: WorktreeSetupResult): void; cleanup(path: string): Promise<void>; discard(path: string): Promise<WorktreeDiscardReceipt>; protected createWorktreeGit(worktreePath: string): Pick<GitService, 'branch' | 'status' | 'addAll' | 'commit'>; } ;; via Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ReadonlyArray = interface ReadonlyArray<T> { readonly length: number; toString(): string; toLocaleString(): string; concat(...items: ConcatArray<T>[]): T[]; concat(...items: (T | ConcatArray<T>)[]): T[]; join(separator?: string): string; slice(start?: number, end?: number): T[]; indexOf(searchElement: T, fromIndex?: number): number; lastIndexOf(searchElement: T, fromIndex?: number): number; every<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): this is readonly S[]; every(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; some(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; forEach(callbackfn: (value: T, index: number, array: readonly T[]) => void, thisArg?: any): void; map<U>(callbackfn: (value: T, index: number, array: readonly T[]) => U, thisArg?: any): U[]; filter<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): S[]; filter(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): T[]; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduce<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduceRight<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; readonly [n: number]: T; } ;; WorktreeSetupResult = export interface WorktreeSetupResult { readonly state: WorktreeSetupState; readonly startedAt: number; readonly completedAt: number; readonly steps: readonly WorktreeSetupStep[]; readonly error?: string | undefined; }"
     },
     {
       "name": "WorktreeRegistryPaths",
@@ -71940,6 +71951,18 @@
       "name": "WorktreeSetupListSetting",
       "kind": "type",
       "text": "export type WorktreeSetupListSetting = readonly string[] | { readonly mode: 'auto' | 'none'; };"
+    },
+    {
+      "name": "WorktreeStartupReport",
+      "kind": "interface",
+      "required": [
+        "attention",
+        "diskNotice",
+        "failed",
+        "finishedAt",
+        "removed"
+      ],
+      "text": "export interface WorktreeStartupReport { readonly finishedAt: number; readonly removed: readonly SweptWorktree[]; readonly attention: readonly WorktreeAttention[]; readonly failed: ReadonlyArray<{ readonly path: string; readonly error: string; }>; readonly diskNotice: string | null; } ;; via ReadonlyArray = interface ReadonlyArray<T> { readonly length: number; toString(): string; toLocaleString(): string; concat(...items: ConcatArray<T>[]): T[]; concat(...items: (T | ConcatArray<T>)[]): T[]; join(separator?: string): string; slice(start?: number, end?: number): T[]; indexOf(searchElement: T, fromIndex?: number): number; lastIndexOf(searchElement: T, fromIndex?: number): number; every<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): this is readonly S[]; every(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; some(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): boolean; forEach(callbackfn: (value: T, index: number, array: readonly T[]) => void, thisArg?: any): void; map<U>(callbackfn: (value: T, index: number, array: readonly T[]) => U, thisArg?: any): U[]; filter<S extends T>(predicate: (value: T, index: number, array: readonly T[]) => value is S, thisArg?: any): S[]; filter(predicate: (value: T, index: number, array: readonly T[]) => unknown, thisArg?: any): T[]; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduce(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduce<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T): T; reduceRight(callbackfn: (previousValue: T, currentValue: T, currentIndex: number, array: readonly T[]) => T, initialValue: T): T; reduceRight<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: readonly T[]) => U, initialValue: U): U; readonly [n: number]: T; }"
     },
     {
       "name": "WorktreeStatusRecord",
@@ -72009,6 +72032,11 @@
       "name": "exportEcosystemCatalogBundle",
       "kind": "function",
       "text": "export declare function exportEcosystemCatalogBundle(scope: 'project' | 'user', options: EcosystemCatalogPathOptions): EcosystemCatalogBundle;"
+    },
+    {
+      "name": "formatWorktreeStartupReport",
+      "kind": "function",
+      "text": "export declare function formatWorktreeStartupReport(report: WorktreeStartupReport, workingDirectory: string): string | null;"
     },
     {
       "name": "getPersistedWorktreeMeta",
@@ -72159,6 +72187,11 @@
       "name": "worktreeSetupSettingValue",
       "kind": "function",
       "text": "export declare function worktreeSetupSettingValue(choice: WorktreeSetupChoice): WorktreeSetupListSetting;"
+    },
+    {
+      "name": "worktreeStatusLines",
+      "kind": "function",
+      "text": "export declare function worktreeStatusLines(report: WorktreeStartupReport | null, workingDirectory: string): string[];"
     }
   ],
   "./platform/runtime/shell-paths": [

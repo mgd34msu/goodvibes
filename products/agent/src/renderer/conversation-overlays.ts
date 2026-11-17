@@ -13,7 +13,7 @@ import { renderFilePickerOverlay } from './file-picker-overlay.ts';
 import { renderModelWorkspace } from './model-workspace.ts';
 import { renderSelectionModalOverlay } from './selection-modal-overlay.ts';
 import { renderSearchOverlay } from './search-overlay.ts';
-import { renderHistorySearchOverlay } from './history-search-overlay.ts';
+import { renderHistorySearchOverlay } from '@goodvibes-jev/engine/terminal-shell/history-search-overlay';
 import { renderProcessModal } from './process-modal.ts';
 import { renderLiveTailModal } from './live-tail-modal.ts';
 import { renderContextInspector } from './context-inspector.ts';

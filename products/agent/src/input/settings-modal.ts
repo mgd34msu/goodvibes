@@ -17,7 +17,7 @@ import { isSecretConfigKey } from '../config/secret-config.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientInstalled, isDaemonOwnedConfigKey, openEffectiveConfigView } from '../config/daemon-config-routing.ts';
 import { routeSettingWriteToConnectedHost } from './settings-modal-daemon-writes.ts';
 import { isDeepStrictEqual } from 'node:util';
-import { modelPickerLaunchForKey, parseNumberEditBuffer } from './settings-modal-behavior.ts';
+import { modelPickerLaunchForKey, parseNumberEditBuffer } from '@goodvibes-jev/engine/terminal-shell/settings-behavior';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes-jev/engine/platform/platform/payments';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
 import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';

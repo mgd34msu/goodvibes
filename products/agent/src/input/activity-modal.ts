@@ -11,7 +11,7 @@
  */
 
 import type { InputToken } from '@goodvibes-jev/engine/platform/platform/core';
-import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.ts';
+import type { SurfaceModal, SurfaceModalHost } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import type { SurfaceLayer } from '../renderer/surface-kit.ts';
 import { activityItems, renderActivityModal, type ActivityModalView, type ActivityView } from '../renderer/activity-modal.ts';
 import { isTextBackspace } from '@goodvibes-jev/engine/terminal-shell';

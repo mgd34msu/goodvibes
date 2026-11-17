@@ -43,7 +43,7 @@ import { LiveTailModal } from '../renderer/live-tail-modal.ts';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import { OverlayFilters } from './overlay-filter.ts';
-import { SurfaceModalHost, isTrackedModal, type TrackedModal } from './surface-modal-host.ts';
+import { SurfaceModalHost, isTrackedModal, type TrackedModal } from '@goodvibes-jev/engine/terminal-shell/surface-modal-host';
 import { BookmarkModal } from './bookmark-modal.ts';
 import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
@@ -142,7 +142,7 @@ export class InputHandler extends TerminalInputHandlerState {
   public liveTailModal: LiveTailModal;
   public contextInspectorModal = new ContextInspectorModal();
   public readonly overlayFilters = new OverlayFilters();
-  /** The one stack of open modals: kit modals and the handler's own, one Esc level at a time (surface-modal-host.ts). */
+  /** The one stack of open modals: kit modals and the handler's own, one Esc level at a time (terminal-shell/surface-modal-host). */
   public surfaceModals = new SurfaceModalHost();
   /** The handler's own modals as objects on that stack: the shared ones, the workspace, the process monitor and its live tail. */
   public readonly modals: HandlerModals & {

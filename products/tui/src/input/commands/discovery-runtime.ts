@@ -31,6 +31,12 @@ export function registerDiscoveryRuntimeCommands(registry: CommandRegistry, scan
         ];
         ctx.print(lines.join('\n'));
       }
+      if (result.skipped.length > 0) {
+        ctx.print([
+          `[Scan] ${result.skipped.length} server(s) answered but were left out:`,
+          ...result.skipped.map((server) => `  ${server.host}:${server.port}  ${server.reason}`),
+        ].join('\n'));
+      }
 
       try {
         await requireProviderApi(ctx).registerDiscoveredProviders(result.servers);

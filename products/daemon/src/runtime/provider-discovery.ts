@@ -37,8 +37,13 @@ export function createDaemonProviderDiscovery(
     if (closed || work) return;
     const scan: Promise<void> = Promise.resolve().then(async () => {
       if (closed) return;
-      const { servers } = await (dependencies.scan ?? scanLocalhost)(lifetime.signal);
+      const { servers, skipped } = await (dependencies.scan ?? scanLocalhost)(lifetime.signal);
       if (closed) return;
+      for (const server of skipped) {
+        logger.warn('A model server on this computer answered but was left out of the scan', {
+          host: server.host, port: server.port, reason: server.reason,
+        });
+      }
       if (servers.length === 0) return;
       register(servers);
       // A synchronous callback can reenter host.close(). Fence persistence too.

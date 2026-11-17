@@ -122,10 +122,11 @@ function reporterFor(router: HostSystemMessageSink, networkScan: boolean): Provi
         router.low(`[Local] ${servers(unregisteredNetwork.length)} saved from the network ${unregisteredNetwork.length === 1 ? 'was' : 'were'} not registered because network scanning is off; ${NETWORK_SCAN_ENABLE_COMMAND} registers ${unregisteredNetwork.length === 1 ? 'it' : 'them'}.`);
       }
     },
-    scanned({ found, kept, unregisteredNetwork }) {
+    scanned({ found, kept, unregisteredNetwork, skipped }) {
       if (found.length > 0) router.low(`[Scan] Discovered ${servers(found.length)} ${networkScan ? 'on this computer and its network' : 'on this computer'}, run /provider to see them.`);
       if (kept.length > 0) router.low(`[Scan] ${servers(kept.length)} saved earlier did not answer this scan; ${kept.length === 1 ? 'it is' : 'they are'} kept.`);
       if (unregisteredNetwork.length > 0) router.low(`[Scan] ${servers(unregisteredNetwork.length)} on the network ${unregisteredNetwork.length === 1 ? 'was' : 'were'} not registered.`);
+      for (const server of skipped) router.low(`[Scan] ${server.host}:${server.port} answered but was left out: ${server.reason}`);
     },
   };
 }

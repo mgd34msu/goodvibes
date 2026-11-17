@@ -28,8 +28,18 @@ export interface DiscoveredServer {
   modelOutputLimits?: Record<string, number>;   // modelId -> max output tokens
 }
 
+/** A server that answered but was left out of a scan, and why. */
+export interface SkippedServer {
+  host: string;
+  port: number;
+  /** One line: what could not be read from it. */
+  reason: string;
+}
+
 export interface ScanResult {
   servers: DiscoveredServer[];
+  /** Servers that answered and could not be identified or read; each was left out alone. */
+  skipped: SkippedServer[];
   scannedHosts: number;
   scannedPorts: number;
   durationMs: number;
@@ -612,7 +622,7 @@ export async function scanHosts(
   hosts: string[],
   onProgress?: (completed: number, total: number) => void,
   signal?: AbortSignal,
-): Promise<DiscoveredServer[]> {
+): Promise<{ servers: DiscoveredServer[]; skipped: SkippedServer[] }> {
   signal?.throwIfAborted();
   type Probe = { host: string; port: number };
   const probes: Probe[] = [];
@@ -625,6 +635,7 @@ export async function scanHosts(
   const total = probes.length;
   let completed = 0;
   const servers: DiscoveredServer[] = [];
+  const skipped: SkippedServer[] = [];
 
   await asyncPool(MAX_CONCURRENT_PROBES, probes, async ({ host, port }) => {
     const result = await probeHost(host, port, signal);
@@ -649,11 +660,13 @@ export async function scanHosts(
       logger.info(`[Scan] Found ${name} at ${host}:${port} (${result.models.length} models)`);
     } catch (error) {
       signal?.throwIfAborted();
-      logger.info(`[Scan] ${host}:${port} answered but was left out of this scan`, { error: summarizeError(error) });
+      const reason = summarizeError(error);
+      skipped.push({ host, port, reason });
+      logger.info(`[Scan] ${host}:${port} answered but was left out of this scan`, { error: reason });
     }
   }, signal);
 
-  return servers;
+  return { servers, skipped };
 }
 
 // ---------------------------------------------------------------------------
@@ -665,9 +678,10 @@ export async function scanHosts(
  */
 export async function scanLocalhost(signal?: AbortSignal): Promise<ScanResult> {
   const start = Date.now();
-  const servers = await scanHosts(['127.0.0.1'], undefined, signal);
+  const { servers, skipped } = await scanHosts(['127.0.0.1'], undefined, signal);
   return {
     servers,
+    skipped,
     scannedHosts: 1,
     scannedPorts: KNOWN_PORTS.length,
     durationMs: Date.now() - start,
@@ -685,12 +699,14 @@ export async function scan(
   signal?: AbortSignal,
 ): Promise<ScanResult> {
   const start = Date.now();
-  const localhostServers = await scanHosts(['127.0.0.1'], undefined, signal);
+  const local = await scanHosts(['127.0.0.1'], undefined, signal);
 
   const networkHosts = networkSweepHosts();
-  const networkServers = networkHosts.length > 0
+  const network = networkHosts.length > 0
     ? await scanHosts(networkHosts, onProgress, signal)
-    : [];
+    : { servers: [], skipped: [] };
+  const localhostServers = local.servers;
+  const networkServers = network.servers;
 
   // Merge and deduplicate by host:port
   const seen = new Set<string>();
@@ -705,6 +721,7 @@ export async function scan(
 
   return {
     servers: allServers,
+    skipped: [...local.skipped, ...network.skipped],
     scannedHosts: 1 + networkHosts.length,
     scannedPorts: KNOWN_PORTS.length,
     durationMs: Date.now() - start,

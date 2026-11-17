@@ -58,7 +58,13 @@ export interface ProviderDiscoveryReporter {
   /** Servers saved by an earlier session: registered ones, and network ones left unregistered. */
   restored?(report: { readonly registered: readonly DiscoveredServerSummary[]; readonly unregisteredNetwork: readonly DiscoveredServerSummary[] }): void;
   /** One scan: servers registered for the first time, saved ones that did not answer and were kept, network ones left unregistered. */
-  scanned?(report: { readonly found: readonly DiscoveredServerSummary[]; readonly kept: readonly DiscoveredServerSummary[]; readonly unregisteredNetwork: readonly DiscoveredServerSummary[] }): void;
+  scanned?(report: {
+    readonly found: readonly DiscoveredServerSummary[];
+    readonly kept: readonly DiscoveredServerSummary[];
+    readonly unregisteredNetwork: readonly DiscoveredServerSummary[];
+    /** Servers that answered but could not be identified or read, so they were left out. */
+    readonly skipped: readonly { readonly host: string; readonly port: number; readonly reason: string }[];
+  }): void;
 }
 
 export interface BackgroundRuntimeTaskHandle {
@@ -154,7 +160,7 @@ export function startBackgroundProviderDiscovery(
     // A missed server is reported only when the scan reached something, as below.
     const kept = local.length > 0 ? missedServers : [];
     if (report) {
-      report.scanned?.({ found: newServers.map(summarize), kept: kept.map(summarize), unregisteredNetwork: network.map(summarize) });
+      report.scanned?.({ found: newServers.map(summarize), kept: kept.map(summarize), unregisteredNetwork: network.map(summarize), skipped: result.skipped });
     } else {
       for (const server of newServers) {
         systemMessageRouter.low(
@@ -166,6 +172,9 @@ export function startBackgroundProviderDiscovery(
         systemMessageRouter.low(
           `[Scan] Found ${server.name} at ${server.host}:${server.port} (${describeModels(server)}) on the network; it was not registered. Register it only if you trust that machine.`,
         );
+      }
+      for (const server of result.skipped) {
+        systemMessageRouter.low(`[Scan] ${server.host}:${server.port} answered but was left out: ${server.reason}`);
       }
     }
 

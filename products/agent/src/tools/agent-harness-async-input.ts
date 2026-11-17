@@ -26,5 +26,7 @@ export function captureAsyncHarnessInput<T>(rawArgs: T, options: CatalogRankingO
   const retainSourceCurrent = (_key?: string): void => { checkSignal(); };
   return { args, assertCurrent, assertCallerCurrent: assertCurrent, assertInputCurrent: checkSignal, assertSourceCurrent: checkSignal, retainSourceCurrent,
     options: { signal, sourceOwner: options.sourceOwner, assertCurrent: callerCurrent ?? checkSignal, retainCurrent,
-      ...(options.requirePreservedSource !== undefined ? { requirePreservedSource: options.requirePreservedSource } : {}) } satisfies CatalogRankingOptions };
+      ...(options.requirePreservedSource !== undefined ? { requirePreservedSource: options.requirePreservedSource } : {}),
+      // A caller that asked for a reading of meaning keeps it through the capture.
+      ...(options.semantic !== undefined ? { semantic: options.semantic } : {}) } satisfies CatalogRankingOptions };
 }

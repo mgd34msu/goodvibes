@@ -142,24 +142,28 @@ async function createWorker(receive: (value: unknown) => void, failed: () => voi
     detach: () => { (worker as unknown as { unref?: () => void }).unref?.(); } };
 }
 
-/** A long-lived isolated tester for many patterns, owned by one long-lived holder (a tool registry). */
+/** A long-lived isolated tester for many patterns, owned by one long-lived holder (a tool registry, the permission rules). */
 export interface SharedRegexTester extends AsyncDisposable {
-  test(source: string, input: string, signal?: AbortSignal): Promise<boolean>;
+  test(source: string, input: string, signal?: AbortSignal, flags?: string): Promise<boolean>;
 }
 
 /**
  * One isolated worker that tests any number of patterns, started on first use
  * and kept for the holder's life. A pattern that runs past `timeoutMs` or a
  * worker failure stops the worker and refuses every test in flight; the next
- * test starts a fresh one. Each distinct source is
- * compiled once on this thread (grammar only) before it is sent. A cancelled
+ * test starts a fresh one. Each distinct source and flag set is
+ * compiled once on this thread (grammar, flags and `maxPatternChars` only)
+ * before it is sent. A cancelled
  * test is refused alone; the worker keeps serving the other tests. The idle
  * worker never keeps the process alive: only a test in flight does, through
  * its deadline timer.
  */
-export function createSharedRegexTester(options: { readonly operation: string; readonly timeoutMs?: number | undefined }): SharedRegexTester {
+export function createSharedRegexTester(options: {
+  readonly operation: string; readonly timeoutMs?: number | undefined; readonly maxPatternChars?: number | undefined;
+}): SharedRegexTester {
   const operation = options.operation;
   const timeoutMs = limit(options.timeoutMs, 0, Number.MAX_SAFE_INTEGER);
+  const maxPatternChars = options.maxPatternChars;
   const checked = new Set<string>();
   let disposed = false, sequence = 0;
   let worker: Promise<WorkerPort> | undefined;
@@ -181,10 +185,11 @@ export function createSharedRegexTester(options: { readonly operation: string; r
   };
   const port = () => worker ??= createWorker(receive, () => reset('isolated worker stopped')).then(started => { started.detach(); return started; });
   return Object.freeze({
-    async test(source: string, input: string, signal?: AbortSignal): Promise<boolean> {
+    async test(source: string, input: string, signal?: AbortSignal, flags = ''): Promise<boolean> {
       if (disposed) throw new RegexAdmissionError(operation, 'executor is closed');
       signal?.throwIfAborted();
-      if (!checked.has(source)) { syntax(source, '', { operation }); checked.add(source); }
+      const key = `${flags}/${source}`;
+      if (!checked.has(key)) { syntax(source, flags, { operation, maxPatternChars }); checked.add(key); }
       let started: WorkerPort;
       try { started = await port(); } catch { worker = undefined; throw new RegexAdmissionError(operation, 'isolated worker startup is unavailable'); }
       signal?.throwIfAborted();
@@ -197,7 +202,7 @@ export function createSharedRegexTester(options: { readonly operation: string; r
           timer: timeoutMs > 0 ? setTimeout(() => reset(`exceeded its ${timeoutMs} ms deadline`), timeoutMs) : undefined };
         pending.set(id, settle);
         signal?.addEventListener('abort', onAbort, { once: true });
-        started.post({ id, source, flags: '', operation: 'test', input, lastIndex: 0, replacement: '' });
+        started.post({ id, source, flags, operation: 'test', input, lastIndex: 0, replacement: '' });
       });
     },
     async [Symbol.asyncDispose]() { disposed = true; reset('executor closed'); },

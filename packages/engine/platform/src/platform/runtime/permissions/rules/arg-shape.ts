@@ -1,4 +1,4 @@
-import type { JudgmentReadingOptions } from '@goodvibes-jev/engine/errors';
+import { createSharedRegexTester, RegexAdmissionError, type JudgmentReadingOptions, type SharedRegexTester } from '@goodvibes-jev/engine/errors';
 /**
  * Argument shape/content policy rule evaluator.
  *
@@ -11,7 +11,7 @@ import type {
   ArgShapeRule,
   EvaluationStep,
 } from '../types.js';
-import { compileSafeRegExp, createSafeRegex, safeRegExpTest } from '../../../utils/safe-regex.js';
+import { compileSafeRegExp, safeRegExpTest } from '../../../utils/safe-regex.js';
 
 /** Result returned by evaluateArgShapeRule. */
 export interface ArgShapeRuleResult {
@@ -150,15 +150,40 @@ export function evaluateArgShapeRule(rule: ArgShapeRule, toolName: string, args:
   return evaluateWithMatcher(rule, toolName, args, matchArgValue);
 }
 
+const ARG_SHAPE_OPERATION = 'permission arg-shape';
+const ARG_SHAPE_MAX_PATTERN_CHARS = 256;
+const ARG_SHAPE_MAX_INPUT_CHARS = 4_096;
+/** A rule's pattern gets this long to test one argument; past it the test is refused and the worker replaced. */
+const ARG_SHAPE_DEADLINE_MS = 1_000;
+
+/**
+ * The one isolated worker every permission rule set's patterns run in. The
+ * gate builds its rule list per check, so a tester held per list would start a
+ * worker per check; held here it starts on the first regex matcher and serves
+ * every later one. A pattern past its deadline is refused and the worker
+ * replaced. The idle worker never keeps the process alive.
+ */
+let permissionPatterns: SharedRegexTester | undefined;
+function permissionPatternTester(): SharedRegexTester {
+  return permissionPatterns ??= createSharedRegexTester({
+    operation: ARG_SHAPE_OPERATION, timeoutMs: ARG_SHAPE_DEADLINE_MS, maxPatternChars: ARG_SHAPE_MAX_PATTERN_CHARS,
+  });
+}
+
 export async function evaluateArgShapeRuleAsync(
   rule: ArgShapeRule, toolName: string, args: Record<string, unknown>, options: JudgmentReadingOptions = {},
 ): Promise<ArgShapeRuleResult> {
-  // Matched against its own copy, so a caller's later change cannot reach the reading.
-  const [capturedRule, capturedArgs] = structuredClone([rule, args]) as [ArgShapeRule, Record<string, unknown>];
   const current = () => { options.signal?.throwIfAborted(); options.assertCurrent?.(); };
   current();
+  // Everything the reading compares is read before the first await, so a
+  // caller's later change to the rule or the arguments cannot reach it.
+  const capturedRule: ArgShapeRule = { ...rule, argMatchers: { ...rule.argMatchers },
+    toolPattern: Array.isArray(rule.toolPattern) ? [...rule.toolPattern] : rule.toolPattern };
+  const capturedArgs: Record<string, unknown> = {};
+  for (const key of Object.keys(capturedRule.argMatchers)) capturedArgs[key] = args[key];
   const matches = new Map<unknown, boolean>();
   if (toolMatchesArgPattern(toolName, capturedRule.toolPattern)) {
+    const tester = permissionPatternTester();
     for (const [key, expected] of Object.entries(capturedRule.argMatchers)) {
       const regex = typeof expected === 'string' ? parseRegexMatcher(expected) : null;
       if (regex === null) continue;
@@ -166,9 +191,9 @@ export async function evaluateArgShapeRuleAsync(
       // Same fallback as the synchronous path: a matcher that is not a valid expression is a literal.
       try { void new RegExp(source, flags); } catch { continue; }
       const actual = String(capturedArgs[key]);
+      if (actual.length > ARG_SHAPE_MAX_INPUT_CHARS) throw new RegexAdmissionError(ARG_SHAPE_OPERATION, `input exceeds ${ARG_SHAPE_MAX_INPUT_CHARS} characters`);
       current();
-      await using pattern = await createSafeRegex(source, flags, { operation: 'permission arg-shape', maxPatternChars: 256, maxInputChars: 4_096, ...options, assertCurrent: current });
-      matches.set(key, await pattern.test(actual));
+      matches.set(key, await tester.test(source, actual, options.signal, flags));
       current();
     }
   }

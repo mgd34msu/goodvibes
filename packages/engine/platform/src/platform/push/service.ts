@@ -250,8 +250,6 @@ export class PushService {
   private readonly scheduler: EscalationScheduler;
   private readonly now: () => number;
   private readonly receipts?: { record(text: string): unknown } | undefined;
-  /** The daemon's own reason it could not send, since the last report read it. */
-  private notSent: string | null = null;
   /** The daemon-side cause last recorded as a receipt, so a repeat is not recorded again. */
   private recordedNotSent: string | null = null;
 
@@ -354,8 +352,11 @@ export class PushService {
    * with no registered device is not a failure (push was never turned on).
    */
   private announce(event: string, context: Record<string, string>, message: PushMessage): void {
-    void this.deliver(message).then(
-      (receipts) => this.reportReach(event, context, receipts),
+    // The daemon's own reason this fan-out could not send, held by this fan-out
+    // alone so a concurrent one can neither take nor clear it.
+    let notSent: string | null = null;
+    void deliverToAll(message, this.deliveryDeps((reason) => { notSent = reason; }), {}).then(
+      (receipts) => this.reportReach(event, context, receipts, notSent),
       (error) => {
         logger.warn(`PushService: ${event} fan-out failed`, {
           ...context,
@@ -365,9 +366,7 @@ export class PushService {
     );
   }
 
-  private reportReach(event: string, context: Record<string, string>, receipts: readonly PushDeliveryReceipt[]): void {
-    const cause = this.notSent;
-    this.notSent = null;
+  private reportReach(event: string, context: Record<string, string>, receipts: readonly PushDeliveryReceipt[], cause: string | null): void {
     if (receipts.length === 0) return;
     if (receipts.some((receipt) => receipt.outcome === 'delivered')) {
       this.recordedNotSent = null;
@@ -387,13 +386,13 @@ export class PushService {
   }
 
   /** Delivery dependencies with the bounded-failure threshold read live. */
-  private deliveryDeps(): DeliveryDeps {
+  private deliveryDeps(onNotSent?: (reason: string) => void): DeliveryDeps {
     const threshold = this.failureThreshold?.();
     return {
       vapid: this.vapid,
       store: this.store,
       transport: this.transport,
-      onNotSent: (reason) => { this.notSent = reason; },
+      ...(onNotSent ? { onNotSent } : {}),
       ...(typeof threshold === 'number' ? { failureThreshold: threshold } : {}),
     };
   }

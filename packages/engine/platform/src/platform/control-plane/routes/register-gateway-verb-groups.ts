@@ -359,6 +359,12 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * and its quiet answer does not claim it did.
    */
   readonly listContracts?: (() => readonly CheckinContractView[]) | undefined;
+  /**
+   * The daemon's receipt store (platform/daemon/receipts.ts): a reason the
+   * daemon itself cannot send pushes (an unreadable key pair) is recorded there
+   * for the next attached surface. Absent → the cause is only logged.
+   */
+  readonly daemonReceipts?: { record(text: string): unknown } | undefined;
 }
 
 /** Adapt a fleet event payload down to the structural notice the push source needs. */

@@ -10,6 +10,7 @@ import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods,
 import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes-jev/engine/platform/platform/workspace';
 import { GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes-jev/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes-jev/engine/platform/platform/pairing';
+import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes-jev/engine/platform/platform/daemon/receipts';
 import { MailboxReaders } from '@goodvibes-jev/engine/platform/platform/email';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes-jev/engine/terminal-shell';
 import { createRuntimeAcquisitionScope } from './acquisition.js';
@@ -272,6 +273,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       powerManager: graph.powerManager, memoryGovernor: graph.memoryGovernor, voiceSetup: graph.voiceSetup,
       acpHost, // Registers acp.agents.list (discovery) and acp.sessions.create (spawn). See register-gateway-verb-groups.ts.
       attemptsController: contractRunner.fleetControls(), contractOperator,
+      // The check-in reads open contracts for one waiting on the owner's decision.
+      listContracts: () => contractRunner.list({ includeInputSnapshot: false }),
+      // A reason the daemon itself cannot send pushes reaches the next attached surface.
+      daemonReceipts: daemonReceiptStoreAt(daemonReceiptsPath(configManager)),
       relayAvailable: () => configManager.get('relay.enabled') === true,
       pairingWebOrigin: () => resolvePairingWebOrigin(configManager).origin,
       disposal: disposalScope.registry,

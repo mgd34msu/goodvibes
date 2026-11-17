@@ -718,6 +718,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   agentOrchestrator.setDependencies({
     ...approvalHandlers,
     permissionManager: client.permissionManager,
+    toolCallHooks: hookDispatcher,
     contractRunner,
     contractHooks: contractRunner.hooks(),
     agentManager,

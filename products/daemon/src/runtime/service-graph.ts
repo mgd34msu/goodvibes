@@ -722,6 +722,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       permissionManager,
       execPromptAnswerHandler,
       sandboxEscalationHandler,
+      // Workers' tool calls fire the owner's tool hooks, as a session's own calls do.
+      toolCallHooks: hookDispatcher,
       localhostFetchApproval,
       fileCache,
       projectIndex,

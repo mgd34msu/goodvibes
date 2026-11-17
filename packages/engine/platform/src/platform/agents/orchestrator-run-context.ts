@@ -126,8 +126,8 @@ export interface AgentOrchestratorRunContext {
   readonly archetypeLoader?: { loadArchetype(template: string): { systemPrompt?: string | undefined } | null | undefined } | undefined;
   /**
    * Permission gate for this run's background/subagent tool calls (see
-   * gateBackgroundToolCall in background-permission-gate.ts). Undefined leaves
-   * the run ungated (e.g. isolated tests that wire no manager).
+   * backgroundToolCallOwner in background-permission-gate.ts). Undefined leaves
+   * the run ungated (an isolated embedding that wires no manager).
    */
   readonly permissionManager?: BackgroundPermissionManager | undefined;
   /** Fires the tool hooks (Pre, Post, Fail, file) for this run's calls, as for the main session. Undefined fires none. */

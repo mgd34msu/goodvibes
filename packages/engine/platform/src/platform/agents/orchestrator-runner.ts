@@ -13,8 +13,7 @@ import { captureAutonomousSource } from '../permissions/autonomous.js';
 // collaborators (ConversationManager, ToolRegistry, AgentSession, etc.).
 // It does not own any state beyond the duration of a single runAgentLoop() call.
 import { ConversationManager } from '../core/conversation.js';
-import { executeToolCalls as executeAutonomousToolCalls, applyToolBudget, capToolResultOutput, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
-import { withExecutionMode } from '../gate/execution-context.js';
+import { executeToolCalls as executeAutonomousToolCalls, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
 import { captureToolInputCalls, projectToolInputBatch } from '../core/tool-input-ingress.js';
 import { captureProjectionArgs, describeToolInputProjectionProblem, ToolInputProjectionError } from '../tools/input-projection.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -48,8 +47,7 @@ import {
 import { readNormalizedError, summarizeError } from '../utils/error-display.js';
 import { resolveScopedDirectory } from '../runtime/surface-root.js';
 import { appendGoodVibesRuntimeAwarenessPrompt } from '../tools/goodvibes-runtime/index.js';
-import { gateBackgroundToolCall } from './background-permission-gate.js';
-import { assertPermissionActive } from '../permissions/cancellation.js';
+import { backgroundToolCallOwner } from './background-permission-gate.js';
 import { KnowledgeEvidenceRelevanceHeldError } from '../knowledge/semantic/evidence-ranking/reader.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { ProviderAttemptDeniedError } from '../providers/attempt-guard.js';
@@ -242,76 +240,28 @@ async function executeToolCalls(
       onToolSettled({ ...result });
     };
     try {
-      const nativePath = context.autonomousSource !== undefined || Boolean(context.permissionManager?.admitAutonomous && context.permissionManager.autonomousPreparation);
-      // A tool the request listed in one line and that is not loaded: its definition is the answer
-      // and the model sends the call again. The native path's executor answers it the same way.
-      const deferred = call.argumentError === undefined && !nativePath && typeof toolRegistry.deferredCallRefusal === 'function'
-        ? toolRegistry.deferredCallRefusal(call.id, call.name) : undefined;
-      if (call.argumentError !== undefined) {
-        // The provider could not read this call's arguments; running it with empty ones would act on a request the model never made.
-        recordResult({ callId: call.id, success: false, error: call.argumentError }, requestedArguments);
-      } else if (context.autonomousSource !== undefined || (context.permissionManager?.admitAutonomous && context.permissionManager.autonomousPreparation)) {
-        const manager = context.permissionManager;
-        if (!manager?.admitAutonomous || !manager.autonomousPreparation) throw new Error('Native contract tool execution requires its autonomous permission owner');
-        const admitAutonomous = manager.admitAutonomous.bind(manager);
-        const autonomousPreparation = manager.autonomousPreparation.bind(manager);
-        let executedName = call.name;
-        let executedArgs = call.arguments;
-        // Use the same prepared-action owner as foreground/native sessions. The
-        // source getter is a construction binding, not agent prose or AgentInput.
-        const [result] = await withCallingAgent(record.id, () => executeAutonomousToolCalls({
-          autonomousSource: context.autonomousSource ?? (() => ({ goal: record.task, criteria: [] })),
-          autonomousPort: context.autonomousPort, turnSignal: signal, toolRegistry,
-          permissionManager: { check: manager.check.bind(manager), checkDetailed: manager.checkDetailed.bind(manager),
-            admitAutonomous, autonomousPreparation,
-            ...(manager.prepareAutonomousOwner ? { prepareAutonomousOwner: manager.prepareAutonomousOwner.bind(manager) } : {}),
-            ...(manager.projectAutonomousChoices ? { projectAutonomousChoices: manager.projectAutonomousChoices.bind(manager) } : {}),
-            ...(manager.getMode ? { getMode: manager.getMode.bind(manager) } : {}),
-            ...(manager.captureExecutionMode ? { captureExecutionMode: manager.captureExecutionMode.bind(manager) } : {}),
-            ...(manager.retireAutonomousSource ? { retireAutonomousSource: manager.retireAutonomousSource.bind(manager) } : {}),
-            ...(manager.releaseAutonomousChoices ? { releaseAutonomousChoices: manager.releaseAutonomousChoices.bind(manager) } : {}) },
-          hookDispatcher: context.hookDispatcher ?? null, runtimeBus: context.runtimeBus, sessionId: record.id,
-          emitterContext: () => context.emitterContext(record.id),
-          toolBudget: () => toolBudgetFromConfig(context.configManager),
-          onToolExecuted(name, args, success) {
-            executedName = name; executedArgs = args;
-            context.onToolExecuted?.(name, args, success);
-          },
-        }, `${record.id}:turn:${turn}`, [call]));
-        if (result === undefined) throw new Error('Native tool runtime returned no result');
-        recordResult(result, JSON.stringify(executedArgs), executedName);
-      } else if (deferred) {
-        recordResult(deferred, requestedArguments);
-      } else {
-      // Background permission gate: consult the session permission mode exactly
-      // like the foreground turn loop (denials return a structured ToolDenial).
-      assertPermissionActive(signal);
-      const permissionOutcome = await gateBackgroundToolCall(context, record, call.name, call.arguments as Record<string, unknown>, signal);
-      assertPermissionActive(signal);
-      if (!permissionOutcome.approved) {
-        recordResult(
-          { callId: call.id, success: false, error: permissionOutcome.error, decision: permissionOutcome.decision, denial: permissionOutcome.denial },
-          requestedArguments,
-        );
-      } else {
-        // The approved arguments, captured once: this object is what executes and what is recorded.
-        const effectiveArgs = captureProjectionArgs(permissionOutcome.modifiedArgs ?? call.arguments, call.name);
-        const budget = toolBudgetFromConfig(context.configManager);
-        const executeStartedAt = performance.now();
-        const executed = await withExecutionMode(context.permissionManager?.getMode?.(),
-          () => withCallingAgent(record.id, () => toolRegistry.execute(call.id, call.name, effectiveArgs, { signal, onProgress: reportToolProgress })));
-        // A cancelled call keeps its cancelled result; only a finished call is judged against the budget.
-        const result = capToolResultOutput(call.name, effectiveArgs,
-          signal?.aborted ? executed : applyToolBudget(budget, call.name, performance.now() - executeStartedAt, executed));
-        // Schedule a debounced reindex of any touched file(s). Never awaited.
-        try {
-          context.onToolExecuted?.(call.name, effectiveArgs, result.success !== false);
-        } catch (hookErr) {
-          logger.warn('onToolExecuted hook error', { tool: call.name, error: summarizeError(hookErr) });
-        }
-        recordResult({ ...result, callId: call.id }, JSON.stringify(effectiveArgs));
-      }
-      }
+      // Every call goes through the one tool-batch executor: the same admission, tool hooks
+      // (Pre can refuse, Post/Fail/file observe), budget and events as the main session's calls.
+      // It also answers an unreadable call and a call to a tool listed in one line and not loaded.
+      let executedName = call.name;
+      let executedArgs = call.arguments;
+      // The source getter is a construction binding, not agent prose or AgentInput.
+      const [result] = await withCallingAgent(record.id, () => executeAutonomousToolCalls({
+        autonomousSource: context.autonomousSource ?? (() => ({ goal: record.task, criteria: [] })),
+        autonomousPort: context.autonomousPort, turnSignal: signal, toolRegistry,
+        permissionManager: backgroundToolCallOwner(context.permissionManager, record),
+        hookDispatcher: context.hookDispatcher ?? null, runtimeBus: context.runtimeBus, sessionId: record.id,
+        emitterContext: () => context.emitterContext(record.id),
+        toolBudget: () => toolBudgetFromConfig(context.configManager),
+        workingDirectory: context.workingDirectory,
+        onProgress: reportToolProgress,
+        onToolExecuted(name, args, success) {
+          executedName = name; executedArgs = args;
+          context.onToolExecuted?.(name, args, success);
+        },
+      }, `${record.id}:turn:${turn}`, [call]));
+      if (result === undefined) throw new Error('Native tool runtime returned no result');
+      recordResult(result, JSON.stringify(executedArgs), executedName);
     } catch (err) {
       assertDecisionAvailable(err);
       if (err instanceof OrchestratorObservationHeldError || (err instanceof Error && err.cause instanceof OrchestratorObservationHeldError)) throw new OrchestratorObservationHeldError();

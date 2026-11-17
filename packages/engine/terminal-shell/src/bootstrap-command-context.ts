@@ -381,6 +381,7 @@ export function projectAgentToolDependencies<
       readonly sandboxSessionRegistry: unknown;
       readonly workflow: unknown;
       readonly contextAccountingHolder: unknown;
+      readonly hookDispatcher: unknown;
     };
     readonly fileCache: unknown;
     readonly projectIndex: unknown;
@@ -423,6 +424,8 @@ export function projectAgentToolDependencies<
     contextAccountingHolder: input.services.contextAccountingHolder,
     // A worker keeps the same project work plan as the conversation that spawned it.
     workPlan: input.services.workPlanStore,
+    // A worker's tool calls fire the owner's tool hooks, as the conversation's own calls do.
+    toolCallHooks: input.services.hookDispatcher,
   } as {
     contractRunner: Input['services']['contractRunner'];
     permissionManager: Input['services']['permissionManager'];
@@ -457,5 +460,6 @@ export function projectAgentToolDependencies<
     workflowServices: Input['services']['workflow'];
     contextAccountingHolder: Input['services']['contextAccountingHolder'];
     workPlan: Input['services']['workPlanStore'];
+    toolCallHooks: Input['services']['hookDispatcher'];
   };
 }

@@ -20,56 +20,56 @@ export interface HookPointContract {
 const CONTRACTS: HookPointContract[] = [
   {
     pattern: 'Pre:tool:*',
-    description: 'Intercept a tool call before execution.',
+    description: 'Intercept a tool call before admission: deny it, rewrite its arguments, or add a note the model reads with its result. A hook that fails (error, timeout, non-zero exit) refuses the call.',
     authority: 'intercept',
     executionMode: 'blocking',
     canDeny: true,
     canMutateInput: true,
     canInjectContext: true,
     timeoutMs: 0,
-    failurePolicy: 'fail_open',
+    failurePolicy: 'fail_closed',
   },
   {
     pattern: 'Post:tool:*',
-    description: 'Observe a successful tool execution.',
+    description: 'Observe a successful tool execution. Runs beside the turn; the next call does not wait for it.',
     authority: 'observe',
     executionMode: 'non_blocking',
     canDeny: false,
     canMutateInput: false,
-    canInjectContext: true,
+    canInjectContext: false,
     timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
     pattern: 'Fail:tool:*',
-    description: 'Observe a failed tool execution.',
+    description: 'Observe a failed tool execution. Runs beside the turn; the next call does not wait for it.',
     authority: 'observe',
     executionMode: 'non_blocking',
     canDeny: false,
     canMutateInput: false,
-    canInjectContext: true,
+    canInjectContext: false,
     timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
     pattern: 'Post:file:*',
-    description: 'Observe file mutations or file-oriented tool success.',
+    description: 'Observe file mutations or file-oriented tool success. Runs beside the turn; the next call does not wait for it.',
     authority: 'observe',
     executionMode: 'non_blocking',
     canDeny: false,
     canMutateInput: false,
-    canInjectContext: true,
+    canInjectContext: false,
     timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
     pattern: 'Fail:file:*',
-    description: 'Observe file-related failures.',
+    description: 'Observe file-related failures. Runs beside the turn; the next call does not wait for it.',
     authority: 'observe',
     executionMode: 'non_blocking',
     canDeny: false,
     canMutateInput: false,
-    canInjectContext: true,
+    canInjectContext: false,
     timeoutMs: 0,
     failurePolicy: 'log_only',
   },
@@ -392,6 +392,15 @@ export function getHookPointContract(path: HookEventPath): HookPointContract | n
     }
   }
   return best;
+}
+
+/**
+ * Whether the caller waits for the hooks at this point: only `blocking` points
+ * hold the work they guard. A point with no contract waits when it is a Pre point.
+ */
+export function hookPointBlocks(path: HookEventPath): boolean {
+  const contract = getHookPointContract(path);
+  return contract ? contract.executionMode === 'blocking' : path.startsWith('Pre:');
 }
 
 /**

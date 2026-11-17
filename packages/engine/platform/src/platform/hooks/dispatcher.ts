@@ -324,6 +324,7 @@ export class HookDispatcher {
    * the aggregated decision; subsequent hooks still execute (for
    * logging/auditing) but their deny decisions don't change the outcome.
    * For all hooks: additionalContext strings are concatenated.
+   * At a point whose contract is `fail_closed`, a hook that fails without a decision denies.
    * Once hooks are removed as they are selected to run, so two overlapping fires run one once.
    * Chains advance on every event and run their action when their last step matches.
    * Async hooks fire and forget.
@@ -360,8 +361,10 @@ export class HookDispatcher {
     let updatedInput = undefined as Record<string, unknown> | undefined;
 
     const canDeny = contract?.canDeny ?? event.phase === 'Pre';
+    // At a fail-closed point a guard that failed has not said yes: its failure refuses.
+    const failClosed = canDeny && contract?.failurePolicy === 'fail_closed';
     // Folds one hook's (or chain action's) result into the event's outcome.
-    const absorb = (result: HookResult): void => {
+    const absorb = (result: HookResult, hookName?: string): void => {
       if (!result.ok) {
         aggregated.ok = false;
         if (!aggregated.error) aggregated.error = result.error;
@@ -377,6 +380,9 @@ export class HookDispatcher {
       } else if (result.decision && canDeny && aggregated.decision !== 'deny') {
         aggregated.decision = result.decision;
         if (result.reason) aggregated.reason = result.reason;
+      } else if (!result.ok && result.decision === undefined && failClosed && aggregated.decision !== 'deny') {
+        aggregated.decision = 'deny';
+        aggregated.reason = `Hook ${hookName ? `'${hookName}' ` : ''}at ${event.path} failed (${result.error ?? 'no reason given'}), so the call was refused. Fix or remove the hook, then retry.`;
       }
 
       // Last updatedInput wins
@@ -454,7 +460,7 @@ export class HookDispatcher {
         turnId: owner?.turnId,
       });
 
-      absorb(result);
+      absorb(result, hook.name);
     }
 
     // Chains advance on every event, including one no hook matched.

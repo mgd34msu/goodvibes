@@ -12,6 +12,7 @@ import { describeToolInputProjectionProblem, ToolInputProjectionError, type Proj
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
 import { isAuthenticAutonomousAdmission, type AutonomousPermissionAdmission } from '../permissions/manager.js';
 import type { TurnHookOwner } from '../hooks/turn-ownership.js';
+import { hookPointBlocks } from '../hooks/contracts.js';
 import { ToolError, PermissionError } from '../types/errors.js';
 import type { HookEvent, HookEventPath, HookResult } from '../hooks/types.js';
 import type { ToolCall, ToolDefinition, ToolResult } from '../types/tools.js';
@@ -154,8 +155,9 @@ export type ToolExecutionDeps = {
   /** Retain each actual settled receipt even when a later call or hook aborts the batch. */
   onToolSettled?: ((result: ToolResult) => void) | undefined;
   toolRegistry: ToolRegistry;
-  permissionManager: Pick<PermissionManager, 'checkDetailed' | 'check' | 'admitAutonomous' | 'autonomousPreparation'>
-    & Partial<Pick<PermissionManager, 'prepareAutonomousOwner' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'retireAutonomousSource' | 'getMode' | 'captureExecutionMode'>>;
+  /** Without `admitAutonomous` and `autonomousPreparation` each call is asked through `checkDetailed` (an embedding's own gate). */
+  permissionManager: Pick<PermissionManager, 'checkDetailed' | 'check'>
+    & Partial<Pick<PermissionManager, 'admitAutonomous' | 'autonomousPreparation' | 'prepareAutonomousOwner' | 'projectAutonomousChoices' | 'releaseAutonomousChoices' | 'retireAutonomousSource' | 'getMode' | 'captureExecutionMode'>>;
   hookDispatcher: HookDispatcherLike | null;
   runtimeBus: RuntimeEventBus | null;
   sessionId: string;
@@ -167,6 +169,8 @@ export type ToolExecutionDeps = {
    * block the tool-result path.
    */
   onToolExecuted?: ((toolName: string, args: Record<string, unknown>, success: boolean) => void) | undefined;
+  /** Handed to each tool body: a tool that reports progress tells the caller it is still working (liveness). */
+  onProgress?: ((note?: string) => void) | undefined;
   /**
    * Per-call cancellation seam: `open(callId)` yields the AbortSignal passed to
    * the tool body (registering the call as cancellable), `close(callId)`
@@ -304,6 +308,25 @@ function toCancelledResult(callId: string, settled: ToolResult | null): ToolResu
   };
 }
 
+/** A Pre hook's note rides with the call's result, where the model reads it (output on success, error otherwise). */
+function withHookNote(result: ToolResult, note: string): ToolResult {
+  const line = `[Note from the owner's Pre:tool hook] ${note}`;
+  if (result.success) return { ...result, output: result.output ? `${result.output}\n\n${line}` : line };
+  return { ...result, error: result.error ? `${result.error}\n\n${line}` : line };
+}
+
+/**
+ * Fires an observing hook point (Post, Fail, file). The point's contract says whether
+ * the call waits: a `non_blocking` point runs beside the turn, which the turn's hook
+ * owner joins before the turn ends, so a slow hook no longer delays the next call.
+ */
+async function fireObservingHook(dispatcher: HookDispatcherLike, event: HookEvent): Promise<void> {
+  const fired = dispatcher.fire(event).catch((error: unknown) => {
+    logger.warn(`${event.path} hook error`, { error: summarizeError(error) });
+  });
+  if (hookPointBlocks(event.path)) await fired;
+}
+
 /** How each call of a batch may run beside the others, from the registry's declarations; every call runs alone when the registry cannot list them. */
 function batchLanes(deps: ToolExecutionDeps, calls: readonly ToolCall[]): number[][] {
   if (calls.length < 2 || typeof deps.toolRegistry.list !== 'function') return calls.map((_, index) => [index]);
@@ -391,10 +414,62 @@ async function executeToolCallsInMode(
       appendResult(deferred);
       continue;
     }
+    // The owner's Pre:tool hooks run before admission, on the call the model made: a deny
+    // refuses it with no gate work and no owner prompt; a rewrite is what the gate admits and
+    // what runs; a note reaches the model with this call's result. A hook that fails refuses
+    // the call (the point's contract is fail-closed; the dispatcher applies it).
+    let hookNote: string | undefined;
+    if (deps.hookDispatcher && !isYoloExecution()) {
+      const hookStartedAt = Date.now();
+      let refusal: string | undefined;
+      try {
+        const preResult = await deps.hookDispatcher.fire({
+          path: `Pre:tool:${call.name}`,
+          phase: 'Pre',
+          category: 'tool',
+          specific: call.name,
+          sessionId: deps.sessionId,
+          timestamp: Date.now(),
+          payload: { callId: call.id, tool: call.name, args: call.arguments },
+        });
+        assertTurnActive();
+        if (preResult.decision === 'deny') {
+          refusal = preResult.reason ?? `Tool '${call.name}' was refused by its Pre hook.`;
+        } else {
+          if (preResult.updatedInput) call = { ...call, arguments: preResult.updatedInput };
+          if (preResult.additionalContext) hookNote = preResult.additionalContext;
+        }
+      } catch (hookErr) {
+        // Cancellation is not a hook failure; it ends the turn.
+        assertTurnActive();
+        const hookMessage = summarizeError(hookErr);
+        logger.error('Orchestrator: Pre hook error', { tool: call.name, error: hookMessage });
+        refusal = `Tool '${call.name}' was not run because its Pre hook failed (${hookMessage}). Fix or remove the hook, then retry.`;
+      }
+      if (refusal !== undefined) {
+        const deniedResult: ToolResult = {
+          callId: call.id,
+          success: false,
+          error: refusal,
+          decision: { state: 'refused', decidedBy: 'rule', reason: refusal, limit: `Pre:tool:${call.name} hook`,
+            next: ['Do something else, or ask the owner to change the hook.'] },
+        };
+        if (deps.runtimeBus) emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
+          callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(refusal),
+          durationMs: Date.now() - hookStartedAt, result: redactedToolResultSummary(redactedErrorResult(deniedResult)),
+        });
+        appendResult(deniedResult);
+        continue;
+      }
+    }
     // Production managers/registries use the migrated path. The boolean seam is
     // retained only for pre-existing duck-typed test/embedding implementations.
-    const autonomous = typeof deps.permissionManager.admitAutonomous === 'function'
-      && typeof deps.toolRegistry.prepareCall === 'function';
+    const manager = deps.permissionManager;
+    const owner = typeof manager.admitAutonomous === 'function' && typeof manager.autonomousPreparation === 'function'
+      && typeof deps.toolRegistry.prepareCall === 'function'
+      ? { admit: manager.admitAutonomous.bind(manager), preparation: manager.autonomousPreparation.bind(manager) }
+      : undefined;
+    const autonomous = owner !== undefined;
     const sourceId = autonomous ? autonomousInvocationSource(deps.permissionManager, deps.sessionId, turnId, call.id) : '';
     const sourceOf = deps.autonomousSource;
     if (autonomous && !sourceOf) throw new Error('Autonomous execution requires the host source goal and criteria');
@@ -405,7 +480,7 @@ async function executeToolCallsInMode(
         await deps.permissionManager.prepareAutonomousOwner?.(admissionSignal);
         assertTurnActive();
         admissionSignal?.throwIfAborted();
-        const originalPreparation = deps.permissionManager.autonomousPreparation(sourceId, sourceOf!, admissionSignal, deps.autonomousPort);
+        const originalPreparation = owner.preparation(sourceId, sourceOf!, admissionSignal, deps.autonomousPort);
         try {
           if (typeof deps.toolRegistry.projectCall === 'function') {
             inputProjection = await deps.toolRegistry.projectCall(call.id, call.name, call.arguments,
@@ -417,7 +492,7 @@ async function executeToolCallsInMode(
           }
           originalPreparation.assertCurrent();
           const preparation = choiceProjection
-            ? deps.permissionManager.autonomousPreparation(sourceId, sourceOf!, admissionSignal, deps.autonomousPort, choiceProjection)
+            ? owner.preparation(sourceId, sourceOf!, admissionSignal, deps.autonomousPort, choiceProjection)
             : originalPreparation;
           prepared = await deps.toolRegistry.prepareCall(call.id, call.name, call.arguments, { signal: admissionSignal,
             port: preparation.port, assertCurrent: () => { assertTurnActive(); preparation.assertCurrent(); } });
@@ -460,12 +535,12 @@ async function executeToolCallsInMode(
       // Event observers and every awaited admission boundary can cancel the turn.
       assertTurnActive();
       let checkResult: import('../permissions/types.js').PermissionCheckResult;
-      if (prepared) {
+      if (prepared && owner) {
         const consumedRevisions: string[] = [];
         let permittedRevisionIds: readonly string[] | undefined;
         while (true) {
           const currentPrepared = prepared;
-          admission = await deps.permissionManager.admitAutonomous(sourceId, currentPrepared.name, currentPrepared.args, { sourceOf: sourceOf!, decoratePort: deps.autonomousPort, signal: admissionSignal, hookOwner: deps.hookOwner, consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}), ...(choiceProjection ? { choiceProjection } : {}), schemaRevision: currentPrepared.schemaRevision, preparationDecisionIds: currentPrepared.judgmentDecisionIds, preparedCall: { registry: deps.toolRegistry, call: currentPrepared }, assertPrepared: () => deps.toolRegistry.assertPrepared(currentPrepared) });
+          admission = await owner.admit(sourceId, currentPrepared.name, currentPrepared.args, { sourceOf: sourceOf!, decoratePort: deps.autonomousPort, signal: admissionSignal, hookOwner: deps.hookOwner, consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}), ...(choiceProjection ? { choiceProjection } : {}), schemaRevision: currentPrepared.schemaRevision, preparationDecisionIds: currentPrepared.judgmentDecisionIds, preparedCall: { registry: deps.toolRegistry, call: currentPrepared }, assertPrepared: () => deps.toolRegistry.assertPrepared(currentPrepared) });
           assertTurnActive();
           permittedRevisionIds ??= admission.revisionIds;
           checkResult = admission.result;
@@ -473,7 +548,7 @@ async function executeToolCallsInMode(
           const revision = admission.revision;
           if (consumedRevisions.includes(revision.ref.id)) throw new Error('Autonomous revision was already consumed');
           consumedRevisions.push(revision.ref.id);
-          const preparation = deps.permissionManager.autonomousPreparation(sourceId, sourceOf!, admissionSignal, deps.autonomousPort, choiceProjection);
+          const preparation = owner.preparation(sourceId, sourceOf!, admissionSignal, deps.autonomousPort, choiceProjection);
           prepared = await deps.toolRegistry.prepareCall(call.id, revision.toolName, revision.args, { signal: admissionSignal, port: preparation.port, assertCurrent: () => { assertTurnActive(); preparation.assertCurrent(); } });
           preparation.assertCurrent();
           call = { id: prepared.callId, name: prepared.name, arguments: prepared.args };
@@ -541,66 +616,6 @@ async function executeToolCallsInMode(
         });
       }
 
-      assertTurnActive();
-      if (deps.hookDispatcher && !isYoloExecution()) {
-        try {
-          const preEvent: HookEvent = {
-            path: `Pre:tool:${call.name}`,
-            phase: 'Pre',
-            category: 'tool',
-            specific: call.name,
-            sessionId: deps.sessionId,
-            timestamp: Date.now(),
-            payload: { callId: call.id, tool: call.name, args: call.arguments },
-          };
-          const preResult = await deps.hookDispatcher.fire(preEvent);
-          assertTurnActive();
-          if (preResult.decision === 'deny' && !isYoloExecution()) {
-            const deniedResult: ToolResult = {
-              callId: call.id,
-              success: false,
-              error: preResult.reason ?? `Tool '${call.name}' denied by hook`,
-            };
-            if (deps.runtimeBus) {
-              emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
-                callId: call.id,
-                turnId,
-                tool: call.name,
-                error: redactDiagnosticText(deniedResult.error ?? `Tool '${call.name}' denied by hook`),
-                durationMs: Date.now() - startedAt,
-                result: redactedToolResultSummary(redactedErrorResult(deniedResult)),
-              });
-            }
-            appendResult(deniedResult);
-            continue;
-          }
-        } catch (hookErr) {
-          // Cancellation is not a hook failure; it ends the turn.
-          assertTurnActive();
-          // A Pre hook may exist to deny this call, and a hook that crashed or
-          // timed out has not said yes. Fail closed, like the Pre:llm:chat hook.
-          const hookMessage = hookErr instanceof Error ? hookErr.message : String(hookErr);
-          logger.error('Orchestrator: Pre hook error', { tool: call.name, error: hookMessage });
-          const failedResult: ToolResult = {
-            callId: call.id,
-            success: false,
-            error: `Tool '${call.name}' was not run because its Pre hook failed (${hookMessage}). Fix or remove the hook, then retry.`,
-          };
-          if (deps.runtimeBus) {
-            emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
-              callId: call.id,
-              turnId,
-              tool: call.name,
-              error: redactDiagnosticText(failedResult.error ?? 'Pre hook failed'),
-              durationMs: Date.now() - startedAt,
-              result: redactedToolResultSummary(redactedErrorResult(failedResult)),
-            });
-          }
-          appendResult(failedResult);
-          continue;
-        }
-      }
-
       // No new call may acquire a fresh, un-aborted execution signal after a cancel.
       assertTurnActive();
       let result: ToolResult;
@@ -624,8 +639,11 @@ async function executeToolCallsInMode(
         } : undefined, () => withCostOriginAsync(
           { tool: call.name, callId: call.id, mcpServer: mcpServerOfToolName(call.name) },
           () => {
+            const progress = deps.onProgress ? { onProgress: deps.onProgress } : {};
+            const executeOptions = callerCurrent ? { signal: callSignal, assertCurrent: assertTurnActive, ...progress }
+              : callSignal ? { signal: callSignal, ...progress } : deps.onProgress ? progress : undefined;
             if (!prepared || !admission) return deps.toolRegistry.execute(call.id, call.name,
-              checkResult.modifiedArgs ?? call.arguments, callerCurrent ? { signal: callSignal, assertCurrent: assertTurnActive } : callSignal ? { signal: callSignal } : undefined);
+              checkResult.modifiedArgs ?? call.arguments, executeOptions);
             // Older embedding managers own a callback-only admission contract.
             // Permit it only on authenticated non-adopted registrations; it
             // mints no strict-body proof. Any genuine brand (even stale) keeps
@@ -633,7 +651,7 @@ async function executeToolCallsInMode(
             const preparedAdmission = isAuthenticAutonomousAdmission(admission)
               || deps.toolRegistry.readPreparedOwnedAdmissionEvidence(prepared) !== undefined
               ? admission : admission.claim;
-            return deps.toolRegistry.executePrepared(prepared, preparedAdmission, callerCurrent ? { signal: callSignal, assertCurrent: assertTurnActive } : callSignal ? { signal: callSignal } : undefined);
+            return deps.toolRegistry.executePrepared(prepared, preparedAdmission, executeOptions);
           },
         ));
         if (checkResult.autonomousDecision) result = { ...result, autonomousDecision: checkResult.autonomousDecision };
@@ -668,23 +686,15 @@ async function executeToolCallsInMode(
           });
 
         if (deps.hookDispatcher && !turnSignal?.aborted) {
-          try {
-            const failEvent: HookEvent = {
-              path: `Fail:tool:${call.name}`,
-              phase: 'Fail',
-              category: 'tool',
-              specific: call.name,
-              sessionId: deps.sessionId,
-              timestamp: Date.now(),
-              payload: { callId: call.id, tool: call.name, error: message },
-            };
-            await deps.hookDispatcher.fire(failEvent);
-          } catch (hookErr) {
-            logger.error('Orchestrator: Fail hook error', {
-              tool: call.name,
-              error: hookErr instanceof Error ? hookErr.message : String(hookErr),
-            });
-          }
+          await fireObservingHook(deps.hookDispatcher, {
+            path: `Fail:tool:${call.name}`,
+            phase: 'Fail',
+            category: 'tool',
+            specific: call.name,
+            sessionId: deps.sessionId,
+            timestamp: Date.now(),
+            payload: { callId: call.id, tool: call.name, error: message },
+          });
         }
       } finally {
         if (!earlyCallSignal) deps.toolCallSignals?.close(call.id);
@@ -698,23 +708,15 @@ async function executeToolCallsInMode(
       // before this throw allows the turn's terminal cancellation event.
       assertTurnActive();
       if (deps.hookDispatcher && result.success === true) {
-        try {
-          const postEvent: HookEvent = {
-            path: `Post:tool:${call.name}`,
-            phase: 'Post',
-            category: 'tool',
-            specific: call.name,
-            sessionId: deps.sessionId,
-            timestamp: Date.now(),
-            payload: { callId: call.id, tool: call.name, result },
-          };
-          await deps.hookDispatcher.fire(postEvent);
-        } catch (hookErr) {
-          logger.error('Orchestrator: Post hook error', {
-            tool: call.name,
-            error: hookErr instanceof Error ? hookErr.message : String(hookErr),
-          });
-        }
+        await fireObservingHook(deps.hookDispatcher, {
+          path: `Post:tool:${call.name}`,
+          phase: 'Post',
+          category: 'tool',
+          specific: call.name,
+          sessionId: deps.sessionId,
+          timestamp: Date.now(),
+          payload: { callId: call.id, tool: call.name, result },
+        });
       }
 
       assertTurnActive();
@@ -744,28 +746,22 @@ async function executeToolCallsInMode(
         const filePath = typeof call.arguments['path'] === 'string' ? call.arguments['path'] :
           (Array.isArray(call.arguments['files']) ? JSON.stringify(call.arguments['files']) : '');
         const phase = result.success ? 'Post' : 'Fail';
-        try {
-          // This admitted file-hook dispatch belongs to the turn, exactly like
-          // the tool hooks above. Await its existing bounded dispatcher promise;
-          // do not manufacture settlement while it is still doing work.
-          await deps.hookDispatcher.fire({
-            path: `${phase}:file:${call.name}` as HookEventPath,
-            phase,
-            category: 'file',
-            specific: call.name,
-            sessionId: deps.sessionId,
-            timestamp: Date.now(),
-            payload: { tool: call.name, path: filePath, callId: call.id, ...(result.success ? {} : { error: result.error }) },
-          });
-        } catch (err) {
-          logger.warn(`${phase}:file:${call.name} hook error`, { error: summarizeError(err) });
-        }
+        await fireObservingHook(deps.hookDispatcher, {
+          path: `${phase}:file:${call.name}` as HookEventPath,
+          phase,
+          category: 'file',
+          specific: call.name,
+          sessionId: deps.sessionId,
+          timestamp: Date.now(),
+          payload: { tool: call.name, path: filePath, callId: call.id, ...(result.success ? {} : { error: result.error }) },
+        });
         // A cancellation during dispatch cannot admit another tool or continue
         // the turn, including when the hook rejected and was logged above.
         assertTurnActive();
       }
 
       result = capToolResultOutput(call.name, call.arguments, result);
+      if (hookNote) result = withHookNote(result, hookNote);
 
       if (deps.onToolExecuted) {
         // Fire-and-forget: the scheduler only records a debounce timer; it must never block the

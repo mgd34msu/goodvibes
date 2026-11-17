@@ -246,7 +246,7 @@ export async function initializeBootstrapCore(
   // fleet plane's `state: 'awaiting-approval'` is carried by the shared free
   // function the manager is built through, not by a local copy of that
   // mapping. Built before the orchestrator is handed its dependencies: the
-  // platform's gateBackgroundToolCall() approves every call when the context has
+  // platform's backgroundToolCallOwner() approves every call when the context has
   // no manager, so a spawned agent must never exist without one.
   const permissionManager = services.permissionManager;
   installAgentOrchestratorDependencies(

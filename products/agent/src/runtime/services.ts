@@ -1627,6 +1627,7 @@ function composeRuntimeServices(options: RuntimeServicesOptions, disposalScope: 
   agentOrchestrator.setDependencies({
     ...approvalHandlers,
     permissionManager,
+    toolCallHooks: hookDispatcher,
     agentManager,
     contractRunner,
     contractHooks: contractRunner.hooks(),

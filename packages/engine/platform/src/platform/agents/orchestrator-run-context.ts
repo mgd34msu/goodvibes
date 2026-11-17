@@ -89,6 +89,8 @@ export interface AgentOrchestratorRunContext {
   readonly codeReadAccessFilter?: import('../tools/shared/read-access.js').ReadAccessFilter | undefined;
   /** Live gate for the embedder's storage.codeIndexEnabled setting. Undefined defaults to allowed. */
   readonly isCodeInjectionSettingEnabled?: (() => boolean) | undefined;
+  /** Told the files of injected or ranked code hits that changed since indexing, so the shared code index reindexes them. */
+  readonly onCodeSourcesChanged?: ((absolutePaths: readonly string[]) => void) | undefined;
   /**
    * called once per executed tool (toolName, args, success) so a code-index
    * reindex scheduler can debounce an incremental reindex of touched files. Never awaited.

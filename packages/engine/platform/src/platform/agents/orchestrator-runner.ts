@@ -43,7 +43,11 @@ import {
   buildPerTurnKnowledgeInjection,
   defaultTurnKnowledgeBudgetTokens,
   recordTurnInjection,
+  staleCodeInjection,
+  withdrawCodeFromInjectionRecord,
+  withdrawnCodeReason,
   DEFAULT_TURN_KNOWLEDGE_RELEVANCE_FLOOR,
+  type TurnInjectionRecord,
 } from './turn-knowledge-injection.js';
 import { readNormalizedError, summarizeError } from '../utils/error-display.js';
 import { resolveScopedDirectory } from '../runtime/surface-root.js';
@@ -585,6 +589,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     const knowledgeIdsAlreadySurfaced = new Set<string>((record.knowledgeInjections ?? []).map((entry) => entry.id));
     let priorTurnKnowledgeBlock: string | null = null;
     let assertCodeInjectionCurrent: (() => Promise<void>) | undefined;
+    // While the reused block carries code hits: its memory part and the record delivered with it, so the code can be withdrawn on its own.
+    let priorKnowledgeCode: { readonly memoryBlock: string | null; readonly record: TurnInjectionRecord } | undefined;
     let priorCapturedMemoryBlock: string | null = null;
     let priorCapturedMemoryIds: string[] = [];
     let priorCapturedMemoryModes: string[] = [];
@@ -635,6 +641,19 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     const awaitingDelivery = { steers: [] as string[], others: [] as string[] };
     const runSession = session;
     const runSignal = context.getCancellationSignal?.(record.id);
+    /** The injected code no longer matches its files: later requests carry the memory part alone, and the record says so. */
+    const withdrawInjectedCode = (why: string): void => {
+      const injected = priorKnowledgeCode;
+      priorTurnKnowledgeBlock = injected?.memoryBlock ?? null;
+      assertCodeInjectionCurrent = undefined;
+      priorKnowledgeCode = undefined;
+      if (injected) {
+        const withdrawn = withdrawCodeFromInjectionRecord(injected.record, injected.memoryBlock, why);
+        record.turnInjections = recordTurnInjection(record.turnInjections, withdrawn);
+        runSession.appendMessage({ type: 'knowledge_injection', ...withdrawn });
+      }
+      logger.info('Injected code context withdrawn for the rest of the agent run', { agentId: record.id, reason: why });
+    };
     // The provider response the turn is acting on; the tool round and the answer are recorded from it.
     let lastResponse: Awaited<ReturnType<LLMProvider['chat']>> | undefined;
     // The model round being worked on, for progress lines, the session log and contract reports.
@@ -704,7 +723,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       const passiveKnowledgeInjectionEnabled = context.featureFlagManager?.isEnabled('agent-passive-knowledge-injection') ?? true;
       // A released captured code generation never survives into another round,
       // even if a feature/storage/registry gate prevents replacement retrieval.
-      if (capturedCode) { priorTurnKnowledgeBlock = priorCapturedMemoryBlock; assertCodeInjectionCurrent = undefined; }
+      if (capturedCode) { priorTurnKnowledgeBlock = priorCapturedMemoryBlock; assertCodeInjectionCurrent = undefined; priorKnowledgeCode = undefined; }
       // Resolved once per round (used by both the awareness check below and the
       // knowledge budget), so the passive-injection budget can derive "3% of
       // context window" even when context-window awareness itself is disabled.
@@ -777,6 +796,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             codeAuthority: { readAccessFilter: context.codeReadAccessFilter, signal: runSignal },
             codeInjectionEnabled,
             codeLimit: context.configManager?.get('agents.passiveInjection.codeLimit'),
+            onCodeSourcesChanged: context.onCodeSourcesChanged,
           }).catch((error: unknown) => {
             runSignal?.throwIfAborted();
             logger.warn('Optional knowledge retrieval unavailable; continuing agent turn', { agentId: record.id, error: summarizeError(error) });
@@ -808,6 +828,9 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             : turnInjectionRecord;
           record.turnInjections = recordTurnInjection(record.turnInjections, deliveredInjectionRecord);
           runSession.appendMessage({ type: 'knowledge_injection', ...deliveredInjectionRecord });
+          priorKnowledgeCode = assertCodeCurrent
+            ? { memoryBlock: capturedCode ? priorCapturedMemoryBlock : memoryBlock ?? null, record: deliveredInjectionRecord }
+            : undefined;
         } else {
           // Hard no-op: no budget headroom this round. Never call into retrieval for a
           // budget that's already known to be zero, and never claim a block that can't
@@ -822,6 +845,7 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           }
           priorTurnKnowledgeBlock = capturedCode && !newUserInputThisTurn ? priorCapturedMemoryBlock : null;
           assertCodeInjectionCurrent = undefined;
+          priorKnowledgeCode = undefined;
         }
       }
     };
@@ -891,10 +915,24 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
               + JSON.stringify(selectedDiffContext)
             : '');
         const capturedCodeGeneration = capturedCode?.generation?.();
-        const codeAuthorityForAttempt = assertCodeInjectionCurrent;
-        const assertNativeProviderSource = async () => {
+        // The consumption check, once per request before it is composed: code that changed since it was
+        // read (the agent's own edit in an earlier round, a formatter) is withdrawn and reindexed, and the
+        // request goes with the memory part, rather than the run failing.
+        if (assertCodeInjectionCurrent) {
+          const withdrawn = await staleCodeInjection(assertCodeInjectionCurrent, { signal: runSignal, onCodeSourcesChanged: context.onCodeSourcesChanged });
+          terminal.assertCurrent();
+          if (withdrawn !== undefined) withdrawInjectedCode(withdrawn);
+        }
+        // Checked again on each provider attempt; a file that changes between attempts is told apart from
+        // the other attempt checks, so the request is composed again without the code instead of failing.
+        const injectedCodeCheck = assertCodeInjectionCurrent;
+        const codeAttempt: { failure?: unknown } = {};
+        const codeAuthorityForAttempt = injectedCodeCheck ? async () => {
+          try { await injectedCodeCheck(); } catch (error) { codeAttempt.failure = error; throw new ProviderAttemptDeniedError(error); }
+        } : undefined;
+        // A verification request carries the proposal and its evidence, never the knowledge block, so it takes no code check.
+        const assertVerificationSource = async () => {
           terminal.assertCurrent(); decisionRoute?.assertCurrent();
-          try { await codeAuthorityForAttempt?.(); } catch (error) { throw new ProviderAttemptDeniedError(error); }
           await capturedCode?.assertCurrent?.(capturedCodeGeneration);
           // beforeProviderRequest ran for this request at the top of the round; an attempt does not repeat it.
           assertOrchestratorKnowledgeCurrent(record, promptContext);
@@ -902,9 +940,13 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             throw new Error('Native provider source changed before retry');
           terminal.assertCurrent();
         };
-        assertVerificationProvider = assertNativeProviderSource;
+        const assertNativeProviderSource = async () => {
+          terminal.assertCurrent(); decisionRoute?.assertCurrent();
+          await codeAuthorityForAttempt?.();
+          await assertVerificationSource();
+        };
+        assertVerificationProvider = assertVerificationSource;
         try {
-          try { await codeAuthorityForAttempt?.(); } catch (error) { throw new ProviderAttemptDeniedError(error); }
           const chat = decisionRoute ? (request: ChatRequest) => chatWithDecisionRoute(decisionRoute, request) : (request: ChatRequest) => activeRoute.provider.chat(request);
           // Core tools in full, the rest one line each; a closing request keeps them (providers reject a tool history without them) and its calls are not run.
           toolDefinitions = toolRegistry.getModelToolDefinitions();
@@ -930,6 +972,10 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
           terminal.assertCurrent();
           if ((record as { status: string }).status === 'cancelled') throw new TurnEnded('cancelled');
           if (chatErr instanceof OrchestratorObservationHeldError) throw chatErr;
+          if (chatErr instanceof ProviderAttemptDeniedError && 'failure' in codeAttempt && !runSignal?.aborted) {
+            withdrawInjectedCode(withdrawnCodeReason(codeAttempt.failure, context.onCodeSourcesChanged));
+            continue;
+          }
           if (chatErr instanceof ProviderAttemptDeniedError || chatErr instanceof KnowledgeEvidenceRelevanceHeldError || chatErr instanceof JudgmentInputError) throw chatErr;
           if (
             !contextRetried &&

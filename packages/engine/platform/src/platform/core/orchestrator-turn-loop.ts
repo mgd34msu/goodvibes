@@ -71,6 +71,9 @@ import {
   buildPerTurnKnowledgeInjection,
   defaultTurnKnowledgeBudgetTokens,
   memoryRecordIdsOf,
+  staleCodeInjection,
+  withdrawCodeFromInjectionRecord,
+  withdrawnCodeReason,
   DEFAULT_TURN_KNOWLEDGE_RELEVANCE_FLOOR,
   type TurnInjectionRecord,
   type TurnKnowledgeRegistrySource,
@@ -356,6 +359,17 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   // written into the system prompt.
   let turnKnowledgeBlock: string | null = null;
   let assertCodeInjectionCurrent: (() => Promise<void>) | undefined;
+  // While the block carries code hits: its memory part and record, so the code can be withdrawn on its own.
+  let turnCodeInjection: { readonly memoryBlock: string | null; readonly record: TurnInjectionRecord } | undefined;
+  /** The injected code no longer matches its files: later requests carry the memory part alone, and the record says so. */
+  const withdrawTurnCodeInjection = (why: string): void => {
+    const injected = turnCodeInjection;
+    turnKnowledgeBlock = injected?.memoryBlock ?? null;
+    assertCodeInjectionCurrent = undefined;
+    turnCodeInjection = undefined;
+    if (injected) context.recordTurnKnowledgeInjection(withdrawCodeFromInjectionRecord(injected.record, injected.memoryBlock, why));
+    logger.info('Injected code context withdrawn for the rest of the turn', { reason: why });
+  };
   const nativeTurn = isNativeConversationTurn();
   const contractSession = nativeTurn ? undefined : bindContractSession(context.contractHooks, context.sessionId, context.turnId);
 
@@ -583,6 +597,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         assertActiveTurn();
         turnKnowledgeBlock = injection?.block ?? null;
         assertCodeInjectionCurrent = injection?.assertCodeCurrent;
+        turnCodeInjection = injection?.assertCodeCurrent ? { memoryBlock: injection.memoryBlock ?? null, record: injection.record } : undefined;
         if (injection) {
           const turnInjectionRecord = injection.record;
           if (turnInjectionRecord.injectedIds.length > 0) {
@@ -599,7 +614,16 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         // carries no knowledge block (mirrors the agent-runner's identical branch).
         turnKnowledgeBlock = null;
         assertCodeInjectionCurrent = undefined;
+        turnCodeInjection = undefined;
       }
+    }
+    // The consumption check, once per request before the block is placed: code that changed since it was
+    // read (the model's own edit on an earlier request, a formatter) is withdrawn and reindexed, and the
+    // request goes with the memory part, rather than the turn failing.
+    if (assertCodeInjectionCurrent) {
+      const withdrawn = await staleCodeInjection(assertCodeInjectionCurrent, { signal, onCodeSourcesChanged: context.onCodeSourcesChanged });
+      assertActiveTurn();
+      if (withdrawn !== undefined) withdrawTurnCodeInjection(withdrawn);
     }
     // The system prompt is the same on every request of the session, so the
     // provider's cached prefix covers the whole history. The open tier of the
@@ -643,16 +667,21 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       if (!current || JSON.stringify(captureAutonomousSource(current)) !== JSON.stringify(capturedProviderSource))
         throw new Error('Native session source changed before provider attempt');
     };
-    const codeAuthorityForAttempt = assertCodeInjectionCurrent;
+    // Checked again on each provider attempt; a file that changes between attempts is told apart from
+    // the other attempt checks, so the request is composed again without the code instead of failing.
+    const injectedCodeCheck = assertCodeInjectionCurrent;
+    const codeAttempt: { failure?: unknown } = {};
+    const codeAuthorityForAttempt = injectedCodeCheck ? async () => {
+      try { await injectedCodeCheck(); } catch (error) { codeAttempt.failure = error; throw error; }
+    } : undefined;
+    // A verification request carries the proposal and its evidence, never the knowledge block, so it takes no code check.
     assertVerificationProvider = async () => {
-      if (codeAuthorityForAttempt) await revalidateProviderAttempt(codeAuthorityForAttempt);
       assertActiveTurn();
       if (capturedProviderSource) assertNativeProviderSource();
       if (nativeTurn) await revalidateNativeConversationTurnScope();
       assertActiveTurn();
     };
     try {
-      if (codeAuthorityForAttempt) await revalidateProviderAttempt(codeAuthorityForAttempt);
       decisionRoute?.assertCurrent();
       const chat = decisionRoute ? (chatRequest: ChatRequest) => chatWithDecisionRoute(decisionRoute, chatRequest) : (chatRequest: ChatRequest) => provider.chat(chatRequest);
       const evidence = [privateDiffBlock,
@@ -687,6 +716,10 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     } catch (chatErr) {
       assertActiveTurn();
       endStream(true);
+      if (chatErr instanceof ProviderAttemptDeniedError && 'failure' in codeAttempt && !signal?.aborted) {
+        withdrawTurnCodeInjection(withdrawnCodeReason(codeAttempt.failure, context.onCodeSourcesChanged));
+        return 'again';
+      }
       if (chatErr instanceof ProviderAttemptDeniedError) throw chatErr;
       if (!contextOverflowRetried && await isContextSizeExceededError(chatErr, 'core.turn-loop.context-exceeded')) {
         // The provider rejected the request as exceeding the model's context

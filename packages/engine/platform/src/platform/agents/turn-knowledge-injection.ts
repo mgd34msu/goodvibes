@@ -20,7 +20,7 @@
 // turn" cache-reuse guard and the AgentRecord/session-transcript recording; this module is
 // a pure function of its inputs so it can be unit-tested without a live agent loop.
 import type { CodeInjectionRanking, CodeInjectionAuthorityOptions } from '../state/code-injection-ranking.js';
-import type { SkippedCodeHit, SkippedCodeHitReason } from '../state/code-injection-live.js';
+import { CodeInjectionSourcesChangedError, type SkippedCodeHit, type SkippedCodeHitReason } from '../state/code-injection-live.js';
 import { summarizeError } from '../utils/error-display.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import type { ContentPart, ProviderMessage } from '../providers/interface.js';
@@ -557,4 +557,48 @@ export function recordTurnInjection(
 ): TurnInjectionRecord[] {
   const next = existing ? [...existing, entry] : [entry];
   return next.length > retention ? next.slice(next.length - retention) : next;
+}
+
+/**
+ * The consumption check for a knowledge block reused on a later request of
+ * the same turn or run. Undefined while the injected code is still what was
+ * read; otherwise why it is not, after handing the files that changed (the
+ * model's own edits, a formatter, the person's editor) to `onCodeSourcesChanged`
+ * for reindexing. The caller then sends the memory part of the block alone
+ * instead of failing the turn. A cancelled turn still throws.
+ */
+export async function staleCodeInjection(
+  assertCodeCurrent: () => Promise<void>,
+  options: { readonly signal?: AbortSignal | undefined; readonly onCodeSourcesChanged?: ((absolutePaths: readonly string[]) => void) | undefined },
+): Promise<string | undefined> {
+  try { await assertCodeCurrent(); return undefined; }
+  catch (error) {
+    options.signal?.throwIfAborted();
+    return withdrawnCodeReason(error, options.onCodeSourcesChanged);
+  }
+}
+
+/** Why injected code is withdrawn after its check failed with `error`; the files that changed go to the reindex. */
+export function withdrawnCodeReason(error: unknown, onCodeSourcesChanged?: ((absolutePaths: readonly string[]) => void) | undefined): string {
+  if (error instanceof CodeInjectionSourcesChangedError) {
+    onCodeSourcesChanged?.(error.absolutePaths);
+    const n = error.absolutePaths.length;
+    return `code context withdrawn: ${n} injected file${n === 1 ? '' : 's'} changed during the turn`;
+  }
+  return `code context withdrawn: ${summarizeError(error)}`;
+}
+
+/** The injection record once its code hits were withdrawn mid-turn: the memory records stay, the code ones are listed as withdrawn. */
+export function withdrawCodeFromInjectionRecord(record: TurnInjectionRecord, memoryBlock: string | null, why: string): TurnInjectionRecord {
+  const keep = record.injectedSources.map(source => source === 'memory');
+  const { reason: _reason, ...rest } = record;
+  return {
+    ...rest,
+    injectedIds: record.injectedIds.filter((_id, i) => keep[i]),
+    injectedSources: record.injectedSources.filter((_source, i) => keep[i]),
+    ingestModes: record.ingestModes.filter((_mode, i) => keep[i]),
+    tokenCost: memoryBlock ? estimateTokens(memoryBlock) : 0,
+    codeInjectionSkipped: record.codeInjectionSkipped ? `${record.codeInjectionSkipped}; ${why}` : why,
+    ...(memoryBlock ? {} : { reason: why }),
+  };
 }

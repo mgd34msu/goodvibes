@@ -23,6 +23,18 @@ export interface SkippedCodeHit {
 }
 
 /**
+ * The consumption check found injected hits whose files changed or are gone
+ * since they were read for this turn: the caller leaves the code context out
+ * of the request and hands these files to the reindex.
+ */
+export class CodeInjectionSourcesChangedError extends Error {
+  constructor(readonly absolutePaths: readonly string[]) {
+    super(`Code injection source is stale: ${absolutePaths.length} file${absolutePaths.length === 1 ? '' : 's'} changed since read`);
+    this.name = 'CodeInjectionSourcesChangedError';
+  }
+}
+
+/**
  * Ranks the hits whose files are as indexed. A hit whose file changed since
  * indexing, is gone, is over the read bound or is not readable now is left out
  * and listed in `skipped`; the other hits are still ranked. Only a failure of
@@ -102,7 +114,17 @@ export async function rankLiveCodeInjection(root: string, query: string, hits: r
       try {
       await authorize(root); await authorize(sourceRoot);
       for (const path of directories.keys()) if (path !== sourceRoot) await authorize(path);
-      for (const snapshot of snapshots) { await authorize(sourcePath(snapshot.hit)); if (read(snapshot.hit) !== snapshot.code) throw new Error('Code injection source is stale'); }
+      const changed: string[] = [];
+      for (const snapshot of snapshots) {
+        const path = (() => { try { return sourcePath(snapshot.hit); } catch { return undefined; } })();
+        if (path === undefined) { changed.push(join(sourceRoot, snapshot.hit.chunk.path)); continue; }
+        await authorize(path);
+        // A file that was read for this turn and now cannot be read the same way has changed under it.
+        let current: string | undefined;
+        try { current = read(snapshot.hit); } catch { signal.throwIfAborted(); }
+        if (current !== snapshot.code) changed.push(path);
+      }
+      if (changed.length > 0) throw new CodeInjectionSourcesChangedError(changed);
       check();
       for (const original of observed.values()) original.assertCurrent();
       } finally { clearTimeout(assertionTimer); }

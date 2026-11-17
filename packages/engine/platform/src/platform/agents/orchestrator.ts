@@ -134,7 +134,8 @@ type AgentOrchestratorToolDeps = {
   readonly memoryEmbeddingRegistry?: import('../state/memory-embeddings.js').MemoryEmbeddingProviderRegistry | undefined;
   readonly isCodeInjectionSettingEnabled?: (() => boolean) | undefined;
   readonly codeIndexReindexScheduler?:
-    | Pick<import('../state/code-index-reindex.js').CodeIndexReindexScheduler, 'onToolExecuted'>
+    | (Pick<import('../state/code-index-reindex.js').CodeIndexReindexScheduler, 'onToolExecuted'>
+      & Partial<Pick<import('../state/code-index-reindex.js').CodeIndexReindexScheduler, 'schedule'>>)
     | undefined;
   /** Additional per-tool-execution tap (e.g. CI auto-watch minting); composed with the reindex scheduler, never blocking. */
   readonly toolExecutionObserver?:
@@ -1010,6 +1011,10 @@ export class AgentOrchestrator {
         codeReadAccessFilter: ownerReadAccess,
         codeIndex: authority ? createCapturedCodeContext({ authority, root: cwd, readAccessFilter: ownerReadAccess, registry: this.toolDeps?.memoryEmbeddingRegistry, signal }) : this.toolDeps?.codeIndex,
         isCodeInjectionSettingEnabled: this.toolDeps?.isCodeInjectionSettingEnabled,
+        // A captured tree is not the shared index; only the shared one is reindexed.
+        onCodeSourcesChanged: !authority && this.toolDeps?.codeIndexReindexScheduler?.schedule
+          ? (paths) => { for (const path of paths) this.toolDeps?.codeIndexReindexScheduler?.schedule?.(path); }
+          : undefined,
         onToolExecuted:
           this.toolDeps?.codeIndexReindexScheduler || this.toolDeps?.toolExecutionObserver
             ? (toolName, args, success) => {

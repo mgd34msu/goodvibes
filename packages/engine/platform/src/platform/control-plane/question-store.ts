@@ -8,7 +8,8 @@
  * terminal app (TUI, Agent, headless runs) and the agents they run. A post, an
  * answer, a withdrawal and what became of an answer are each one row write in
  * one transaction, so two processes answering at once cannot both win, and a
- * process sees another's change on its next read. `revision()` is SQLite's own
+ * process sees another's change on its next read, or at once when it listens
+ * (`onChange`: the WAL file is watched). `revision()` is SQLite's own
  * change counter (one statement, no file read): a reader compares one integer
  * to learn whether anything changed, and re-reads the rows only when it did.
  *
@@ -16,6 +17,8 @@
  * later one changes nothing and reports who answered it.
  */
 import { randomUUID } from 'node:crypto';
+import { watch, type FSWatcher } from 'node:fs';
+import { basename, dirname } from 'node:path';
 import type { Database } from 'bun:sqlite';
 import { openSqliteFile, type SqliteFile, type SqliteMigration } from '../state/sqlite-file.js';
 import type { RevisionSource } from '../utils/revision.js';
@@ -212,15 +215,53 @@ function isClosed(entry: StoredOwnerEntry): boolean {
   return entry.closedAt !== undefined;
 }
 
+/**
+ * What a row says now, as one string: it differs after every post, answer,
+ * withdrawal and delivery report on the row, even two in the same millisecond.
+ */
+export function storedEntryVersion(entry: StoredOwnerEntry): string {
+  return `${entry.updatedAt}|${entry.closedAt ?? ''}|${entry.answer !== undefined ? 'a' : ''}|${entry.withdrawnReason !== undefined ? 'w' : ''}|${entry.delivery?.state ?? ''}`;
+}
+
+/** Called with the rows that changed since the last call. */
+export type QuestionStoreChangeListener = (changed: readonly StoredOwnerEntry[]) => void;
+
 export class QuestionStore implements RevisionSource {
   readonly id = 'owner questions';
   readonly #path: string;
   #file: SqliteFile | null = null;
   /** Every row as of `revision`; read again only when the revision moved. */
   #snapshot: { readonly revision: number; readonly entries: ReadonlyMap<string, StoredOwnerEntry> } | null = null;
+  readonly #changeListeners = new Set<QuestionStoreChangeListener>();
+  /** While watched: each row's {@link storedEntryVersion} as last announced, and the revision it was read at. */
+  #versions: Map<string, string> | null = null;
+  #announcedRevision = -1;
+  #watcher: FSWatcher | null = null;
+  #scheduled = false;
 
   constructor(options: { readonly path: string }) {
     this.#path = options.path;
+  }
+
+  /**
+   * Calls `listener` with the rows that changed, once per event-loop turn in
+   * which any did: a write through this process's connection (every inbox in
+   * the process shares it), or a commit by another process. Another process's
+   * commit is heard from the store's WAL file (watched, never polled) and
+   * confirmed by the revision, so a waiter in the daemon hears an answer typed
+   * in a terminal app that wrote the store directly. Watching starts when the
+   * store is first opened, never earlier, and stops with the last listener.
+   *
+   * Cost while watched: one file watch per process, and per change one read
+   * of the rows (the same read a list makes, shared with it by revision).
+   */
+  onChange(listener: QuestionStoreChangeListener): () => void {
+    this.#changeListeners.add(listener);
+    if (this.#file) this.#startWatching(this.#file);
+    return () => {
+      this.#changeListeners.delete(listener);
+      if (this.#changeListeners.size === 0) this.#stopWatching();
+    };
   }
 
   get path(): string {
@@ -274,7 +315,7 @@ export class QuestionStore implements RevisionSource {
     stillOpen: (entry: StoredOwnerEntry) => boolean,
   ): { readonly created: boolean; readonly entry: StoredOwnerEntry } {
     const file = this.#open();
-    return file.tx(() => {
+    const posted = file.tx(() => {
       if (item.key !== undefined) {
         const rows = file.db.query<ItemRow, [string, string]>(
           `SELECT ${ROW_COLUMNS} FROM owner_items WHERE kind = ? AND item_key = ? AND closed_at IS NULL`,
@@ -295,6 +336,8 @@ export class QuestionStore implements RevisionSource {
       );
       return { created: true, entry: { item: stored, updatedAt: now } };
     });
+    if (posted.created) this.#wrote();
+    return posted;
   }
 
   /** Record the first answer; a later one changes nothing. Expiry is the caller's check. */
@@ -317,6 +360,7 @@ export class QuestionStore implements RevisionSource {
     const changed = file.db.query<never, [string, string | null, number, number, string]>(
       'UPDATE owner_items SET delivery_state = ?, delivery_reason = ?, delivery_at = ?, updated_at = ? WHERE id = ? AND answer IS NOT NULL AND delivery_state IS NULL',
     ).run(state, reason ?? null, now, now, id).changes;
+    if (changed > 0) this.#wrote();
     const entry = this.#read(id);
     if (!entry) return undefined;
     return changed > 0 ? { applied: true, entry } : { applied: false, entry };
@@ -331,7 +375,7 @@ export class QuestionStore implements RevisionSource {
    */
   settleSession(sessionId: string, withdrawnReason: string, undeliverableReason: string, now: number, sessionFile?: string): string[] {
     const file = this.#open();
-    return file.tx(() => {
+    const settled = file.tx(() => {
       const rows = file.db.query<ItemRow, [string]>(
         `SELECT ${ROW_COLUMNS} FROM owner_items WHERE answer_session = ? AND ${UNDELIVERED}`,
       ).all(sessionId);
@@ -349,9 +393,13 @@ export class QuestionStore implements RevisionSource {
       }
       return ids;
     });
+    if (settled.length > 0) this.#wrote();
+    return settled;
   }
 
+  /** Closes the connection; listeners stay, and are heard again once the store is next opened. */
   close(): void {
+    this.#stopWatching();
     this.#file?.close();
     this.#file = null;
     this.#snapshot = null;
@@ -362,9 +410,94 @@ export class QuestionStore implements RevisionSource {
     const changed = file.db.query<never, (string | number)[]>(
       `UPDATE owner_items SET ${assignments}, closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL`,
     ).run(...values, now, now, id).changes;
+    if (changed > 0) this.#wrote();
     const entry = this.#read(id);
     if (!entry) return undefined;
     return changed > 0 && isClosed(entry) ? { applied: true, entry } : { applied: false, entry };
+  }
+
+  /** A write through this connection: its listeners hear it at the end of this turn. */
+  #wrote(): void {
+    if (this.#versions !== null) this.#schedule();
+  }
+
+  #startWatching(file: SqliteFile): void {
+    if (this.#versions !== null || this.#changeListeners.size === 0) return;
+    this.#announcedRevision = file.revision();
+    this.#versions = new Map([...this.#entries()].map(([id, entry]) => [id, storedEntryVersion(entry)]));
+    if (this.#path === ':memory:') return;
+    const wal = `${this.#path}-wal`;
+    const onChange = (): void => this.#schedule();
+    let watcher: FSWatcher;
+    try {
+      // In WAL mode every commit by any process appends to the -wal file, which stays while this connection is open.
+      watcher = watch(wal, { persistent: false }, onChange);
+    } catch {
+      try {
+        watcher = watch(dirname(this.#path), { persistent: false }, (_event, name) => {
+          if (name === basename(this.#path) || name === basename(wal)) onChange();
+        });
+      } catch (error) {
+        // Writes in this process are still heard; another process's are read on the next list.
+        logger.debug('[owner-inbox] the owner inbox store is not watched for other processes\' answers', {
+          path: this.#path,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+    }
+    this.#watcher = watcher;
+    watcher.on('error', () => {
+      if (this.#watcher === watcher) this.#watcher = null;
+      try { watcher.close(); } catch { /* already closed */ }
+    });
+  }
+
+  #stopWatching(): void {
+    const watcher = this.#watcher;
+    this.#watcher = null;
+    this.#versions = null;
+    try { watcher?.close(); } catch { /* already closed */ }
+  }
+
+  /** Once per event-loop turn: when the revision moved, tell the listeners which rows changed. */
+  #schedule(): void {
+    if (this.#scheduled) return;
+    this.#scheduled = true;
+    setImmediate(() => {
+      this.#scheduled = false;
+      const file = this.#file;
+      const known = this.#versions;
+      if (!file || known === null) return;
+      let changed: StoredOwnerEntry[];
+      try {
+        const revision = file.revision();
+        if (revision === this.#announcedRevision) return;
+        this.#announcedRevision = revision;
+        const versions = new Map<string, string>();
+        changed = [];
+        for (const [id, entry] of this.#entries()) {
+          const version = storedEntryVersion(entry);
+          versions.set(id, version);
+          if (known.get(id) !== version) changed.push(entry);
+        }
+        this.#versions = versions;
+      } catch (error) {
+        logger.warn('[owner-inbox] could not read the owner inbox store after a change', {
+          path: this.#path,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      if (changed.length === 0) return;
+      for (const listener of [...this.#changeListeners]) {
+        try {
+          listener(changed);
+        } catch (error) {
+          logger.warn('[owner-inbox] a store change listener failed', { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    });
   }
 
   #read(id: string): StoredOwnerEntry | undefined {
@@ -415,16 +548,25 @@ export class QuestionStore implements RevisionSource {
     const file = openSqliteFile(this.#path, { name: 'owner inbox', migrations: MIGRATIONS });
     this.#file = file;
     this.#trimOnOpen(file);
+    this.#startWatching(file);
     return file;
   }
 
   /**
    * Keep every open item, every answer still waiting for its asker, and the
    * newest closed ones. Runs once per process, when the store is first opened;
-   * it writes only when there is more than that to drop.
+   * it writes only when there is more than that to drop. An item that expired
+   * unanswered is closed at its expiry first (it reads as expired as before),
+   * so it is history like any other closed item and is dropped by the same rule.
    */
   #trimOnOpen(file: SqliteFile): void {
     try {
+      const now = Date.now();
+      file.db.query<never, [number, number]>(
+        `UPDATE owner_items SET closed_at = json_extract(item, '$.expiresAt'), updated_at = ?
+          WHERE closed_at IS NULL AND answer IS NULL AND withdrawn_reason IS NULL
+          AND json_extract(item, '$.expiresAt') < ?`,
+      ).run(now, now);
       const closed = file.db.query<{ n: number }, []>('SELECT count(*) AS n FROM owner_items WHERE closed_at IS NOT NULL').get()?.n ?? 0;
       if (closed <= MAX_CLOSED_ENTRIES) return;
       file.db.query<never, [number]>(

@@ -40,6 +40,7 @@ import {
   OWNER_ASKER_SESSION_FILE_METADATA,
   sessionFileMatches,
   sharedQuestionStore,
+  storedEntryVersion,
   type QuestionAskerScope,
   type QuestionStore,
   type StoredOwnerEntry,
@@ -563,6 +564,10 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   readonly #unsubscribeApprovals: (() => void) | undefined;
   #probes: OwnerAskerPresenceProbe[];
   #approvalRevision = 0;
+  /** While anyone listens: the store's change feed, so a change made by another process is heard too. */
+  #stopStoreChanges: (() => void) | null = null;
+  /** Rows this inbox already announced itself, by id: the store's feed repeats them and is skipped once. */
+  readonly #announced = new Map<string, string>();
 
   constructor(options: OwnerInboxOptions) {
     this.#questions = options.questions;
@@ -704,7 +709,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       (existing) => storedStatus(existing, now) === 'open',
     );
     const projected = this.#project(entry, now);
-    if (created) this.#emit(projected);
+    if (created) this.#emitStored(entry, projected);
     return { created, item: projected };
   }
 
@@ -731,7 +736,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       if (!result) return { applied: false, refusal: unknownRefusal(id) };
       const answered = this.#project(result.entry, now);
       if (!result.applied) return { applied: false, item: answered, refusal: closedRefusal(answered) };
-      this.#emit(answered);
+      this.#emitStored(result.entry, answered);
       this.#closed(answered);
       return { applied: true, item: answered, ...(answered.delivery ? { delivery: answered.delivery } : {}) };
     }
@@ -747,7 +752,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     if (!result) return { applied: false, refusal: unknownRefusal(id) };
     const item = this.#project(result.entry, now);
     if (!result.applied) return { applied: false, item, refusal: closedRefusal(item) };
-    this.#emit(item);
+    this.#emitStored(result.entry, item);
     this.#closed(item);
     return { applied: true, item };
   }
@@ -766,7 +771,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   claim(id: string): boolean {
     const result = this.#questions.recordDelivery(id, 'delivered', undefined, this.#now());
     if (!result?.applied) return false;
-    this.#emit(this.#project(result.entry, this.#now()));
+    this.#emitStored(result.entry, this.#project(result.entry, this.#now()));
     this.#closed(result.entry.item);
     return true;
   }
@@ -790,7 +795,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     for (const id of changed) {
       const entry = this.#questions.get(id);
       if (entry) {
-        this.#emit(this.#project(entry, now));
+        this.#emitStored(entry, this.#project(entry, now));
         this.#closed(entry.item);
       }
     }
@@ -841,15 +846,16 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
         }),
       };
     }
-    this.#emit(updated);
+    this.#emitStored(result.entry, updated);
     this.#closed(updated);
     return { applied: true, item: updated, ...(updated.delivery ? { delivery: updated.delivery } : {}) };
   }
 
   /**
    * Resolves when the item stops being open (answered, withdrawn, or found
-   * expired when checked). Rejects when the signal aborts. One listener while
-   * waiting; nothing polls.
+   * expired when checked), whichever process closed it: an answer another
+   * process wrote to the store is heard through the store's change feed.
+   * Rejects when the signal aborts. One listener while waiting; nothing polls.
    */
   waitForAnswer(id: string, signal?: AbortSignal): Promise<OwnerItem> {
     const current = this.get(id);
@@ -870,6 +876,9 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       unsubscribe = this.subscribe((item) => {
         if (item.id === id && item.status !== 'open') finish(() => resolve(item));
       });
+      // The feed starts from the rows as they are now; an answer another process wrote since the read above is in them.
+      const since = this.get(id);
+      if (since && since.status !== 'open') { finish(() => resolve(since)); return; }
       if (current.expiresAt !== undefined) {
         // Expiry is read, not written; wake once at the deadline so the waiter sees it.
         timer = setTimeout(() => {
@@ -881,15 +890,49 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     });
   }
 
+  /**
+   * Hear every change of an item: this inbox's own writes at once, and a
+   * write by another inbox or another process on the same store (a terminal
+   * app answering the store directly) at the end of the turn it lands in.
+   */
   subscribe(listener: OwnerInboxListener): () => void {
     this.#listeners.add(listener);
-    return () => { this.#listeners.delete(listener); };
+    this.#stopStoreChanges ??= this.#questions.onChange((changed) => this.#heard(changed));
+    return () => {
+      this.#listeners.delete(listener);
+      if (this.#listeners.size === 0) this.#stopListening();
+    };
   }
 
   dispose(): void {
     this.#unsubscribeApprovals?.();
     this.#listeners.clear();
+    this.#stopListening();
     this.#questions.close();
+  }
+
+  #stopListening(): void {
+    this.#stopStoreChanges?.();
+    this.#stopStoreChanges = null;
+    this.#announced.clear();
+  }
+
+  /** Rows the store reports changed: each one this inbox did not announce itself is announced now. */
+  #heard(changed: readonly StoredOwnerEntry[]): void {
+    const now = this.#now();
+    for (const entry of changed) {
+      const id = entry.item.id;
+      const own = this.#announced.get(id);
+      this.#announced.delete(id);
+      if (own === storedEntryVersion(entry)) continue;
+      this.#emit(this.#project(entry, now));
+    }
+  }
+
+  /** Announce a change this inbox wrote, and note it so the store's feed does not announce it twice. */
+  #emitStored(entry: StoredOwnerEntry, item: OwnerItem): void {
+    if (this.#stopStoreChanges !== null) this.#announced.set(entry.item.id, storedEntryVersion(entry));
+    this.#emit(item);
   }
 
   #checkAnswer(item: OwnerItem, answer: OwnerAnswer): { answer: OwnerAnswer } | { refusal: Refusal } {

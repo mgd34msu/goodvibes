@@ -104,6 +104,8 @@ export function channelBackedPaymentNotifier(
 /** The part of the owner inbox (control-plane/owner-inbox.ts) a purchase notice is posted through. */
 export interface PaymentOwnerInbox {
   postNow(item: NewOwnerItem): { readonly item: OwnerItem };
+  /** The item as stored now; read once when a window closes, so an answer recorded by its deadline is never taken for silence. */
+  get(id: string): OwnerItem | undefined;
   waitForAnswer(id: string, signal?: AbortSignal): Promise<OwnerItem>;
   withdraw(id: string, reason: string): unknown;
 }
@@ -190,11 +192,25 @@ export function withOwnerInbox(
   const inboxDelivery = (item: OwnerItem | null): ChannelDelivery => ({ channel: 'owner-inbox', delivered: item !== null, backfillable: false });
 
   /** The first answer from the channels or the inbox; the inbox item is withdrawn when the window closes. */
+  /**
+   * The answer the inbox item holds, when the owner recorded one by the
+   * window's deadline: an answer written to the store by another process (a
+   * terminal app not connected to this daemon) still settles the window.
+   */
+  const recordedAnswer = (kind: PaymentWindowKind, id: string, deadlineMs: number): NotifierAnswer => {
+    let stored: OwnerItem | undefined;
+    try { stored = inbox.get(id); } catch { return null; }
+    if (stored?.status !== 'answered' || stored.closedAt === undefined || !(stored.closedAt <= deadlineMs)) return null;
+    const answer = inboxAnswer(kind, stored.answer?.option ?? stored.answer?.text?.trim().toLowerCase());
+    return answer === null ? null : { answer, channel: 'owner-inbox' };
+  };
+
   const firstAnswer = async (
     kind: PaymentWindowKind,
     item: OwnerItem | null,
     channelWait: Promise<NotifierAnswer>,
     signal: AbortSignal | undefined,
+    deadlineMs: number,
     /** Retires the channel wait when the inbox answered first. */
     retireChannels?: () => void,
   ): Promise<NotifierAnswer> => {
@@ -215,7 +231,8 @@ export function withOwnerInbox(
         fromChannels,
         fromInbox.then((answer) => ({ from: 'inbox' as const, answer })),
       ]);
-      if (first.from === 'channel') return first.answer;
+      // Silence on the channels is read against the item once before it counts: the inbox answer may not have been heard yet.
+      if (first.from === 'channel') return first.answer ?? recordedAnswer(kind, item.id, deadlineMs);
       if (first.answer !== undefined) {
         retireChannels?.();
         return first.answer;
@@ -244,7 +261,7 @@ export function withOwnerInbox(
       const key = `${input.kind}\n${input.notice}`;
       const item = posted.get(key) ?? null;
       posted.delete(key);
-      return firstAnswer(input.kind, item, inner.awaitAnswer(input), input.signal);
+      return firstAnswer(input.kind, item, inner.awaitAnswer(input), input.signal, input.deadlineMs);
     },
   };
   const prepare = inner.prepareWindow?.bind(inner);
@@ -263,7 +280,7 @@ export function withOwnerInbox(
           window.cancel();
           if (item !== null) { try { inbox.withdraw(item.id, 'the purchase window closed'); } catch { /* already closed */ } }
         },
-        awaitAnswer: (deadlineMs: number) => firstAnswer(input.kind, item, window.awaitAnswer(deadlineMs), input.signal, () => window.cancel()),
+        awaitAnswer: (deadlineMs: number) => firstAnswer(input.kind, item, window.awaitAnswer(deadlineMs), input.signal, deadlineMs, () => window.cancel()),
       });
     };
   }

@@ -34,10 +34,10 @@ const RUNS = 3;
 
 export const STARTUP_SCENARIOS: readonly StartupScenario[] = [
   { name: 'startup-bun-floor', entry: 'packages/engine/scripts/measure/instrument.ts', args: [], note: 'reference: bun plus this harness preload, no product code' },
-  { name: 'startup-tui-version', entry: 'products/tui/src/main.ts', args: ['--version'], expect: /\d+\.\d+\.\d+/, note: 'spawn to exit; loads the interactive module graph first' },
+  { name: 'startup-tui-version', entry: 'products/tui/src/main.ts', args: ['--version'], expect: /\d+\.\d+\.\d+/, note: 'spawn to exit; metadata fast path' },
   { name: 'startup-tui-status', entry: 'products/tui/src/main.ts', args: ['status'], note: 'spawn to exit; config, sandbox probe, report' },
   { name: 'startup-agent-version', entry: 'products/agent/src/main.ts', args: ['--version'], expect: /\d+\.\d+\.\d+/, note: 'spawn to exit; metadata fast path' },
-  { name: 'startup-agent-status', entry: 'products/agent/src/main.ts', args: ['status'], note: 'spawn to exit; full graph, report' },
+  { name: 'startup-agent-status', entry: 'products/agent/src/main.ts', args: ['status'], note: 'spawn to exit; the status command graph only, report' },
   { name: 'startup-daemon-version', entry: 'products/daemon/src/cli/entrypoint.ts', args: ['--version'], expect: /\d+\.\d+\.\d+/, note: 'spawn to exit' },
   {
     name: 'startup-daemon-serve', entry: 'products/daemon/src/cli/entrypoint.ts',

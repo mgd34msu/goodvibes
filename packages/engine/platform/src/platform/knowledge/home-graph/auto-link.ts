@@ -66,9 +66,14 @@ function hasActiveSourceLink(sourceId: string, edges: readonly KnowledgeEdgeReco
     (edge.fromKind === 'source' && edge.fromId === sourceId && edge.toKind === 'node')
     || (edge.fromKind === 'node' && edge.toKind === 'source' && edge.toId === sourceId)));
 }
-/** Devices and integrations are what a document is about; entities ride with their device. */
-function candidate(node: KnowledgeNodeRecord): boolean {
-  return node.kind === 'ha_device' || node.kind === 'ha_integration';
+/**
+ * What a document can be about: a device, an integration, a room or area, or an
+ * entity that belongs to no device (a helper, a template sensor). An entity of
+ * a device rides with that device instead.
+ */
+function candidate(node: KnowledgeNodeRecord, deviceEntities: ReadonlySet<string>): boolean {
+  return node.kind === 'ha_device' || node.kind === 'ha_integration' || node.kind === 'ha_area' || node.kind === 'ha_room'
+    || (node.kind === 'ha_entity' && !deviceEntities.has(node.id));
 }
 /**
  * Outcomes other than `linked`, per store and source, with what they were read
@@ -90,7 +95,7 @@ function sourceText(source: KnowledgeSourceRecord, extraction: KnowledgeExtracti
 
 interface Candidate { readonly node: KnowledgeNodeRecord; readonly entities: readonly KnowledgeNodeRecord[]; readonly terms: readonly string[] }
 
-/** Identity words of a device or integration and its entities: names, model, manufacturer, ids. */
+/** Identity words of a candidate and its entities: names, model, manufacturer, ids. */
 function candidateTerms(node: KnowledgeNodeRecord, entities: readonly KnowledgeNodeRecord[]): string[] {
   const identity = (record: KnowledgeNodeRecord) => [record.title, ...record.aliases, record.metadata.model, record.metadata.modelId,
     record.metadata.model_id, record.metadata.manufacturer, record.metadata.vendor, record.metadata.brand];
@@ -118,7 +123,7 @@ function counts(outcomes: readonly HomeGraphAutoLinkOutcome[]): Record<HomeGraph
 }
 
 /**
- * Links each unlinked document to the device or integration it is about. Code
+ * Links each unlinked document to the device, integration, room or entity it is about. Code
  * shortlists candidates from the home; one request per document reads the
  * document kind and the shortlist together. A document with no shortlist makes
  * no request. Anything but a single settled subject (`none`, `ambiguous`, or
@@ -129,7 +134,17 @@ function counts(outcomes: readonly HomeGraphAutoLinkOutcome[]): Record<HomeGraph
 async function linkSources(input: AutoLinkSourcesInput): Promise<HomeGraphAutoLinkReport> {
   const stopped = () => input.signal?.aborted || input.shouldStop?.();
   if (stopped()) throw new Held('aborted');
-  const pool = input.state.nodes.filter(candidate);
+  const nodeById = new Map(input.state.nodes.map((node) => [node.id, node]));
+  const belongsTo = new Map<string, KnowledgeNodeRecord[]>();
+  const deviceEntities = new Set<string>();
+  for (const edge of input.state.edges) {
+    if (!edgeIsActive(edge) || edge.relation !== 'belongs_to_device' || edge.fromKind !== 'node' || edge.toKind !== 'node') continue;
+    const entity = nodeById.get(edge.fromId);
+    if (entity?.kind !== 'ha_entity') continue;
+    deviceEntities.add(entity.id);
+    belongsTo.set(edge.toId, [...(belongsTo.get(edge.toId) ?? []), entity]);
+  }
+  const pool = input.state.nodes.filter((node) => candidate(node, deviceEntities));
   const outcomes = outcomesFor(input.store);
   const plans = input.sources.filter((source) => !skipped(source) && source.status !== 'stale'
     && getKnowledgeSpaceId(source) === input.spaceId && !hasActiveSourceLink(source.id, input.state.edges))
@@ -140,13 +155,6 @@ async function linkSources(input: AutoLinkSourcesInput): Promise<HomeGraphAutoLi
         || recorded.extractionId !== (extraction?.id ?? null) || recorded.extractionUpdatedAt !== (extraction?.updatedAt ?? null);
     });
   if (plans.length === 0) return { linked: [], outcomes: [], counts: counts([]) };
-  const belongsTo = new Map<string, KnowledgeNodeRecord[]>();
-  const nodeById = new Map(input.state.nodes.map((node) => [node.id, node]));
-  for (const edge of input.state.edges) {
-    if (!edgeIsActive(edge) || edge.relation !== 'belongs_to_device' || edge.fromKind !== 'node' || edge.toKind !== 'node') continue;
-    const entity = nodeById.get(edge.fromId);
-    if (entity?.kind === 'ha_entity') belongsTo.set(edge.toId, [...(belongsTo.get(edge.toId) ?? []), entity]);
-  }
   const candidates: Candidate[] = pool.map((node) => {
     const entities = belongsTo.get(node.id) ?? [];
     return { node, entities, terms: candidateTerms(node, entities) };

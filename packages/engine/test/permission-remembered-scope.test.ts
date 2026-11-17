@@ -1,5 +1,7 @@
 // Proves: A remembered rule covers more than was granted, a remembered deny is not enforced, or a deleted rule keeps applying.
 // Red when: A remembered exact deny is not enforced or outlives its deletion, a class grant misses a consumer or covers `gitfoo`, a stored grant lets an input-only surface run a command, or an exact rule is normalised when stored.
+// Proves: A rule remembered in one project applies in another, including a repository just cloned.
+// Red when: The rule store stops comparing a remembered rule's project with the working directory of the check, so a grant made in one project settles the same command in another.
 /**
  * Remembered authority keeps its chosen scope and follows live revocation.
  * Explicit owner rules are exercised through live permission and registry consumers.
@@ -14,12 +16,12 @@ import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
 import type { PermissionRequestHandler } from '../platform/src/platform/permissions/prompt.ts';
 import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.ts';
-import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
+import { projectIdentity, UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { registerPermissionRulesGatewayMethods } from '../platform/src/platform/control-plane/routes/permission-rules.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 
-useGateReadings([['git wipe-fixture', { catastrophic: true }]]);
+useGateReadings([['git wipe-fixture', { catastrophic: true }], ['git push --force origin', { irreversible: true }]]);
 
 const execArgs = (...commands: string[]): Record<string, unknown> => ({
   commands: commands.map((cmd) => ({ cmd })),
@@ -115,6 +117,36 @@ describe('literal exact command authority', () => {
         expect((await permissions.checkDetailed('exec', execArgs(changed))).sourceLayer).toBe('stakes_preset');
       }
       expect(asks).toBe(0);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('remembered rules stay in their project', () => {
+  test('a grant remembered in one project is asked again in another; a rule with no project applies in both', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gv-rule-project-'));
+    try {
+      const store = new UserPermissionRuleStore(join(dir, 'rules.json'));
+      await store.init();
+      const [projectA, projectB] = [join(dir, 'project-a'), join(dir, 'cloned-b')];
+      const grant = buildDurableRuleForDecision({ toolName: 'exec', args: commit, tier: 'command-class', effect: 'allow' })!;
+      await store.remember({ rule: grant, tier: 'command-class', tool: 'exec', createdAt: 1, project: projectIdentity(projectA) });
+      const everywhere = buildDurableRuleForDecision({ toolName: 'exec', args: execArgs('npm run build'), tier: 'command-class', effect: 'allow' })!;
+      await store.add({ rule: everywhere, tier: 'command-class', tool: 'exec', createdAt: 2 });
+      let asks = 0;
+      const managerIn = (project: string) => new PermissionManager(async () => { asks++; return { approved: false }; },
+        createPermissionConfigReader(new ConfigManager({ surfaceRoot: 'agent', workingDir: project, homeDir: join(dir, 'home'), configDir: join(dir, 'config') })),
+        new PolicyRuntimeState(), null, null, store);
+      const [inA, inB] = [managerIn(projectA), managerIn(projectB)];
+      const forcePush = execArgs('git push --force origin');
+      expect(await inA.checkDetailed('exec', forcePush)).toMatchObject({ approved: true, sourceLayer: 'user_rule' });
+      expect(asks).toBe(0);
+      const inProjectB = await inB.checkDetailed('exec', forcePush);
+      expect(inProjectB.sourceLayer).not.toBe('user_rule');
+      expect(inProjectB.approved).toBe(false);
+      for (const consumer of [inA, inB]) {
+        expect(await consumer.checkDetailed('exec', execArgs('npm test'))).toMatchObject({ approved: true, sourceLayer: 'user_rule' });
+      }
+      expect(asks).toBe(1);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

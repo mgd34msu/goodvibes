@@ -1714,10 +1714,10 @@ export const client = {
         migrate: (name: string) => invokeGatewayMethod('pairing.tokens.migrate', { name }),
         rename: (id: string, name: string) => invokeGatewayMethod('pairing.tokens.rename', { id, name }),
         delete: (id: string) => invokeGatewayMethod('pairing.tokens.delete', { id }),
-        // revokeShared: a one-way action, once every device has its own token,
-        // this permanently disables the legacy shared token so it can never sign
-        // in again. legacySharedRevoked also comes back on tokens.list, so a
-        // caller can render whether this has already happened.
+        // revokeShared: once every device has its own token, this ends every
+        // copy of the shared token devices hold; the daemon replaces it with a
+        // value only its own machine's apps read. legacySharedRevoked also comes
+        // back on tokens.list, so a caller can render whether this happened.
         revokeShared: () => invokeGatewayMethod('pairing.tokens.revokeShared', {}),
       },
       handoff: {

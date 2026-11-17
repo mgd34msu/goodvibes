@@ -72,7 +72,7 @@ export interface PairingTokenAuthenticator {
   issueNativeContinuation?(credential: NativeCredential, expected: NativeContinuationAuthority, binding: string, assertCurrent: () => void, sourceBinding?: string): NativeContinuationGrant;
   revokeNativeContinuation?(grant: NativeContinuationGrant): void;
   /** Additive strict SETTINGS path; never substituted with native authority. */
-  captureSettingsAuthority?(input: { readonly kind: 'shared-token' }
+  captureSettingsAuthority?(input: { readonly kind: 'shared-token'; readonly token: string }
     | { readonly kind: 'pairing-token'; readonly token: string }): SettingsPairingAuthority | null;
   withSettingsAuthority?<T>(authority: SettingsPairingAuthority,
     operation: (assertCurrent: () => void) => T): T;
@@ -89,8 +89,14 @@ export interface PairingTokenAuthenticator {
   withNativeAuthority?<T>(credential: NativeCredential, expected: AuthenticatedNativePairingToken,
     operation: (assertCurrent: () => AuthenticatedNativePairingToken) => T | Promise<T>): Promise<T>;
   authenticate(token: string): { readonly id: string; readonly name: string; readonly client?: 'agent' | undefined } | null;
-  /** Whether the legacy single shared token has been revoked. */
+  /** Whether the shared operator token has been revoked (and, in the serving daemon, replaced). */
   isLegacyRevoked(): boolean;
+  /**
+   * Whether this shared token value is refused: the shared token was revoked
+   * and `token` is not the replacement this machine's apps hold. Absent: every
+   * shared value is refused once {@link isLegacyRevoked} is true.
+   */
+  refusesSharedToken?(token: string): boolean;
   /**
    * Why a token this store knows does not authenticate (over its rotation age,
    * or an offer that expired unused), or null. Asked only after a refusal.
@@ -167,6 +173,11 @@ export function matchesSharedToken(token: string, sharedToken: string): boolean 
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 
+function sharedTokenRefused(pairingTokens: PairingTokenAuthenticator | undefined, token: string): boolean {
+  if (!pairingTokens) return false;
+  return pairingTokens.refusesSharedToken ? pairingTokens.refusesSharedToken(token) : pairingTokens.isLegacyRevoked();
+}
+
 export function authenticateOperatorToken(
   token: string,
   context: {
@@ -186,15 +197,11 @@ export function authenticateOperatorToken(
       ...(pairing.client === 'agent' ? { client: 'agent' as const } : {}) };
   }
 
-  // Then the legacy shared token, unless it has been revoked. The revocation is
+  // Then the shared token, unless this value was revoked. The revocation is
   // asked only for a token that is the shared token, so a session request never
   // pays for it. A non-match must still be checked as a user session so session
   // cookies remain valid when operator tooling also uses a bearer token.
-  if (
-    context.sharedToken &&
-    matchesSharedToken(normalized, context.sharedToken) &&
-    context.pairingTokens?.isLegacyRevoked() !== true
-  ) {
+  if (context.sharedToken && matchesSharedToken(normalized, context.sharedToken) && !sharedTokenRefused(context.pairingTokens, normalized)) {
     return { kind: 'shared-token', token: normalized };
   }
 

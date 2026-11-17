@@ -37,7 +37,9 @@ The daemon recognizes three conceptual principal kinds:
   2. The **legacy shared token**, one bearer token every companion held before
      per-device pairing existed, stored in `daemonHomeDir/operator-tokens.json`.
      It keeps authenticating until an operator explicitly revokes it
-     (`pairing.tokens.revokeShared`).
+     (`pairing.tokens.revokeShared`), which replaces it: the daemon writes a new
+     value to that file for the apps on its own machine, and every other copy
+     stops working.
   Both shapes carry full operator authority, identically to the bootstrap
   token; `isOperatorAdmin()` returns true for either.
 - **Admin.** An internal elevation scope required for destructive routes

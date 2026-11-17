@@ -41,11 +41,11 @@ What makes pairing distinct is how that token is provisioned. Instead of a user 
 | Prefix | `gvp_` | `gv_` |
 | Scope | One token per paired device, individually named | One token, shared by every companion that has not migrated off it |
 | At-rest storage | Only a SHA-256 hash is persisted; the plaintext is returned exactly once, at mint time | The plaintext token itself is persisted |
-| Revocation | `pairing.tokens.delete` revokes one device without affecting any other | `pairing.tokens.revokeShared` turns it off for every client still using it |
+| Revocation | `pairing.tokens.delete` revokes one device without affecting any other | `pairing.tokens.revokeShared` replaces it: every copy a device holds stops working, and the daemon writes the new value for its own machine's apps |
 | Storage location | `<surfaceRoot>/control-plane/pairing-tokens.json` | `<daemonHomeDir>/operator-tokens.json` |
 
 A presented bearer token is checked against per-device pairing tokens first, then the legacy
-shared token (unless it has been revoked), then user sessions. Both a per-device token and the
+shared token (after a revocation, only the replacement the daemon wrote), then user sessions. Both a per-device token and the
 legacy shared token carry full operator authority, identically to the bootstrap token.
 
 ### Persistent tokens
@@ -59,6 +59,16 @@ Revocation is always explicit:
 - The legacy shared token survives daemon restarts and stays valid until an operator calls
   `pairing.tokens.revokeShared`; the older, host-level `regenerateCompanionToken` API also
   replaces it (see [Legacy: the shared token](#legacy-the-shared-token)).
+- `pairing.tokens.revokeShared` replaces the shared token rather than leaving the daemon's
+  own machine without one: the pairing store records the revocation with the new value's
+  hash, the daemon writes that value to `<daemonHomeDir>/operator-tokens.json` and serves
+  with it, and the terminal app, the Agent and the daemon CLI on that machine, which read
+  the file for every call, stay signed in. Every copy handed to another device stops
+  working at once. After that the stored token is never put in a pairing link:
+  `goodvibes-daemon pair` mints the device its own token instead (with `-y`). A daemon
+  serving a token set by `GOODVIBES_DAEMON_TOKEN` cannot replace it and refuses the call
+  (`SHARED_TOKEN_NOT_REPLACEABLE`); change that variable instead. A revocation recorded
+  while no daemon was serving is completed when the daemon next starts.
 
 ### Storage
 

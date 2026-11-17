@@ -67,6 +67,7 @@ import {
   type ResolvedInboundTlsContext,
 } from '../runtime/network/index.js';
 import { createRuntimeServices, type RuntimeServices } from '../runtime/services.js';
+import { readCompanionTokenValue, replaceCompanionToken } from '../pairing/companion-token.js';
 import { createAsyncDisposalScope, type AsyncDisposalScope } from '../runtime/async-disposal.js';
 import type { McpServerConfig } from '../mcp/config.js';
 import { isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
@@ -166,6 +167,8 @@ export class DaemonServer {
   private readonly integrationHelpers: IntegrationHelperService;
   private configManager: ConfigManager;
   private authToken: string | null = null;
+  private unbindSharedToken: (() => void) | null = null;
+  readonly #sharedTokenListeners = new Set<(token: string) => void>();
   /** Exact serving lifetime, retired before stop callbacks and token/bind ABA. */
   private settingsLifetime: object | null = null;
   private userAuth: UserAuthManager;
@@ -462,6 +465,46 @@ export class DaemonServer {
     return true;
   }
 
+  /**
+   * Told the new value after revoking the shared token replaced the one this
+   * daemon serves with, so a listener started with the same token follows it.
+   * Returns the unsubscribe.
+   */
+  onSharedTokenReplaced(listener: (token: string) => void): () => void {
+    this.#sharedTokenListeners.add(listener);
+    return () => { this.#sharedTokenListeners.delete(listener); };
+  }
+
+  /**
+   * Bind this daemon's shared token to the pairing store, so revoking it
+   * replaces the value in `<daemon home>/operator-tokens.json`, which the apps
+   * on this machine read, and here. Without a daemon home, or with a token the
+   * process environment set (it differs from the stored one), nothing can be
+   * replaced and a revocation refuses the shared token outright.
+   */
+  private bindSharedTokenCustody(): void {
+    const daemonHomeDir = this.config.daemonHomeDir;
+    if (this.unbindSharedToken || !daemonHomeDir) return;
+    this.unbindSharedToken = this.runtimeServices.pairingTokens.bindSharedTokenCustody({
+      current: () => this.authToken,
+      replacementRefusal: () => {
+        let stored: string | null;
+        try { stored = readCompanionTokenValue(daemonHomeDir); }
+        catch (error) { return `the stored operator token could not be read (${summarizeError(error)})`; }
+        return this.authToken !== null && stored === this.authToken ? null
+          : 'this daemon serves a token set by GOODVIBES_DAEMON_TOKEN, not the one stored in its operator-tokens.json; change that variable and restart the daemon instead';
+      },
+      replace: (commit) => {
+        const replaced = replaceCompanionToken({ daemonHomeDir }, commit);
+        this.authToken = replaced.token;
+        for (const listener of [...this.#sharedTokenListeners]) {
+          try { listener(replaced.token); }
+          catch (error) { logger.warn('A shared token replacement listener failed', { error: summarizeError(error) }); }
+        }
+      },
+    });
+  }
+
   /** Bound TCP port after {@link DaemonServer.start} (resolves a `port: 0` request to the real port). */
   get boundPort(): number {
     const served = (this.server as { port?: number } | null)?.port;
@@ -540,6 +583,9 @@ export class DaemonServer {
     }
     // A revoked pairing, shared token or user closes that principal's connections at once.
     this.controlPlaneHelper.watchRevocations();
+    // Revoking the shared token replaces the value served here; a revocation recorded
+    // while this daemon was not serving is completed now.
+    this.bindSharedTokenCustody();
     this.hostStartupCompleted = false;
     this.nativeStartupHandover = undefined;
     // Crash-loop guard, before anything that can fail: repeated boots that
@@ -1130,6 +1176,8 @@ export class DaemonServer {
     this.relayReachability = null;
     this.httpRouter.dispose();
     this.controlPlaneHelper.dispose();
+    this.unbindSharedToken?.();
+    this.unbindSharedToken = null;
     this.surfaceActionHelper.closeDelegatedTelegram();
     try { await this.companionChatManager.close(); }
     catch (error) { runtimeCloseFailures.push(error); }

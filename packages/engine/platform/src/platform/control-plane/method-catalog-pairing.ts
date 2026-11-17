@@ -128,7 +128,7 @@ export const builtinGatewayPairingMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'pairing.tokens.revokeShared',
     title: 'Revoke The Legacy Shared Token',
-    description: 'Turn off the legacy single shared operator token. After this, only per-device pairing tokens (and user sessions) authenticate; the shared token stops working immediately. Idempotent.',
+    description: 'Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Idempotent.',
     category: 'pairing',
     scopes: ['write:control-plane'],
     transport: ['ws'],

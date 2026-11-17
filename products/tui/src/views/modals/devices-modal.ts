@@ -13,7 +13,8 @@ import { formatDeviceLine, shortTokenId } from '@goodvibes-jev/engine/platform/p
 // Paired Devices, the settings security-domain device/token management surface.
 // Lists every per-device pairing token (name · created · last-seen · id) and
 // mirrors the pairing.tokens.* gateway verbs: revoke a device, migrate off the
-// legacy shared token, revoke the shared token. Rename needs a name, which the
+// shared token, revoke the shared token (through the daemon, which replaces
+// it so this machine's apps stay signed in). Rename needs a name, which the
 // stable-layout modal cannot capture inline, so its status line names the
 // /devices rename command with the row's id filled in. Every action answers in
 // the modal's status line; nothing is printed under the modal. A migration's
@@ -29,11 +30,12 @@ export interface DevicesModalPairingTokens {
   revoke(id: string): boolean;
   mintForMigration(input: { readonly name: string }): MintedPairingToken;
   isLegacyRevoked(): boolean;
-  revokeLegacyShared(): void;
 }
 
 export interface DevicesModalDeps {
   readonly pairingTokens: DevicesModalPairingTokens;
+  /** Asks the daemon to revoke and replace the shared token; absent where no daemon is reachable from here. */
+  readonly revokeShared?: () => Promise<{ readonly ok: boolean; readonly message: string }>;
   /** Injectable clock so last-seen formatting is deterministic in tests. */
   readonly now?: () => number;
   /** Writes the terminal clipboard escape; true when it was written (the terminal never confirms it). */
@@ -112,8 +114,8 @@ class DevicesModalSurface implements ConfigModalSurface {
     rows.push(infoRow(
       'legacy',
       legacyRevoked
-        ? 'Legacy shared token: revoked.'
-        : 'Legacy shared token: active. This machine\'s own tools (the daemon CLI, local clients) sign in with it, as do devices paired before per-device tokens. Move a device to its own token with Ctrl+G then m. Revoking it (Ctrl+S) cannot be undone and locks out everything still using it.',
+        ? 'Shared token: revoked and replaced; only the apps on this machine hold it.'
+        : 'Shared token: active. This machine\'s own apps (this terminal, the Agent, the daemon CLI) sign in with it, as do devices paired before per-device tokens. Move a device to its own token with Ctrl+G then m. Revoking it (Ctrl+S) signs out every other device still using it; the daemon writes a new one for this machine, so its apps stay signed in.',
       legacyRevoked ? { fg: MODAL_TONES.dim } : { fg: MODAL_TONES.reasoning },
     ));
 
@@ -171,10 +173,14 @@ class DevicesModalSurface implements ConfigModalSurface {
     }
 
     if (id === 'revokeShared') {
-      if (tokens.isLegacyRevoked()) { ctx.setStatus('The legacy shared token is already revoked.'); return; }
-      tokens.revokeLegacyShared();
-      ctx.setStatus('Revoked the legacy shared token. Anything still signing in with it, including this machine\'s daemon CLI and devices not yet moved, is refused; devices must pair again for their own token.');
-      this.requestRender();
+      if (tokens.isLegacyRevoked()) { ctx.setStatus('The shared token is already revoked; only this machine holds its replacement.'); return; }
+      const revokeShared = this.deps.revokeShared;
+      if (!revokeShared) { ctx.setStatus('The shared token is revoked by the daemon, and no daemon is reachable from here.'); return; }
+      ctx.setStatus('Asking the daemon to revoke and replace the shared token...');
+      void revokeShared().then(
+        (outcome) => { ctx.setStatus(outcome.message); this.requestRender(); },
+        (error: unknown) => { ctx.setStatus(`The shared token was not revoked: ${error instanceof Error ? error.message : String(error)}`); this.requestRender(); },
+      );
       return;
     }
   }

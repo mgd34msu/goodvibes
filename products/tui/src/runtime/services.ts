@@ -119,8 +119,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       homeDirectory,
       daemonHome: options.daemonHomeDirectory,
       sessionStorePath: shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'control-plane', 'sessions.json'),
-      // This installation's own pairing tokens.
-      pairingTokenPath: shellPaths.resolveUserPath('control-plane', 'pairing-tokens.json'),
+      // No pairingTokenPath: the default is the daemon's own store (its surface root is this
+      // one), so a device paired, renamed or revoked here is the one the daemon authenticates.
     },
     memoryStore: 'home',
     workspaceTrust: { kind: 'surface', requestTrustDecision },

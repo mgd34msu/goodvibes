@@ -17,16 +17,20 @@
  * revoking the device revokes every token it minted, so cutting off a lost
  * phone cannot leave a credential it handed out behind.
  *
- * The legacy single shared token keeps working (authenticated elsewhere) until
- * it is revoked here via `revokeLegacyShared()`; a client on the shared token
+ * The shared operator token (authenticated elsewhere) keeps working until it
+ * is revoked here via `revokeLegacyShared()`; a client on the shared token
  * calls `mintForMigration()` once to move to its own per-device token.
+ * Revoking replaces the token: the serving daemon writes a new value to its
+ * home, where this machine's own apps read it, and this store keeps that
+ * value's hash, so every copy handed to another device is dead and the apps
+ * on the daemon's machine stay signed in.
  *
  * The owner's own machine needs no pairing: its apps hold the shared token,
  * and the transport, having seen that token arrive from the daemon's own
  * machine, asks for the local native owner (`ensureLocalNativeOwner`). That
  * is one stable record, made once, which native work, the work ledger and
- * continuation grants are bound to the way they are bound to a pairing. It
- * goes when the legacy shared token is revoked.
+ * continuation grants are bound to the way they are bound to a pairing. A
+ * revocation of the shared token ends it; the next use makes a new one.
  *
  * A pairing minted with `client: 'agent'` is the GoodVibes Agent's credential
  * for the calls it makes on the owner's behalf. The transport reports it as
@@ -69,6 +73,8 @@ import { fileObservationIdentity } from '../utils/file-observation.js';
 import { matchesSharedToken, type CredentialRefusal } from '../security/http-auth.js';
 
 const TOKEN_PREFIX = 'gvp_';
+/** How a shared operator token begins (pairing/companion-token.ts mints them). */
+const SHARED_TOKEN_PREFIX = 'gv_';
 /** The identity recorded for a pairing file that does not exist. */
 const ABSENT_FILE = 'absent';
 
@@ -167,8 +173,17 @@ interface PairingTokenSnapshot {
   revokedNativeSources?: string[];
 
   tokens: StoredPairingToken[];
-  /** Once true, the legacy single shared token no longer authenticates. */
+  /**
+   * Once true, the shared operator token handed out before no longer
+   * authenticates: only the value {@link localSharedHash} names does.
+   */
   legacyRevoked?: boolean | undefined;
+  /**
+   * SHA-256 of the shared token value written to this machine's daemon home
+   * when the old one was revoked. Absent while revoked: no shared value
+   * authenticates until the serving daemon writes its replacement.
+   */
+  localSharedHash?: string | undefined;
   /** The owner's own machine, once one of its apps used native work. */
   localOwner?: StoredLocalOwner | undefined;
 }
@@ -314,6 +329,9 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
   if (snapshot.legacyRevoked !== undefined && typeof snapshot.legacyRevoked !== 'boolean') {
     throw new Error('pairing token store has an invalid legacy revocation flag');
   }
+  if (snapshot.localSharedHash !== undefined && (typeof snapshot.localSharedHash !== 'string' || !/^[0-9a-f]{64}$/.test(snapshot.localSharedHash))) {
+    throw new Error('pairing token store has an invalid replacement shared token');
+  }
   const ids = new Set<string>(), hashes = new Set<string>();
   for (const record of snapshot.tokens) {
     if (!record || typeof record !== 'object' || Array.isArray(record)
@@ -370,6 +388,7 @@ function validateSnapshot(parsed: unknown): PairingTokenSnapshot {
     }
   }
   return { tokens: snapshot.tokens, legacyRevoked: snapshot.legacyRevoked === true,
+    ...(snapshot.legacyRevoked === true && snapshot.localSharedHash !== undefined ? { localSharedHash: snapshot.localSharedHash } : {}),
     ...(local ? { localOwner: local } : {}),
     ...(snapshot.continuations ? { continuations: snapshot.continuations } : {}),
     ...(snapshot.revokedNativeSources ? { revokedNativeSources: snapshot.revokedNativeSources } : {}) };
@@ -385,10 +404,18 @@ export interface AuthenticatedPairingToken {
   readonly client?: 'agent' | undefined;
 }
 
+/**
+ * Whether a shared token value still authenticates: it was never revoked, or
+ * it was revoked and replaced by the value this machine's apps now hold.
+ */
+function sharedTokenUsable(snapshot: PairingTokenSnapshot): boolean {
+  return snapshot.legacyRevoked !== true || snapshot.localSharedHash !== undefined;
+}
+
 /** The pairing or local owner record a continuation grant names, while it is live. */
 function custodianOf(snapshot: PairingTokenSnapshot, id: string): NativeCustodian | undefined {
   return snapshot.tokens.find(item => item.id === id)
-    ?? (snapshot.localOwner?.id === id && snapshot.legacyRevoked !== true ? snapshot.localOwner : undefined);
+    ?? (snapshot.localOwner?.id === id && sharedTokenUsable(snapshot) ? snapshot.localOwner : undefined);
 }
 
 /** The native identity a custodian authenticates as. */
@@ -476,7 +503,8 @@ export class PairingMinterRevokedError extends Error {
 function revokedPrincipals(before: PairingTokenSnapshot, after: PairingTokenSnapshot): string[] {
   const kept = new Set(after.tokens.map(token => `${token.id}\0${token.tokenHash}`));
   const revoked = before.tokens.filter(token => !kept.has(`${token.id}\0${token.tokenHash}`)).map(token => pairingPrincipalId(token.id));
-  if (before.legacyRevoked !== true && after.legacyRevoked === true) revoked.push('shared-token');
+  // A revocation, and every later replacement, ends the shared value in use before it.
+  if (after.legacyRevoked === true && (before.legacyRevoked !== true || before.localSharedHash !== after.localSharedHash)) revoked.push('shared-token');
   return revoked;
 }
 
@@ -509,6 +537,34 @@ export interface PairingTokenManagerOptions {
    * store, and so this module never has to depend on ConfigManager.
    */
   readonly maxPaired?: (() => number | undefined) | undefined;
+}
+
+/**
+ * The serving daemon's hold on the shared operator token, bound so that
+ * revoking the shared token replaces it: every copy handed to another device
+ * stops signing in, and this machine's own apps read the new value from the
+ * daemon home and stay signed in.
+ */
+export interface SharedTokenCustody {
+  /** The value the daemon serves with now, or null when it serves none. */
+  current(): string | null;
+  /** Why the served value cannot be replaced here, or null when it can. */
+  replacementRefusal(): string | null;
+  /**
+   * Make a new value and hand it to `commit`, which records it in this store
+   * before anything else changes; then write it where this machine's apps read
+   * it and serve with it. A throw from `commit` leaves the old value in place.
+   */
+  replace(commit: (token: string) => void): void;
+}
+
+/** The shared token cannot be revoked here, because the daemon cannot replace the value it serves with. */
+export class SharedTokenNotReplaceableError extends Error {
+  readonly code = 'SHARED_TOKEN_NOT_REPLACEABLE';
+  constructor(reason: string) {
+    super(`The shared operator token was not revoked: ${reason}`);
+    this.name = 'SharedTokenNotReplaceableError';
+  }
 }
 
 export class PairingTokenManager {
@@ -565,6 +621,8 @@ export class PairingTokenManager {
   /** The file identity native authority last confirmed durable; native reads confirm a new identity once. */
   #durableIdentity: string | undefined;
   readonly #revocationListeners = new Set<(principalIds: readonly string[]) => void>();
+  /** The serving daemon's shared token, while one is bound (see {@link bindSharedTokenCustody}). */
+  #sharedCustody: SharedTokenCustody | undefined;
 
   constructor(filePath: string, options: PairingTokenManagerOptions = {}) {
     this.filePath = filePath;
@@ -633,8 +691,11 @@ export class PairingTokenManager {
     if (identity !== undefined && identity === this.#observedIdentity) return !this.#readFaulted;
     try {
       const snapshot = this.readPersisted();
-      // A missing file holds no pairings; a legacy revocation already seen stays revoked.
-      this.publish(snapshot ?? { tokens: [], ...(this.snapshot.legacyRevoked === true ? { legacyRevoked: true } : {}) });
+      // A missing file holds no pairings; a legacy revocation already seen stays
+      // revoked, and the replacement this machine's apps hold stays theirs.
+      const seen = this.snapshot;
+      this.publish(snapshot ?? { tokens: [], ...(seen.legacyRevoked === true ? { legacyRevoked: true,
+        ...(seen.localSharedHash !== undefined ? { localSharedHash: seen.localSharedHash } : {}) } : {}) });
       this.#readFaulted = false;
       this.#observedIdentity = identity;
     } catch {
@@ -717,21 +778,43 @@ export class PairingTokenManager {
 
   /**
    * Why a presented credential is refused, when this store is what refuses it:
-   * a device token it knows (see {@link describeRefusal}), or the shared
-   * operator token after it was revoked here. `sharedToken` is the daemon's own
-   * copy, null when it has none. Asked only on the 401 path; never grants access.
+   * a device token it knows (see {@link describeRefusal}), or a shared
+   * operator token after the shared token was revoked here. `sharedToken` is
+   * the daemon's own copy, null when it has none. Asked only on the 401 path;
+   * never grants access.
    */
   describePresentedRefusal(token: string, sharedToken: string | null): CredentialRefusal | null {
     const device = this.describeRefusal(token);
     if (device) return device;
     const normalized = token.trim();
-    if (!sharedToken || !normalized || !matchesSharedToken(normalized, sharedToken) || !this.isLegacyRevoked()) return null;
+    if (!normalized || isPairingTokenShape(normalized) || !this.isLegacyRevoked()) return null;
+    const served = sharedToken !== null && matchesSharedToken(normalized, sharedToken);
+    // A served value that is still refused: the revocation is recorded, its replacement not yet written.
+    if (served && !this.refusesSharedToken(normalized)) return null;
+    if (!served && !normalized.startsWith(SHARED_TOKEN_PREFIX)) return null;
     return {
       code: 'SHARED_TOKEN_REVOKED',
-      state: 'the shared operator token was revoked on this daemon and no longer signs in',
-      reason: 'This request presented the shared operator token, which was revoked on this daemon.',
-      next: ['On the daemon\'s machine, run /devices migrate-shared in the GoodVibes terminal to mint this device its own token, then use that token.'],
+      state: served
+        ? 'the shared operator token was revoked on this daemon and its replacement is not written yet'
+        : 'this is not the daemon\'s shared operator token: the shared token was revoked and replaced, and only the daemon\'s own machine holds the new one',
+      reason: 'This request presented a shared operator token that this daemon no longer accepts.',
+      next: served
+        ? ['Restart the daemon so it writes the replacement token, then retry from this machine.']
+        : ['Pair this device for its own token: open /pair in the GoodVibes terminal on the daemon\'s machine (or goodvibes-daemon pair there), then use the new link.'],
     };
+  }
+
+  /**
+   * Whether the shared operator token value `token` is refused here: the
+   * shared token was revoked and `token` is not the replacement written for
+   * this machine's own apps. One `lstat` (the file is read only when it moved)
+   * and, while revoked, one hash.
+   */
+  refusesSharedToken(token: string): boolean {
+    this.refreshIfChanged();
+    if (this.snapshot.legacyRevoked !== true) return false;
+    const replacement = this.snapshot.localSharedHash;
+    return replacement === undefined || hashToken(token.trim()) !== replacement;
   }
 
   /** Take in the last-seen times stamped since the last write; true when a record moved. */
@@ -985,7 +1068,17 @@ export class PairingTokenManager {
     }
   }
 
-  captureSettingsAuthority(input: { readonly kind: 'shared-token' }
+  /**
+   * Whether the shared token value hashing to `hash` may hold settings
+   * authority in `snapshot`: never revoked (and no revocation was ever seen
+   * here), or revoked and `hash` names its replacement.
+   */
+  private sharedSettingsAllowed(snapshot: PairingTokenSnapshot | null, hash: string): boolean {
+    if (snapshot?.legacyRevoked === true) return snapshot.localSharedHash === hash;
+    return !this.settingsObservedLegacyRevocation;
+  }
+
+  captureSettingsAuthority(input: { readonly kind: 'shared-token'; readonly token: string }
     | { readonly kind: 'pairing-token'; readonly token: string }): SettingsPairingAuthority | null {
     if (input.kind === 'pairing-token' && !isPairingTokenShape(input.token)) return null;
     let lock: PairingOwnerLock | undefined;
@@ -994,8 +1087,9 @@ export class PairingTokenManager {
       const snapshot = this.readSettingsSnapshot();
       let record: SettingsPairingAuthorityRecord;
       if (input.kind === 'shared-token') {
-        if (snapshot?.legacyRevoked === true || this.settingsObservedLegacyRevocation) return null;
-        record = { kind: 'shared-token' };
+        const hash = hashToken(input.token.trim());
+        if (!this.sharedSettingsAllowed(snapshot, hash)) return null;
+        record = { kind: 'shared-token', hash };
       } else {
         if (!snapshot?.tokens.length) return null;
         const hash = hashToken(input.token.trim());
@@ -1030,7 +1124,7 @@ export class PairingTokenManager {
         lock.assertOwned();
         const current = this.readSettingsSnapshot();
         if (expected.kind === 'shared-token') {
-          if (current?.legacyRevoked === true || this.settingsObservedLegacyRevocation) throw new SettingsAuthorityUnavailableError();
+          if (expected.hash === undefined || !this.sharedSettingsAllowed(current, expected.hash)) throw new SettingsAuthorityUnavailableError();
         } else if (!current?.tokens.some(item => item.tokenHash === expected.hash
           && item.id === expected.id && item.createdAt === expected.createdAt)) {
           throw new SettingsAuthorityUnavailableError();
@@ -1089,7 +1183,7 @@ export class PairingTokenManager {
     if (credential === LOCAL_OWNER_CREDENTIAL) {
       if (!this.#nativeSnapshotCurrent()) return null;
       const owner = this.snapshot.localOwner;
-      return owner && this.snapshot.legacyRevoked !== true ? nativeIdentityOf(owner) : null;
+      return owner && sharedTokenUsable(this.snapshot) ? nativeIdentityOf(owner) : null;
     }
     const normalized = credential.trim();
     if (!normalized.startsWith(TOKEN_PREFIX) || !this.#nativeSnapshotCurrent() || this.index.size === 0) return null;
@@ -1100,16 +1194,18 @@ export class PairingTokenManager {
 
   /**
    * The owner's own machine's native identity, made the first time one of its
-   * apps uses native work (one durable write, once) and read after that. Null
-   * once the legacy shared token is revoked, or when the record cannot be
-   * written; the refusal the caller gives then names pairing as the way on.
+   * apps uses native work (one durable write, once) and read after that. A
+   * revocation of the shared token ends it, and the next use after the
+   * replacement makes a new one. Null while the shared token is revoked and
+   * not yet replaced, or when the record cannot be written; the refusal the
+   * caller gives then names pairing as the way on.
    */
   ensureLocalNativeOwner(): AuthenticatedNativePairingToken | null {
     const current = this.authenticateNative(LOCAL_OWNER_CREDENTIAL);
-    if (current || this.nativePersistenceFailed || this.snapshot.legacyRevoked === true) return current;
+    if (current || this.nativePersistenceFailed || !sharedTokenUsable(this.snapshot)) return current;
     try {
       const made = this.mutate(snapshot => {
-        if (snapshot.legacyRevoked === true) return { value: false, changed: false };
+        if (!sharedTokenUsable(snapshot)) return { value: false, changed: false };
         if (snapshot.localOwner) return { value: true, changed: false };
         snapshot.localOwner = { id: `local-${randomUUID()}`, createdAt: Date.now(), tokenHash: randomBytes(32).toString('hex') };
         return { value: true, changed: true };
@@ -1555,16 +1651,87 @@ export class PairingTokenManager {
   }
 
   /**
-   * Revoke the legacy single shared token; report only persisted success. The
-   * owner's own machine loses its native authority with it (its grants go in
-   * the same write): its apps then pair like any other device.
+   * Revoke the shared operator token; report only persisted success. Every
+   * copy handed out stops signing in. In the serving daemon (a bound
+   * {@link SharedTokenCustody}) the token is replaced in the same step: the
+   * new value is recorded here, written to the daemon home where this
+   * machine's apps read it, and served from then on, so those apps stay
+   * signed in. Without a bound daemon only the revocation is recorded, and
+   * the daemon writes the replacement when it next reads this store.
+   *
+   * The owner's own machine's native identity and its grants end with the old
+   * value; the next native use after the replacement makes a new one.
+   *
+   * @throws {SharedTokenNotReplaceableError} when the daemon serves a value it
+   *   cannot replace (one set by the process environment); nothing is revoked.
    */
   revokeLegacyShared(): void {
+    const custody = this.#sharedCustody;
+    const served = custody?.current() ?? null;
+    if (custody && served !== null) {
+      // Already revoked and the served value is the replacement: nothing is left to do.
+      if (this.isLegacyRevoked() && !this.refusesSharedToken(served)) return;
+      const refusal = custody.replacementRefusal();
+      if (refusal !== null) throw new SharedTokenNotReplaceableError(refusal);
+      this.#replaceSharedToken(custody);
+      return;
+    }
     this.mutate(snapshot => {
       const changed = snapshot.legacyRevoked !== true || snapshot.localOwner !== undefined;
       snapshot.legacyRevoked = true;
       delete snapshot.localOwner;
       return { value: undefined, changed };
+    });
+  }
+
+  /**
+   * Bind the serving daemon's shared token (see {@link SharedTokenCustody}). A
+   * revocation recorded without a replacement, by another process or before
+   * replacement existed, is completed now and whenever this store reads one.
+   * Returns the unbind.
+   */
+  bindSharedTokenCustody(custody: SharedTokenCustody): () => void {
+    this.#sharedCustody = custody;
+    // Deferred: the listener runs inside a write that still holds the owner lock.
+    const stop = this.onRevoked(principalIds => {
+      if (principalIds.includes('shared-token')) queueMicrotask(() => this.#completeSharedRevocation());
+    });
+    this.#completeSharedRevocation();
+    return () => {
+      stop();
+      if (this.#sharedCustody === custody) this.#sharedCustody = undefined;
+    };
+  }
+
+  /** Replace the served value when this store refuses it; a failure is logged and retried at the next read of a revocation. */
+  #completeSharedRevocation(): void {
+    const custody = this.#sharedCustody;
+    const served = custody?.current() ?? null;
+    if (!custody || served === null || !this.refusesSharedToken(served)) return;
+    const refusal = custody.replacementRefusal();
+    if (refusal !== null) {
+      logger.warn('The shared operator token was revoked and the daemon cannot replace the value it serves; it no longer signs in', { reason: refusal });
+      return;
+    }
+    try {
+      this.#replaceSharedToken(custody);
+    } catch (error) {
+      logger.error('The revoked shared operator token could not be replaced; apps on this machine are refused until the daemon restarts', {
+        path: this.filePath, error: String(error),
+      });
+    }
+  }
+
+  /** Record the revocation with the new value's hash, then let the custody write and serve it. */
+  #replaceSharedToken(custody: SharedTokenCustody): void {
+    custody.replace(token => {
+      const replacement = hashToken(token);
+      this.mutate(snapshot => {
+        snapshot.legacyRevoked = true;
+        snapshot.localSharedHash = replacement;
+        delete snapshot.localOwner;
+        return { value: undefined, changed: true };
+      });
     });
   }
 }

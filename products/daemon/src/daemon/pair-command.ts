@@ -17,6 +17,11 @@
  * sign in). Only when no daemon answers is the link rebuilt from the settings
  * and the token file, and the output says so.
  *
+ * Once the shared token was revoked, the stored token is the replacement the
+ * daemon wrote for this machine's own apps and goes in no link. The local
+ * form then mints the new device its own token on this machine's daemon, the
+ * same act and the same `-y` consent as the remote form.
+ *
  * REMOTE FORM, `pair --host <name> [--port] [--token]`, asks THAT daemon to
  * MINT A NEW per-device pairing token over `pairing.handoff.create` and prints
  * the pairing block for it. Minting is a different act than reprinting: it is
@@ -188,14 +193,24 @@ async function runLocalReprint(input: RunPairCommandInput): Promise<DaemonComman
       flags.json,
     );
   }
-  // The stored shared token after it was revoked signs nothing in, with or
-  // without a daemon answering, so no link is printed from it.
+  // Once the shared token was revoked, the value stored here is the replacement
+  // only this machine's apps hold; it is never put in a link for another
+  // device. The new device gets its own token from this machine's daemon instead.
   if (flags.token === undefined && input.operatorToken === undefined && input.sharedTokenRevoked?.() === true) {
-    return failure(
-      'the shared operator token stored on this machine was revoked, so a link built from it would not sign in',
-      'mint the device its own token: run /devices migrate-shared in the GoodVibes terminal on this machine, or goodvibes-daemon pair --host <this machine\'s address> --token <a token that still signs in>',
-      flags.json,
-    );
+    const resolved = resolveRemoteDaemonTarget({
+      flags: { token, ...(flags.port === undefined ? {} : { port: flags.port }) },
+      configManager: input.configManager,
+      daemonHomeDir: input.daemonHomeDir,
+      readToken: input.readToken,
+    });
+    if (!resolved.ok) return failure(resolved.error, resolved.fix, flags.json, resolved.code);
+    if (!flags.yes) {
+      return mintPlanResult(resolved.target, flags.json, [
+        'The shared token on this machine was revoked and replaced; the replacement belongs to this machine\'s own apps and is not put in a pairing link.',
+        '',
+      ]);
+    }
+    return runRemoteMint(input, resolved.target, true);
   }
 
   const answer = await askLocalDaemon(input, token);
@@ -275,10 +290,11 @@ export function localOnlyNotice(config: Pick<ConfigManager, 'get'>, origin: stri
   ];
 }
 
-/** The plan `pair --host <target>` prints before it will act, absent `-y`. Nothing is called yet. */
-function mintPlanResult(target: RemoteDaemonTarget, json: boolean): DaemonCommandResult {
+/** The plan a minting `pair` prints before it will act, absent `-y`. Nothing is called yet. */
+function mintPlanResult(target: RemoteDaemonTarget, json: boolean, why: readonly string[] = []): DaemonCommandResult {
   const plan = [
-    `pair --host: this will MINT A NEW per-device pairing token on the daemon at ${target.baseUrl}`,
+    ...why,
+    `pair${why.length > 0 ? '' : ' --host'}: this will MINT A NEW per-device pairing token on the daemon at ${target.baseUrl}`,
     'and print the pairing link/QR for that new token.',
     '',
     "That daemon's existing tokens (its shared token and every other paired device) are",
@@ -299,8 +315,8 @@ function mintPlanResult(target: RemoteDaemonTarget, json: boolean): DaemonComman
   return { exitCode: 0, lines: plan };
 }
 
-/** The remote form, once `-y` has consented: mint and render. */
-async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTarget): Promise<DaemonCommandResult> {
+/** The minting form, once `-y` has consented: mint and render. `local`: the daemon is this machine's own. */
+async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTarget, local = false): Promise<DaemonCommandResult> {
   const { flags } = input;
 
   const outcome = await callDaemonMethod<PairingHandoffCreateResult>(
@@ -352,7 +368,7 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
 
   const origin = originFromDeepLink(data.deepLink);
   const banner = renderPairingBanner({
-    version: `remote build at ${target.baseUrl}`,
+    version: local ? input.version : `remote build at ${target.baseUrl}`,
     origin,
     token: data.token.token,
     offers: offerKinds,

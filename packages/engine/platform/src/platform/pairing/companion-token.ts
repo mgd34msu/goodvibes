@@ -304,6 +304,36 @@ export function regenerateCompanionToken(
   return getOrCreateCompanionToken({ ...options, regenerate: true });
 }
 
+/**
+ * The token stored in `<daemonHomeDir>/operator-tokens.json`, read without
+ * creating, moving or repairing anything. Null when the file is absent or
+ * holds no usable record.
+ */
+export function readCompanionTokenValue(daemonHomeDir: string): string | null {
+  return readTokenRecord(operatorTokenPath(daemonHomeDir)).record?.token ?? null;
+}
+
+/**
+ * Replace the stored token with a new value. `commit` is told the new value
+ * first; when it throws, the file is left exactly as it was. The record is then
+ * written whole at mode 0600, keeping its peer id, and the new value returned.
+ */
+export function replaceCompanionToken(
+  options: Pick<CompanionTokenOptions, 'daemonHomeDir'>,
+  commit: (token: string) => void,
+): CompanionPairingResult {
+  const tokenPath = operatorTokenPath(options.daemonHomeDir);
+  const previous = readTokenRecord(tokenPath).record;
+  const record: CompanionTokenRecord = {
+    token: generateTokenValue(),
+    peerId: previous?.peerId ?? generatePeerId(),
+    createdAt: Date.now(),
+  };
+  commit(record.token);
+  writeJsonFileAtomic(tokenPath, record, { mode: 0o600, trailingNewline: false });
+  return { token: record.token, peerId: record.peerId, createdAt: record.createdAt };
+}
+
 export function pruneStaleOperatorTokens(
   options: PruneStaleOperatorTokensOptions,
 ): PruneStaleOperatorTokensResult {

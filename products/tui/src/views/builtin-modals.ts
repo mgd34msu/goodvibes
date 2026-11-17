@@ -30,6 +30,8 @@ import { createWorkPlanModalSurface } from './modals/work-plan-modal.ts';
 import { createKeybindingsModalSurface } from './modals/keybindings-modal.ts';
 import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo } from './modals/pairing-modal.ts';
 import { createDevicesModalSurface } from './modals/devices-modal.ts';
+import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
+import { revokeSharedTokenOnDaemon } from '../runtime/client/shared-token-revocation.ts';
 import { createPlanningModalSurface } from './modals/planning-modal.ts';
 
 /**
@@ -173,6 +175,8 @@ export function registerBuiltinModals(
   // migrate-shared over the same per-device token store the pairing QR mints into.
   manager.registerModalSurface(createDevicesModalSurface({
     pairingTokens: ui.platform.pairingTokens,
+    // Resolved per press: the daemon's address and this machine's bearer are read then.
+    revokeShared: () => revokeSharedTokenOnDaemon(resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory })),
     copyToClipboard,
   }));
   manager.registerModalRedirect('devices', 'devices-modal');

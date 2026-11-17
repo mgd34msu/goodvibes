@@ -15,7 +15,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { PairingTokenManager } from '../../pairing/pairing-token-store.js';
-import { PairingLimitReachedError, PairingMinterRevokedError, isPairingAttemptId, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
+import { PairingLimitReachedError, PairingMinterRevokedError, SharedTokenNotReplaceableError, isPairingAttemptId, pairingTokenIdOfPrincipal } from '../../pairing/pairing-token-store.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
@@ -134,10 +134,21 @@ function createRevokeHandler(service: PairingGatewayService, onRevoked?: Pairing
   };
 }
 
+/**
+ * Revoke the shared token. On the daemon this replaces it in the same step:
+ * every copy another device holds stops signing in, and the apps on the
+ * daemon's machine read the new value from its home and stay signed in.
+ */
 function createRevokeSharedHandler(service: PairingGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     requirePrincipal(invocation);
-    service.revokeLegacyShared();
+    try {
+      service.revokeLegacyShared();
+    } catch (error) {
+      // 409: the request is fine; the daemon serves a token it cannot replace.
+      if (error instanceof SharedTokenNotReplaceableError) throw new GatewayVerbError(error.message, error.code, 409);
+      throw error;
+    }
     return { legacySharedRevoked: true };
   };
 }

@@ -39,8 +39,9 @@ again only when it changed.
 
 A device still holding the legacy shared token calls `pairing.tokens.migrate` once to mint
 its own per-device token without disrupting other clients; `pairing.tokens.revokeShared`
-then turns the legacy shared token off entirely, after which only per-device tokens and
-user sessions authenticate.
+then replaces the shared token: every copy a device holds stops authenticating, and only
+the new value the daemon writes to its own home (read by the apps on its machine), per-device
+tokens and user sessions authenticate.
 
 A paired device (per-device token or legacy shared token) carries the same operator
 authority as the shared token: `isOperatorAdmin()` returns true for either.
@@ -177,8 +178,8 @@ flow, the deep-link/QR content, offer set, migration path, and client integratio
 3. **No challenge-response.** Pairing is a direct token transfer. Security relies on the
    QR/link being shown only in a trusted context, the transport using TLS when the daemon
    is reachable over a network, and the token being individually revocable
-   (`pairing.tokens.delete` for a per-device token; `pairing.tokens.revokeShared` turns the
-   legacy shared token off for everyone using it).
+   (`pairing.tokens.delete` for a per-device token; `pairing.tokens.revokeShared` ends every
+   copy of the legacy shared token and replaces it for the daemon's own machine).
 
 4. **Connection.** After scanning, the companion app connects using `transport-http` with
    `Authorization: Bearer <token>`. The daemon validates this through the normal

@@ -461,7 +461,7 @@ export class DaemonControlPlaneHelper {
       } else {
         const shared = this.context.authToken();
         if (shared && matchesSharedToken(token, shared)) {
-          paired = pairingOwner?.captureSettingsAuthority?.({ kind: 'shared-token' }) ?? null;
+          paired = pairingOwner?.captureSettingsAuthority?.({ kind: 'shared-token', token }) ?? null;
           if (!paired && pairingOwner?.settingsAuthorityFaulted === true) throw new PairingStoreFaultedError();
           if (!paired || !pairingOwner?.withSettingsAuthority) return null;
           kind = 'shared-token';

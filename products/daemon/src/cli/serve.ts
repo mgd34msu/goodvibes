@@ -152,7 +152,11 @@ export function runConfiguredDaemonCli(
         if (pairingOutput) {
           // Only an interactive terminal or an explicitly supplied local sink
           // receives credentials. Service/redirected diagnostics stay private.
-          pairingOutput(renderDaemonStartupPairing(config, actual, token, version));
+          // Once the shared token was revoked, the value served is this machine's
+          // own replacement and goes in no link; a device gets its own token.
+          pairingOutput(host.services?.pairingTokens.isLegacyRevoked() === true
+            ? 'Device pairing: the shared token was revoked and replaced, so no pairing link carries it. Pair a device with its own token: goodvibes-daemon pair -y'
+            : renderDaemonStartupPairing(config, actual, token, version));
         }
         stdout(`goodvibes-daemon ${version} host started (${snapshot.state})`);
         return snapshot;

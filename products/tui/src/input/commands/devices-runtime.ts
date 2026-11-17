@@ -1,6 +1,8 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { formatDeviceLine, resolveTokenByIdPrefix, shortTokenId } from '@goodvibes-jev/engine/platform/platform/pairing';
 import { holdMintedTokenForReveal } from '../../views/modals/devices-modal.ts';
+import { revokeSharedTokenOnDaemon } from '../../runtime/client/shared-token-revocation.ts';
+import { getOperatorRpc } from './operator-rpc.ts';
 import {
   DEVICE_CAPABILITY_SUBCOMMANDS,
   DEVICE_CAPABILITY_USAGE,
@@ -20,7 +22,8 @@ import {
  *   /devices revoke <id>          revoke a device token (asks once first)
  *   /devices migrate-shared [name] mint a per-device token off the legacy shared token;
  *                                 the token is shown in the Paired Devices view, never in the transcript
- *   /devices revoke-shared        revoke the legacy shared token (asks once first)
+ *   /devices revoke-shared        revoke the shared token (asks once first); the daemon
+ *                                 replaces it, so this machine's apps stay signed in
  *
  * and the paired-phone capabilities the daemon serves (device-capabilities-command.ts):
  *   /devices nodes                phones paired as device nodes and what each can serve
@@ -53,10 +56,9 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
       }
       if (sub === 'revoke-shared' && !pairingTokens.isLegacyRevoked()) {
         return {
-          title: 'Revoke the legacy shared token?',
-          detail: `This cannot be undone. ${pairingTokens.list().length === 0
-            ? 'No per-device token exists yet, so every device still using the shared token is locked out.'
-            : 'Devices still on the shared token are locked out until they pair again.'}`,
+          title: 'Revoke the shared token?',
+          detail: `Every device still using it is signed out and has to pair again for its own token${pairingTokens.list().length === 0
+            ? ' (no device has its own token yet)' : ''}. The daemon writes a new shared token for this machine, so this terminal, the Agent and the daemon CLI stay signed in.`,
           confirmLabel: 'Revoke',
         };
       }
@@ -129,11 +131,10 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
 
       if (sub === 'revoke-shared') {
         if (pairingTokens.isLegacyRevoked()) {
-          ctx.print('The legacy shared token is already revoked.');
+          ctx.print('The shared token is already revoked; only this machine holds its replacement.');
           return;
         }
-        pairingTokens.revokeLegacyShared();
-        ctx.print('Revoked the legacy shared token; devices still on it must re-pair with their own token.');
+        ctx.print((await revokeSharedTokenOnDaemon(getOperatorRpc(ctx))).message);
         return;
       }
 
@@ -153,8 +154,8 @@ function renderList(ctx: CommandContext, pairingTokens: NonNullable<CommandConte
   lines.push(
     '',
     pairingTokens.isLegacyRevoked()
-      ? 'Legacy shared token: revoked.'
-      : 'Legacy shared token: active; run /devices migrate-shared then /devices revoke-shared to retire it.',
+      ? 'Shared token: revoked and replaced; only the apps on this machine hold it.'
+      : 'Shared token: active, also held by devices paired before per-device tokens; run /devices migrate-shared then /devices revoke-shared to retire their copies.',
   );
   ctx.print(lines.join('\n'));
 }

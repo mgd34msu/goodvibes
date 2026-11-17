@@ -13,10 +13,11 @@
  *     immediately swaps the stored auth token to it (setExplicitAuthToken), so
  *     a browser still relying on the legacy shared token gets its own without
  *     ever being signed out mid-flow.
- *   - Revoke the shared token, a one-way action, gated by a danger confirm
- *     naming the exact consequence (every device still on the shared token is
- *     signed out at once, including this one if it has not migrated yet).
- *     Hidden once legacySharedRevoked is already true, nothing left to revoke.
+ *   - Revoke the shared token, gated by a danger confirm naming the exact
+ *     consequence: the daemon replaces it, so every device still on the old
+ *     value is signed out at once (this browser too if it has not migrated
+ *     yet), while the apps on the daemon's machine read the new value and stay
+ *     signed in. Hidden once legacySharedRevoked is already true.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -145,7 +146,7 @@ export function PairingTokensSettings() {
   async function handleRevokeShared(): Promise<void> {
     const ok = await confirm.ask({
       title: 'Revoke the shared token?',
-      description: 'Every device still using it is signed out now, this browser included if it has no token of its own.',
+      description: 'Every device still using it is signed out now, this browser included if it has no token of its own. The daemon writes a new shared token for its own machine, so the terminal, the Agent and the daemon CLI there stay signed in.',
       confirmLabel: 'Revoke the shared token',
       tone: 'danger',
     });
@@ -283,8 +284,8 @@ export function PairingTokensSettings() {
       <SettingsBlock
         title="Shared token"
         description={legacySharedRevoked
-          ? 'The legacy shared token has been revoked. Every device now needs its own token.'
-          : 'Older devices may still be signed in with one shared token. Give each its own token before revoking the shared one, since revoking it signs out anything still using it.'}
+          ? 'The shared token was revoked and replaced. Only the apps on the daemon\'s own machine hold the new one; every other device uses its own token.'
+          : 'Older devices may still be signed in with one shared token. Give each its own token before revoking the shared one: revoking signs out every device still using it, while the apps on the daemon\'s own machine get a new one and stay signed in.'}
       >
         {!legacySharedRevoked && (
           <div className="pairing-tokens-legacy__actions">

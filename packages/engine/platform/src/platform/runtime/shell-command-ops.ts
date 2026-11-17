@@ -26,6 +26,7 @@ import type {
   CancellationRequest,
   CancellationResult,
   CrossSessionTaskRef,
+  HandoffWithdrawal,
   SessionTaskGraphSnapshot,
   TaskHandoffRecord,
 } from '../sessions/orchestration/index.js';
@@ -35,6 +36,9 @@ import type { HITLMode, HITLModeDefinition } from '../state/mode-manager.js';
 
 export interface ShellAgentManagerService {
   spawn(input: AgentInput): AgentRecord;
+  /** Settles once the agent's admitted work, including its cleanup, has finished. */
+  join(agentId: string): Promise<void>;
+  getStatus(agentId: string): AgentRecord | null;
   cancel(agentId: string): boolean;
   cancelGraph(graphId: string): string[];
   cancelSubtree(rootAgentId: string): string[];
@@ -89,6 +93,10 @@ export interface ShellSessionOrchestrationService {
   getDependencies(sessionId: string, taskId: string): CrossSessionTaskRef[];
   getDependents(sessionId: string, taskId: string): CrossSessionTaskRef[];
   getHandoffs(): TaskHandoffRecord[];
+  /** The destination session accepts a waiting handoff; `true` when it is accepted (already, or now). */
+  acknowledgeHandoff(handoffId: string, bySessionId?: string): boolean;
+  /** The source session takes back a handoff that is still waiting. */
+  withdrawHandoff(handoffId: string, bySessionId?: string): HandoffWithdrawal;
   cancel(request: CancellationRequest): CancellationResult;
 }
 

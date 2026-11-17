@@ -1027,6 +1027,12 @@ export class DaemonHttpRouter {
       serviceRegistry: this.context.serviceRegistry,
       githubWebhookSecret: this.context.githubWebhookSecret,
       trySpawnAgent: (input, logLabel, sessionId) => this.context.trySpawnAgent(input, logLabel, sessionId),
+      // The integration posts the finished answer with its own token, so the
+      // agent is not asked to post a comment it has no credential for.
+      awaitAgent: async (agentId) => {
+        await this.context.agentManager.join(agentId);
+        return this.context.agentManager.getStatus(agentId);
+      },
     });
   }
 

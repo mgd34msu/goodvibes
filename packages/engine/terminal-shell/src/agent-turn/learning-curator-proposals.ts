@@ -124,7 +124,7 @@ const proposalKey = {
   session: (name: string) => `session:${name}`,
 };
 
-/** The stored proposal verdict for a source, outside Classic operation; undefined when no pass has read it in this form. */
+/** The stored proposal verdict for a source, outside operation without a decision model; undefined when no pass has read it in this form. */
 function storedProposal(source: LearningCuratorSource, key: string, hash: string): StoredLearningProposal | undefined {
   return isClassicOperation() ? undefined : source.curation.proposal(key, hash);
 }
@@ -618,116 +618,156 @@ export async function runLearningCurationPass(context: LearningCuratorNativeCont
   return withConfiguredDecisionModelPolicy(async () => {
     requireDecisionFeature('the learning curation pass; inspect and edit the records explicitly with agent_local_registry');
     const source = acquireLearningCuratorSource(context, options);
-    const store = source.curation;
-    const live = { proposals: new Set<string>(), pairs: new Set<string>(), survivors: new Set<string>(), grades: new Set<string>() };
-    let readings = 0, reused = 0, unsettled = 0;
-    /** One reading; an unsettled one is counted and skipped, anything else (an abort, a lost admission) ends the pass. */
-    const settle = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
-      try { const value = await read(); readings++; source.assertCurrent(); return value; }
-      catch (error) {
-        if (!(error instanceof ToolInputProjectionError) || error.problem !== 'held') throw error;
-        source.assertCurrent(); unsettled++; return undefined;
+    // One pass at a time per curation store: a second call (two in one tool
+    // batch, or the auto-promoter's own pass) waits for the one running, then
+    // reuses every verdict it stored instead of paying for the same readings.
+    const earlier = passesInFlight.get(source.curation);
+    const pass = (async () => {
+      if (earlier) {
+        await settledOrAborted(earlier, options.signal);
+        source.assertCurrent();
       }
-    };
-    const proposal = async (key: string, hash: string, input: () => unknown): Promise<void> => {
-      live.proposals.add(key);
-      if (store.proposal(key, hash)) { reused++; return; }
-      const evidence = input();
-      const target = await settle(() => readLearningProposalTarget(evidence, source.options));
-      if (target === undefined) return;
-      if (target !== 'memory') { store.setProposal(key, hash, { target }); return; }
-      const cls = await settle(() => readLearningMemoryClass(evidence, source.options));
-      if (cls !== undefined) store.setProposal(key, hash, { target, cls });
-    };
-    const limit = maxParallelToolCalls(context.platform?.configManager);
-    /** Run one phase's readings, at most `limit` in flight; an error other than an unsettled reading ends the pass. */
-    const inParallel = async (tasks: ReadonlyArray<() => Promise<void>>): Promise<void> => {
-      await mapWithConcurrency(tasks, limit, (task) => task());
-    };
+      return runCurationPassOnce(context, source);
+    })();
+    passesInFlight.set(source.curation, pass);
     try {
-      const firstPhase: Array<() => Promise<void>> = [];
-      for (const record of source.libraries.note) {
-        if (!isReviewed(record.item)) continue;
-        firstPhase.push(() => proposal(proposalKey.note(record.item.id), contentHash(record.record), () => ({ origin: 'note', ...record })));
-      }
-      for (const item of source.source.workItems) {
-        if (item.status !== 'done') continue;
-        firstPhase.push(() => proposal(proposalKey.work(item.id), contentHash(item), () => ({ origin: 'work_plan', record: item })));
-      }
-      for (const run of source.source.researchSnapshot?.completed ?? []) {
-        firstPhase.push(() => proposal(proposalKey.research(run.id), contentHash(run), () => ({ origin: 'research_run', record: run })));
-      }
-      for (const session of source.source.sessions) {
-        const name = session.name;
-        if (!name) continue;
-        // A transcript is loaded only for a session no pass has read in its current form.
-        firstPhase.push(() => proposal(proposalKey.session(name), sessionHash(session), () => ({ origin: 'session', record: source.loadSession(session) })));
-      }
-      const shortlists = CONSOLIDATION_DOMAINS.map((domain) => {
-        const records = source.libraries[domain];
-        return { domain, records, pairs: shortlistDuplicatePairs(domain, records) };
-      });
-      for (const { domain, records, pairs } of shortlists) {
-        for (const [left, right] of pairs) {
-          const a = records[left]!, b = records[right]!;
-          const key = duplicatePairKey(domain, a, b), hash = `${contentHash(a.record)}|${contentHash(b.record)}`;
-          live.pairs.add(key);
-          if (store.pair(key, hash) !== undefined) { reused++; continue; }
-          firstPhase.push(async () => {
-            const same = await settle(() => readLearningDuplicatePair({ left: { domain, ...a }, right: { domain, ...b } }, source.options));
-            if (same === undefined) logger.warn('Learning duplicate pair reading was not settled; it is read again next pass', { domain, left: a.item.id, right: b.item.id });
-            else store.setPair(key, hash, same);
-          });
-        }
-      }
-      await inParallel(firstPhase);
-      // Survivors after every pair verdict, since the groups are built from them.
-      const survivorPhase: Array<() => Promise<void>> = [];
-      for (const { domain, records, pairs } of shortlists) {
-        const groups = consolidationGroups(records, pairs, (left, right) =>
-          store.pair(duplicatePairKey(domain, records[left]!, records[right]!), `${contentHash(records[left]!.record)}|${contentHash(records[right]!.record)}`) === true);
-        for (const group of groups) {
-          const members = liveGroupMembers(group);
-          if (members.length < 2) continue;
-          const key = survivorGroupKey(domain, group), hash = survivorHash(group);
-          live.survivors.add(key);
-          if (store.survivor(key, hash) !== undefined) { reused++; continue; }
-          survivorPhase.push(async () => {
-            const index = await settle(() => readLearningSurvivor({ domain, records: members, context: { capturedAt: source.source.capturedAt } }, source.options));
-            const survivor = index === undefined ? undefined : members[index];
-            if (survivor) store.setSurvivor(key, hash, survivor.item.id);
-          });
-        }
-      }
-      await inParallel(survivorPhase);
-      // Priorities last, over the candidates the stored verdicts now produce.
-      const assembled = assembleLearningCandidates(source);
-      const grades = [
-        ...assembled.promptRecords.map(({ domain, record, gradeKey, gradeHash }) => ({ key: gradeKey, hash: gradeHash,
-          input: () => ({ proposedUse: 'priority of existing eligible prompt context', domain, capturedAt: source.source.capturedAt, ...record }) })),
-        ...assembled.drafts.filter(({ candidate }) => candidate.domain !== 'capture').map(({ candidate, record, gradeKey, gradeHash }) => ({ key: gradeKey, hash: gradeHash,
-          input: () => ({ capturedAt: source.source.capturedAt, proposedUse: candidate.status, candidate, record }) })),
-      ];
-      const gradePhase: Array<() => Promise<void>> = [];
-      for (const { key, hash, input } of grades) {
-        live.grades.add(key);
-        if (store.grade(key, hash)) { reused++; continue; }
-        gradePhase.push(async () => {
-          const graded = await settle(() => readLearningGrade(input(), source.options));
-          if (graded) store.setGrade(key, hash, graded);
-        });
-      }
-      await inParallel(gradePhase);
-      store.retainOnly(live);
-      const at = Date.now();
-      store.markPass(at);
-      const after = assembleLearningCandidates(source);
-      return Object.freeze({ readings, reused, unsettled, unassessed: after.unassessed, lastPassAt: at,
-        proposals: after.drafts.filter(({ candidate }) => candidate.status === 'proposal-ready').length,
-        duplicateGroups: after.drafts.filter(({ candidate }) => candidate.status === 'needs-consolidation').length });
+      return await pass;
     } finally {
-      // Verdicts read before a stop are kept, so the next pass does not pay for them again.
-      store.save();
+      if (passesInFlight.get(source.curation) === pass) passesInFlight.delete(source.curation);
     }
   });
+}
+
+/** The curation pass running for each store in this process. */
+const passesInFlight = new WeakMap<LearningCuratorSource['curation'], Promise<LearningCurationPassResult>>();
+
+/** Wait for `earlier` to end, however it ends; a stop of this caller ends the wait at once. */
+async function settledOrAborted(earlier: Promise<unknown>, signal: AbortSignal | undefined): Promise<void> {
+  const ended = earlier.then(() => undefined, () => undefined);
+  if (!signal) return ended;
+  signal.throwIfAborted();
+  let onAbort = (): void => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    await Promise.race([ended, aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+async function runCurationPassOnce(context: LearningCuratorNativeContext, source: LearningCuratorSource): Promise<LearningCurationPassResult> {
+  const store = source.curation;
+  const live = { proposals: new Set<string>(), pairs: new Set<string>(), survivors: new Set<string>(), grades: new Set<string>() };
+  let readings = 0, reused = 0, unsettled = 0;
+  /** One reading; an unsettled one is counted and skipped, anything else (an abort, a lost admission) ends the pass. */
+  const settle = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
+    try { const value = await read(); readings++; source.assertCurrent(); return value; }
+    catch (error) {
+      if (!(error instanceof ToolInputProjectionError) || error.problem !== 'held') throw error;
+      source.assertCurrent(); unsettled++; return undefined;
+    }
+  };
+  const proposal = async (key: string, hash: string, input: () => unknown): Promise<void> => {
+    live.proposals.add(key);
+    if (store.proposal(key, hash)) { reused++; return; }
+    const evidence = input();
+    const target = await settle(() => readLearningProposalTarget(evidence, source.options));
+    if (target === undefined) return;
+    if (target !== 'memory') { store.setProposal(key, hash, { target }); return; }
+    const cls = await settle(() => readLearningMemoryClass(evidence, source.options));
+    if (cls !== undefined) store.setProposal(key, hash, { target, cls });
+  };
+  const limit = maxParallelToolCalls(context.platform?.configManager);
+  /** Run one phase's readings, at most `limit` in flight; an error other than an unsettled reading ends the pass. */
+  const inParallel = async (tasks: ReadonlyArray<() => Promise<void>>): Promise<void> => {
+    await mapWithConcurrency(tasks, limit, (task) => task());
+  };
+  try {
+    const firstPhase: Array<() => Promise<void>> = [];
+    for (const record of source.libraries.note) {
+      if (!isReviewed(record.item)) continue;
+      firstPhase.push(() => proposal(proposalKey.note(record.item.id), contentHash(record.record), () => ({ origin: 'note', ...record })));
+    }
+    for (const item of source.source.workItems) {
+      if (item.status !== 'done') continue;
+      firstPhase.push(() => proposal(proposalKey.work(item.id), contentHash(item), () => ({ origin: 'work_plan', record: item })));
+    }
+    for (const run of source.source.researchSnapshot?.completed ?? []) {
+      firstPhase.push(() => proposal(proposalKey.research(run.id), contentHash(run), () => ({ origin: 'research_run', record: run })));
+    }
+    for (const session of source.source.sessions) {
+      const name = session.name;
+      if (!name) continue;
+      // A transcript is loaded only for a session no pass has read in its current form.
+      firstPhase.push(() => proposal(proposalKey.session(name), sessionHash(session), () => ({ origin: 'session', record: source.loadSession(session) })));
+    }
+    const shortlists = CONSOLIDATION_DOMAINS.map((domain) => {
+      const records = source.libraries[domain];
+      return { domain, records, pairs: shortlistDuplicatePairs(domain, records) };
+    });
+    for (const { domain, records, pairs } of shortlists) {
+      for (const [left, right] of pairs) {
+        const a = records[left]!, b = records[right]!;
+        const key = duplicatePairKey(domain, a, b), hash = `${contentHash(a.record)}|${contentHash(b.record)}`;
+        live.pairs.add(key);
+        if (store.pair(key, hash) !== undefined) { reused++; continue; }
+        firstPhase.push(async () => {
+          const same = await settle(() => readLearningDuplicatePair({ left: { domain, ...a }, right: { domain, ...b } }, source.options));
+          if (same === undefined) logger.warn('Learning duplicate pair reading was not settled; it is read again next pass', { domain, left: a.item.id, right: b.item.id });
+          else store.setPair(key, hash, same);
+        });
+      }
+    }
+    await inParallel(firstPhase);
+    // Survivors after every pair verdict, since the groups are built from them.
+    const survivorPhase: Array<() => Promise<void>> = [];
+    for (const { domain, records, pairs } of shortlists) {
+      const groups = consolidationGroups(records, pairs, (left, right) =>
+        store.pair(duplicatePairKey(domain, records[left]!, records[right]!), `${contentHash(records[left]!.record)}|${contentHash(records[right]!.record)}`) === true);
+      for (const group of groups) {
+        const members = liveGroupMembers(group);
+        if (members.length < 2) continue;
+        const key = survivorGroupKey(domain, group), hash = survivorHash(group);
+        live.survivors.add(key);
+        if (store.survivor(key, hash) !== undefined) { reused++; continue; }
+        survivorPhase.push(async () => {
+          const index = await settle(() => readLearningSurvivor({ domain, records: members, context: { capturedAt: source.source.capturedAt } }, source.options));
+          const survivor = index === undefined ? undefined : members[index];
+          if (survivor) store.setSurvivor(key, hash, survivor.item.id);
+        });
+      }
+    }
+    await inParallel(survivorPhase);
+    // Priorities last, over the candidates the stored verdicts now produce.
+    const assembled = assembleLearningCandidates(source);
+    const grades = [
+      ...assembled.promptRecords.map(({ domain, record, gradeKey, gradeHash }) => ({ key: gradeKey, hash: gradeHash,
+        input: () => ({ proposedUse: 'priority of existing eligible prompt context', domain, capturedAt: source.source.capturedAt, ...record }) })),
+      ...assembled.drafts.filter(({ candidate }) => candidate.domain !== 'capture').map(({ candidate, record, gradeKey, gradeHash }) => ({ key: gradeKey, hash: gradeHash,
+        input: () => ({ capturedAt: source.source.capturedAt, proposedUse: candidate.status, candidate, record }) })),
+    ];
+    const gradePhase: Array<() => Promise<void>> = [];
+    for (const { key, hash, input } of grades) {
+      live.grades.add(key);
+      if (store.grade(key, hash)) { reused++; continue; }
+      gradePhase.push(async () => {
+        const graded = await settle(() => readLearningGrade(input(), source.options));
+        if (graded) store.setGrade(key, hash, graded);
+      });
+    }
+    await inParallel(gradePhase);
+    store.retainOnly(live);
+    const at = Date.now();
+    store.markPass(at);
+    const after = assembleLearningCandidates(source);
+    return Object.freeze({ readings, reused, unsettled, unassessed: after.unassessed, lastPassAt: at,
+      proposals: after.drafts.filter(({ candidate }) => candidate.status === 'proposal-ready').length,
+      duplicateGroups: after.drafts.filter(({ candidate }) => candidate.status === 'needs-consolidation').length });
+  } finally {
+    // Verdicts read before a stop are kept, so the next pass does not pay for them again.
+    store.save();
+  }
 }

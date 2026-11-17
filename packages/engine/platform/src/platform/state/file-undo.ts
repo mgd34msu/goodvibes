@@ -112,18 +112,19 @@ export class FileUndoManager {
   /**
    * Record a completed file operation for potential undo/redo.
    * beforeContent is null when the file was newly created. An operation with
-   * the same `call` as the newest entry joins it; a second write of the same
-   * file in that call keeps the first before-content and the last after-content.
+   * the same `call` as an entry still in the history joins it, wherever it sits
+   * (calls that run side by side interleave their writes); a second write of the
+   * same file in that call keeps the first before-content and the last after-content.
    */
   snapshot(op: Omit<FileOperation, 'timestamp'>): void {
     const operation: FileOperation = { ...op, timestamp: new Date().toISOString() };
-    const top = this.undoStack[this.undoStack.length - 1];
-    if (top && op.call !== undefined && top.call === op.call) {
-      const operations = top.operations as FileOperation[];
+    const joined = op.call === undefined ? undefined : this.entryForCall(op.call);
+    if (joined) {
+      const operations = joined.operations as FileOperation[];
       const same = operations.find((existing) => existing.path === op.path);
       if (same) same.afterContent = op.afterContent;
       else operations.push(operation);
-      if (operations[0] === same) top.afterContent = op.afterContent;
+      if (operations[0] === same) joined.afterContent = op.afterContent;
     } else {
       this.undoStack.push(entryOf([operation]));
       // Trim to max stack size, remove oldest entries first
@@ -131,6 +132,14 @@ export class FileUndoManager {
     }
     // Any new operation invalidates the redo stack
     this.redoStack = [];
+  }
+
+  /** The undo entry of `call`, newest first; at most MAX_STACK_SIZE entries to look through. */
+  private entryForCall(call: number): FileUndoEntry | undefined {
+    for (let index = this.undoStack.length - 1; index >= 0; index--) {
+      if (this.undoStack[index]!.call === call) return this.undoStack[index];
+    }
+    return undefined;
   }
 
   // ---------------------------------------------------------------------------

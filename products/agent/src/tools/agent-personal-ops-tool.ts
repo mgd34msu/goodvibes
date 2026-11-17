@@ -1,4 +1,4 @@
-import { createPersonalOpsInputProjector } from './agent-personal-ops-ingress.ts';
+import { createPersonalOpsInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';

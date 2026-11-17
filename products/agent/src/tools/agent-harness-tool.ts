@@ -8,7 +8,7 @@ import { catalogReadingOptions, modelReadingOptions, modelReadingServicePath, wi
 import { processClassificationOptions } from './agent-harness-process-launch.ts';
 import { createProcessInputProjector } from './agent-process-ingress.ts';
 import { createHarnessCatalogInputProjector, isHarnessCatalogQuery, protectHarnessCatalogTool, harnessCatalogExecutionGuard, harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
-import { createPersonalOpsInputProjector } from './agent-personal-ops-ingress.ts';
+import { createPersonalOpsInputProjector } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { createAgentHarnessResearchProjector, protectAgentHarnessResearchTool } from './agent-research-ingress.ts';
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';

@@ -1,18 +1,47 @@
-import { agentDaemonConfigClientRevision } from '../config/daemon-config-routing.ts';
-import type { CommandContext } from '../input/command-registry.ts';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+/**
+ * catalog-ingress.ts, how a protected catalog call is admitted: the call's
+ * input is screened by the research-source owner before any registry guard,
+ * repair reader or log sees it (personal-ops-ingress.ts), the sources it reads
+ * are checked again at every boundary, and a call one tool forwards to another
+ * keeps the original call's admission. The Agent harness and the learning
+ * consolidation tool admit through it, in the Agent's own process and in a
+ * session the daemon hosts for the Agent.
+ *
+ * What only the Agent's own process has (its command context: the settings
+ * it reads, the live session, a settings-import preview, channel drafts and
+ * setup smoke runs a call names) comes in as a `CatalogIngressContext`; a
+ * call made without one is admitted on the research owner and its own checks.
+ */
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry, type ToolExecutionEffect } from '@goodvibes-jev/engine/platform/platform/tools';
-import { captureModelReadingInput, assertModelReadingInputCurrent, modelReadingServicePath } from './agent-harness-model-reading-source.ts';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { isAgentWorkspaceSettingsImportPreview } from './agent-settings-import-admission.ts';
-import { createPersonalOpsInputProjector } from './agent-personal-ops-ingress.ts';
-import { createChannelDraftReferenceCapture } from './agent-channel-draft-reference.ts';
-import { createSetupSmokeReferenceCapture } from './agent-setup-smoke-reference.ts';
-import { captureAgentWorkspaceTuiSettingsImportPreview } from '../input/agent-workspace-settings.ts';
-import { RetainedGuards } from './agent-harness-retained-guards.ts';
+import { agentResearchSourceOwner } from './protected-research-report.js';
+import { captureModelReadingInput, assertModelReadingInputCurrent } from './model-reading.js';
+import { captureCatalogData } from './catalog-data.js';
+import { createPersonalOpsInputProjector } from './personal-ops-ingress.js';
+import { RetainedGuards } from './retained-guards.js';
 
 type ToolExecuteOptions = NonNullable<Parameters<Tool['execute']>[1]>;
+
+/** A settings-import preview read once from its native source, with the check that it is still that source. */
+export interface CatalogPreviewCapture {
+  readonly preview: unknown;
+  readonly sourceViews: unknown;
+  readonly assertCurrent: () => void;
+}
+
+/** What the Agent's own process adds to a protected catalog call's admission. */
+export interface CatalogIngressContext {
+  /** The command context a settings-import preview is bound to; a preview is read only for this one. */
+  readonly owner?: object | undefined;
+  /** Native references a call names (a channel draft, a setup smoke run), captured before projection. */
+  readonly captureNativeReferences?: ToolInputProjector['captureNativeReferences'] | undefined;
+  /** Whether a workspace action is a settings-import preview, inspected from its native source. */
+  readonly isSettingsPreview?: ((args: Record<string, unknown>) => boolean) | undefined;
+  /** Reads the settings-import preview once; absent where no command context exists. */
+  readonly capturePreview?: (() => CatalogPreviewCapture) | undefined;
+  /** The check over the process sources a protected call reads (settings when it inspects them, the live session, the MCP registry). */
+  readonly sourceGuard?: ((settings: boolean) => () => void) | undefined;
+}
 
 const MEMORY_CATALOG_MODES = new Set(['memory_posture', 'memory_provider']);
 const PRESERVED_CATALOG_MODES = new Set([...MEMORY_CATALOG_MODES, 'route_decision', 'browser_control_route', 'run_local_model_smoke', 'autonomy_intake', 'autonomy_queue', 'autonomy_queue_item', 'learning_curator', 'learning_candidate', 'background_processes', 'background_process', 'cli_commands', 'cli_command', 'shortcuts', 'keybindings', 'keybinding', 'set_keybinding', 'reset_keybinding', 'run_keybinding', 'agent_orchestration', 'agent_orchestration_agent', 'execution_posture', 'execution_route', 'execution_history', 'execution_history_item', 'document_ops_lane', 'delegation_posture', 'delegation_route']);
@@ -42,19 +71,19 @@ function admissionOf(options: ToolExecuteOptions | undefined): CallAdmission | u
   return active?.[active.length - 1];
 }
 interface SettingsPreviewBinding {
-  readonly context: CommandContext;
+  readonly owner: object;
   readonly registry: ToolRegistry;
-  readonly capture: ReturnType<typeof captureAgentWorkspaceTuiSettingsImportPreview>;
+  readonly capture: CatalogPreviewCapture;
   readonly aliases: Set<object>;
   released: boolean;
 }
 const settingsPreviewBindings = new WeakMap<object, SettingsPreviewBinding>();
 
 /** The body reads the exact native source acquired by its original projection. */
-export function capturedHarnessSettingsImportPreview(args: Record<string, unknown>, options: ToolExecuteOptions | undefined,
-  context: CommandContext, registry: ToolRegistry): ReturnType<typeof captureAgentWorkspaceTuiSettingsImportPreview> {
+export function capturedCatalogPreview(args: Record<string, unknown>, options: ToolExecuteOptions | undefined,
+  owner: object, registry: ToolRegistry): CatalogPreviewCapture {
   const binding = settingsPreviewBindings.get(args);
-  if (!binding || binding.released || binding.context !== context || binding.registry !== registry) throw new ToolInputProjectionError('stale');
+  if (!binding || binding.released || binding.owner !== owner || binding.registry !== registry) throw new ToolInputProjectionError('stale');
   harnessCatalogExecutionGuard(args, options)(); binding.capture.assertCurrent();
   return binding.capture;
 }
@@ -89,36 +118,26 @@ export function isHarnessCatalogQuery(input: Record<string, unknown>): boolean {
     && typeof routing.query === 'string' && routing.query.trim().length > 0;
 }
 
-function catalogContextGuard(registry: ToolRegistry, context?: CommandContext, settings = false): () => void {
-  const platform = settings ? context?.platform : undefined;
-  const config = platform?.configManager;
-  const incarnation = config?.getConfigurationIncarnation();
-  const clientRevision = settings ? agentDaemonConfigClientRevision() : undefined;
-  const session = modelReadingServicePath(context, ['session', 'runtime']);
-  const sessionId = modelReadingServicePath(session, ['sessionId']);
+/** The research owner stays the one bound to the registry, and the process sources the context names stay as captured. */
+function catalogContextGuard(registry: ToolRegistry, context: CatalogIngressContext | undefined, settings = false): () => void {
   const owner = agentResearchSourceOwner(registry);
-  const api = modelReadingServicePath(context, ['clients', 'mcpApi']) ?? modelReadingServicePath(context, ['extensions', 'mcpRegistry']);
+  const sources = context?.sourceGuard?.(settings);
   return () => {
-    const currentConfig = settings ? context?.platform.configManager : undefined;
-    const currentIncarnation = config?.getConfigurationIncarnation();
-    if ((settings && (currentConfig !== config || currentIncarnation !== incarnation || agentDaemonConfigClientRevision() !== clientRevision))
-      || modelReadingServicePath(context, ['session', 'runtime']) !== session || modelReadingServicePath(session, ['sessionId']) !== sessionId
-      || agentResearchSourceOwner(registry) !== owner
-      || (modelReadingServicePath(context, ['clients', 'mcpApi']) ?? modelReadingServicePath(context, ['extensions', 'mcpRegistry'])) !== api) throw new ToolInputProjectionError('stale');
+    sources?.();
+    if (agentResearchSourceOwner(registry) !== owner) throw new ToolInputProjectionError('stale');
   };
 }
 
 /** Reuse the protected-source owner and full original invocation projector. */
-export function createHarnessCatalogInputProjector(registry: ToolRegistry, fallback?: ToolInputProjector,
-  selected = isHarnessCatalogQuery, context?: CommandContext): ToolInputProjector {
+export function createCatalogInputProjector(registry: ToolRegistry, fallback?: ToolInputProjector,
+  selected = isHarnessCatalogQuery, context?: CatalogIngressContext): ToolInputProjector {
   const projector = createPersonalOpsInputProjector(registry, fallback, selected);
-  const captureChannel = createChannelDraftReferenceCapture(context);
-  const captureSmoke = createSetupSmokeReferenceCapture(context);
-  return { captureNativeReferences: request => captureChannel(request) ?? captureSmoke(request), async project(request) {
+  const captureNativeReferences = context?.captureNativeReferences;
+  return { ...(captureNativeReferences ? { captureNativeReferences } : {}), async project(request) {
     const protectedQuery = selected(request.args);
     const retained = retainedGuards(request.args);
     const routing = catalogRoutingInput(request.args);
-    const previewInspection = routing.mode === 'run_workspace_action' && isAgentWorkspaceSettingsImportPreview(request.args);
+    const previewInspection = routing.mode === 'run_workspace_action' && context?.isSettingsPreview?.(request.args) === true;
     const settingsInspection = request.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting' || previewInspection;
     const assertContext = protectedQuery ? catalogContextGuard(registry, context, settingsInspection) : () => {};
     const modelInspection = routing.mode === 'model_routing' || routing.mode === 'model_route' || routing.mode === 'local_model_cookbook' || request.name === 'models'
@@ -127,12 +146,13 @@ export function createHarnessCatalogInputProjector(registry: ToolRegistry, fallb
     const originalJson = original && JSON.stringify(original);
     let previewBinding: SettingsPreviewBinding | undefined;
     if (protectedQuery && previewInspection) {
-      if (!context) throw new ToolInputProjectionError('unconfigured');
+      const owner = context?.owner, capturePreview = context?.capturePreview;
+      if (!owner || !capturePreview) throw new ToolInputProjectionError('unconfigured');
       request.assertCurrent(); request.signal?.throwIfAborted(); assertContext();
-      const native = captureAgentWorkspaceTuiSettingsImportPreview(context);
+      const native = capturePreview();
       const view = captureModelReadingInput({ preview: native.preview, sources: native.sourceViews });
       native.assertCurrent(); assertContext(); request.assertCurrent(); request.signal?.throwIfAborted();
-      previewBinding = { context, registry, capture: { preview: view.preview, sourceViews: view.sources, assertCurrent: native.assertCurrent }, aliases: new Set(), released: false };
+      previewBinding = { owner, registry, capture: { preview: view.preview, sourceViews: view.sources, assertCurrent: native.assertCurrent }, aliases: new Set(), released: false };
       retained.add(native.assertCurrent);
     }
     const guarded = protectedQuery ? { ...request, ...(original ? { args: original } : {}), assertCurrent: () => {
@@ -189,9 +209,9 @@ export function harnessCatalogExecutionGuard(args: Record<string, unknown>, opti
   if (inherited) return inherited.assertCurrent;
   const projected = projectionGuards.get(args);
   const retained = retainedGuards(args);
-  const signal = modelReadingServicePath(options, ['signal']) as AbortSignal | undefined;
+  const signal = options?.signal;
   return () => {
-    if (modelReadingServicePath(options, ['signal']) !== signal) throw new ToolInputProjectionError('stale');
+    if (options?.signal !== signal) throw new ToolInputProjectionError('stale');
     signal?.throwIfAborted();
     assertCurrentToolExecution(args, options);
     // This private projection checks the retained source guards on both sides
@@ -245,12 +265,12 @@ export async function forwardHarnessCatalogCall(tool: Tool, original: Record<str
 }
 
 /** Raw factory callers use the same full-source boundary as registered callers. */
-export function protectHarnessCatalogTool(tool: Tool, registry: ToolRegistry, selected = isHarnessCatalogQuery, context?: CommandContext): Tool {
-  const projector = createHarnessCatalogInputProjector(registry, undefined, selected, context);
+export function protectCatalogTool(tool: Tool, registry: ToolRegistry, selected = isHarnessCatalogQuery, context?: CatalogIngressContext): Tool {
+  const projector = createCatalogInputProjector(registry, undefined, selected, context);
   return { ...tool, async execute(input, options) {
     if (!selected(input)) return tool.execute(input, options);
     const routing = catalogRoutingInput(input);
-    const previewInspection = routing.mode === 'run_workspace_action' && isAgentWorkspaceSettingsImportPreview(input);
+    const previewInspection = routing.mode === 'run_workspace_action' && context?.isSettingsPreview?.(input) === true;
     if (!admissionOf(options) && !projectionGuards.has(input)) { publicationGuards.set(input, new RetainedGuards()); }
     const guard = harnessCatalogExecutionGuard(input, options);
     // The tool's registration, read once by name (no scan of every registered tool).

@@ -4,7 +4,6 @@ import { ToolRegistry, registerAllTools } from '@goodvibes-jev/engine/platform/p
 import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend } from './agent-browser.ts';
-import { registerAgentLearningConsolidationTool } from '../tools/agent-learning-consolidation-tool.ts';
 import {
   connectedHostGoogleCalendar,
   getOutwardApprovalStore,
@@ -195,7 +194,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
       },
     },
   });
-  registerAgentLearningConsolidationTool(toolRegistry, services.shellPaths, services.memoryRegistry, services.memorySpineClient);
   installAgentToolPolicyGuard(toolRegistry);
   compactRegisteredToolDefinitions(toolRegistry);
   return { toolRegistry, fileCache, projectIndex, dispose };

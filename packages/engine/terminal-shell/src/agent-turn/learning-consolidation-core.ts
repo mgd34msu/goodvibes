@@ -1,24 +1,20 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
-import { runStoreFileUpdateSync, writeStoreJson } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { runStoreFileUpdateSync, writeStoreJson } from './store-file.js';
 import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { MemoryRecord } from '@goodvibes-jev/engine/platform/platform/state';
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import type { CommandContext } from '../input/command-registry.ts';
-import { AgentPersonaRegistry, type AgentPersonaRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentRoutineRegistry, type AgentRoutineRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentSkillRegistry, type AgentSkillRecord } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import {
-  resolveLearningConsolidationCandidate,
-  type LearningCandidate,
-  type LearningConsolidationFields,
-} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import type { CatalogRankingOptions } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { harnessCatalogInvocationAuthority } from './agent-harness-catalog-ingress.ts';
-import { clampReadLimit } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { readString } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
+import { AgentPersonaRegistry, type AgentPersonaRecord } from './persona-registry.js';
+import { AgentRoutineRegistry, type AgentRoutineRecord } from './routine-registry.js';
+import { AgentSkillRegistry, type AgentSkillRecord } from './skill-registry.js';
+import { resolveLearningConsolidationCandidate, type LearningCandidate, type LearningConsolidationFields } from './learning-curator.js';
+import type { LearningCuratorNativeContext } from './learning-curator-source.js';
+import type { CatalogRankingOptions } from './catalog-ranking.js';
+import { harnessCatalogInvocationAuthority } from './catalog-ingress.js';
+import { clampReadLimit } from './read-helpers.js';
+import { readString } from './tool-args.js';
 
 export type AgentLearningConsolidationMode = 'preview' | 'stale' | 'delete' | 'rollback' | 'recreate' | 'receipts';
 export type AgentLearningConsolidationDomain = 'memory' | 'persona' | 'skill' | 'routine';
@@ -46,11 +42,11 @@ export interface LearningConsolidationReceipt {
   readonly explicitUserRequest: string;
   readonly survivorId: string;
   readonly duplicateIds: readonly string[];
-  readonly beforeSurvivor?: Record<string, unknown>;
+  readonly beforeSurvivor?: Record<string, unknown> | undefined;
   /** Merge only: the survivor as the merge left it, so a rollback can tell whether it was edited since. */
-  readonly afterSurvivor?: Record<string, unknown>;
+  readonly afterSurvivor?: Record<string, unknown> | undefined;
   /** Rollback receipts: the receipt that was rolled back. */
-  readonly rollbackOf?: string;
+  readonly rollbackOf?: string | undefined;
   readonly beforeDuplicates: readonly Record<string, unknown>[];
 }
 
@@ -58,7 +54,7 @@ export interface LearningConsolidationReceiptFile {
   readonly version: 1;
   readonly receipts: readonly LearningConsolidationReceipt[];
   /** Entries this build does not recognise, kept verbatim so a rewrite never erases them. */
-  readonly preserved?: readonly unknown[];
+  readonly preserved?: readonly unknown[] | undefined;
 }
 
 export const MODES: readonly AgentLearningConsolidationMode[] = ['preview', 'stale', 'delete', 'rollback', 'recreate', 'receipts'];
@@ -245,12 +241,9 @@ export type ConsolidationMemory = Pick<MemoryAccess, 'get' | 'update' | 'updateR
  * The candidate reader is synchronous, so it is given the records read through
  * the spine just now, not the boot-time local image.
  */
-async function minimalContext(shellPaths: ShellPathService, memory: ConsolidationMemory): Promise<CommandContext> {
+async function minimalContext(shellPaths: ShellPathService, memory: ConsolidationMemory): Promise<LearningCuratorNativeContext> {
   const records = await memory.list();
-  return {
-    workspace: { shellPaths },
-    clients: { agentKnowledgeApi: { memory: { getAll: () => records, get: (id: string) => records.find((record) => record.id === id) ?? null } } },
-  } as unknown as CommandContext;
+  return { workspace: { shellPaths }, clients: { agentKnowledgeApi: { memory: { getAll: () => records } } } };
 }
 
 export async function resolveCandidate(

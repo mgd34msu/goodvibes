@@ -68,6 +68,12 @@ export * from './learning-curator-source.js';
 export * from './learning-curator-readings.js';
 export * from './learning-curator-proposals.js';
 export * from './learning-curator.js';
+export * from './retained-guards.js';
+export * from './personal-ops-ingress.js';
+export * from './catalog-ingress.js';
+// Not re-exported: the consolidation core's argument readers and record helpers, named like other tools' own.
+export { writeReceipt, type AgentLearningConsolidationToolArgs, type LearningConsolidationReceipt } from './learning-consolidation-core.js';
+export { createAgentLearningConsolidationTool, registerAgentLearningConsolidationTool } from './learning-consolidation-tool.js';
 export * from './preview-text.js';
 export * from './read-helpers.js';
 export * from './effect-admission.js';

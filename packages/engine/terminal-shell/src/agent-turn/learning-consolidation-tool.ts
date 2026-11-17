@@ -1,21 +1,21 @@
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { resolveAndValidatePath } from '@goodvibes-jev/engine/platform/platform/utils';
-import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import type { Tool } from '@goodvibes-jev/engine/platform/platform/types';
 import { assertCurrentToolExecution, ToolInputProjectionError, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
 import type { MemoryBundle, MemoryRecord, MemoryRegistry } from '@goodvibes-jev/engine/platform/platform/state';
 import { createLocalMemoryAccess, type MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import type { ShellPathService } from '@/runtime/index.ts';
-import { AgentPersonaRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentRoutineRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { AgentSkillRegistry } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './agent-learning-consolidation-core.ts';
-import type { LearningCandidate } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { captureCatalogData } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
-import { createHarnessCatalogInputProjector, protectHarnessCatalogTool } from './agent-harness-catalog-ingress.ts';
-import { confirmParameter, requestParameter } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import type { ShellPathService } from '@goodvibes-jev/engine/platform/platform/runtime/shell';
+import { AgentPersonaRegistry } from './persona-registry.js';
+import { AgentRoutineRegistry } from './routine-registry.js';
+import { AgentSkillRegistry } from './skill-registry.js';
+import { MEMORY_CLASSES, MEMORY_REVIEW_STATES, MEMORY_SCOPES, MODES, cloneRecord, deleteDuplicate, domainForCandidate, failure, getRecord, markDuplicateStale, nextGeneratedId, output, readLimit, readMode, readReceiptFile, readString, receiptId, receiptIdFromReceipt, receiptPath, requireConfirmedWrite, resolveCandidate, updateSurvivor, writeReceipt, type AgentLearningConsolidationDomain, type AgentLearningConsolidationToolArgs, type ConsolidationMemory, type LearningConsolidationReceipt } from './learning-consolidation-core.js';
+import type { LearningCandidate } from './learning-curator.js';
+import { agentResearchSourceOwner } from './protected-research-report.js';
+import { captureCatalogData } from './catalog-data.js';
+import { createCatalogInputProjector, protectCatalogTool } from './catalog-ingress.js';
+import { confirmParameter, requestParameter } from './effect-admission.js';
 function arrayField(snapshot: Record<string, unknown>, key: string): string[] {
   const value = snapshot[key];
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
@@ -487,9 +487,9 @@ async function applyRecreate(
   }
   const guidance = await recreateGuidance(shellPaths, memory, deleteReceipt) as {
     readonly records?: readonly {
-      readonly previousId?: string;
-      readonly expectedId?: string;
-      readonly exactId?: { readonly possible?: boolean; readonly reason?: string };
+      readonly previousId?: string | undefined;
+      readonly expectedId?: string | undefined;
+      readonly exactId?: { readonly possible?: boolean; readonly reason?: string } | undefined;
     }[];
   } | null;
   const records = guidance?.records ?? [];
@@ -883,7 +883,7 @@ export function createAgentLearningConsolidationTool(shellPaths: ShellPathServic
       }
     },
   };
-  return registry ? protectHarnessCatalogTool(tool, registry, isConsolidationCandidateCall) : tool;
+  return registry ? protectCatalogTool(tool, registry, isConsolidationCandidateCall) : tool;
 }
 
 export function registerAgentLearningConsolidationTool(
@@ -892,5 +892,5 @@ export function registerAgentLearningConsolidationTool(
   memoryRegistry: MemoryRegistry,
   memorySpine?: MemoryAccess,
 ): void {
-  registry.register(createAgentLearningConsolidationTool(shellPaths, memoryRegistry, registry, memorySpine), { inputProjection: createHarnessCatalogInputProjector(registry, undefined, isConsolidationCandidateCall) });
+  registry.register(createAgentLearningConsolidationTool(shellPaths, memoryRegistry, registry, memorySpine), { inputProjection: createCatalogInputProjector(registry, undefined, isConsolidationCandidateCall) });
 }

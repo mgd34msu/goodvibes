@@ -1,7 +1,7 @@
 import { snapshotJudgmentInput } from '@goodvibes-jev/engine/platform/platform/gate';
 import { SOURCE_SCREENING_LIMITS } from '@goodvibes-jev/engine/platform/platform/security';
 import { ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { agentResearchSourceOwner } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
+import { agentResearchSourceOwner } from './protected-research-report.js';
 
 const MODES = new Set(['personal_ops_queue', 'personal_ops_intake', 'personal_ops_lane', 'run_personal_ops_read']);
 export function isPersonalOpsJudgmentMode(args: Record<string, unknown>): boolean {

@@ -345,6 +345,7 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
 ### `gate`
 
 - `control.approval_update` -> `approval-update`
+- `control.owner_inbox_update` -> `owner-inbox-update`
 - `runtime.gate` -> `gate`
 
 #### `control.approval_update` payload schema
@@ -795,6 +796,149 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
 }
 ```
 
+#### `control.owner_inbox_update` payload schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "item": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "question",
+            "claim",
+            "purchase",
+            "queued-action"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "answered",
+            "withdrawn",
+            "expired"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "askedBy": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "expiresAt": {
+          "type": "number"
+        },
+        "answer": {
+          "type": "object",
+          "properties": {
+            "option": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "answeredBy": {
+          "type": "object",
+          "properties": {
+            "actor": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "actor",
+            "surface"
+          ],
+          "additionalProperties": false
+        },
+        "closedAt": {
+          "type": "number"
+        },
+        "withdrawnReason": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "title",
+        "detail",
+        "options",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "createdAt": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "item",
+    "createdAt"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `runtime.gate` payload schema
 
 ```json
@@ -1212,6 +1356,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
           "items": {
             "type": "string"
           }
+        },
+        "saveError": {
+          "type": "string"
         }
       },
       "required": [
@@ -1626,6 +1773,7 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `origin` | enum: `turn`, `agent-tool`, `cli`, `hosted`, `external`, `proposal` | yes |
 | `ask` | string | yes |
 | `ownerAgentId` | string | yes |
+| `gateProblems` | string[] | optional |
 
 ### `CONTRACT_STATUS_CHANGED`
 

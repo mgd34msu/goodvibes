@@ -987,6 +987,12 @@ export class ToolRegistry {
       // All callbacks and option capture precede claim. The tail below is synchronous
       // and invokes only metadata/intrinsic checks before the exact executor.
       const guardRevision = record.projection.preparationGuards.revision;
+      // The one complete verification, immediately before the admission is consumed:
+      // consuming claims the call's source, and a preparation check of a claimed
+      // source refuses by design, so nothing after this point may run one.
+      assertProjectionCurrent(callerCurrent);
+      this.assertPreparationCurrent(record.projection);
+      this.assertPrepared(call);
       // Compatibility callbacks never mint autonomous body authority. Only the
       // manager's consume-only identity map can authenticate this exact handle.
       const assertAdmissionCurrent = typeof admission === 'function'
@@ -1003,9 +1009,6 @@ export class ToolRegistry {
           assertProjectionSignal(signal);
         };
       }
-      // The claim: the one complete verification immediately before the body.
-      assertProjectionCurrent(callerCurrent);
-      this.assertPreparationCurrent(record.projection);
       this.assertPrepared(call);
       if (record.projection.preparationGuards.revision !== guardRevision) throw new ToolInputProjectionError('stale');
       assertProjectionSignal(signal);

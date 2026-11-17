@@ -4,7 +4,8 @@ import { join } from 'path';
 import { unlinkSync } from 'node:fs';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { SelectionItem } from '../selection-modal.ts';
-import { TemplateManager, parseTemplateArgs } from '@goodvibes-jev/engine/platform/platform/templates';
+import { TemplateManager, parseTemplateArgs, type TemplateDeleteResult, type TemplateScope } from '@goodvibes-jev/engine/platform/platform/templates';
+import { RefusalError, formatRefusal, readRefusal } from '@goodvibes-jev/engine/errors';
 import { requireSessionManager, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils/native-error-summary';
 import { sessionCommand } from './session.ts';
@@ -127,12 +128,16 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
     name: 'template',
     aliases: ['tmpl'],
     description: 'Manage and use prompt templates',
-    usage: 'save <name> | use <name> [args] | list | show <name> | edit <name> | delete <name>',
+    usage: 'save <name> | use <name> [args] | list | show <name> | edit <name> | delete <name> [--global]',
     argsHint: '<save|use|list|show|edit|delete> [name]',
-    subcommands: { save: '<name>', use: '<name> [args]', list: '', show: '<name>', edit: '<name>', delete: '<name>' },
+    subcommands: { save: '<name>', use: '<name> [args]', list: '', show: '<name>', edit: '<name>', delete: '<name> [--global]' },
     confirm(args) {
-      if (args[0] !== 'delete' || !args[1]) return undefined;
-      return { title: `Delete template ${args[1]}?`, detail: `The template file ${args[1]} is removed and cannot be recovered.`, confirmLabel: 'Delete' };
+      if (args[0] !== 'delete') return undefined;
+      const name = args.slice(1).find((word) => word !== '--global');
+      if (!name) return undefined;
+      return args.includes('--global')
+        ? { title: `Delete global template ${name}?`, detail: `The global template ${name} is shared by every project; its file is removed for all of them and cannot be recovered.`, confirmLabel: 'Delete' }
+        : { title: `Delete template ${name}?`, detail: `This project's template file ${name} is removed and cannot be recovered.`, confirmLabel: 'Delete' };
     },
     handler(args, ctx) {
       const shellPaths = requireShellPaths(ctx);
@@ -164,13 +169,28 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           if (exited) ctx.print(`Edited template ${name} (${path}); /template use ${name} reads the saved file.`);
         });
       };
-      const deleteTemplate = (name: string): void => {
-        const deleted = templateManager.delete(name);
+      /** Deletes one scope's template; a refusal is thrown with this command's own next step. */
+      const deleteTemplate = (name: string, scope: TemplateScope): void => {
+        const deleted: TemplateDeleteResult = templateManager.delete(name, scope);
         if (!deleted.ok) {
-          ctx.print(`${deleted.refusal.reason}. ${deleted.refusal.next[0] ?? ''}`.trim());
+          const next = deleted.refusal.code === 'TEMPLATE_ONLY_GLOBAL'
+            ? [`/template delete ${deleted.name} --global removes it for every project`]
+            : deleted.refusal.next;
+          throw new RefusalError({ ...deleted.refusal, next });
+        }
+        ctx.print(`${deleted.scope === 'global' ? 'Global template' : 'Template'} deleted: ${deleted.name}${deleted.stillLoadsFrom === 'global' ? ' (a global template of that name still loads)' : ''}`);
+      };
+      /** A list action: through the command when this surface can run one, so the deletion is confirmed once; otherwise directly. */
+      const deleteFromList = (name: string, scope: TemplateScope): void => {
+        const report = (error: unknown): void => {
+          const refused = readRefusal(error);
+          ctx.print(refused ? formatRefusal(refused) : `Template not deleted: ${summarizeError(error)}`);
+        };
+        if (ctx.executeCommand) {
+          void ctx.executeCommand('template', ['delete', name, ...(scope === 'global' ? ['--global'] : [])]).catch(report);
           return;
         }
-        ctx.print(`Template deleted: ${deleted.name}${deleted.stillLoadsFrom === 'global' ? ' (a global template of that name still loads)' : ''}`);
+        try { deleteTemplate(name, scope); } catch (error) { report(error); }
       };
       if (!sub || sub === 'list') {
         const templates = templateManager.list();
@@ -184,7 +204,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
               ? [{ id: '_empty', label: 'No templates saved', detail: 'Use /template save <name>' }]
               : templates.map((t) => ({
                   id: t.name,
-                  label: t.name,
+                  label: t.shadowsGlobal ? `${t.name} (hides global)` : t.name,
                   detail: t.preview,
                   category: t.scope === 'project' ? 'project' : 'global',
                   actions: '[Del] delete  [Ctrl+E] edit',
@@ -192,7 +212,9 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           ctx.openSelection('Templates', items, { allowSearch: true, customActions: actions }, (result) => {
             if (!result) return;
             if (result.action === 'delete') {
-              deleteTemplate(result.item.id);
+              // The list holds one entry per name (a project template hides the global one), so its scope is the one shown.
+              const entry = templates.find((t) => t.name === result.item.id);
+              if (entry) deleteFromList(entry.name, entry.scope);
             } else if (result.action === 'edit') {
               editTemplate(result.item.id);
             } else {
@@ -207,7 +229,7 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
           [
             'Templates:',
             '',
-            ...templates.map((t) => `  ${t.scope === 'project' ? '[project]' : '[global] '} ${t.name.padEnd(28)} ${t.preview}`),
+            ...templates.map((t) => `  ${t.scope === 'project' ? '[project]' : '[global] '} ${(t.shadowsGlobal ? `${t.name} (hides global)` : t.name).padEnd(28)} ${t.preview}`),
           ].join('\n'),
         );
         return;
@@ -258,12 +280,12 @@ export function registerSessionContentCommands(registry: CommandRegistry): void 
         return;
       }
       if (sub === 'delete') {
-        const name = rest[0];
+        const name = rest.find((word) => word !== '--global');
         if (!name) {
-          ctx.print('Usage: /template delete <name>');
+          ctx.print('Usage: /template delete <name> [--global]');
           return;
         }
-        deleteTemplate(name);
+        deleteTemplate(name, rest.includes('--global') ? 'global' : 'project');
         return;
       }
       ctx.print(`Unknown subcommand: ${sub}\nUsage: /template save|use|list|show|edit|delete`);

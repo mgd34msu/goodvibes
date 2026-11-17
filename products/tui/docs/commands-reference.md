@@ -515,7 +515,7 @@ GoodVibes ships **164** built-in slash commands across **75** categories. Every 
 | `/retry` | `/r` | `[modified text]` | Retry the last request while retaining completed work |
 | `/save` | None | `[name] [--replace]` | Save current session to .goodvibes/tui/sessions/ |
 | `/sessions` | None | `[resume <id\|name>]` | List saved sessions |
-| `/template` | `/tmpl` | `save <name> \| use <name> [args] \| list \| show <name> \| edit <name> \| delete <name>` | Manage and use prompt templates |
+| `/template` | `/tmpl` | `save <name> \| use <name> [args] \| list \| show <name> \| edit <name> \| delete <name> [--global]` | Manage and use prompt templates |
 | `/title` | None | `[text]` | Show or set the conversation title |
 | `/undo` | None | `[rewind\|file]` | Undo last action. /undo rewind reverses the last /rewind. /undo file reverts every file the last write/edit call changed. /undo alone removes the last conversation turn |
 

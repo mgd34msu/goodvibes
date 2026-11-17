@@ -75,8 +75,6 @@ const SCRYPT_KEY_LENGTH = 64;
 
 /** New hashes use the OWASP 128 MiB scrypt configuration. */
 const DEFAULT_SCRYPT_PARAMS: ScryptParams = { N: 131072, r: 8, p: 1 };
-/** Two-part hashes predate stored parameters and always used this cost. */
-const LEGACY_SCRYPT_PARAMS: ScryptParams = { N: 16384, r: 8, p: 1 };
 const SCRYPT_MAXMEM = 256 * 1024 * 1024;
 
 /**
@@ -193,8 +191,8 @@ function generateInitialPassword(): string {
   return randomBytes(16).toString('hex');
 }
 
-type PasswordVerification = { readonly params: ScryptParams; readonly legacy: boolean } | undefined;
-type ParsedPasswordHash = { readonly salt: Buffer; readonly expected: Buffer; readonly params: ScryptParams; readonly legacy: boolean };
+type PasswordVerification = { readonly params: ScryptParams } | undefined;
+type ParsedPasswordHash = { readonly salt: Buffer; readonly expected: Buffer; readonly params: ScryptParams };
 function deriveSync(password: string, salt: Buffer, params: ScryptParams): Buffer {
   return scryptSync(password, salt, SCRYPT_KEY_LENGTH, { N: params.N, r: params.r, p: params.p, maxmem: SCRYPT_MAXMEM });
 }
@@ -206,7 +204,7 @@ const deriveAsync = (password: string, salt: Buffer, params: ScryptParams): Prom
 
 function compareDerived(parsed: ParsedPasswordHash, actual: Buffer): PasswordVerification {
   if (actual.length !== parsed.expected.length) return undefined;
-  return timingSafeEqual(actual, parsed.expected) ? { params: parsed.params, legacy: parsed.legacy } : undefined;
+  return timingSafeEqual(actual, parsed.expected) ? { params: parsed.params } : undefined;
 }
 
 function verifyPassword(password: string, passwordHash: string): PasswordVerification {
@@ -230,31 +228,17 @@ async function hashPasswordAsync(password: string, params: ScryptParams): Promis
 }
 
 function parsePasswordHash(passwordHash: string): ParsedPasswordHash | undefined {
+  // salt:N:r:p:hash
   const parts = passwordHash.split(':');
-  // Legacy format: salt:hash (2 parts), uses the original fixed cost for backward compatibility.
-  // New format: salt:N:r:p:hash (5 parts)
-  let saltEncoded: string;
-  let hashEncoded: string;
-  let params: ScryptParams;
-
-  if (parts.length === 2) {
-    // Legacy hash: its historical cost must not follow new defaults.
-    [saltEncoded, hashEncoded] = parts as [string, string];
-    params = LEGACY_SCRYPT_PARAMS;
-  } else if (parts.length === 5) {
-    const N = Number(parts[1]);
-    const r = Number(parts[2]);
-    const p = Number(parts[3]);
-    if (!Number.isInteger(N) || N < 1 || !Number.isInteger(r) || r < 1 || !Number.isInteger(p) || p < 1) return undefined;
-    saltEncoded = parts[0]!;
-    hashEncoded = parts[4]!;
-    params = { N, r, p };
-  } else {
-    return undefined;
-  }
-
+  if (parts.length !== 5) return undefined;
+  const N = Number(parts[1]);
+  const r = Number(parts[2]);
+  const p = Number(parts[3]);
+  if (!Number.isInteger(N) || N < 1 || !Number.isInteger(r) || r < 1 || !Number.isInteger(p) || p < 1) return undefined;
+  const saltEncoded = parts[0]!;
+  const hashEncoded = parts[4]!;
   if (!saltEncoded || !hashEncoded) return undefined;
-  return { salt: Buffer.from(saltEncoded, 'base64'), expected: Buffer.from(hashEncoded, 'base64'), params, legacy: parts.length === 2 };
+  return { salt: Buffer.from(saltEncoded, 'base64'), expected: Buffer.from(hashEncoded, 'base64'), params: { N, r, p } };
 }
 
 function readBootstrapUsers(filePath: string, observedRecovery?: () => void, freshAbsence = false): AuthUser[] | null {
@@ -594,7 +578,7 @@ export class UserAuthManager {
 
     const user = this.users.get(username);
     // Unknown accounts still perform the configured scrypt work instead of
-    // bypassing password derivation. Legacy hashes retain their stored cost.
+    // bypassing password derivation.
     const target = this.scryptParams;
     const hashToCheck = user?.passwordHash ?? `Z29vZHZpYmVzLWR1bW15:${target.N}:${target.r}:${target.p}:${Buffer.alloc(SCRYPT_KEY_LENGTH).toString('base64')}`;
     return { username, lockKey, now, user, hashToCheck };
@@ -613,7 +597,7 @@ export class UserAuthManager {
       return lockedUntilMs !== undefined ? { ok: false, lockedUntilMs } : { ok: false };
     }
     const target = this.scryptParams;
-    if (!(verified.legacy || verified.params.N < target.N || verified.params.r < target.r || verified.params.p < target.p)) return { user, upgrade: null };
+    if (!(verified.params.N < target.N || verified.params.r < target.r || verified.params.p < target.p)) return { user, upgrade: null };
     // Never downgrade a stronger stored dimension during an automatic upgrade.
     return { user, upgrade: { N: Math.max(target.N, verified.params.N), r: Math.max(target.r, verified.params.r), p: Math.max(target.p, verified.params.p) } };
   }

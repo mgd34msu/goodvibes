@@ -366,6 +366,7 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/api/media/analyze' && method === 'POST') return handlers.postMediaAnalyze(req);
   if (pathname === '/api/media/transform' && method === 'POST') return handlers.postMediaTransform(req);
   if (pathname === '/api/media/generate' && method === 'POST') return handlers.postMediaGenerate(req);
+  if (pathname === '/api/media/collect' && method === 'POST') return handlers.postMediaCollect(req);
 
   if (pathname === '/api/multimodal' && method === 'GET') return handlers.getMultimodalStatus();
   if (pathname === '/api/multimodal/providers' && method === 'GET') return handlers.getMultimodalProviders();

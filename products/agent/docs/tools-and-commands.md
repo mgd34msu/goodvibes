@@ -81,7 +81,7 @@ A typed message that starts or ends with `@model:<id>` (`@model:opus summarize t
 | `agent_notify` | Send one confirmed notification through configured webhook targets. |
 | `agent_autonomy_schedule` | Create one confirmed visible autonomous Agent schedule. |
 | `agent_reminder_schedule` | Create one confirmed connected reminder/schedule. |
-| `agent_media_generate` | Generate one confirmed image/video artifact. |
+| `agent_media_generate` | Generate one confirmed image/video artifact, or collect a job an earlier call left pending (`taskId`, `providerId`, `resume`). |
 | `agent_model_compare` | Run, review, side-by-side view, handoffDiff with section jumps, judge, routeDecision receipts, task/document/benchmark-filtered analytics/synthesis, apply, export, handoff, handoffArchive, or reveal one blind model comparison, optionally from a saved text artifact. |
 | `agent_operator_method` | Run one exact public daemon method. Read-only methods run directly; write/admin methods require `confirm:true` plus `explicitUserRequest`. |
 | `accounts` | List, alias, record, forget, and sweep the register of accounts created for the owner. |
@@ -430,7 +430,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/knowledge` | Use isolated Agent Knowledge. |
 | `/load` | Load a saved Agent session. |
 | `/mcp` | Manage MCP servers, trust posture, and tool inventory. |
-| `/media` | Inspect media providers or generate media through configured providers. |
+| `/media` | Inspect media providers or generate media through configured providers; `/media generate collect <provider> <task-id> [key=value ...]` collects a job that was still running when the wait ended. |
 | `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory files sync` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may sync and review but not apply. |
 | `/mode` | Manage Agent interaction mode and per-domain verbosity. |
 | `/model` | Select or display the current LLM model. |

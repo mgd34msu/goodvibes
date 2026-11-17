@@ -16,6 +16,7 @@ import {
   METADATA_SCHEMA,
   STRING_LIST_SCHEMA,
   enumSchema,
+  recordSchema,
 } from './operator-contract-schemas-shared.js';
 
 export { ARTIFACT_ACQUISITION_MODE_SCHEMA, ARTIFACT_FETCH_MODE_SCHEMA };
@@ -109,6 +110,16 @@ export const MEDIA_GENERATION_REQUEST_SCHEMA = bodyEnvelopeSchema({
   options: JSON_RECORD_SCHEMA,
   metadata: METADATA_SCHEMA,
 }, ['prompt']);
+
+/** The provider's own handles for a job it accepted (endpoint, queue addresses, output kind); never a key. */
+export const MEDIA_TASK_RESUME_SCHEMA = recordSchema(STRING_SCHEMA);
+
+export const MEDIA_COLLECT_REQUEST_SCHEMA = bodyEnvelopeSchema({
+  providerId: STRING_SCHEMA,
+  taskId: STRING_SCHEMA,
+  resume: MEDIA_TASK_RESUME_SCHEMA,
+  waitSeconds: NUMBER_SCHEMA,
+}, ['providerId', 'taskId']);
 
 export const MULTIMODAL_ARTIFACT_INPUT_SCHEMA = objectSchema({
   artifactId: STRING_SCHEMA,

@@ -161,6 +161,12 @@ export interface MediaProviderRegistryLike {
     capability: 'understand' | 'transform' | 'generate',
     providerId?: string,
   ) => MediaProviderLike | null;
+  /** Finishes a generation job an earlier generate answered as pending. */
+  readonly collect: (
+    task: { readonly providerId: string; readonly taskId: string; readonly resume?: Readonly<Record<string, string>> | undefined },
+    options?: { readonly waitSeconds?: number | undefined },
+    lifetime?: { readonly signal?: AbortSignal | undefined },
+  ) => Promise<unknown>;
 }
 
 /** A file to analyse when it is not a stored artifact; private hosts come only from the daemon's policy. */

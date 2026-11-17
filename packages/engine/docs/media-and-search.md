@@ -112,15 +112,19 @@ given by URL or as an artifact chooses the matching endpoint. Finished outputs
 are streamed into the artifact store. A job the provider accepted but had not
 finished when the wait ended (`options.waitSeconds`, ten minutes by default;
 brief poll failures such as a 429 or 5xx are retried) comes back with
-`pending: { providerId, taskId, resume }`; passing that task to the registry's
-`collect` finishes it later without submitting, or paying for, a new job.
+`pending: { providerId, taskId, resume }`; passing that task to `media.collect`
+(the registry's `collect`) finishes it later without submitting, or paying for,
+a new job. The Agent collects with `agent_media_generate` given `taskId`,
+`providerId` and `resume`, or `/media generate collect <provider> <task-id>
+[key=value ...]`; the TUI with `/imagine --collect`.
 
 | Method | What it does |
 | --- | --- |
 | `media.providers.list` | Return registered media provider capabilities |
 | `media.analyze` | Analyze an artifact through a registered media provider |
 | `media.transform` | Transform an artifact through a registered media provider |
-| `media.generate` | Generate a media artifact through a registered media provider |
+| `media.generate` | Generate a media artifact through a registered media provider; a job still running when the wait ends answers `pending` |
+| `media.collect` | Finish a pending generation job by its provider, task id and resume values |
 
 ## Multimodal service
 

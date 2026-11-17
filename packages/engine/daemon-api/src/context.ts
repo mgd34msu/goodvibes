@@ -364,6 +364,8 @@ export interface DaemonMediaProviderRouteHandlers {
   postMediaAnalyze(req: Request): MaybeResponse;
   postMediaTransform(req: Request): MaybeResponse;
   postMediaGenerate(req: Request): MaybeResponse;
+  /** Finishes a generation job an earlier generate answered as pending. */
+  postMediaCollect(req: Request): MaybeResponse;
 }
 
 /** Route handlers for multimodal capabilities: status, providers, analyze, packet, and writeback. */

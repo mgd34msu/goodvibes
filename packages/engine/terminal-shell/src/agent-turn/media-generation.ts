@@ -244,14 +244,33 @@ async function runAndStore(
   };
 }
 
-export function formatAgentMediaGenerationResult(result: AgentMediaGenerationResult): string {
+/** The `agent_media_generate` call that collects a pending job. */
+export function mediaCollectToolCall(task: MediaProviderTask): string {
+  const resume = task.resume && Object.keys(task.resume).length > 0 ? { resume: task.resume } : {};
+  return `agent_media_generate ${JSON.stringify({ providerId: task.providerId, taskId: task.taskId, ...resume })}`;
+}
+
+/** The `/media` command that collects a pending job. */
+export function mediaCollectCommand(task: MediaProviderTask): string {
+  const resume = Object.entries(task.resume ?? {}).map(([key, value]) => ` ${key}=${value}`).join('');
+  return `/media generate collect ${task.providerId} ${task.taskId}${resume}`;
+}
+
+/**
+ * The result as text. A pending job names the step that collects it on the
+ * surface printing it: the tool call by default, the slash command for `/media`.
+ */
+export function formatAgentMediaGenerationResult(
+  result: AgentMediaGenerationResult,
+  collectStep: (task: MediaProviderTask) => string = mediaCollectToolCall,
+): string {
   if (result.pending) {
     return [
       'Agent media still generating',
       `  provider ${result.pending.providerId}`,
       `  task ${result.pending.taskId}`,
       '  the provider accepted (and charged for) the job; it had not finished when the wait ended',
-      `  collect with ${JSON.stringify(result.pending)}`,
+      `  collect it later with ${collectStep(result.pending)}`,
     ].join('\n');
   }
   return [

@@ -16,6 +16,7 @@ import {
 } from '../../config/credential-scope.ts';
 import { summarizeError } from '@goodvibes-jev/engine/platform/platform/utils';
 import { requireYesFlag, stripYesFlag } from './confirmation.ts';
+import { collectAgentMedia, mediaCollectCommand } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { formatAgentMediaGenerationResult, generateAgentMedia } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 interface MediaGenerateArgs {
@@ -70,6 +71,19 @@ function parseMediaGenerateArgs(args: readonly string[]): MediaGenerateArgs {
     yes: parsed.yes,
     errors,
   };
+}
+
+/** `collect <provider> <task-id> [key=value ...]`: the pending job a generation named, as the command printed it. */
+function parseMediaCollectArgs(args: readonly string[]): { readonly providerId: string; readonly taskId: string; readonly resume: Record<string, string> } | string {
+  const [providerId, taskId, ...pairs] = stripYesFlag([...args]).rest;
+  if (!providerId || !taskId) return 'collect needs the provider and task id the pending result named.';
+  const resume: Record<string, string> = {};
+  for (const pair of pairs) {
+    const at = pair.indexOf('=');
+    if (at <= 0) return `"${pair}" is not key=value; give the resume values exactly as the pending result printed them.`;
+    resume[pair.slice(0, at)] = pair.slice(at + 1);
+  }
+  return { providerId, taskId, resume };
 }
 
 const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
@@ -174,7 +188,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
     effect: 'external-network',
     description: 'Inspect media providers or generate media through configured providers',
     hidden: true,
-    usage: 'providers | generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes',
+    usage: 'providers | generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes | generate collect <provider> <task-id> [key=value ...]',
     argsHint: '<providers|generate>',
     async handler(args, ctx) {
       const subcommand = args[0]?.toLowerCase() || 'providers';
@@ -197,12 +211,31 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
         return;
       }
       if (subcommand !== 'generate') {
-        ctx.print('[media] Usage: /media providers | /media generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes');
+        ctx.print('[media] Usage: /media providers | /media generate [--provider <id>] [--model <id>] [--mime <mime>] <prompt> --yes | /media generate collect <provider> <task-id> [key=value ...]');
         return;
       }
       const artifactStore = ctx.platform.artifactStore;
       if (!artifactStore) {
         ctx.print('[media] Artifact storage is not available in this runtime.');
+        return;
+      }
+      if (args[1]?.toLowerCase() === 'collect') {
+        // The job was paid for when it was accepted; collecting it spends nothing new, so no --yes.
+        const task = parseMediaCollectArgs(args.slice(2));
+        if (typeof task === 'string') {
+          ctx.print(`[media] ${task} Usage: /media generate collect <provider> <task-id> [key=value ...]`);
+          return;
+        }
+        try {
+          const result = await collectAgentMedia(registry, artifactStore, {
+            providerId: task.providerId,
+            taskId: task.taskId,
+            ...(Object.keys(task.resume).length > 0 ? { resume: task.resume } : {}),
+          });
+          ctx.print(formatAgentMediaGenerationResult(result, mediaCollectCommand));
+        } catch (error) {
+          ctx.print(`[media] Collecting ${task.providerId} task ${task.taskId} failed ${summarizeError(error)}`);
+        }
         return;
       }
       const parsed = parseMediaGenerateArgs(args.slice(1));
@@ -220,7 +253,7 @@ export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
       }
       try {
         const result = await generateAgentMedia(registry, artifactStore, parsed);
-        ctx.print(formatAgentMediaGenerationResult(result));
+        ctx.print(formatAgentMediaGenerationResult(result, mediaCollectCommand));
       } catch (error) {
         ctx.print(`[media] Generation failed ${summarizeError(error)}`);
       }

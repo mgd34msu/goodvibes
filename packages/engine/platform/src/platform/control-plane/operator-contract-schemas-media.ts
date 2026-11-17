@@ -16,6 +16,7 @@ import {
 import {
   ARTIFACT_ACQUISITION_MODE_SCHEMA,
   ARTIFACT_FETCH_MODE_SCHEMA,
+  MEDIA_TASK_RESUME_SCHEMA,
   MULTIMODAL_ANALYSIS_RESULT_SCHEMA,
 } from './media-contract-schemas.js';
 export {
@@ -23,6 +24,7 @@ export {
   ARTIFACT_FETCH_MODE_SCHEMA,
   MULTIMODAL_ANALYSIS_RESULT_SCHEMA,
   MEDIA_ANALYZE_REQUEST_SCHEMA,
+  MEDIA_COLLECT_REQUEST_SCHEMA,
   MEDIA_GENERATION_REQUEST_SCHEMA,
   MEDIA_TRANSFORM_REQUEST_SCHEMA,
   MULTIMODAL_ANALYZE_REQUEST_SCHEMA,
@@ -212,10 +214,18 @@ export const MEDIA_TRANSFORM_RESULT_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 }, ['providerId', 'artifact', 'metadata']);
 
+/** A job the provider accepted (and charged for) that had not finished when the wait ended. */
+const MEDIA_PENDING_TASK_SCHEMA = objectSchema({
+  providerId: STRING_SCHEMA,
+  taskId: STRING_SCHEMA,
+  resume: MEDIA_TASK_RESUME_SCHEMA,
+}, ['providerId', 'taskId']);
+
 export const MEDIA_GENERATION_RESULT_SCHEMA = objectSchema({
   providerId: STRING_SCHEMA,
   artifacts: arraySchema(MEDIA_RESULT_ARTIFACT_SCHEMA),
   metadata: METADATA_SCHEMA,
+  pending: MEDIA_PENDING_TASK_SCHEMA,
 }, ['providerId', 'artifacts', 'metadata']);
 
 const MULTIMODAL_PROVIDER_DESCRIPTOR_SCHEMA = objectSchema({

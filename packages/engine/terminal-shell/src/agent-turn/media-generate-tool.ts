@@ -6,6 +6,7 @@ import { snapshotJudgmentInput, captureStrictJudgmentJson } from '@goodvibes-jev
 import { evaluateOutwardEffect, getProcessUntrustedContentLedger as getSessionUntrustedContentLedger } from '@goodvibes-jev/engine/platform/platform/security';
 import { CardMaterialRefusedError, screenOutboundForCardMaterial } from './payments-channel-guard.js';
 import {
+  collectAgentMedia,
   formatAgentMediaGenerationResult,
   generateAgentMedia,
 } from './media-generation.js';
@@ -16,6 +17,9 @@ export interface AgentMediaGenerateToolArgs {
   readonly providerId?: unknown | undefined;
   readonly modelId?: unknown | undefined;
   readonly outputMimeType?: unknown | undefined;
+  readonly taskId?: unknown | undefined;
+  readonly resume?: unknown | undefined;
+  readonly waitSeconds?: unknown | undefined;
   readonly confirm?: unknown | undefined;
   readonly explicitUserRequest?: unknown | undefined;
   readonly preview?: unknown | undefined;
@@ -27,6 +31,15 @@ function readString(value: unknown): string {
 
 function readBoolean(value: unknown): boolean {
   return value === true || value === 'true' || value === 'yes';
+}
+
+/** The provider's own handles for a pending job, as strings; null when the value is not that shape. */
+function readResume(value: unknown): Record<string, string> | null {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.some(([, entry]) => typeof entry !== 'string')) return null;
+  return Object.fromEntries(entries) as Record<string, string>;
 }
 
 function failure(error: string): { readonly success: false; readonly error: string } {
@@ -58,7 +71,7 @@ export function createAgentMediaGenerateTool(
     definition: {
       name: 'agent_media_generate',
       activity: { doing: 'Generating', did: 'generated', object: 'media' },
-      description: 'Preview or generate one image or video artifact through current recorded effect admission.',
+      description: 'Preview or generate one image or video artifact through current recorded effect admission, or collect a job an earlier call left pending (taskId with its providerId and resume).',
       parameters: {
         type: 'object',
         properties: {
@@ -78,11 +91,23 @@ export function createAgentMediaGenerateTool(
             type: 'string',
             description: 'Optional requested output MIME type, such as image/png or video/mp4.',
           },
+          taskId: {
+            type: 'string',
+            description: 'Collect instead of generating: the task id a pending result named (with its providerId and resume). Nothing new is paid for.',
+          },
+          resume: {
+            type: 'object',
+            additionalProperties: { type: 'string' },
+            description: 'With taskId: the resume values the pending result named, exactly as given.',
+          },
+          waitSeconds: {
+            type: 'number',
+            description: 'With taskId: how long to wait for the job before answering pending again; 0 checks once.',
+          },
           confirm: confirmParameter(),
           explicitUserRequest: requestParameter(),
           preview: { type: 'boolean', description: 'Return a read-only preview without generation.' },
         },
-        required: ['prompt'],
         additionalProperties: false,
       },
       sideEffects: ['network', 'state'],
@@ -92,7 +117,32 @@ export function createAgentMediaGenerateTool(
       const prompt = readString(args.prompt);
       const generationProviderCount = mediaProviderRegistry.list()
         .filter((provider) => provider.capabilities.includes('generate')).length;
-      if (!prompt) return failure('prompt is required.');
+      const taskId = readString(args.taskId);
+      if (taskId) {
+        const providerId = readString(args.providerId);
+        if (!providerId) return failure('providerId is required with taskId: the provider the pending result named.');
+        const resume = readResume(args.resume);
+        if (!resume) return failure('resume must be an object of strings, exactly as the pending result gave it.');
+        if (args.waitSeconds !== undefined && (typeof args.waitSeconds !== 'number' || !Number.isFinite(args.waitSeconds) || args.waitSeconds < 0)) {
+          return failure('waitSeconds must be a number of seconds, 0 or more.');
+        }
+        if (readBoolean(args.preview)) return output(`Agent media collection preview\n  provider ${providerId}\n  task ${taskId}\n  nothing new is paid for`);
+        try {
+          const assertCurrent = () => {
+            executionOptions?.signal?.throwIfAborted();
+            if (!assertCurrentToolEffect(rawArgs, executionOptions, 'send') || !assertCurrentToolEffect(rawArgs, executionOptions, 'write')) throw new ToolInputProjectionError('held');
+          };
+          assertCurrent();
+          const result = await collectAgentMedia(mediaProviderRegistry, artifactStore,
+            { providerId, taskId, ...(Object.keys(resume).length > 0 ? { resume } : {}) },
+            typeof args.waitSeconds === 'number' ? { waitSeconds: args.waitSeconds } : {},
+            { signal: executionOptions?.signal, assertCurrent });
+          return output(formatAgentMediaGenerationResult(result));
+        } catch (error) {
+          return failure(error instanceof Error ? error.message : String(error));
+        }
+      }
+      if (!prompt) return failure('prompt is required (or taskId to collect a pending job).');
       if (readBoolean(args.preview)) return output(preview(args, generationProviderCount));
       try {
         const ledger = getSessionUntrustedContentLedger();

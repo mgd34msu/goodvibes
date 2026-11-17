@@ -170,6 +170,7 @@ export function createDaemonMediaRouteHandlers(
     postMediaAnalyze: async (request) => handleMediaAnalyze(context, request),
     postMediaTransform: async (request) => handleMediaTransform(context, request),
     postMediaGenerate: async (request) => handleMediaGenerate(context, request),
+    postMediaCollect: async (request) => handleMediaCollect(context, request),
     getMultimodalStatus: async () => Response.json(await context.multimodalService.getStatus()),
     getMultimodalProviders: async () => Response.json({ providers: await context.multimodalService.listProviders() }),
     postMultimodalAnalyze: async (request) => handleMultimodalAnalyze(context, request),
@@ -604,6 +605,42 @@ async function handleMediaGenerate(context: DaemonMediaRouteContext, req: Reques
       options: typeof body.options === 'object' && body.options !== null ? body.options as Record<string, unknown> : {},
       metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
     }));
+  } catch (error) {
+    return readServiceErrorResponse(error);
+  }
+}
+
+/**
+ * Finishes a job a generate answered as pending. The job was paid for when the
+ * provider accepted it; this only asks for its outputs, waiting up to
+ * `waitSeconds` (the provider's own wait when absent, 0 checks once).
+ */
+async function handleMediaCollect(context: DaemonMediaRouteContext, req: Request): Promise<Response> {
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
+  const body = await context.parseJsonBody(req);
+  if (body instanceof Response) return body;
+  const providerId = typeof body.providerId === 'string' ? body.providerId.trim() : '';
+  if (!providerId) return invalidField('providerId', 'the provider the pending result named');
+  const taskId = typeof body.taskId === 'string' ? body.taskId.trim() : '';
+  if (!taskId) return invalidField('taskId', 'the task id the pending result named');
+  let resume: Record<string, string> | undefined;
+  if (body.resume !== undefined) {
+    if (!isPlainRecord(body.resume) || Object.values(body.resume).some((value) => typeof value !== 'string')) {
+      return invalidField('resume', 'an object of strings, exactly as the pending result gave it');
+    }
+    resume = body.resume as Record<string, string>;
+  }
+  const waitSeconds = body.waitSeconds;
+  if (waitSeconds !== undefined && (typeof waitSeconds !== 'number' || !Number.isFinite(waitSeconds) || waitSeconds < 0)) {
+    return invalidField('waitSeconds', 'a number of seconds, 0 or more');
+  }
+  try {
+    return Response.json(await context.mediaProviders.collect(
+      { providerId, taskId, ...(resume && Object.keys(resume).length > 0 ? { resume } : {}) },
+      typeof waitSeconds === 'number' ? { waitSeconds } : {},
+      { signal: req.signal },
+    ));
   } catch (error) {
     return readServiceErrorResponse(error);
   }

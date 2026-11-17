@@ -88,7 +88,7 @@ import {
   type OccasionsPlansProposeInput,
   type OccasionsProposeInput,
   type OccasionsRecurrenceWord,
-} from './agent-occasions-types.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   fail,
   isOutcome,

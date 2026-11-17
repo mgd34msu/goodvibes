@@ -70,7 +70,7 @@ import { createRuntimeShutdown } from './bootstrap-shutdown.ts';
 import { recordComposedPromptUsage } from './prompt-usage-record.ts';
 import { createMemorySpineRecheck, resolveMemorySpineRecheckMs } from './memory-spine-recheck.ts';
 import { capabilitySnapshot, refreshCapabilityIndex } from '../capabilities/capability-snapshot.ts';
-import { GOODVIBES_AGENT_OPERATOR_POLICY } from './agent-operator-policy.ts';
+import { GOODVIBES_AGENT_OPERATOR_POLICY } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { flushPendingChannelRows } from '../agent/channel-outbox-flush.ts';
 import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '../agent/daemon-operator-client.ts';
 

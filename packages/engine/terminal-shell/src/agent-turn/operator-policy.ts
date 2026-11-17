@@ -1,17 +1,18 @@
 /**
- * agent-operator-policy.ts, the operator policy the Agent runs under.
+ * operator-policy.ts, the operator policy every Agent turn runs under.
  *
- * Lifted out of bootstrap.ts so the policy text can be read, diffed and tested
- * on its own; bootstrap composes it into the system prompt unchanged.
+ * Kept on its own so the policy text can be read, diffed and tested on its
+ * own; it is composed into the system prompt unchanged.
  *
- * This block rides on EVERY turn, which is why the capture contract
- * (agent-conversational-capture.ts) and the platform boundary are carried here
- * rather than injected at some turn types and not others. The Agent has exactly
- * one conversational path, `Orchestrator.handleUserInput`, built in
- * bootstrap.ts, and this is the text that path is given.
+ * This block rides on EVERY Agent turn, which is why the capture contract
+ * (conversational-capture.ts) and the platform boundary are carried here rather
+ * than injected at some turn types and not others. An Agent turn runs in one of
+ * two places, and both compose this text: the Agent's own process
+ * (products/agent runtime/bootstrap.ts) and a session the daemon hosts for the
+ * Agent (hosted-turn.ts).
  */
 
-import { AGENT_CONVERSATIONAL_CAPTURE_POLICY } from './agent-conversational-capture.ts';
+import { AGENT_CONVERSATIONAL_CAPTURE_POLICY } from './conversational-capture.js';
 
 export const GOODVIBES_AGENT_OPERATOR_POLICY = [
   '## GoodVibes Agent Operator Policy',

@@ -1,14 +1,15 @@
 /**
- * agent-conversational-capture.ts, what an Agent conversational turn is told
+ * conversational-capture.ts, what an Agent conversational turn is told
  * about recording, and what it is allowed to record with.
  *
  * ## The defect this closes
  *
  * The platform shipped `platform/personal-capture` and the daemon wired it into the
  * shared-session continuation runner, so a channel turn records what the owner
- * tells it. The Agent product answers on a DIFFERENT path, its own
- * `Orchestrator.handleUserInput` turn (runtime/bootstrap.ts), with its own tool
- * registry and its own operator policy, and that path never got the contract.
+ * tells it. The Agent answers on a DIFFERENT path, its own turn (in the Agent
+ * process, products/agent runtime/bootstrap.ts, or in a session the daemon hosts
+ * for it, hosted-turn.ts), with its own tools and its own operator policy, and
+ * that path never got the contract.
  *
  * The result, in his own live session: it searched his mail, found his flight
  * itinerary, answered "plan to be at the airport by 5:55 AM", and stored
@@ -32,7 +33,7 @@
  *
  * So the rules are restated against THIS product's verbs, in the same order and
  * with the same force as the platform contract, and
- * `src/test/runtime/conversational-capture-contract.test.ts` pins each rule so
+ * the Agent's conversational-capture contract test pins each rule so
  * neither copy can lose one quietly.
  *
  * The one rule that is NOT restated is answering a reminder ("I know, I'm on
@@ -55,7 +56,7 @@ import {
   type CaptureAuthorityDecision,
 } from '@goodvibes-jev/engine/platform/platform/personal-capture';
 import { occasionAcknowledgementInstruction } from '@goodvibes-jev/engine/platform/platform/occasions';
-import { AGENT_OCCASION_ACKNOWLEDGE } from '../tools/agent-occasions-types.ts';
+import { AGENT_OCCASION_ACKNOWLEDGE } from './occasions-types.js';
 
 /**
  * The capture-capable tools a conversational Agent turn needs registered.

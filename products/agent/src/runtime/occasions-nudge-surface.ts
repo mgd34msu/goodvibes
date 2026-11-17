@@ -105,7 +105,7 @@ import type { OccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
 import {
   OCCASIONS_METHOD_IDS,
   narrowOccasionsPending,
-} from '../tools/agent-occasions-types.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 export interface OccasionsNudgeSurfaceDeps {
   /** The relay to the sixteen verbs. In-process when this build carries them. */

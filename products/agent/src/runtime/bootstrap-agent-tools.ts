@@ -13,7 +13,7 @@ import type { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools
 import { logger } from '@goodvibes-jev/engine/platform/platform/utils';
 import type { RuntimeServices } from './services.ts';
 import { bindControlCommands } from './control-surfaces.ts';
-import { missingConversationalCaptureTools } from './agent-conversational-capture.ts';
+import { missingConversationalCaptureTools } from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createOccasionsGatewayInvoke } from '../agent/occasions-gateway.ts';
 import { createProfileGatewayInvoke } from '../agent/owner-profile-gateway.ts';

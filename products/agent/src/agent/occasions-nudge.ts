@@ -50,7 +50,7 @@
 
 import type {
   OccasionsPendingResponse,
-} from '../tools/agent-occasions-types.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 
 /**
  * One thing to say, and the ledger entry that records having said it.

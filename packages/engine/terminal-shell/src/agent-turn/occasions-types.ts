@@ -1,6 +1,7 @@
 /**
- * agent-occasions-types.ts, the occasions control-plane payloads, as this
- * surface handles them.
+ * occasions-types.ts, the occasions control-plane payloads, as the Agent's
+ * `occasions` tool and its nudges handle them, in the Agent's own process and in
+ * a turn the daemon hosts for it.
  *
  * The sixteen `occasions.*` verbs (docs/occasions.md §7) are in the platform
  * runtime's generated operator contract, so every request and response type here
@@ -28,7 +29,7 @@
  */
 
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes-jev/engine/platform/contracts';
-import type { AuthoritySurface } from '../trust/untrusted-content.ts';
+import type { AuthoritySurface } from '@goodvibes-jev/engine/platform/platform/security';
 import type { OccasionAcknowledgeVocabulary } from '@goodvibes-jev/engine/platform/platform/occasions';
 
 /**

@@ -32,7 +32,7 @@ import {
   OCCASIONS_METHOD_IDS,
   OCCASIONS_RESPONSE_UNREADABLE,
   type OccasionsInterviewResponse,
-} from './agent-occasions-types.ts';
+} from '@goodvibes-jev/engine/terminal-shell/agent-turn';
 import {
   fail,
   ok,

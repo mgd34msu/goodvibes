@@ -1,5 +1,7 @@
 // Proves: A daemon restart while a purchase waits on the owner buys twice, or turns "silence means no" into "silence buys".
 // Red when: The resumed approval submits or records twice or not at all, or the restored window reopens as a notice whose silence buys.
+// Proves: A stop the owner gave while the daemon was down is not read after the restart, or silence is assumed for a channel whose replies were never received, and the veto's silence buys.
+// Red when: The daemon's stop withdraws a kept window's owner-inbox item, or the restored veto window counts silence without first reading the answer the owner recorded there before its deadline.
 /**
  * A purchase waiting on the owner survives a daemon restart. The case that
  * matters is the follow-up: the owner answered the "goes ahead unless you stop
@@ -105,7 +107,7 @@ function daemon(now: () => number) {
  * The channel side of the notices: the veto notice gets a reply Jev did not
  * read as a go-ahead; any later window hears nothing until the daemon stops.
  */
-function channel(vetoAnswer: 'not-understood' | null): PaymentNotifier {
+function channel(vetoAnswer: 'not-understood' | null | 'quiet'): PaymentNotifier {
   const quiet = (signal: AbortSignal | undefined) => new Promise<never>((_resolve, reject) => {
     signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
   });
@@ -115,7 +117,7 @@ function channel(vetoAnswer: 'not-understood' | null): PaymentNotifier {
     prepareWindow: (input): PaymentNoticeWindow => ({
       deliveries: Promise.resolve([]),
       cancel: () => {},
-      awaitAnswer: async () => input.kind === 'veto'
+      awaitAnswer: async () => input.kind === 'veto' && vetoAnswer !== 'quiet'
         ? vetoAnswer === null ? null : { answer: vetoAnswer, channel: 'telegram' }
         : quiet(input.signal),
     }),
@@ -126,16 +128,16 @@ function channel(vetoAnswer: 'not-understood' | null): PaymentNotifier {
  * The first daemon runs the purchase until the follow-up approval is armed and
  * its checkpoint kept, then stops. Returns the checkpoint as the host stored it.
  */
-async function firstDaemonStopsDuringFollowUp(now: () => number): Promise<CheckoutWindowCheckpoint> {
+async function firstDaemonStopsDuringFollowUp(now: () => number, window: 'approval' | 'veto' = 'approval'): Promise<CheckoutWindowCheckpoint> {
   const first = daemon(now);
   const file = join(dir, 'window-checkpoint.json');
   let armed!: () => void;
   const followUpArmed = new Promise<void>(resolve => { armed = resolve; });
   const run = runCheckout(REQUEST, await readFixtureCheckout(merchant), CONTROLS, {
-    ...first.deps(channel('not-understood')),
+    ...first.deps(channel(window === 'approval' ? 'not-understood' : 'quiet')),
     retainWindowCheckpoint: async checkpoint => {
       writeFileSync(file, JSON.stringify(checkpoint));
-      if (checkpoint.record.windowKind === 'approval') armed();
+      if (checkpoint.record.windowKind === window) armed();
     },
   });
   const settled = run.then(() => 'returned', () => 'stopped');
@@ -144,7 +146,7 @@ async function firstDaemonStopsDuringFollowUp(now: () => number): Promise<Checko
   expect(await settled).toBe('stopped');
   expect(merchant.submissions).toHaveLength(0);
   const checkpoint = captureCheckoutWindowCheckpoint(JSON.parse(readFileSync(file, 'utf8')));
-  expect(checkpoint.record).toMatchObject({ windowKind: 'approval', windowHeldReply: true });
+  expect(checkpoint.record).toMatchObject(window === 'approval' ? { windowKind: 'approval', windowHeldReply: true } : { windowKind: 'veto' });
   return checkpoint;
 }
 
@@ -163,7 +165,7 @@ function restartedDaemon(now: () => number, checkpoint: CheckoutWindowCheckpoint
         purchaseId: PURCHASE, checkpoint, recipients: [], readHistory: undefined, replies,
         router: { deliver: async () => { throw new Error('No channel recipient to notify again'); } },
         signal: owner.signal ?? next.stop.signal, assertCurrent: () => owner.assertCurrent?.(), renewMinutes: 60,
-        inbox: { port: next.inbox, key: purchaseInboxKey(PURCHASE, 'approval'), delivery: inboxDelivery },
+        inbox: { port: next.inbox, key: purchaseInboxKey(PURCHASE, checkpoint.record.windowKind ?? 'approval'), delivery: inboxDelivery },
       }),
     },
   }));
@@ -182,13 +184,16 @@ test('a yes to the follow-up approval after a restart buys exactly once', async 
   const now = () => Date.now();
   const checkpoint = await firstDaemonStopsDuringFollowUp(now);
   const restarted = restartedDaemon(now, checkpoint);
-  // The owner answers the approval the restarted daemon is waiting on.
+  // The owner answers the approval the restarted daemon is waiting on: the item the stop left open, or the one posted again.
   const answered = new Promise<void>(resolve => {
-    const stop = restarted.inbox.subscribe((item: OwnerItem) => {
-      if (item.key !== purchaseInboxKey(PURCHASE, 'approval') || item.status !== 'open') return;
-      stop();
+    const answer = (item: OwnerItem): boolean => {
+      if (item.key !== purchaseInboxKey(PURCHASE, 'approval') || item.status !== 'open') return false;
       void restarted.inbox.answer(item.id, { option: 'approve' }).then(() => resolve());
-    });
+      return true;
+    };
+    const open = restarted.inbox.listNow({ status: 'open' }).find(answer);
+    if (open) return;
+    const stop = restarted.inbox.subscribe((item: OwnerItem) => { if (answer(item)) stop(); });
   });
   const outcome = await restarted.run();
   await answered;
@@ -209,4 +214,25 @@ test('silence on the follow-up approval across a restart buys nothing and frees 
   expect(merchant.submissions).toHaveLength(0);
   expect(new DaemonPurchaseLedger({ filePath: join(dir, 'purchases.json') }).list({ limit: 10, dayKey: undefined }).total).toBe(0);
   expect(budget(now)).toEqual({ spent: 0, reserved: 0 });
+});
+
+test('a stop the owner recorded while the daemon was down is read after the restart; without it the veto\'s silence buys once', async () => {
+  // The veto window opened two hours ago, so its deadline passed while the daemon was down.
+  const earlier = Date.now() - 2 * 60 * 60_000;
+  const now = () => earlier;
+  const checkpoint = await firstDaemonStopsDuringFollowUp(now, 'veto');
+  // A terminal app answers the inbox item a minute into the window, while the daemon is down.
+  const terminal = new OwnerInbox({ questions: new QuestionStore({ path: join(dir, 'owner-questions.sqlite') }), now: () => earlier + 60_000 });
+  closers.push(() => terminal.dispose());
+  const item = terminal.listNow({ status: 'open' }).find(entry => entry.key === purchaseInboxKey(PURCHASE, 'veto'))!;
+  expect((await terminal.answer(item.id, { option: 'stop' })).applied).toBe(true);
+  expect((await restartedDaemon(now, checkpoint).run()).kind).toBe('cancelled');
+  expect(merchant.submissions).toHaveLength(0);
+  expect(budget(now)).toEqual({ spent: 0, reserved: 0 });
+
+  // Control: the same restart with nothing recorded lets the veto's silence buy, once.
+  dir = makeProjectTempDir('gv-payments-restart');
+  const unanswered = await firstDaemonStopsDuringFollowUp(now, 'veto');
+  expect((await restartedDaemon(now, unanswered).run()).kind).toBe('purchased');
+  expect(merchant.submissions).toHaveLength(1);
 });

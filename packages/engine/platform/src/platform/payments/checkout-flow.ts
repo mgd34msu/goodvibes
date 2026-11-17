@@ -890,11 +890,13 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     try {
       let deliveries: readonly ChannelDelivery[];
       try {
+        // A window the host keeps for the next start leaves its inbox item open to be answered meanwhile.
+        const keepOnStop = (): boolean => signal?.aborted === true && lifecycle.keepOnStop();
         if (restored && resumption) {
-          const prepared = resumption.prepare({ signal, assertCurrent: addressCurrent });
+          const prepared = resumption.prepare({ signal, assertCurrent: addressCurrent, keepOnStop });
           reception = Object.freeze({ deliveries: prepared.deliveries, awaitAnswer: prepared.awaitAnswer.bind(prepared), cancel: prepared.cancel.bind(prepared) });
           restoredDeadline = prepared.deadlineMs;
-        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind, notice: message, assertCurrent: addressCurrent, signal });
+        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind, notice: message, assertCurrent: addressCurrent, signal, keepOnStop });
         deliveries = await (reception?.deliveries ?? notifier.deliver({ kind, message, assertCurrent: addressCurrent, signal }));
         addressCurrent();
       }

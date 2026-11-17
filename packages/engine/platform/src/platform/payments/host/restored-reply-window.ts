@@ -33,6 +33,8 @@ interface RestoreReplyWindowInput {
   readonly renewMinutes: number;
   /** The owner-inbox item the notice was posted as, when the window reached the inbox. */
   readonly inbox?: RestoredInboxWindow | undefined;
+  /** True when the purchase stops with this window kept for the next start: its inbox item stays open to be answered meanwhile. */
+  readonly keepOnStop?: (() => boolean) | undefined;
 }
 export interface RestoredInboxWindow {
   readonly port: PaymentOwnerInbox & {
@@ -94,6 +96,7 @@ export function prepareRestoredPaymentReplyWindow(input: RestoreReplyWindowInput
   };
   let inboxItemId: string | undefined;
   const withdrawInbox = (): void => {
+    if (input.keepOnStop?.() === true) return;
     const id = inboxItemId; inboxItemId = undefined;
     if (inbox && id) { try { inbox.port.withdraw(id, 'the purchase window closed'); } catch { /* already closed */ } }
   };

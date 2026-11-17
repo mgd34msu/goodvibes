@@ -23,7 +23,8 @@ export interface CheckoutWindowCheckpoint {
  * the callback nor execution ownership is accepted from wire/stored JSON. */
 export interface CheckoutWindowResumption {
   readonly checkpoint: CheckoutWindowCheckpoint;
-  readonly prepare: (owner: CheckoutOperationOwnership) => PaymentNoticeWindow & { readonly deadlineMs: Promise<number> };
+  /** `keepOnStop` as on `PaymentNotifier.prepareWindow`: a window kept for the next start leaves its inbox item open. */
+  readonly prepare: (owner: CheckoutOperationOwnership & { readonly keepOnStop?: (() => boolean) | undefined }) => PaymentNoticeWindow & { readonly deadlineMs: Promise<number> };
 }
 
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);

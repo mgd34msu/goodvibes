@@ -46,6 +46,13 @@ export interface PaymentNotifier {
     readonly notice: string;
     readonly assertCurrent?: (() => void) | undefined;
     readonly signal?: AbortSignal | undefined;
+    /**
+     * True when the purchase is stopping with this window saved for the next
+     * start (the host stops, the owner did not cancel). The window's
+     * owner-inbox item then stays open, so the owner can still answer it while
+     * the daemon is down and the next start reads that answer.
+     */
+    readonly keepOnStop?: (() => boolean) | undefined;
   }): PaymentNoticeWindow;
   /** Sends the message; reports per-channel landing. `notice` expects no reply (boot-recovery settlements). */
   deliver(input: {

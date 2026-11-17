@@ -89,7 +89,7 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
         },
       });
       return Object.freeze({ source, input, driver: retainedPage.driver, release: retainedPage.release.bind(retainedPage),
-        resumption: Object.freeze({ checkpoint, prepare: (windowOwner: import('../checkout-ownership.js').CheckoutOperationOwnership) => {
+        resumption: Object.freeze({ checkpoint, prepare: (windowOwner: import('../checkout-ownership.js').CheckoutOperationOwnership & { readonly keepOnStop?: (() => boolean) | undefined }) => {
           current(); windowOwner.assertCurrent?.();
           if (!windowOwner.signal) throw new CheckoutOwnershipError();
           const retiredWindow = new AbortController(), signal = AbortSignal.any([windowOwner.signal, retiredWindow.signal]);
@@ -124,6 +124,7 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
               return { receipt, delivery, target };
             }), readHistory, replies, router, signal, assertCurrent: windowCurrent,
             renewMinutes: kind === 'approval' ? request.host.configuration.approvalMinutes : request.host.configuration.vetoMinutes,
+            ...(windowOwner.keepOnStop ? { keepOnStop: windowOwner.keepOnStop } : {}),
             ...(inboxDelivery && ownerInbox ? { inbox: { port: ownerInbox, key: purchaseInboxKey(request.purchaseId, kind), delivery: inboxDelivery } } : {}) });
           return Object.freeze({ ...restored, cancel: () => { retiredWindow.abort(); restored.cancel(); } });
         } }),

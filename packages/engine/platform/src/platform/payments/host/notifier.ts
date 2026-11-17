@@ -213,6 +213,8 @@ export function withOwnerInbox(
     deadlineMs: number,
     /** Retires the channel wait when the inbox answered first. */
     retireChannels?: () => void,
+    /** True when the window is kept for the next start: the item stays open to be answered meanwhile. */
+    keepOnStop?: () => boolean,
   ): Promise<NotifierAnswer> => {
     if (item === null) return channelWait;
     const fromChannels = channelWait.then((answer) => ({ from: 'channel' as const, answer }));
@@ -242,7 +244,7 @@ export function withOwnerInbox(
     } finally {
       signal?.removeEventListener('abort', onAbort);
       stop.abort();
-      try { inbox.withdraw(item.id, 'the purchase window closed'); } catch { /* already closed */ }
+      if (keepOnStop?.() !== true) { try { inbox.withdraw(item.id, 'the purchase window closed'); } catch { /* already closed */ } }
     }
   };
 
@@ -278,9 +280,9 @@ export function withOwnerInbox(
         deliveries,
         cancel: () => {
           window.cancel();
-          if (item !== null) { try { inbox.withdraw(item.id, 'the purchase window closed'); } catch { /* already closed */ } }
+          if (item !== null && input.keepOnStop?.() !== true) { try { inbox.withdraw(item.id, 'the purchase window closed'); } catch { /* already closed */ } }
         },
-        awaitAnswer: (deadlineMs: number) => firstAnswer(input.kind, item, window.awaitAnswer(deadlineMs), input.signal, deadlineMs, () => window.cancel()),
+        awaitAnswer: (deadlineMs: number) => firstAnswer(input.kind, item, window.awaitAnswer(deadlineMs), input.signal, deadlineMs, () => window.cancel(), input.keepOnStop),
       });
     };
   }
